@@ -1,2 +1,3 @@
 #!/bin/bash
-nasm -o hello.com hello.asm && nasm -o kernel.com kernel.asm && cat hello.com kernel.com > boot.dsk && bochs -f hello.bochs
+cd src
+nasm -o ../bin/hello.com hello.asm && nasm -o ../bin/kernel.com kernel.asm && cd .. && cat bin/hello.com bin/kernel.com > bin/boot.dsk && bochs -f hello.bochs

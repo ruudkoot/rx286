@@ -7,12 +7,12 @@ romimage: file="/usr/share/bochs/BIOS-bochs-latest"
 vgaromimage: file="/usr/share/bochs/VGABIOS-lgpl-latest"
 boot: floppy
 floppy_bootsig_check: disabled=0
-floppya: type=1_2, 1_2="boot.dsk", status=inserted, write_protected=0
+floppya: type=1_2, 1_2="bin/boot.dsk", status=inserted, write_protected=0
 # no floppyb
 ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14
-ata0-master: type=disk, mode=flat, translation=auto, path="hd.0", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata0-master: type=disk, mode=flat, translation=auto, path="bin/hd.0", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
 ata1: enabled=1, ioaddr1=0x170, ioaddr2=0x370, irq=15
-ata1-master: type=disk, mode=flat, translation=auto, path="hd.1", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata1-master: type=disk, mode=flat, translation=auto, path="bin/hd.1", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
 ata2: enabled=0
 ata3: enabled=0
 parport1: enabled=1, file=""
