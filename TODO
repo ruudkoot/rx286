@@ -1,0 +1,10 @@
+* rewrite tty code (using 12 pages @ 48kb, needs a hercules in full mode)
+** fn keys switch between frames displayed
+* setup 12 fixed tasks with round-robin scheduling
+** ES points to task private framebuffer
+* add FAT support to boot0 and introduce 
+** use mtools to create disk images
+* development tools
+** (paritally) replace shell scipts by makefiles
+** use custom assembler
+** write non-kernel code in c
