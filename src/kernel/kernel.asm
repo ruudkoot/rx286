@@ -39,7 +39,7 @@ main:
     inc     dx
     mov     al,0x20
     out     dx,al           ; read sector
-    ; start task1 (reanables interrupts)
+    ; start task1 (re-enables interrupts)
     jmp 0x23:task1
     
 stop:
