@@ -17,6 +17,14 @@ irq1:   ; keyboard
     MOV     SI, keyboard_buffer
     MOV     CX, 1
     CALL    tty_print
+    ; mess with the crtc
+    MOV     DX,03D4h
+    MOV     AL,13
+    OUT     DX,AL
+    INC     DX
+    MOV     AL,[crtc_start]
+    OUT     DX,AL
+    INC     BYTE [crtc_start]
 irq1_1:
     mov     al,0x20
     out     0x20,al
@@ -33,3 +41,6 @@ keyboard_translation:
     DB      '????????????????'
     DB      '????????????????'
     DB      '????????????????'
+
+crtc_start:
+    DB      00h
