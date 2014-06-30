@@ -11,22 +11,28 @@ floppya: type=1_2, 1_2="bin/boot.dsk", status=inserted, write_protected=0
 # no floppyb
 ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14
 ata0-master: type=disk, mode=flat, translation=auto, path="bin/hd.0", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata0-slave:  type=disk, mode=flat, translation=auto, path="bin/hd.1", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
 ata1: enabled=1, ioaddr1=0x170, ioaddr2=0x370, irq=15
-ata1-master: type=disk, mode=flat, translation=auto, path="bin/hd.1", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
-ata2: enabled=0
-ata3: enabled=0
-parport1: enabled=1, file=""
-parport2: enabled=0
-com1: enabled=1, mode=null, dev=""
-com2: enabled=0
-com3: enabled=0
-com4: enabled=0
+ata1-master: type=disk, mode=flat, translation=auto, path="bin/hd.2", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata1-slave:  type=disk, mode=flat, translation=auto, path="bin/hd.3", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata2: enabled=1, ioaddr1=0x1e8, ioaddr2=0x3e0, irq=11
+ata2-master: type=disk, mode=flat, translation=auto, path="bin/hd.4", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata2-slave:  type=disk, mode=flat, translation=auto, path="bin/hd.5", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata3: enabled=1, ioaddr1=0x168, ioaddr2=0x360, irq=9
+ata3-master: type=disk, mode=flat, translation=auto, path="bin/hd.6", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+ata3-slave:  type=disk, mode=flat, translation=auto, path="bin/hd.7", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
+parport1: enabled=1, file="parallel0.txt"
+parport2: enabled=1, file="parallel1.txt"
+com1: enabled=1, mode=file, dev="serial0.txt"
+com2: enabled=1, mode=file, dev="serial1.txt"
+com3: enabled=1, mode=file, dev="serial2.txt"
+com4: enabled=1, mode=file, dev="serial3.txt"
 usb_uhci: enabled=0
 usb_ohci: enabled=0
 i440fxsupport: enabled=0
 vga_update_interval: 50000
 vga: extension=vbe
-cpu: count=1, ips=4000000, reset_on_triple_fault=1, ignore_bad_msrs=1
+cpu: count=1, ips=200000, reset_on_triple_fault=1, ignore_bad_msrs=1
 cpuid: cpuid_limit_winnt=0, mmx=1, sse=sse2, xapic=1, sep=1, aes=0, xsave=0, movbe=0, 1g_pages=0, pcid=0 fsgsbase=0
 cpuid: stepping=3, vendor_string="GenuineIntel", brand_string="              Intel(R) Pentium(R) 4 CPU        "
 print_timestamps: enabled=0
@@ -34,7 +40,7 @@ print_timestamps: enabled=0
 port_e9_hack: enabled=0
 text_snapshot_check: enabled=0
 private_colormap: enabled=0
-clock: sync=none, time0=local
+clock: sync=slowdonw, time0=local
 # no cmosimage
 ne2k: enabled=0
 pnic: enabled=0
