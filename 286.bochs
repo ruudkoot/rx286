@@ -21,12 +21,12 @@ ata2-slave:  type=disk, mode=flat, translation=auto, path="bin/hd.5", cylinders=
 ata3: enabled=1, ioaddr1=0x168, ioaddr2=0x360, irq=9
 ata3-master: type=disk, mode=flat, translation=auto, path="bin/hd.6", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
 ata3-slave:  type=disk, mode=flat, translation=auto, path="bin/hd.7", cylinders=615, heads=4, spt=17, biosdetect=auto, model="ST-225"
-parport1: enabled=1, file="parallel0.txt"
-parport2: enabled=1, file="parallel1.txt"
-com1: enabled=1, mode=file, dev="serial0.txt"
-com2: enabled=1, mode=file, dev="serial1.txt"
-com3: enabled=1, mode=file, dev="serial2.txt"
-com4: enabled=1, mode=file, dev="serial3.txt"
+parport1: enabled=1, file="log/parallel0.txt"
+parport2: enabled=1, file="log/parallel1.txt"
+com1: enabled=1, mode=file, dev="log/serial0.txt"
+com2: enabled=1, mode=file, dev="log/serial1.txt"
+com3: enabled=1, mode=file, dev="log/serial2.txt"
+com4: enabled=1, mode=file, dev="log/serial3.txt"
 usb_uhci: enabled=0
 usb_ohci: enabled=0
 i440fxsupport: enabled=0
