@@ -36,6 +36,8 @@ VEC_SYSCALL         equ 0x30
 IDT_ENTRIES         equ VEC_SYSCALL + 1
 IDT_LIMIT           equ IDT_ENTRIES * 8 - 1     ; 187h
 
+IRQ_LINES           equ 16          ; two 8259As
+
 ; The IRQ lines with a driver.
 IRQ_TIMER           equ 0
 IRQ_KEYBOARD        equ 1

@@ -58,6 +58,15 @@ What happens next depends on who was running (the frame's CS):
   NMI is masked, and the CPU halts.
 - **A double fault** switches to the double-fault task on its own stack, which
   reads the faulting state from the TSS and panics.
+- **Two exceptions in ring 0 are the program's, not the kernel's:** a
+  single-step trap (on a 286 the program's pending trap arrives at the first
+  instruction of a fault's handler, Intel 9.7.1: dropped), and vector 9, the
+  287 overrunning a segment after the CPU moved on (Intel 9.6.3: the program
+  is restarted on its way back, like IRQ13).
+- **An `IRET` that would return past the program's code limit** (after a
+  system call in the segment's last bytes, or an interrupt at an IP past the
+  limit, which a 286 checks at the fetch) would fault in ring 0; the kernel
+  checks first and reports the program's #GP.
 
 **#TS (vector 10) has an interrupt gate,** although Intel advises a task gate
 (9.6.4): rx286 has only two task switches, the double fault's (where a fault
@@ -67,7 +76,7 @@ which faults on the null back link before anything is switched.
 ## The IRQ lines
 
 `VEC_IRQ0` + n is IRQn for the master's lines, `VEC_IRQ8` + n − 8 for the
-slave's.
+slave's; there are `IRQ_LINES` (16).
 
 | Line | Rule |
 |---|---|
@@ -95,10 +104,11 @@ IF clear and nothing interleaves with a half-done change. It sets IF at two
 points only, where its state is whole:
 
 - **`read_key` waiting for a key**: `sti; hlt; cli` until a key arrives.
-- **`write`, after each line it writes**: `sti; nop; cli`. `STI` takes effect
-  after the next instruction, so `sti; cli` would open nothing. Without this
-  window a `write` of 4,096 newlines would keep IF clear for seconds of
-  scrolling.
+- **`write`, after each byte it writes**: `sti; nop; cli`. `STI` takes effect
+  after the next instruction, so `sti; cli` would open nothing. A byte's work
+  is at most one scroll or one clear of the screen; without the window, a
+  `write` of 4,096 newlines, spaces or form feeds would keep IF clear for
+  seconds.
 
 An IRQ at either point nests once on the kernel stack. A Ctrl+Break or a 287
 error that arrives during a system call sets a flag, and the call's return to

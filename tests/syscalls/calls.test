@@ -21,4 +21,7 @@ time: a valid BCD date and time
 error 2
 registers: kept
 window: ticks kept pace with the clock
+window: ticks kept pace with the clock
+[form feed]
+window: ticks kept pace with the clock
 exit: the program started again, its data kept

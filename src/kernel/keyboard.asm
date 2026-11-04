@@ -326,7 +326,7 @@ kbd_reset:
         cli
         mov al, CMOS_SHUTDOWN
         out CMOS_INDEX, al
-        xor al, al                      ; shutdown byte 0: a soft reset (IBM 1-49)
+        xor al, al                      ; shutdown byte 0: a soft reset (the BIOS listing's codes)
         out CMOS_DATA, al
         call kbc_wait_input
         mov al, KBC_CMD_PULSE_RESET

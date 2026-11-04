@@ -203,6 +203,8 @@ attacks:
         arpl ax, bx
         PRINT "attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed", CHAR_LF
         jmp entry
+.edge:  mov ah, SYS_TICKS
+        jmp edge_of_code                ; INT 30h as the code segment's last bytes
 .sgdt:  sgdt [scratch]                  ; unprivileged on the 286: allowed
         PRINT "attack: sgdt allowed", CHAR_LF
         jmp entry
@@ -281,6 +283,7 @@ attack_table:
         attack "write from a null selector", attacks.nullw
         attack "write past FFFFh", attacks.wrap
         attack "unprivileged reads", attacks.reads
+        attack "int 30h at the end of the code", attacks.edge
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
         dw 0
@@ -288,3 +291,15 @@ end_udata
 
 %include "uprint.asm"
 %include "format.asm"
+
+; The last two bytes of the code segment: the system call returns to IP
+; UTEXT_ROOM, past the limit, and IRET would fault in ring 0 (M10).
+        times UTEXT_ROOM - 2 - ($ - $$) db 0
+; ----------------------------------------------------------------------------
+; edge_of_code - INT 30h as the code segment's last two bytes
+;   In:       AH = a system call (attacks.edge)
+;   Out:      does not return: the kernel finds the return IP past the limit
+;   Destroys: what the call destroys
+; ----------------------------------------------------------------------------
+edge_of_code:
+        int SYSCALL_VECTOR

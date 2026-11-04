@@ -9,7 +9,7 @@
 ; handler with BP at the frame. A handler may change the frame: that is how
 ; system calls return values and how a faulting program is restarted. On the
 ; way back to ring 3, a restart that was asked for during a system call is
-; done (D15).
+; done (D15), and a return IP past the program's limit is its fault.
 ; ============================================================================
 
 ; The stubs, one per vector of the IDT but the double fault's (a task gate).
@@ -50,8 +50,20 @@ isr_common:
         test byte [bp + FRAME_CS], CPL_MASK
         jz .restore
         cmp byte [restart_pending], 0
-        je .restore
+        je .check_ip
         call restart_program
+.check_ip:
+        ; IRET checks the return IP against CS's limit (Intel B-51) and would
+        ; fault here, in ring 0: a program whose INT 30h is its segment's last
+        ; two bytes, or one interrupted at an IP past its limit (a 286 checks
+        ; the limit when it fetches). That is the program's #GP.
+        mov ax, [bp + FRAME_CS]
+        lsl dx, ax
+        cmp [bp + FRAME_IP], dx
+        jbe .restore
+        mov word [bp + FRAME_VECTOR], VEC_GP
+        mov word [bp + FRAME_ERROR], 0
+        call fault_program
 .restore:
         pop es
         pop ds

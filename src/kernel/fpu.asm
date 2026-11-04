@@ -20,6 +20,8 @@ fpu_init:
         fsetpm
         ret
 
+FPU_STATUS_ES       equ 0x80            ; the status word's error summary
+
 begin_kdata
 msg_fpu_error       db "the 287 reported an error (IRQ13)", 0
 end_kdata
@@ -28,13 +30,16 @@ end_kdata
 ; fpu_irq - IRQ13: the program's 287 error
 ;   In:       BP = the frame; DS = SEL_KDATA
 ;   Out:      nothing (the dispatcher sends EOI); the program restarts on its
-;             way back to ring 3
+;             way back to ring 3, unless the 287 holds no error any more
 ;   Destroys: AX, SI
 ; ----------------------------------------------------------------------------
 fpu_irq:
         xor al, al
         out FPU_CLEAR_BUSY, al          ; release the latched BUSY first
-        fnclex
+        fnstsw ax
+        test al, FPU_STATUS_ES
+        jz .stale                       ; no error left: a restart's FNINIT cleared
+        fnclex                          ; it after the PIC had latched the request
 %ifdef TEST_FUZZ
         inc word [fuzz_fpu_errors]      ; the fuzzer counts, quietly
 %else
@@ -42,4 +47,5 @@ fpu_irq:
         call klog
 %endif
         mov byte [restart_pending], 1
+.stale:
         ret

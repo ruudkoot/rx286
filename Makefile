@@ -169,9 +169,11 @@ test-286: disks
 unit:
 	$(PYTHON) -m pytest -q -W ignore::DeprecationWarning tests/unit
 
+# Every listing there is: the flavours', and the test images' once the tests
+# have run (make check runs them first).
 check-286: all test-build
 	$(PYTHON) tools/check-286 --self-test
-	$(PYTHON) tools/check-286 build/release/*.lst build/debug/*.lst build/test/*.lst
+	$(PYTHON) tools/check-286 $$(ls build/*/*.lst build/tests*/*/*.lst 2>/dev/null)
 
 check-image: all
 	$(PYTHON) tools/check-image build/release
@@ -190,7 +192,7 @@ lint:
 check-docs:
 	$(PYTHON) tools/check-docs
 
-check: check-286 check-image check-repro lint check-docs unit test test-286
+check: unit test test-286 check-286 check-image check-repro lint check-docs
 	@echo "make check: all checks passed"
 
 doctor:

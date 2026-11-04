@@ -20,7 +20,8 @@ BPB_HEADS               equ 0x1A    ; word
 
 ; A directory entry.
 DIR_ENTRY_SIZE          equ 32
-DIR_NAME                equ 0x00    ; 11 bytes, space padded, no dot
+DIR_NAME                equ 0x00    ; DIR_NAME_LENGTH bytes, space padded, no dot
+DIR_NAME_LENGTH         equ 11
 DIR_ATTRIBUTES          equ 0x0B
 DIR_FIRST_CLUSTER       equ 0x1A    ; word
 DIR_FILE_SIZE           equ 0x1C    ; dword

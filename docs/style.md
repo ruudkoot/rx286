@@ -39,8 +39,9 @@ con_putc:
 
 - **In:** registers and segment registers it reads.
 - **Out:** what it returns, and in which flags.
-- **Destroys:** what it changes besides Out. "Nothing" means every register
-  and the flags but those named in Out.
+- **Destroys:** the registers it changes besides Out. "Nothing" means every
+  register but those named in Out. Flags are not kept unless the header says
+  so: a flag a caller may test is named in Out (CF, ZF).
 
 Labels inside a routine are local (`.loop`). A routine that does not return
 says so in Out.

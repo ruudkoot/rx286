@@ -17,9 +17,11 @@ LOADER_SECTORS      equ 3           ; reserved sectors 1-3 of the floppy
 RESERVED_SECTORS    equ 1 + LOADER_SECTORS
 LOADER_MAGIC        equ 'LD'        ; the word at LOADER_PHYS + 2, checked by the boot sector
 BOOT_TRIES          equ 3           ; reads of the floppy before giving up
+SECTOR_SIZE         equ 512
+SECTOR_SHIFT        equ 9           ; log2 of SECTOR_SIZE
 LOADER_STACK_TOP    equ 0x7C00      ; both boot stages' stack grows down from here
-LOADER_FAT_BUF      equ 0x8400      ; the loader's buffer for one FAT (up to 9 sectors)
-LOADER_ROOT_BUF     equ 0x9800      ; the loader's buffer for the root directory (up to 14 sectors)
+LOADER_FAT_BUF      equ 0x8400      ; the loader's buffer for one FAT (10 sectors of room)
+LOADER_ROOT_BUF     equ 0x9800      ; the loader's buffer for the root directory (26 sectors)
 LOADER_BUF_END      equ 0x10000
 
 ; ---------------------------------------------------------------- the kernel's image
@@ -39,6 +41,7 @@ UTEXT_ROOM          equ 0x2000
 UDATA_OFF           equ 0x5100      ; the program's data (incbin)
 UDATA_ROOM          equ 0x1000
 KERNEL_FILE_SIZE    equ 0x6100      ; KERNEL.BIN is exactly this long
+KERNEL_END_MARK     equ 0x286E      ; its last word: the loader checks it arrived
 
 ; Zeroed at start, not in the file.
 KSTACK_OFF          equ 0x6100      ; the kernel's stack (SS0 in the TSS)

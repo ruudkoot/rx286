@@ -16,7 +16,8 @@ msg_at              db " at ", 0
 msg_error           db " error ", 0
 msg_double_fault    db "double fault", 0
 msg_vector          db "vector ", 0
-; The CPU's exceptions by vector: four characters each.
+; The CPU's exceptions by vector: four characters each, the name in up to
+; VECTOR_NAME_CHARS of them.
 vector_names        db "#DE #DB NMI #BP #OF #BR #UD #NM #DF #MP #TS #NP #SS #GP #14 #15 "
                     db "#MF #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 "
 end_kdata
@@ -94,7 +95,7 @@ kput_vector:
         mov si, ax
         shl si, 2
         add si, vector_names
-        mov cx, 3
+        mov cx, VECTOR_NAME_CHARS
 .name:
         lodsb
         cmp al, ' '

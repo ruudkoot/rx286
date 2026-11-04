@@ -62,9 +62,12 @@ ktext_end:
 section kdata
 kdata_end:
 
-; The program: USER_FILE_SIZE bytes, its data padded with zeros to the room.
-; "TIMES value is negative" here means the program's data outgrew UDATA_ROOM.
+; The program: USER_FILE_SIZE bytes, its data padded with zeros to the room,
+; and KERNEL_END_MARK as the file's last word (the last word of the program's
+; data room), which the loader checks. "TIMES value is negative" here means
+; the program's data outgrew UDATA_ROOM.
 section user
 user_start:
         incbin USER_BIN
-        times USER_FILE_SIZE - ($ - user_start) db 0
+        times USER_FILE_SIZE - 2 - ($ - user_start) db 0
+        dw KERNEL_END_MARK

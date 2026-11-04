@@ -6,8 +6,10 @@
 ; uses) into a buffer in the program's data segment.
 ; ============================================================================
 
+PRINT_BUF_SIZE      equ 12              ; ten digits of a 32-bit number, with room to spare
+
 begin_udata
-print_buf           times 12 db 0
+print_buf           times PRINT_BUF_SIZE db 0
 end_udata
 
 ; ----------------------------------------------------------------------------

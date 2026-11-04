@@ -113,7 +113,7 @@ CRASH_ENTRY         equ 6
     __?SECT?__
 %endmacro
 
-crashes_start:
+crashes_start       equ $
         crash "gp", crash_kinds.gp, "jump past the end of my code"
         crash "ud", crash_kinds.ud, "an instruction that does not exist"
         crash "de", crash_kinds.de, "divide by zero"

@@ -19,7 +19,7 @@ numbers and the macro `sys`:
 |---|---|---|---|
 | 0 | `SYS_EXIT` | | does not return: the kernel restarts the program |
 | 1 | `SYS_WRITE` | DS:SI buffer, CX length (at most `WRITE_MAX`, 4,096) | AX = bytes written; CF with `E_FAULT` for a buffer the program may not read, `E_INVAL` for CX above `WRITE_MAX` |
-| 2 | `SYS_READ_KEY` | AL = `KEY_WAIT` (0) to wait, `KEY_POLL` (1) to poll | AL = ASCII (0 for none), AH = scancode; AX = 0 if polling found no key, or if a Ctrl+Break ended the wait; CF with `E_INVAL` for another AL |
+| 2 | `SYS_READ_KEY` | AL = `KEY_WAIT` (0) to wait, `KEY_POLL` (1) to poll | AL = ASCII (0 for none), AH = scancode; AX = 0 if polling found no key; CF with `E_INVAL` for another AL. (A Ctrl+Break during the wait restarts the program: the call does not return.) |
 | 3 | `SYS_TICKS` | | DX:AX = ticks since start, `SYS_TICKS_HZ` (50) a second |
 | 4 | `SYS_TIME` | | the RTC, in BCD: CH century, CL year, DH month, DL day, BH hours, BL minutes, AL seconds (roadmap D20) |
 | other | | | CF, AX = `E_NOSYS` |
@@ -52,7 +52,10 @@ For `SYS_WRITE`, the kernel takes the caller's DS from the interrupt frame and:
    (CX = 0 writes nothing);
 4. loads it into ES and copies from it.
 
-The GDT never changes and there is no LDT, so the check cannot go stale, even
-across `write`'s interrupt windows. Any selector the program can name has DPL
-3 or is refused, so the kernel never reads through a selector the program
-could not use itself.
+It also refuses an expand-down segment (and a conforming code segment, whose
+bit is the same), for which 0..limit is not the valid range (`LAR`). The GDT
+never changes and there is no LDT, so the check cannot go stale, even across
+`write`'s interrupt windows. Any selector the program can name has DPL 3 or
+is refused, so the kernel never reads through a selector the program could
+not use itself. A buffer ending at FFFFh exactly is refused too: no program
+segment is that large.

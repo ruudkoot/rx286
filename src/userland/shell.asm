@@ -58,8 +58,6 @@ read_line:
 .key:
         mov al, KEY_WAIT
         sys SYS_READ_KEY
-        test ax, ax
-        jz .key                         ; a wait ended by Ctrl+Break
         cmp al, CHAR_CR
         je .enter
         cmp al, CHAR_BS
@@ -188,7 +186,7 @@ COMMAND_ENTRY       equ 6
     __?SECT?__
 %endmacro
 
-commands_start:
+commands_start      equ $
         command "help", cmd_help, "these lines"
         command "echo", cmd_echo, "echo TEXT: write TEXT"
         command "clear", cmd_clear, "clear the screen"

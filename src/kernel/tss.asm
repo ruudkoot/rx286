@@ -15,4 +15,4 @@
 tss:
         tss286 0, KSTACK_SIZE, SEL_KSTACK, 0, 0, 0, 0, 0, 0
 df_tss:
-        tss286 0, 0, 0, df_task, 0x0002, DFSTACK_SIZE, SEL_DFSTACK, SEL_KDATA, SEL_KDATA
+        tss286 0, 0, 0, df_task, FLAGS_DF_TASK, DFSTACK_SIZE, SEL_DFSTACK, SEL_KDATA, SEL_KDATA

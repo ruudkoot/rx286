@@ -43,12 +43,14 @@ FLAGS_TF            equ 0x0100
 FLAGS_IF            equ 0x0200
 FLAGS_NT            equ 0x4000
 FLAGS_USER_START    equ 0x0202  ; IF set, IOPL 0, everything else clear
+FLAGS_DF_TASK       equ 0x0002  ; the double-fault task: interrupts off (bit 1 reads as 1)
 CPL_MASK            equ 3
 
 ; ---------------------------------------------------------------- the console
 ATTR_NORMAL         equ 0x07    ; light grey on black
 ATTR_KERNEL         equ 0x0E    ; yellow on black: the kernel's own messages
 ATTR_PANIC          equ 0x4F    ; white on red
+VECTOR_NAME_CHARS   equ 3       ; "#GP", "NMI": the longest name of an exception
 
 ; ---------------------------------------------------------------- kdata
 ; begin_kdata / end_kdata - put what lies between in the kernel's data

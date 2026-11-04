@@ -13,23 +13,26 @@
 ; entry - enter protected mode
 ;   In:       CS = KERNEL_SEG; interrupts off (the loader)
 ;   Out:      does not return: jumps to SEL_KCODE:pm_start
-;   Destroys: AX, DS (and BX, CX, SI in test images that sum the file)
+;   Destroys: AX, DS (and BX, CX, DX, SI in test images that sum the file)
 ; ----------------------------------------------------------------------------
 entry:
         cli
         mov ax, cs
         mov ds, ax
 %ifdef TEST_IMAGE_SUM
-        ; The boot tests' proof that the loader brought every byte: the sum
-        ; of KERNEL.BIN's words, taken before anything writes to it.
+        ; The boot tests' proof that the loader brought every byte, each in
+        ; its place: a Fletcher sum of KERNEL.BIN's words (the second sum
+        ; weighs each word by its position), before anything writes to it.
         xor si, si
-        xor bx, bx
+        xor bx, bx                      ; the plain sum
+        xor dx, dx                      ; the sum of the plain sums
         mov cx, KERNEL_FILE_SIZE / 2
 .sum:
         add bx, [si]
+        add dx, bx
         add si, 2
         loop .sum
-        mov [KDATA_OFF + test_image_sum], bx
+        mov [KDATA_OFF + test_image_sum], dx
 %endif
         lgdt [KDATA_OFF + gdt_pointer]
         lidt [KDATA_OFF + idt_pointer]

@@ -106,6 +106,8 @@ attack: write past FFFFh
 attack: refused, error 1
 attack: unprivileged reads
 attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed
+attack: int 30h at the end of the code
+rx286: program fault #GP(0000) at 0043:2000
 attack: sgdt
 attack: sgdt allowed
 attack: smsw

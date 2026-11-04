@@ -11,6 +11,7 @@ SECONDS_PER_HOUR    equ 3600
 SECONDS_PER_MINUTE  equ 60
 FPU_SCALE           equ 100000000000000000      ; 10^17: 18 digits in the BCD store
 HELP_COLUMN         equ 9
+BCD_DIGIT_BYTES     equ 9               ; FBSTP's 18 digits, two a byte (the tenth byte: the sign)
 
 begin_udata
 fpu_scale           dq FPU_SCALE
@@ -224,14 +225,14 @@ cmd_fpu:
 ; ----------------------------------------------------------------------------
 print_bcd18:
         fwait                           ; the 287 has stored it
-        mov si, fpu_bcd + 8             ; the most significant pair
-        mov cx, 9
+        mov si, fpu_bcd + BCD_DIGIT_BYTES - 1   ; the most significant pair
+        mov cx, BCD_DIGIT_BYTES
 .pair:
         mov al, [si]
         shr al, 4
         add al, '0'
         call print_char
-        cmp si, fpu_bcd + 8
+        cmp si, fpu_bcd + BCD_DIGIT_BYTES - 1
         jne .low
         PRINT "."                       ; after the first digit
 .low:

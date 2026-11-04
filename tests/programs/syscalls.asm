@@ -13,7 +13,7 @@ bits 16
 %include "build.inc"
 %include "program.inc"
 
-WINDOW_LINES        equ WRITE_MAX       ; newlines in the window test's write
+WINDOW_LINES        equ WRITE_MAX / 2   ; bytes a window write: what the data segment holds
 WINDOW_SLACK        equ 2               ; ticks either way the edges allow
 
 begin_udata
@@ -21,6 +21,7 @@ runs                dw 0
 hello               db "hello"
 hello_end:
 before              dd 0
+window_bytes        times WINDOW_LINES db 0     ; filled by each window_write
 expected            dw 0
 start_seconds       db 0
 edge_from           db 0
@@ -173,27 +174,41 @@ check_others:
         ; falls through
 
 ; ----------------------------------------------------------------------------
-; check_window - a write of WRITE_MAX newlines scrolls that many times. The
-; kernel lets interrupts in after each line (roadmap D15), so the ticks
-; counted across the write match the RTC's seconds; with interrupts off for
-; the whole write, they would fall short by its length.
+; check_window - writes of WINDOW_LINES newlines, spaces and form feeds scroll
+; or clear the screen that many times. The kernel lets interrupts in after
+; every byte (roadmap D15), so the ticks counted across each write match the
+; RTC's seconds; with interrupts off for a write, they would fall short.
 ;   In:       DS = ES = the program's data
 ;   Out:      does not return: SYS_EXIT
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 check_window:
+        mov al, CHAR_LF
+        call window_write
+        mov al, ' '
+        call window_write
+        mov al, CHAR_FF
+        call window_write
+        sys SYS_EXIT
+
+; ----------------------------------------------------------------------------
+; window_write - one write of WINDOW_LINES copies of a byte, measured
+;   In:       AL = the byte; DS = ES = the program's data
+;   Out:      a line: whether the ticks kept pace with the clock
+;   Destroys: everything but DS, ES
+; ----------------------------------------------------------------------------
+window_write:
+        mov di, window_bytes
+        mov cx, WINDOW_LINES
+        rep stosb
         call clock_edge                 ; start at an edge of the RTC's seconds
         mov [start_seconds], al
         sys SYS_TICKS
         mov [before], ax
         mov [before + 2], dx
-        push ds
-        push cs                         ; the newlines are in the code segment,
-        pop ds                          ; which the program may read
-        mov si, newlines
+        mov si, window_bytes
         mov cx, WINDOW_LINES
         sys SYS_WRITE
-        pop ds
         call clock_edge                 ; end at the next edge
         mov bl, [start_seconds]
         call bcd_seconds_between        ; AX = the clock's seconds
@@ -203,7 +218,7 @@ check_window:
         sys SYS_TICKS
         sub ax, [before]
         sbb dx, [before + 2]            ; DX:AX = the ticks counted
-        PRINT "window: "
+        PRINT CHAR_LF, "window: "
         test dx, dx
         jnz .lost
         sub ax, [expected]
@@ -211,10 +226,10 @@ check_window:
         cmp ax, 2 * WINDOW_SLACK
         ja .lost                        ; more than WINDOW_SLACK either way
         PRINT "ticks kept pace with the clock", CHAR_LF
-        sys SYS_EXIT
+        ret
 .lost:
         PRINT "ticks were lost", CHAR_LF
-        sys SYS_EXIT
+        ret
 
 ; ----------------------------------------------------------------------------
 ; clock_edge - wait until the RTC's seconds change
@@ -334,5 +349,4 @@ report_error:
 %include "uprint.asm"
 %include "format.asm"
 
-newlines            times WINDOW_LINES db CHAR_LF   ; too many for the data segment
 cs_byte             db "C"

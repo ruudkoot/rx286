@@ -32,6 +32,7 @@ bits 16
 ; ----------------------------------------------------------------------------
 start:
         cli
+        cld                             ; LODSB below counts up, whatever the BIOS left
         xor ax, ax
         mov ds, ax
         mov es, ax
@@ -141,6 +142,7 @@ msg_no_loader   db "rx286: no loader on this disk", 13, 10, 0
 msg_press_key   db "Press a key to try again.", 13, 10, 0
 boot_drive      db 0
 
+boot_sector_end:
 %if ($ - $$) > 510
   %error "boot-sector.asm: the code does not fit in 510 bytes"
 %endif

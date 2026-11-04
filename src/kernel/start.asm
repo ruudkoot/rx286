@@ -7,7 +7,9 @@
 ; anything could interrupt from ring 3; LDTR is loaded with a null selector,
 ; since Bochs starts with a live LDT at address 0 (roadmap X8); the 8259As
 ; are reprogrammed before interrupts are enabled (X1); the devices are set
-; up before their lines are unmasked; NMI comes last.
+; up before their lines are unmasked. NMI comes on with the clock's set-up
+; (any write of the CMOS index with bit 7 clear enables it), once every
+; handler is in place.
 ; ============================================================================
 
 ; zero_segment selector, size - zero a segment with no stack in use

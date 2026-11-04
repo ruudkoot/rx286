@@ -33,6 +33,7 @@ bits 16
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 start:
+        cld                             ; the string instructions count up
         mov [drive], dl
 %ifdef WITH_SERIAL
         call serial_init
@@ -51,6 +52,13 @@ start:
         call read_sectors
         call find_kernel                ; SI = its directory entry
         call load_kernel
+        mov ax, KERNEL_SEG
+        mov es, ax
+        cmp word [es:KERNEL_FILE_SIZE - 2], KERNEL_END_MARK
+        mov si, msg_incomplete
+        jne fail                        ; the file is short, or arrived short
+        xor ax, ax
+        mov es, ax
         mov si, msg_trace_loaded
         call trace
         ; The hand-over.
@@ -69,16 +77,20 @@ start:
 ;   In:       the BPB at BOOT_SECTOR_PHYS
 ;   Out:      root_lba, root_sectors, data_lba, max_cluster set; returns only
 ;             if the disk is one this loader can read
-;   Destroys: AX, BX, CX, DX
+;   Destroys: AX, BX, CX, DX, SI
 ; ----------------------------------------------------------------------------
 geometry:
         mov si, msg_bad_disk
-        cmp word [BPB(BPB_BYTES_PER_SECTOR)], 512
+        cmp word [BPB(BPB_BYTES_PER_SECTOR)], SECTOR_SIZE
         jne fail
         cmp byte [BPB(BPB_SECTORS_PER_CLUSTER)], 0
         je fail
+        cmp word [BPB(BPB_ROOT_ENTRIES)], 0
+        je fail
         mov ax, [BPB(BPB_SECTORS_PER_FAT)]
-        cmp ax, (LOADER_ROOT_BUF - LOADER_FAT_BUF) / 512
+        test ax, ax
+        jz fail
+        cmp ax, (LOADER_ROOT_BUF - LOADER_FAT_BUF) / SECTOR_SIZE
         ja fail
         mov bl, [BPB(BPB_FATS)]
         xor bh, bh
@@ -86,9 +98,9 @@ geometry:
         add ax, [BPB(BPB_RESERVED_SECTORS)]
         mov [root_lba], ax
         mov ax, [BPB(BPB_ROOT_ENTRIES)]
-        add ax, 512 / DIR_ENTRY_SIZE - 1
+        add ax, SECTOR_SIZE / DIR_ENTRY_SIZE - 1
         shr ax, 4                       ; 16 entries a sector
-        cmp ax, (LOADER_BUF_END - LOADER_ROOT_BUF) / 512
+        cmp ax, (LOADER_BUF_END - LOADER_ROOT_BUF) / SECTOR_SIZE
         ja fail
         mov [root_sectors], ax
         add ax, [root_lba]
@@ -120,7 +132,7 @@ find_kernel:
         jnz .next
         mov di, kernel_name
         push si
-        mov cx, 11
+        mov cx, DIR_NAME_LENGTH
         repe cmpsb
         pop si
         je .found
@@ -152,8 +164,8 @@ find_kernel:
 ; ----------------------------------------------------------------------------
 load_kernel:
         mov ax, [si + DIR_FILE_SIZE]
-        add ax, 511
-        shr ax, 9
+        add ax, SECTOR_SIZE - 1
+        shr ax, SECTOR_SHIFT
         mov di, ax                      ; DI = sectors still to read
         mov ax, [si + DIR_FIRST_CLUSTER]
         mov [cluster], ax
@@ -176,7 +188,7 @@ load_kernel:
         xor bx, bx
         mov cx, 1
         call read_sectors
-        add word [dest_seg], 512 / 16
+        add word [dest_seg], SECTOR_SIZE / 16
         pop cx
         pop ax
         dec di
@@ -200,11 +212,13 @@ load_kernel:
 
 ; ----------------------------------------------------------------------------
 ; read_sectors - read CX sectors from AX on, to ES:BX, retrying each one
-;   In:       AX = first logical sector; CX = count; ES:BX = destination
+;   In:       AX = first logical sector; CX = count (0 reads nothing);
+;             ES:BX = destination
 ;   Out:      the sectors in memory; returns only if every read succeeded
 ;   Destroys: AX, CX
 ; ----------------------------------------------------------------------------
 read_sectors:
+        jcxz .none
         push bx
         push dx
         push si
@@ -237,11 +251,12 @@ read_sectors:
         pop cx
         pop ax
         inc ax
-        add bx, 512
+        add bx, SECTOR_SIZE
         loop .next
         pop si
         pop dx
         pop bx
+.none:
         ret
 
 ; ----------------------------------------------------------------------------
@@ -347,6 +362,7 @@ msg_read_error      db "cannot read the disk", 13, 10, 0
 msg_no_kernel       db "no KERNEL.BIN on this disk", 13, 10, 0
 msg_too_large       db "KERNEL.BIN is larger than its room", 13, 10, 0
 msg_bad_chain       db "KERNEL.BIN's cluster chain is broken", 13, 10, 0
+msg_incomplete      db "KERNEL.BIN is incomplete", 13, 10, 0
 msg_press_key       db "Press a key to try again.", 13, 10, 0
 msg_trace_prefix    db "[trace] loader: ", 0
 msg_trace_start     db "started", 13, 10, 0
@@ -360,7 +376,8 @@ max_cluster         dw 0
 cluster             dw 0
 dest_seg            dw 0
 
-%if ($ - $$) > LOADER_SECTORS * 512
+%if ($ - $$) > LOADER_SECTORS * SECTOR_SIZE
   %error "boot-loader.asm: the loader does not fit in its reserved sectors"
 %endif
-        times LOADER_SECTORS * 512 - ($ - $$) db 0
+loader_end:
+        times LOADER_SECTORS * SECTOR_SIZE - ($ - $$) db 0

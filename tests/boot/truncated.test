@@ -1,0 +1,8 @@
+# A KERNEL.BIN a sector short: its end mark is missing, and the loader
+# refuses it.
+image: truncated
+match: prefix
+timeout: 15
+---
+rx286 loader: KERNEL.BIN is incomplete
+Press a key to try again.

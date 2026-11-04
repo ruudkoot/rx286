@@ -247,12 +247,20 @@ def keys_include(script):
 
 # ---------------------------------------------------------------- transcripts
 
+FORM_FEED = '[form feed]'
+
+
 def normalise_transcript(raw):
-    """COM1's bytes as the lines a person would read: CR and FF dropped,
-    backspaces applied, trailing spaces trimmed."""
+    """COM1's bytes as the lines a person would read: CR dropped, a form
+    feed (or a run of them) as a line of its own, FORM_FEED, backspaces
+    applied, trailing spaces trimmed."""
     text = raw.decode('latin-1')
+    # Test builds write trace lines straight to COM1, even in the middle of
+    # a line of the console's: cut them out, so the console's line joins up.
+    text = re.sub(r'\[trace\][^\n]*\n', '', text)
+    text = re.sub(r'\f+', '\n' + FORM_FEED + '\n', text.replace('\r', ''))
     lines = []
-    for line in text.replace('\r', '').replace('\f', '').split('\n'):
+    for line in text.split('\n'):
         chars = []
         for c in line:
             if c == '\b':

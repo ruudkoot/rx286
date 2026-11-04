@@ -10,9 +10,10 @@
 #   header    the file starts with the banner and "; rx286 - <its path>"
 #   cpu       a file that includes build.inc (a top-level source) says `cpu 286`
 #   routine   in code, every label that is not local (.x) follows a routine
-#             header with In:, Out: and Destroys: (data labels have no colon;
-#             labels ending in _start or _end mark places, not routines)
-#   port      `in` and `out` name their port (a constant, or DX), never a number
+#             header that names it, with In:, Out: and Destroys: (data labels
+#             have no colon; a label ending in _start or _end that no code
+#             follows marks a place, not a routine)
+#   port      `in`, `out` and `mov dx` name their port with a constant
 #   layout    no tabs, no trailing spaces, at most 100 characters a line
 # ============================================================================
 
@@ -48,6 +49,22 @@ LABEL = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):')
 PORT_NUMBER = re.compile(
     r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:out\s+(\d\w*)\s*,|in\s+\w+\s*,\s*(\d\w*)\s*(?:;|$))',
     re.I)
+DX_NUMBER = re.compile(r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*mov\s+dx\s*,\s*\d\w*\s*(?:;|$)', re.I)
+DX_PORT = re.compile(r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:in\s+\w+\s*,\s*dx|out\s+dx\s*,)', re.I)
+DIRECTIVE = re.compile(r'^\s*(?:times|db|dw|dd|dq|dt|incbin|section|\[section|%|[A-Za-z_][\w]*:|'
+                       r'[A-Za-z_][\w]*\s+(?:db|dw|dd|equ|times))', re.I)
+
+
+def is_marker(label, lines, n):
+    """A label that marks a place (it ends in _start or _end and no code
+    follows it), not a routine."""
+    if not label.endswith(('_start', '_end')):
+        return False
+    for line in lines[n:]:
+        text = line.split(';', 1)[0].strip()
+        if text:
+            return bool(DIRECTIVE.match(text))
+    return True
 
 
 def lint(path):
@@ -85,8 +102,12 @@ def lint(path):
             section = saved.pop()
         if PORT_NUMBER.match(line):
             report(n, 'port', 'name the port with a constant: ' + line.strip())
+        if DX_NUMBER.match(line):
+            following = next((l for l in lines[n:] if l.split(';', 1)[0].strip()), '')
+            if DX_PORT.match(following):
+                report(n, 'port', 'name the port with a constant: ' + line.strip())
         m = LABEL.match(line)
-        if m and section in CODE_SECTIONS and not m.group(1).endswith(('_end', '_start')):
+        if m and section in CODE_SECTIONS and not is_marker(m.group(1), lines, n):
             k = n - 2
             while k >= 0 and lines[k].strip() == '':
                 k -= 1
@@ -98,6 +119,10 @@ def lint(path):
             if not all(word in header for word in ('In:', 'Out:', 'Destroys:')):
                 report(n, 'routine', '%s needs a header with In:, Out: and Destroys:'
                        % m.group(1))
+            else:
+                named = re.findall(r'^;\s+([A-Za-z_][\w]*)\s+-\s', header, re.M)
+                if m.group(1) not in named:
+                    report(n, 'routine', "%s's header names %s" % (m.group(1), named or 'nothing'))
     return problems
 
 

@@ -8,8 +8,10 @@
 ; are formatted by src/lib/format.asm into a buffer in kdata.
 ; ============================================================================
 
+NUM_BUF_SIZE        equ 12              ; ten digits of a 32-bit number, and the zero
+
 begin_kdata
-num_buf             times 12 db 0
+num_buf             times NUM_BUF_SIZE db 0
 %ifdef TEST_IMAGE_SUM
 test_image_sum      dw 0                ; written by entry.asm in real mode
 %endif

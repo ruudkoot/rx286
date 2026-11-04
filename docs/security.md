@@ -36,12 +36,17 @@ Every way out is a reported fault, after which the program starts again
 - **The kernel's stack** is switched to on every interrupt from ring 3
   (SS0:SP0 in the TSS), so a broken program stack cannot hurt the kernel.
 - **System calls** check every buffer with the 286's own instructions before
-  reading it: `ARPL` against the caller's CS, `VERR`, `LSL` and bounds
-  (*docs/syscalls.md*). A program can only pass a selector it could load,
-  which is one of its own or null; the checks hold even if that changes.
+  reading it: `ARPL` against the caller's CS, `VERR`, `LSL`, `LAR` (no
+  expand-down segment) and bounds (*docs/syscalls.md*). A program can only
+  pass a selector it could load, which is one of its own or null; the checks
+  hold even if that changes.
 - **No starvation.** The kernel runs with interrupts off only for short
-  stretches: `write` opens a window after every line, and `read_key` sleeps
+  stretches: `write` opens a window after every byte, and `read_key` sleeps
   with interrupts on. A program that spins is stopped by Ctrl+Break.
+- **The way back.** Before every `IRET` to ring 3 the kernel checks the return
+  IP against the program's code limit, so a return past it is the program's
+  fault, not the kernel's. A single-step trap or a 287 overrun (vector 9)
+  that arrives in ring 0 is the program's too.
 - **Kernel bugs** are reported, never a silent reset: a fault in the kernel is
   a panic, and a double fault (a kernel stack overflow, say) reaches its own
   task with its own stack (*docs/interrupts.md*).
@@ -50,7 +55,7 @@ Every way out is a reported fault, after which the program starts again
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 49 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 51 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -65,26 +70,30 @@ that faulted:
 | pushing past the stack's bottom; popping past its top | #SS(0000) |
 | divide by zero; an invalid opcode; `BOUND` | #DE, #UD, #BR |
 | the trap flag through `POPF` | #DB, after the next instruction |
+| the trap flag, then an instruction that faults | #GP(0000): on a 286 the pending trap follows into the kernel and is dropped (*docs/emulators.md*) |
 | NT and `IRET` | #TS(0000) |
 | IOPL 3 through `POPF`, then `CLI` | ignored, then #GP(0000) |
-| `LOCK` | runs on Bochs (a 286 faults) |
-| `LOADALL` (0Fh 05h) | #UD on Bochs (a 286: #GP) |
-| a 287 error, unmasked | IRQ13: reported, the program restarted |
-| a 287 operand across the data's limit | #GP(0000) on Bochs (a 286: #MP, vector 9) |
+| `LOCK` | runs on Bochs; #GP(0000) on MAME's 286 |
+| `LOADALL` (0Fh 05h) | #UD on Bochs; #GP(0000) on MAME's 286 |
+| a 287 error, unmasked | IRQ13: reported, the program restarted (MAME has no 287) |
+| a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
+| `INT 30h` as the code segment's last two bytes | #GP(0000) at 0043:2000: the return IP is past the limit |
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 
-Before every restart in attack and fuzz builds, the kernel checks that a
+The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core
+(*docs/emulators.md*). Before every restart in attack and fuzz builds, the kernel checks that a
 checksum of its code, GDT, IDT and TSSs is what it was at the first start,
 and that the frame it restarts from sits at the kernel stack's top. A
 difference is a panic, which fails the test.
 
 ### The system calls (`tests/syscalls/calls.test`)
 
-Every call with good and bad arguments, the registers a call keeps, and a
-`write` of 4,096 newlines during which the timer's ticks keep pace with the
-RTC. That test fails if `write`'s interrupt window is removed, or written as
-`sti; cli`, which opens nothing.
+Every call with good and bad arguments, the registers a call keeps, and
+writes of 2,048 newlines, spaces and form feeds during which the timer's
+ticks keep pace with the RTC. That test fails if `write`'s interrupt window
+is removed, opened only after line feeds (as before M10's review), or
+written as `sti; cli`, which opens nothing.
 
 ### The fuzzer (`tests/fuzz/fuzz.test`)
 
@@ -94,7 +103,7 @@ selector it may not load). One iteration in four starts with `INT 30h`, so
 system calls run with random arguments. A watchdog restarts an iteration
 that runs for 5 ticks. The kernel counts the faults by vector instead of
 reporting each, checks its code and tables at every start, and ends the
-test after 10,000 starts. A typical run: three quarters of the iterations
+test after 10,000 starts. It runs on Bochs and MAME. A typical run: three quarters of the iterations
 fault inside the random bytes, mostly #GP and #SS, some #UD, #DB, #DE and
 #BR, a few hit the watchdog; it takes about 2.5 seconds.
 
@@ -107,6 +116,9 @@ Bugs seeded into the kernel by hand (roadmap M8), each caught:
 | `check_buffer` without its limit check | the attack suite, the system calls' test and the fuzzer: the kernel panics reading past the program's segment |
 | IRQ1's gate at DPL 3 | the attack suite: `INT 21h` no longer faults |
 | `write` without its interrupt window, or with `sti; cli` | the system calls' test: ticks are lost |
+| the kernel without its rule for a single-step trap in ring 0 | the attack suite on MAME's 286 (and the fuzzer there): a panic |
+| no check of the return IP before `IRET` | the attack suite: a panic at the `IRET` |
+| a loader three sectors short | the boot tests: the image's end mark is missing |
 
 ## What is outside the promise
 

@@ -57,24 +57,50 @@ at a kernel symbol). In expected lines, `{name}` is a program symbol's offset
 and `{k:name}` a kernel one.
 
 How a test types: `test.asm` in the kernel's test build reads a byte stream
-compiled from the key script, and types each key through the 8042's command
-D2h, which puts the byte where the keyboard would and raises IRQ1 (roadmap
-E7). It types only while the program waits in `read_key` with nothing
-buffered, so tests never race. When the keys run out and the program waits
-again, the kernel prints `TEST END` on COM1, waits for the UART to empty and
-writes Bochs' shutdown port.
+compiled from the key script (`tools/rxlib.py`), and types each key through
+the 8042's command D2h, which puts the byte where the keyboard would and
+raises IRQ1 (roadmap E7). A key is pressed only while the program waits in
+`read_key` with nothing buffered, so tests never race; its release is typed
+at once. `{ctrl-break}` and `{ctrl-alt-del}` are typed whatever the program
+does. When the keys run out and the program waits again, the kernel prints
+`TEST END` on COM1, waits for the UART to empty and writes Bochs' shutdown
+port. On MAME, whose IBM 8042 firmware has no D2h, the kernel hands each byte
+to its keyboard driver directly (`TEST_TYPE_DIRECT`).
 
-The kernel marks lines that are not part of the transcript with `[trace]`
-(trace output) or `[regs]` (register dumps); the runner ignores them.
+The runner ignores trace lines (`[trace]`), register dumps (`regs:`) and
+blank lines.
+
+The suites:
+
+| Suite | What |
+|---|---|
+| `tests/boot` | the boot sector and loader: every word of `KERNEL.BIN` arrives (contiguous and fragmented), a missing or oversized kernel, a disk without a loader |
+| `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break, Ctrl+Alt+Del, the rule for unhandled IRQs (three devices provoked), the 287's IRQ13, the timer against the RTC |
+| `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
+| `tests/syscalls` | every system call with good and bad arguments; `write`'s interrupt window |
+| `tests/shell` | every command of the shell, its editor, every `crash` |
+| `tests/attack` | 51 attacks (*docs/security.md*) |
+| `tests/fuzz` | 10,000 iterations of random code in ring 3 |
+| `tests/unit` | the host tests (layer 3) |
 
 ## 5. The attack suite and the fuzzer
 
 `tests/attack/` runs `tests/programs/attack.asm`, a program that tries one
-forbidden thing per restart, and checks each fault line. `tests/fuzz/` runs
+forbidden thing per restart, and checks each fault line at its exact
+instruction; the kernel checks its own code and tables at every restart. `tests/fuzz/` runs
 random bytes as code in ring 3 for thousands of iterations; the kernel checks
 a checksum of its code and tables after each one.
 
 ## 6. On a real 286 core
 
-`make test-286` runs the suites on DOSBox-X's 286 and MAME's IBM PC/AT
-(*docs/emulators.md*).
+`make test-286` (part of `make check`) runs the suites on DOSBox-X's 286 and
+MAME's IBM PC/AT (*docs/emulators.md*). A test names the emulators it applies
+to (`emulators:`), and an expected line marked `@bochs`, `@dosbox-x` or `@mame`
+counts on that emulator only, where they differ. On MAME the suites found a
+real bug that Bochs cannot show (a single-step trap carried into the kernel).
+
+## What `make check` costs
+
+About a minute and a quarter on this machine, most of it MAME's IBM BIOS
+running its power-on test once per test: Bochs' suites take about 10 s, the
+host tests 3 s, DOSBox-X's 15 s, MAME's 45 s (the tests run in parallel).

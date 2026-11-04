@@ -86,7 +86,8 @@ numbers below are the Technical Reference's.
   test probe), `CMOS_REG_B` (`CMOS_REG_B_24H_BCD`, which rx286 sets;
   `CMOS_REG_B_PIE`, the probe's periodic interrupt), `CMOS_REG_C` (reading
   it acknowledges the clock's interrupt) and `CMOS_REG_D`; `CMOS_SHUTDOWN` is
-  the BIOS's shutdown status byte, 0 for a soft reset (1-49).
+  the BIOS's shutdown status byte (1-49), 0 for a soft reset (the BIOS
+  listing's table of shutdown codes).
   `CMOS_NMI_DISABLE` is bit 7 of the index port: set, NMI is masked (1-28).
 - **80287**: `FPU_CLEAR_BUSY` (F0h) clears the busy latch an error leaves;
   `FPU_RESET` (F1h) would reset the 287 into real mode (2-4).

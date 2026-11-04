@@ -7,7 +7,7 @@
 ; its code in AX. A buffer is checked with the 286's own instructions before
 ; the kernel reads it: ARPL against the caller's CS, VERR, LSL, and bounds
 ; (docs/syscalls.md). Interrupts stay off but at two points (D15): while
-; read_key waits, and after each line write writes.
+; read_key waits, and after each byte write writes.
 ; ============================================================================
 
 begin_kdata
@@ -85,16 +85,14 @@ sys_write:
         call con_emit
         inc si
         inc bx
-        cmp al, CHAR_LF
-        jne .more
-        ; A line written: let interrupts in (STI acts after the next
-        ; instruction), and stop early if the program is to restart.
+        ; Let interrupts in after every byte (STI acts after the next
+        ; instruction): a byte's work is at most a scroll or a clear of the
+        ; screen. Stop early if the program is to restart.
         sti
         nop
         cli
         cmp byte [restart_pending], 0
         jne .written
-.more:
         loop .next
 .written:
         call con_cursor
@@ -112,7 +110,8 @@ sys_write:
 ; check_buffer - may the caller read CX bytes at AX:SI?
 ;   In:       AX = the caller's selector; SI = offset; CX = length (> 0);
 ;             BP = the frame (its CS is the caller's privilege)
-;   Out:      CF clear and ES = the selector if so; CF set if not
+;   Out:      CF clear and ES = the selector if so; CF set if not (also for a
+;             buffer ending at FFFFh exactly: no program segment is that big)
 ;   Destroys: AX, DX
 ; ----------------------------------------------------------------------------
 check_buffer:
@@ -121,6 +120,11 @@ check_buffer:
         verr ax                         ; readable at that privilege?
         jnz .refuse
         lsl dx, ax                      ; DX = the segment's limit
+        jnz .refuse
+        push dx
+        lar dx, ax                      ; DH = the access byte
+        test dh, ACC_EXPAND_DOWN        ; expand-down data (or conforming code):
+        pop dx                          ; 0..limit is not its range; refuse it
         jnz .refuse
         push si
         add si, cx                      ; CF: the buffer runs past FFFFh

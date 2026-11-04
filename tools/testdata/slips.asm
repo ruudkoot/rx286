@@ -23,6 +23,12 @@ bits 16
         fucom st1               ; SLIP
 label:  shld ax, bx, 4          ; SLIP
         times 2 bsf ax, bx      ; SLIP
+        fstcw [fs:bx]           ; SLIP
+%macro load 1
+        mov ax, %1              ; SLIP (listed here for each expansion; only the second slips)
+%endmacro
+        load [bx]
+        load [ebx]
         ; the 286's own, which must pass
         pusha
         popa

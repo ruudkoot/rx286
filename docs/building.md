@@ -86,11 +86,12 @@ E5):
 | Target | What |
 |---|---|
 | `make test` | every boot test in Bochs (*docs/testing.md*) |
+| `make test-286` | the same on DOSBox-X's 286 and MAME's IBM PC/AT (*docs/emulators.md*) |
 | `make unit` | the host tests of pure routines |
 | `make check-286` | no 386 instruction in any listing |
 | `make check-image` | the floppies are what the boot code expects |
 | `make check-repro` | two builds give the same image |
 | `make lint` | the sources follow *docs/style.md* |
 | `make check-docs` | the documents name every constant; the bochsrc matches |
-| `make check` | all of the above |
+| `make check` | all of the above (about 75 s) |
 | `make sizes` | each segment against its room |

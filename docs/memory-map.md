@@ -50,6 +50,11 @@ segment.
 | double-fault stack | `DFSTACK_OFF` 6500h | `DFSTACK_SIZE` 512 B | `DFSTACK_PHYS` 16500h | no: zeroed at start | `SEL_DFSTACK` |
 | program stack | `USTACK_OFF` 6700h | `USTACK_SIZE` 2 KB | `USTACK_PHYS` 16700h | no: zeroed at start | `SEL_USTACK` |
 
+`KERNEL.BIN`'s last word, which is the last word of the program's data room,
+is `KERNEL_END_MARK`: the loader refuses a kernel whose end did not arrive.
+The loader reads whole sectors of `SECTOR_SIZE` bytes (`SECTOR_SHIFT` is its
+logarithm).
+
 The program is assembled on its own, into a binary of `USER_FILE_SIZE` bytes:
 its code at `USER_TEXT_START`, its data at `USER_DATA_START`, each padded to
 its room. The kernel includes that binary at `UTEXT_OFF` with `incbin`.

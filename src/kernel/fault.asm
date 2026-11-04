@@ -6,12 +6,14 @@
 ; it and starts the program again), CPL 0 the kernel (a panic). NMI is always
 ; a panic. The single-step trap counts as the program's fault: only a
 ; program sets TF; in ring 0 it is the program's trap that the 286 carried
-; into a fault's handler, and is dropped.
+; into a fault's handler, and is dropped; vector 9 in ring 0 is the
+; program's 287, which overran a segment after the CPU had moved on.
 ; ============================================================================
 
 begin_kdata
 restart_pending     db 0                ; restart the program on the way back to ring 3
 msg_kernel_fault    db "exception in the kernel", 0
+msg_fpu_overrun     db "the 287 overran a segment (vector 9)", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -28,8 +30,19 @@ exception:
         jnz fault_program
         cmp word [bp + FRAME_VECTOR], VEC_DB
         je .carried_trap
+        cmp word [bp + FRAME_VECTOR], VEC_MP
+        je .overrun
         mov si, msg_kernel_fault
         jmp panic
+.overrun:
+        ; Vector 9 in the kernel: the program's 287 overran a segment while
+        ; the CPU had moved on (Intel 9.6.3: "any time after the processor
+        ; extension is started"). The program's, as IRQ13 is: restart it on
+        ; the way back; the restart's FNINIT resets the 287.
+        mov si, msg_fpu_overrun
+        call klog
+        mov byte [restart_pending], 1
+        ret
 .carried_trap:
         ; A single-step trap in the kernel. The kernel never sets TF: this is
         ; the program's. When an instruction with TF set faults, the 286

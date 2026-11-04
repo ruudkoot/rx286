@@ -59,11 +59,11 @@ def mnemonic(source):
 def check_instruction(code):
     """A reason this instruction is not the 286's, or None."""
     i = 0
-    while i < len(code) and code[i] in PREFIXES:
+    # Prefixes, and WAIT (9Bh), which NASM puts before an ESC and its
+    # prefixes: `fstcw [fs:bx]` is 9B 64 D9 3F.
+    while i < len(code) and (code[i] in PREFIXES or code[i] == 0x9B and i + 1 < len(code)):
         if code[i] in FORBIDDEN_PREFIXES:
             return FORBIDDEN_PREFIXES[code[i]]
-        i += 1
-    if i < len(code) and code[i] == 0x9B and i + 1 < len(code):   # WAIT before an ESC
         i += 1
     if i >= len(code):
         return None
@@ -85,16 +85,19 @@ def check_instruction(code):
 
 def check_listing(path):
     problems = []
-    seen = set()
+    continued = False
     for raw in open(path, encoding='latin-1'):
         m = LINE.match(raw.rstrip('\n'))
         if not m:
+            continued = False
             continue
-        lineno, addr, hexbytes, _, source = m.groups()
-        key = (lineno, source)
-        if key in seen:       # a continuation line of the same instruction
+        lineno, addr, hexbytes, dash, source = m.groups()
+        # A byte field that ends in '-' goes on in the next line: that line
+        # holds more of the same bytes, not an instruction of its own. Every
+        # other line is checked, each expansion of a macro included.
+        was_continued, continued = continued, dash == '-'
+        if was_continued:
             continue
-        seen.add(key)
         word = mnemonic(source)
         if word is None or word in DATA or word.startswith('%'):
             continue

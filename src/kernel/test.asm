@@ -128,6 +128,7 @@ test_start:
 %endif
         ret
 
+%ifdef TEST_KEYBOARD
 ; ----------------------------------------------------------------------------
 ; test_after_start - TEST_KEYBOARD: the kernel reads and prints keys itself,
 ; and the program never starts
@@ -135,7 +136,6 @@ test_start:
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
-%ifdef TEST_KEYBOARD
 test_after_start:
 .next:
         call kbd_wait_key
@@ -275,7 +275,7 @@ test_wait_ticks:
 ; must be reported once and masked, and the RTC must not flood
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
-;   Destroys: AX, BX, CX, DX
+;   Destroys: AX, BX, CX, DX, SI
 ; ----------------------------------------------------------------------------
 test_probes:
         ; The diskette controller interrupts when it leaves reset (IRQ6).
@@ -335,7 +335,7 @@ test_probes:
 ; test_fpu_kernel - divide by zero on the 287 with zero-divide unmasked
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
-;   Destroys: AX, CX
+;   Destroys: AX, CX, SI
 ; ----------------------------------------------------------------------------
 test_fpu_kernel:
         sti
@@ -475,9 +475,9 @@ test_fault_quiet:
 
 %ifdef TEST_KERNEL_CHECKS
 ; ----------------------------------------------------------------------------
-; test_kernel_sum - the sum of the words of the kernel's code, its GDT, IDT
-; and both TSSs (accessed bits are preset; the TSS's busy bit was set
-; before the first start, and nothing else of these may change)
+; test_kernel_sum - the sum of the words of the kernel's code, its GDT,
+; IDT, dispatch tables and both TSSs (accessed bits are preset; the TSS's
+; busy bit was set before the first start, and nothing else may change)
 ;   In:       DS = SEL_KDATA
 ;   Out:      AX = the sum
 ;   Destroys: BX, CX, SI
@@ -495,10 +495,19 @@ test_kernel_sum:
         mov cx, (gdt_end - gdt) / 2
         call .data
         mov si, idt
-        mov cx, IDT_ENTRIES * 4
+        mov cx, IDT_ENTRIES * 8 / 2        ; words of 8-byte gates
+        call .data
+        mov si, isr_handlers
+        mov cx, IDT_ENTRIES
+        call .data
+        mov si, irq_drivers
+        mov cx, IRQ_LINES
+        call .data
+        mov si, syscall_table
+        mov cx, SYSCALL_COUNT
         call .data
         mov si, tss
-        mov cx, TSS286_SIZE                ; both TSSs, one after the other
+        mov cx, TSS286_SIZE                ; words: both TSSs, one after the other
 .data:
         add ax, [si]
         add si, 2
