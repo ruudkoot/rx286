@@ -266,6 +266,103 @@ def normalise_transcript(raw):
     return lines
 
 
+DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
+
+
+def run_dosbox(directory, image, serial, timeout, until):
+    """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
+    `until(lines)` holds of the serial transcript or `timeout` seconds. DOSBox-X
+    has no shutdown port and ignores SIGTERM: it is killed."""
+    text = open(DOSBOX_TEMPLATE, encoding='utf-8').read()
+    text = text.replace('@IMAGE@', image).replace('@SERIAL@', serial)
+    conf = os.path.join(directory, 'dosbox-x.conf')
+    with open(conf, 'w', encoding='utf-8') as f:
+        f.write(text)
+    env = dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy',
+               HOME=directory)              # its own settings stay in the test's directory
+    log = open(os.path.join(directory, 'dosbox-x.log'), 'w')
+    started = time.monotonic()
+    proc = subprocess.Popen(['dosbox-x', '-conf', conf, '-nogui', '-nomenu', '-fastlaunch'],
+                            stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env,
+                            cwd=directory)
+    status = 'exit'
+    while proc.poll() is None:
+        if time.monotonic() - started > timeout:
+            status = 'timeout'
+            break
+        if os.path.exists(serial) and until(normalise_transcript(open(serial, 'rb').read())):
+            status = 'until'
+            break
+        time.sleep(0.05)
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+    log.close()
+    return status, time.monotonic() - started
+
+
+MAME_SCRIPT = os.path.join(ROOT, 'mame', 'rx286.lua')
+MAME_ROMS = os.path.expanduser('~/mame/roms')     # the IBM 5170 ROM set (docs/emulators.md)
+
+
+def at_cmos():
+    """The 64 bytes of CMOS of rx286's AT, as IBM's SETUP would leave them, so
+    the real BIOS's power-on test passes in MAME: drive A 1.2 MB, B 360 KB, no
+    fixed disk, two diskette drives, a 287, an EGA, 640 KB, the checksum of
+    10h-2Dh (IBM, Technical Reference, 1-45 to 1-50)."""
+    c = bytearray(64)
+    c[0x00:0x0A] = bytes([0, 0, 0, 0, 0, 0, 0x01, 0x01, 0x01, 0x89])   # MAME sets the time
+    c[0x0A] = 0x26              # 32 kHz base, 1,024 Hz rate
+    c[0x0B] = 0x02              # 24-hour, BCD
+    c[0x0D] = 0x80              # valid RAM and time: the battery is good
+    c[0x10] = 0x21              # diskettes: A high capacity (2), B double sided (1)
+    c[0x12] = 0x00              # no fixed disk
+    c[0x14] = 0x43              # two diskette drives, primary display with its own BIOS (EGA), 287
+    c[0x15], c[0x16] = 0x80, 0x02   # 640 KB base memory
+    total = sum(c[0x10:0x2E])
+    c[0x2E], c[0x2F] = total >> 8, total & 0xFF
+    c[0x32] = 0x19              # the century
+    c[0x33] = 0x80              # 128 KB expansion: 512 + 128 = 640 KB
+    return bytes(c)
+
+
+def run_mame(directory, image, serial, timeout, until):
+    """Run MAME's IBM PC/AT (a real 80286 core, IBM's BIOS; roadmap M9) on an
+    image without a window, until `until(lines)` holds of the serial
+    transcript or `timeout` seconds."""
+    nvram = os.path.join(directory, 'mame-nvram')
+    os.makedirs(os.path.join(nvram, 'ibm5170'), exist_ok=True)
+    with open(os.path.join(nvram, 'ibm5170', 'mb_rtc'), 'wb') as f:
+        f.write(at_cmos())
+    open(serial, 'wb').close()      # the null modem's file must exist
+    log = open(os.path.join(directory, 'mame.log'), 'w')
+    started = time.monotonic()
+    proc = subprocess.Popen(
+        ['mame', 'ibm5170', '-rompath', MAME_ROMS, '-ramsize', '640K',
+         '-isa2:fdc:fdc:0', '525hd', '-isa2:fdc:fdc:1', '525dd',
+         '-isa3:comat:serport0', 'null_modem', '-bitb', serial,
+         '-flop1', image,                # isa4 stays the IDE card: the AT's task file at 1F0h
+         '-video', 'none', '-sound', 'none', '-nothrottle', '-skip_gameinfo',
+         '-nvram_directory', nvram, '-cfg_directory', os.path.join(directory, 'mame-cfg'),
+         '-autoboot_script', MAME_SCRIPT, '-autoboot_delay', '0',
+         '-seconds_to_run', str(int(timeout * 10))],
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory)
+    status = 'exit'
+    while proc.poll() is None:
+        if time.monotonic() - started > timeout:
+            status = 'timeout'
+            break
+        if until(normalise_transcript(open(serial, 'rb').read())):
+            status = 'until'
+            break
+        time.sleep(0.05)
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+    log.close()
+    return status, time.monotonic() - started
+
+
 def run_bochs(bochsrc, rc_commands, timeout, until=None, serial=None, cwd=None):
     """Run Bochs on a bochsrc with a debugger script. Stops when Bochs exits,
     when `until(lines)` is true of the serial transcript, or at `timeout`

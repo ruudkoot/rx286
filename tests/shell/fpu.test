@@ -1,6 +1,7 @@
 # The 287 computes the square root of 2 and pi; FBSTP stores 18 digits.
 program: shell
 keys: fpu\n
+emulators: bochs dosbox-x
 ---
 rx286, test build
 rx286 shell: type help for the commands

@@ -17,7 +17,7 @@ read_key: polled 0000
 read_key: waited for 2D78
 error 3
 ticks: counting up
-time: 1989-01-01 00
+time: a valid BCD date and time
 error 2
 registers: kept
 window: ticks kept pace with the clock

@@ -3,6 +3,8 @@
 define: TEST_KEYBOARD
 keys: {ctrl-alt-del}
 match: prefix
+# DOSBox-X keeps protected-mode segment limits across the 8042's reset (docs/emulators.md).
+emulators: bochs mame
 ---
 rx286, test build
 rx286: Ctrl+Alt+Del: resetting

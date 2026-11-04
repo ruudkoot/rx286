@@ -3,6 +3,8 @@
 # on its own stack instead of a triple fault and a silent reset.
 define: TEST_PANIC_STACK
 match: contains
+# DOSBox-X never reaches the double-fault task (docs/emulators.md).
+emulators: bochs mame
 ---
 rx286, test build
 rx286 PANIC: double fault

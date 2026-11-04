@@ -1,0 +1,45 @@
+# ============================================================================
+# rx286 - dosbox-x/rx286.conf.in
+# DOSBox-X as a 286 with an EGA, for the suites on a 286 core (roadmap M9).
+#
+# A template: tools/run-test --emulator dosbox-x fills in the placeholders.
+# DOSBox-X boots its own DOS first; [autoexec] then boots the floppy image.
+# docs/emulators.md lists how this machine differs from the AT and Bochs.
+# ============================================================================
+
+[sdl]
+autolock = false
+
+[dosbox]
+machine = ega
+memsize = 1
+fastbioslogo = true
+startbanner = false
+
+[cpu]
+core = normal
+cputype = 286
+fpu = 287
+segment limits = true
+double fault = true
+reset on triple fault = true
+allow lmsw to exit protected mode = false
+cycles = max
+isapnpbios = false
+apmbios = false
+
+[keyboard]
+aux = false
+
+[serial]
+serial1 = file file:@SERIAL@
+serial2 = disabled
+
+[dos]
+xms = false
+ems = false
+umb = false
+
+[autoexec]
+imgmount a @IMAGE@ -t floppy
+boot a:

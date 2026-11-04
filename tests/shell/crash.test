@@ -1,6 +1,8 @@
 # Every kind of crash: the kernel reports the fault, and the shell starts
 # again (an unknown kind lists them all).
 program: shell
+# DOSBox-X lets a write through CS go through (docs/emulators.md).
+emulators: bochs mame
 keys: crash help\ncrash gp\ncrash ud\ncrash de\ncrash ss\ncrash io\ncrash cli\n
 keys: crash hlt\ncrash int\ncrash kernel\ncrash call\ncrash write\ncrash fpu\n
 keys: crash tf\ncrash nt\n
@@ -12,7 +14,8 @@ rx286> crash help
 crash what? The kinds: gp ud de ss io cli hlt int kernel call write fpu tf nt
 rx286> crash gp
 crash: jump past the end of my code
-rx286: program fault #GP(0000) at 0043:{crash_kinds.gp}
+@bochs rx286: program fault #GP(0000) at 0043:{crash_kinds.gp}
+@mame rx286: program fault #GP(0000) at 0043:2000
 rx286 shell, started again
 rx286> crash ud
 crash: an instruction that does not exist
@@ -56,8 +59,9 @@ rx286: program fault #GP(0000) at 0043:{crash_kinds.write}
 rx286 shell, started again
 rx286> crash fpu
 crash: divide by zero on the 287, unmasked
-rx286: the 287 reported an error (IRQ13)
-rx286 shell, started again
+@bochs rx286: the 287 reported an error (IRQ13)
+@bochs rx286 shell, started again
+@mame crash: no 287 error arrived; is there a 287?
 rx286> crash tf
 crash: set the trap flag
 rx286: program fault #DB at 0043:{crash_kinds.tf_after}

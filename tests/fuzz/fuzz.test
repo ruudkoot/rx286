@@ -4,6 +4,8 @@
 program: fuzz
 match: contains
 timeout: 300
+# DOSBox-X stops itself on a far RET through a gate (type 13) (docs/emulators.md).
+emulators: bochs mame
 ---
 fuzz: starting
 fuzz: faults

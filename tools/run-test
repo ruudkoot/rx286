@@ -20,10 +20,16 @@
 #   match: full                 full (default), prefix or contains
 #   break: syscall              a debugger breakpoint, by kernel symbol...
 #   debugger: info gdt 0 11     ...and commands to run there; may repeat
+#   emulators: bochs dosbox-x   where the test applies (default: all)
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one
 #   (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
-#   {image_sum} the sum of kernel.bin's words
+#   {image_sum} the sum of kernel.bin's words. A line that starts with
+#   @bochs, @dosbox-x or @mame counts on that emulator only: where they
+#   differ (docs/emulators.md).
+#
+# --emulator chooses Bochs (the default), DOSBox-X's 286 or MAME's IBM PC/AT
+# (roadmap M9).
 #
 # full:     the transcript is exactly the expected lines, then `TEST END`.
 # prefix:   the transcript starts with the expected lines (the run stops then).
@@ -48,6 +54,8 @@ import rxlib
 
 ROOT = rxlib.ROOT
 IGNORED_PREFIXES = ('[trace]', 'regs:')
+EMULATORS = ('bochs', 'dosbox-x', 'mame')
+EMULATOR = 'bochs'                  # set from --emulator
 
 
 class Test:
@@ -63,6 +71,7 @@ class Test:
         self.match = 'full'
         self.breakpoint = None
         self.debugger = []
+        self.emulators = list(EMULATORS)
         self.expected = []
         self.parse(open(path, encoding='utf-8').read())
 
@@ -93,6 +102,11 @@ class Test:
                 self.breakpoint = value
             elif key == 'debugger':
                 self.debugger.append(value)
+            elif key == 'emulators':
+                self.emulators = value.split()
+                for e in self.emulators:
+                    if e not in EMULATORS:
+                        raise ValueError('%s: unknown emulator %r' % (self.path, e))
             else:
                 raise ValueError('%s: unknown header %r' % (self.path, key))
         self.expected = body.rstrip('\n').split('\n') if body.strip() else []
@@ -101,7 +115,9 @@ class Test:
 
     @property
     def build_dir(self):
-        return os.path.join(ROOT, 'build', 'tests', '%s-%s' % (self.suite, self.name))
+        # MAME's images differ (TEST_TYPE_DIRECT), so they are built apart.
+        tests = 'tests-mame' if EMULATOR == 'mame' else 'tests'
+        return os.path.join(ROOT, 'build', tests, '%s-%s' % (self.suite, self.name))
 
 
 def build(test):
@@ -115,7 +131,7 @@ def build(test):
             f.write(text)
     # The defines are part of the build too: a change of them rebuilds.
     stamp = os.path.join(b, 'defines.txt')
-    wanted = repr((test.program, test.defines))
+    wanted = repr((test.program, test.defines, EMULATOR == 'mame'))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
         for name in ('kernel.bin', 'user.bin'):
             if os.path.exists(os.path.join(b, name)):
@@ -128,6 +144,8 @@ def build(test):
     if test.program == 'attack':
         defines.append('-dTEST_ATTACK')
     defines += ['-d' + d for d in test.defines]
+    if EMULATOR == 'mame':
+        defines.append('-dTEST_TYPE_DIRECT')    # IBM's 8042 firmware has no D2h
     cmd = ['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=test', 'B=' + b,
            'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
            'TEST_KEYS_FILE=' + keys_inc,
@@ -211,9 +229,22 @@ def relevant(lines):
     return [l for l in lines if l and not l.startswith(IGNORED_PREFIXES)]
 
 
+def for_emulator(lines):
+    """The expected lines that count on this emulator, without their tags."""
+    out = []
+    for line in lines:
+        if line.startswith('@'):
+            tag, _, rest = line.partition(' ')
+            if tag[1:] != EMULATOR:
+                continue
+            line = rest
+        out.append(line)
+    return out
+
+
 def compare(test, transcript, debugger_lines):
     """Returns None if the test passes, else a description of the failure."""
-    expected = [substitute(test, l) for l in test.expected if l]
+    expected = [substitute(test, l) for l in for_emulator(test.expected) if l]
     got = relevant(transcript)
     if any(l.startswith('PANIC') or 'rx286 PANIC' in l for l in got) and \
             not any('PANIC' in l for l in expected):
@@ -256,7 +287,7 @@ def run(test):
     if error:
         return test, error, time.monotonic() - started
     b = test.build_dir
-    serial = os.path.join(b, 'com1.log')
+    serial = os.path.join(b, 'com1.log' if EMULATOR == 'bochs' else 'com1-%s.log' % EMULATOR)
     dbglog = os.path.join(b, 'debugger.log')
     for f in (serial, dbglog):
         if os.path.exists(f):
@@ -276,15 +307,19 @@ def run(test):
     else:
         rc.append('c')
 
-    expected_len = len(test.expected)
+    wanted = [substitute(test, l) for l in for_emulator(test.expected) if l]
 
     def until(lines):
         got = relevant(lines)
         if test.match == 'prefix':
-            return len(got) >= expected_len and \
-                got[:expected_len] == [substitute(test, l) for l in test.expected]
+            return got[:len(wanted)] == wanted
         return 'TEST END' in got
-    status, _ = rxlib.run_bochs(bochsrc, rc, test.timeout, until=until, serial=serial)
+    if EMULATOR == 'bochs':
+        status, _ = rxlib.run_bochs(bochsrc, rc, test.timeout, until=until, serial=serial)
+    elif EMULATOR == 'dosbox-x':
+        status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, test.timeout, until)
+    else:
+        status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, test.timeout, until)
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
         if os.path.exists(serial) else []
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
@@ -300,7 +335,10 @@ def main():
     parser.add_argument('tests', nargs='*')
     parser.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--emulator', choices=EMULATORS, default='bochs')
     args = parser.parse_args()
+    global EMULATOR
+    EMULATOR = args.emulator
     paths = args.tests or sorted(glob.glob(os.path.join(ROOT, 'tests', '*', '*.test')))
     if not paths:
         print('run-test: no tests')
@@ -309,6 +347,10 @@ def main():
         subprocess.run(['make', '--no-print-directory', '-C', ROOT, 'disks'], check=True,
                        capture_output=True)
     tests = [Test(os.path.abspath(p)) for p in paths]
+    skipped = [t for t in tests if EMULATOR not in t.emulators]
+    tests = [t for t in tests if EMULATOR in t.emulators]
+    for t in skipped:
+        print('SKIP  %-40s (not on %s)' % (t.path, EMULATOR))
     failures = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         for test, error, seconds in pool.map(run, tests):
@@ -319,7 +361,7 @@ def main():
                 print('      ' + error.replace('\n', '\n      '))
                 print('      (transcript: %s)' % os.path.relpath(
                     os.path.join(test.build_dir, 'com1.log'), ROOT))
-    print('run-test: %d of %d passed' % (len(tests) - failures, len(tests)))
+    print('run-test: %d of %d passed on %s' % (len(tests) - failures, len(tests), EMULATOR))
     return 1 if failures else 0
 
 

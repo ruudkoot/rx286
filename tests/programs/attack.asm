@@ -127,6 +127,13 @@ attacks:
         nop                             ; the trap comes after this instruction
 .tf_after:
         nop
+.tfgp:  pushf
+        pop ax
+        or ax, FLAGS_TF
+        push ax
+        popf
+.tfgp_f: cli                            ; faults with a single step pending: a 286
+                                        ; delivers the trap after the fault, in ring 0
 .nt:    pushf
         pop ax
         or ax, FLAGS_NT
@@ -150,7 +157,8 @@ attacks:
         fldz
         fdivp st1, st0
         fwait                           ; Bochs raises IRQ13 here
-        jmp $
+        PRINT "attack: no 287 error arrived (no 287 emulated?)", CHAR_LF
+        jmp entry
 .write: mov si, UDATA_ROOM - 2
         mov cx, 4
         sys SYS_WRITE                   ; refused: past the limit
@@ -168,7 +176,8 @@ attacks:
 .pop_f: pop ax                          ; past the stack's top
 .fpuop: fld tword [UDATA_ROOM - 4]      ; a 287 operand across the limit:
         fwait                           ; #MP (vector 9) on a 286, #GP on Bochs
-        jmp $
+        PRINT "attack: the 287 read across the limit (no 287 emulated?)", CHAR_LF
+        jmp entry
 .nullw: push ds
         xor ax, ax
         mov ds, ax
@@ -256,6 +265,7 @@ attack_table:
         attack "invalid opcode", attacks.ud
         attack "bound", attacks.bound
         attack "trap flag", attacks.tf
+        attack "the trap flag and a fault", attacks.tfgp
         attack "NT and iret", attacks.nt
         attack "IOPL through popf", attacks.iopl
         attack "lock", attacks.lock

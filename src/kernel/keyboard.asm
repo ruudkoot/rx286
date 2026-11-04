@@ -95,6 +95,15 @@ kbc_wait_input:
 ; ----------------------------------------------------------------------------
 kbd_irq:
         in al, KBC_DATA
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; kbd_byte - one byte from the keyboard, as IRQ1 reads it from port 60h
+;   In:       AL = the byte; BP = an interrupt's frame; DS = ES = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+kbd_byte:
         cmp byte [kbd_e1_skip], 0
         jne .skip
         cmp al, SC_PREFIX_E1

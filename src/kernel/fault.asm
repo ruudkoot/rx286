@@ -5,7 +5,8 @@
 ; Who faulted is in the frame's CS: CPL 3 is the program (program.asm reports
 ; it and starts the program again), CPL 0 the kernel (a panic). NMI is always
 ; a panic. The single-step trap counts as the program's fault: only a
-; program sets TF.
+; program sets TF; in ring 0 it is the program's trap that the 286 carried
+; into a fault's handler, and is dropped.
 ; ============================================================================
 
 begin_kdata
@@ -17,7 +18,7 @@ end_kdata
 ; exception - the handler of vectors 00h-1Fh
 ;   In:       BP = the frame; DS = ES = SEL_KDATA
 ;   Out:      returns only if the program faulted, with the frame changed so
-;             that the program starts again
+;             that the program starts again, or for a carried single step
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 exception:
@@ -25,8 +26,21 @@ exception:
         je nmi
         test byte [bp + FRAME_CS], CPL_MASK
         jnz fault_program
+        cmp word [bp + FRAME_VECTOR], VEC_DB
+        je .carried_trap
         mov si, msg_kernel_fault
         jmp panic
+.carried_trap:
+        ; A single-step trap in the kernel. The kernel never sets TF: this is
+        ; the program's. When an instruction with TF set faults, the 286
+        ; services the fault first and the pending trap after it, before the
+        ; first instruction of the fault's handler (Intel 9.7.1, table 9-4),
+        ; so the trap's frame points at that handler, in ring 0. Intel: check
+        ; the privilege level after any single step. Clear TF and let the
+        ; fault's handler run. (A 386 or later, Bochs, never does this.)
+        and word [bp + FRAME_FLAGS], ~FLAGS_TF
+        TRACE "a program's single-step trap carried into a fault's handler"
+        ret
 
 ; ----------------------------------------------------------------------------
 ; nmi - a parity error or an I/O channel check: panic, with port 61h

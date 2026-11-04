@@ -1,6 +1,7 @@
 # The prefilled tables, as the CPU sees them once loaded (Bochs' debugger at
 # the end of pm_start). Code and data limits change with the code, so they
 # are left out; everything else is checked.
+emulators: bochs
 break: pm_start.ready
 debugger: info gdt 0 10
 debugger: info idt 0 0x30

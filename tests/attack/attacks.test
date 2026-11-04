@@ -1,6 +1,8 @@
 # Every attack of the program tests/programs/attack.asm, and what the kernel
 # makes of it (on Bochs: docs/emulators.md lists where a 286 differs).
 program: attack
+# DOSBox-X stops itself at the jump to the TSS (docs/emulators.md).
+emulators: bochs mame
 timeout: 60
 ---
 rx286, test build
@@ -68,16 +70,21 @@ attack: bound
 rx286: program fault #BR at 0043:{attacks.bound_f}
 attack: trap flag
 rx286: program fault #DB at 0043:{attacks.tf_after}
+attack: the trap flag and a fault
+rx286: program fault #GP(0000) at 0043:{attacks.tfgp_f}
 attack: NT and iret
 rx286: program fault #TS(0000) at 0043:{attacks.nt_f}
 attack: IOPL through popf
 rx286: program fault #GP(0000) at 0043:{attacks.iopl_f}
 attack: lock
-attack: lock ran without a fault (not a 286)
+@bochs attack: lock ran without a fault (not a 286)
+@mame rx286: program fault #GP(0000) at 0043:{attacks.lock}
 attack: loadall
-rx286: program fault #UD at 0043:{attacks.loadall}
+@bochs rx286: program fault #UD at 0043:{attacks.loadall}
+@mame rx286: program fault #GP(0000) at 0043:{attacks.loadall}
 attack: 287 error
-rx286: the 287 reported an error (IRQ13)
+@bochs rx286: the 287 reported an error (IRQ13)
+@mame attack: no 287 error arrived (no 287 emulated?)
 attack: write past the limit
 attack: refused, error 1
 attack: insb
@@ -91,7 +98,8 @@ rx286: program fault #GP(0000) at 0043:{attacks.nulljmp}
 attack: pop past the stack's top
 rx286: program fault #SS(0000) at 0043:{attacks.pop_f}
 attack: a 287 operand across the limit
-rx286: program fault #GP(0000) at 0043:{attacks.fpuop}
+@bochs rx286: program fault #GP(0000) at 0043:{attacks.fpuop}
+@mame attack: the 287 read across the limit (no 287 emulated?)
 attack: write from a null selector
 attack: refused, error 1
 attack: write past FFFFh

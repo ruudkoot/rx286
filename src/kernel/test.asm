@@ -20,6 +20,9 @@
 ;   TEST_TICKS          compare the timer with the RTC
 ;   TEST_KEYBOARD       print every key read (the program never starts)
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
+;   TEST_TYPE_DIRECT    type keys by handing each byte to the driver instead
+;                       of through the 8042: MAME runs IBM's own 8042
+;                       firmware, which has no command D2h (M9)
 ;   TEST_ATTACK         the attack program runs: check the kernel's code and
 ;                       tables before every restart (M8)
 ;   TEST_FUZZ           the fuzzer runs: the same checks, faults counted
@@ -171,9 +174,9 @@ test_recurse:
 
 ; ----------------------------------------------------------------------------
 ; test_tick - every tick: type the key script's next byte when it is time
-;   In:       DS = SEL_KDATA; interrupts off
+;   In:       BP = the timer's frame; DS = SEL_KDATA; interrupts off
 ;   Out:      nothing (or never: the end of the test)
-;   Destroys: AX, BX, SI
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 test_tick:
 %ifdef TEST_FUZZ
@@ -208,13 +211,14 @@ test_tick:
         je test_end
 %endif
 .now:
+%ifndef TEST_TYPE_DIRECT
         in al, KBC_STATUS
         test al, KBC_STATUS_OBF
         jnz .done                       ; the last byte typed is still unread
-        mov al, [si + 1]
-        call test_type
+%endif
         add word [test_key_ptr], 2
-        ret
+        mov al, [si + 1]
+        jmp test_type
 .wait:
         cmp byte [test_wait_left], 0
         jne .count
@@ -228,12 +232,16 @@ test_tick:
         ret
 
 ; ----------------------------------------------------------------------------
-; test_type - type one scancode through the 8042 (command D2h, PS/2 only)
-;   In:       AL = the scancode
+; test_type - type one scancode through the 8042 (command D2h, PS/2 only),
+; or hand it to the driver directly (TEST_TYPE_DIRECT)
+;   In:       AL = the scancode; BP = the timer's frame; DS = SEL_KDATA
 ;   Out:      nothing
-;   Destroys: AX
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 test_type:
+%ifdef TEST_TYPE_DIRECT
+        jmp kbd_byte
+%endif
         mov ah, al
         call kbc_wait_input
         mov al, KBC_CMD_WRITE_OUT

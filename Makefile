@@ -8,8 +8,9 @@
 #   make run             Bochs with a window, on the debug image
 #   make debugger        Bochs stopped at the kernel's entry, with symbols
 #   make test            every suite (tests/)
-#   make check           test, plus check-286, the image checks, the
-#                        reproducibility check, lint and the documents' checks
+#   make test-286        the suites on DOSBox-X's 286 and MAME's IBM PC/AT
+#   make check           test and test-286, plus check-286, the image checks,
+#                        the reproducibility check, lint and the documents' checks
 #   make doctor          the tools and their versions
 #   make sizes           each segment against its room
 #   make clean
@@ -63,7 +64,7 @@ FLOPPY_SERIAL := 52583836
 IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/kernel.bin
 
-.PHONY: all release debug test-build image symbols run debugger test check \
+.PHONY: all release debug test-build image symbols run debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
 
 all:
@@ -155,6 +156,16 @@ debugger: disks
 test: disks
 	$(PYTHON) tools/run-test
 
+# The suites on two 286 cores (roadmap M9): DOSBox-X's, and MAME's IBM PC/AT,
+# which needs the IBM 5170 ROM set in ~/mame/roms (docs/emulators.md).
+test-286: disks
+	$(PYTHON) tools/run-test --emulator dosbox-x
+	@if (cd /tmp && mame -rompath $(HOME)/mame/roms -verifyroms ibm5170 2>/dev/null | grep -q '1 were OK'); then \
+	    $(PYTHON) tools/run-test --emulator mame; \
+	else \
+	    echo "test-286: no IBM 5170 ROMs in ~/mame/roms: MAME's suites skipped"; \
+	fi
+
 unit:
 	$(PYTHON) -m pytest -q -W ignore::DeprecationWarning tests/unit
 
@@ -179,7 +190,7 @@ lint:
 check-docs:
 	$(PYTHON) tools/check-docs
 
-check: check-286 check-image check-repro lint check-docs unit test
+check: check-286 check-image check-repro lint check-docs unit test test-286
 	@echo "make check: all checks passed"
 
 doctor:

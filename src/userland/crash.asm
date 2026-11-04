@@ -60,7 +60,8 @@ cmd_crash:
 ; ----------------------------------------------------------------------------
 ; crash_kinds - the crashes themselves, as local labels
 ;   In:       DS = ES = the program's data
-;   Out:      does not return: the kernel restarts the shell
+;   Out:      does not return, the kernel restarting the shell (but `fpu`
+;             returns on a machine whose 287 raises no error)
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 crash_kinds:
@@ -84,7 +85,9 @@ crash_kinds:
         fldz
         fdivp st1, st0
         fwait                           ; the 287's error: IRQ13
-        jmp $
+        fninit
+        PRINT "crash: no 287 error arrived; is there a 287?", CHAR_LF
+        ret
 .tf:    pushf
         pop ax
         or ax, FLAGS_TF

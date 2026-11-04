@@ -1,30 +1,94 @@
 # Emulators
 
+rx286 runs on three emulators (roadmap D1, M9). `make test` runs every suite
+on Bochs; `make test-286` runs them on DOSBox-X's 286 and MAME's IBM PC/AT;
+`tools/run-test --emulator NAME` runs one.
+
 | | Bochs 2.7 | DOSBox-X 2024.03 | MAME 0.264 `ibm5170` |
 |---|---|---|---|
-| CPU | Pentium class or later (`bx_generic`), runs 386 code | `cputype=286` | a real 80286 core |
-| Machine | AT-like: legacy BIOS, no PCI | a DOS PC, `machine=ega` | the IBM PC/AT, with IBM's BIOS |
-| Used for | everything daily: `make run`, `make debugger`, `make test` | the suites on a 286 | the suites on the AT itself |
+| CPU | Pentium class or later (`bx_generic`): runs 386 code | `cputype=286`: rejects 386 opcodes (#UD) | a real 80286 core |
+| 287 | the FPU of its CPU; errors on IRQ13 | `fpu=287`: computes; raises no IRQ13 | none emulated |
+| BIOS | Bochs' legacy BIOS | its own, after its own DOS | IBM's (ROM set in `~/mame/roms`) |
+| Video | VGA | `machine=ega` | IBM's EGA |
+| Configuration | `bochs/rx286.bochsrc.in` | `dosbox-x/rx286.conf.in` | `tools/rxlib.py` (`run_mame`), `mame/rx286.lua` |
+| Debugger | yes, scriptable, with symbols | not in this build | `-debug` (with a window) |
+| Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS |
+| Tests that run | all 30 | 22 | 27 |
+| A boot in a test | 0.3-0.5 s | about 1.5 s | about 6 s (IBM's power-on test) |
 
 ## Bochs and the AT
 
-Bochs is told everything about the machine it can be told
-(`bochs/rx286.bochsrc.in`). What it cannot be:
+Bochs is told everything about the machine it can be told. What it cannot be:
 
-| | The AT | Bochs |
+| | The AT (MAME's 286, the manuals) | Bochs |
 |---|---|---|
-| CPU | 80286 | 64-bit Athlon-class `bx_generic`: runs 386 code a 286 would reject |
+| CPU | 80286 | 64-bit Athlon-class: runs 386 code a 286 rejects |
 | Video | EGA | VGA, a superset of the EGA registers rx286 uses |
-| LDTR at start | not defined: Intel says to load it | a live LDT at 0, limit FFFFh (rx286 loads LDTR with 0) |
-| A20 after the BIOS | IBM's BIOS manages it | on |
-| `LOCK` at CPL 3 | general protection fault | runs |
-| `LOADALL` (0F 05) at CPL 3 | general protection fault (believed) | invalid opcode (it is `SYSCALL`) |
-| `IRET` with NT and a null back link | Intel: #GP in 10.1, #TS in its pseudocode | #TS(0) |
-| A 287 error | IRQ13 when the faulting instruction ends | IRQ13 at the next waiting FPU instruction |
-| 8042 command D2h | not in the AT's controller | written to the output buffer, IRQ1 |
+| LDTR at start | Intel: load it | a live LDT at 0, limit FFFFh (rx286 loads LDTR with 0) |
+| A20 after the BIOS | | on |
 | Memory with `megs: 1` | | 639 KB base, no extended memory |
+| `LOCK` at CPL 3 | #GP(0000) (seen on MAME) | runs |
+| `LOADALL` (0Fh 05h) at CPL 3 | #GP(0000) (seen on MAME) | #UD: it is `SYSCALL` |
+| `IRET` with NT and a null back link | #TS(0000) (seen on MAME; Intel's text says #GP, its pseudocode #TS) | #TS(0000) |
+| A jump past CS's limit | the fault's IP is the target: the limit is checked at the fetch (seen on MAME) | the fault's IP is the jump |
+| An instruction with TF set that faults | the fault, then the pending single-step trap at the first instruction of the fault's handler, in ring 0 (Intel 9.7.1, table 9-4; seen on MAME and DOSBox-X) | the fault alone |
+| A 287 error | IRQ13 when the faulting instruction ends | IRQ13 at the next waiting FPU instruction |
+| 8042 command D2h | not in the AT's controller (IBM 1-40) | puts a byte in the output buffer, IRQ1 |
 | An I/O APIC | none | at FEC00000h, beyond any 286 address |
 
-None of these matters to the kernel: it relies on none of them, D2h is used
-by test builds only, and the attack suite expects either result where the
-two differ.
+The single-step row was a real bug of rx286, found by the fuzzer on both 286
+emulators in M9: the kernel took the carried trap for a kernel fault and
+panicked, so a program could stop the machine. The kernel now drops a
+single-step trap in ring 0 (`fault.asm`), as Intel advises, and the attack
+"the trap flag and a fault" tests it; Bochs never shows the case.
+
+## DOSBox-X
+
+DOSBox-X's 286 rejects 386 opcodes with #UD (a 66h-prefixed `MOV` faults at
+`cputype=286` and runs at `cputype=386`), so every test that passes on it
+proves its paths free of 386 instructions. Its protection is not a 286's,
+which is why the attack suite and the fuzzer run on Bochs and MAME instead:
+
+| Seen | A 286 |
+|---|---|
+| stops itself ("E_Exit: JMP Illegal descriptor type 3") on a jump to the busy TSS | #GP(0020) |
+| stops itself ("E_Exit: RET from illegal descriptor type 13") on a far RET the fuzzer made | #GP |
+| no fault for memory used through a null selector | #GP(0000) |
+| a write through CS goes through | #GP(0000) |
+| a kernel stack overflow never reaches the double-fault task | the double-fault task |
+| after the 8042's reset, real-mode code meets protected-mode segment limits | a reset |
+| no IRQ13 for a 287 error | IRQ13 |
+| no IRQ6 from the diskette controller's reset, no fixed-disk controller (IRQ14) | both |
+| the clock is the host's | |
+
+Running it: `tools/run-test --emulator dosbox-x` writes `dosbox-x.conf` from
+the template, runs DOSBox-X with `SDL_VIDEODRIVER=dummy`, and kills it once
+COM1 shows `TEST END` (it has no shutdown port, and ignores SIGTERM).
+
+## MAME's IBM PC/AT
+
+The most faithful of the three: a real 80286 core, IBM's BIOS and 8042
+firmware, IBM's EGA. What it needs:
+
+- **The ROM set**: `ibm5170.zip`, `at_keybc.zip`, `ega.zip` and
+  `kb_pcat84.zip` in `~/mame/roms` (`make doctor` checks them).
+  `mame -verifyroms ibm5170` says "best available": one PAL has no known
+  dump.
+- **A valid CMOS**: the IBM BIOS stops its power-on test without one, as on a
+  real AT nobody has run SETUP on. `rxlib.at_cmos()` writes the 64 bytes of
+  rx286's AT (drive A 1.2 MB, B 360 KB, no fixed disk, two diskette drives, a
+  287, an EGA, 640 KB, the checksum) into a fresh nvram directory per run.
+- **The machine's slots**: drive A `525hd`, drive B `525dd`, `-ramsize 640K`,
+  a null modem on COM1 writing to a file (`-bitb`), and MAME's IDE card,
+  which has the AT's task file at 1F0h.
+- **The null modem at 115200 baud**: `mame/rx286.lua` sets it at start.
+- **Typed keys**: IBM's 8042 firmware has no command D2h, so MAME's test
+  images are built with `TEST_TYPE_DIRECT`: the kernel's test hook hands each
+  typed byte to the keyboard driver as IRQ1 would. The 8042's command byte and
+  its reset (FEh) still run on IBM's firmware.
+
+What MAME does not emulate:
+
+- **The 80287.** The AT's socket is empty: `ESC` instructions do nothing, so
+  the 287's tests run on Bochs (and its arithmetic on DOSBox-X), and the
+  attack program and `crash fpu` say "no 287 error arrived" and go on.

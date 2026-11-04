@@ -133,22 +133,17 @@ check_others:
 .backwards:
         PRINT "went backwards", CHAR_LF
 .time:
+        ; The date depends on the emulator (Bochs: 1989; DOSBox-X and MAME:
+        ; the host's), so the check is that it is a valid BCD date and time.
         sys SYS_TIME
-        push ax
         PRINT "time: "
-        mov ax, cx
-        call print_hex16
-        PRINT "-"
-        mov al, dh
-        call print_hex8
-        PRINT "-"
-        mov al, dl
-        call print_hex8
-        PRINT " "
-        mov al, bh
-        call print_hex8
-        call print_newline
-        pop ax
+        call valid_time
+        jc .bad_time
+        PRINT "a valid BCD date and time", CHAR_LF
+        jmp .unknown
+.bad_time:
+        PRINT "INVALID", CHAR_LF
+.unknown:
         mov ah, 0x7F                    ; no such call
         int SYSCALL_VECTOR
         call report_error
@@ -273,6 +268,52 @@ bcd_to_binary:
         mov ah, bh
         pop bx
         ret
+
+; ----------------------------------------------------------------------------
+; valid_time - is SYS_TIME's answer a valid BCD date and time?
+;   In:       CX, DX, BX, AL as SYS_TIME returns them
+;   Out:      CF clear if every field is BCD and in range
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+valid_time:
+        mov si, time_limits
+        mov ah, al                      ; seconds
+        call .check
+        mov ah, bl                      ; minutes
+        call .check
+        mov ah, bh                      ; hours
+        call .check
+        mov ah, dl                      ; day
+        call .check
+        mov ah, dh                      ; month
+        call .check
+        mov ah, cl                      ; year
+        call .check
+        mov ah, ch                      ; century
+        jmp .check
+; AH = a BCD field; [cs:si] = its smallest and largest value; SI moves on
+.check:
+        mov al, ah
+        and al, 0x0F
+        cmp al, 9
+        ja .bad
+        mov al, ah
+        cmp al, 0x9F
+        ja .bad
+        cmp al, [cs:si]
+        jb .bad
+        cmp al, [cs:si + 1]
+        ja .bad
+        add si, 2
+        clc
+        ret
+.bad:
+        add sp, 2                       ; out of valid_time, not just .check
+        stc
+        ret
+
+time_limits     db 0x00, 0x59, 0x00, 0x59, 0x00, 0x23, 0x01, 0x31, 0x01, 0x12
+                db 0x00, 0x99, 0x19, 0x20
 
 ; ----------------------------------------------------------------------------
 ; report_error - "error N" if CF, else "no error"

@@ -7,6 +7,6 @@ match: contains
 rx286> uptime
 up 0:00:
 rx286> date
-1989-01-01 00:00:
+@bochs 1989-01-01 00:00:
 rx286> clear
 rx286>
