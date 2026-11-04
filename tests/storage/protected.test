@@ -1,0 +1,12 @@
+# Drive B write-protected: reading works, writing fails with E_PROTECTED
+# (tests/programs/storage.asm).
+program: storage
+define: STORAGE_MEDIA
+media: B protected
+timeout: 60
+emulators: bochs
+---
+rx286, test build
+B: sector 0: label 'RX286B     ', signature AA55
+B: sector 700: error 6
+D: sector 0: partition type 01 from sector 17, signature AA55

@@ -5,9 +5,10 @@
 ; The function is in the caller's AH, the arguments in its other registers;
 ; results go back through the frame, and an error sets the frame's CF with
 ; its code in AX. A buffer is checked with the 286's own instructions before
-; the kernel reads it: ARPL against the caller's CS, VERR, LSL, and bounds
-; (docs/syscalls.md). Interrupts stay off but at two points (D15): while
-; read_key waits, and after each byte write writes.
+; the kernel uses it: ARPL against the caller's CS, VERR (or VERW, for a
+; buffer the kernel fills), LSL, and bounds (docs/syscalls.md). Interrupts
+; stay off but where the kernel waits (D15): while read_key waits, after
+; each byte write or print writes, and while a disk or printer works.
 ; ============================================================================
 
 begin_kdata
@@ -17,10 +18,13 @@ syscall_table:
         dw sys_read_key                 ; SYS_READ_KEY
         dw sys_ticks                    ; SYS_TICKS
         dw sys_time                     ; SYS_TIME
+        dw sys_disk_read                ; SYS_DISK_READ
+        dw sys_disk_write               ; SYS_DISK_WRITE
+        dw sys_print                    ; SYS_PRINT
 syscall_table_end:
 end_kdata
 
-%if SYSCALL_COUNT != 5
+%if SYSCALL_COUNT != 8
   %error "syscall.asm: syscall_table does not match SYSCALL_COUNT"
 %endif
 
@@ -118,14 +122,37 @@ check_buffer:
         mov dx, [bp + FRAME_CS]
         arpl ax, dx                     ; no more privilege than the caller's
         verr ax                         ; readable at that privilege?
-        jnz .refuse
+        jnz check_refuse
+        jmp check_bounds
+
+; ----------------------------------------------------------------------------
+; check_buffer_writable - may the caller write CX bytes at AX:SI?
+;   In:       as check_buffer
+;   Out:      as check_buffer
+;   Destroys: AX, DX
+; ----------------------------------------------------------------------------
+check_buffer_writable:
+        mov dx, [bp + FRAME_CS]
+        arpl ax, dx
+        verw ax                         ; writable at that privilege? (never code)
+        jnz check_refuse
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; check_bounds - the rest of check_buffer: AX:SI, CX bytes, within the
+; segment's limit (not expand-down)
+;   In:       AX = the selector, already verified; SI, CX as check_buffer
+;   Out:      as check_buffer
+;   Destroys: AX, DX
+; ----------------------------------------------------------------------------
+check_bounds:
         lsl dx, ax                      ; DX = the segment's limit
-        jnz .refuse
+        jnz check_refuse
         push dx
         lar dx, ax                      ; DH = the access byte
         test dh, ACC_EXPAND_DOWN        ; expand-down data (or conforming code):
         pop dx                          ; 0..limit is not its range; refuse it
-        jnz .refuse
+        jnz check_refuse
         push si
         add si, cx                      ; CF: the buffer runs past FFFFh
         dec si                          ; SI = the last byte (DEC keeps CF)
@@ -138,7 +165,15 @@ check_buffer:
         ret
 .wraps:
         pop si
-.refuse:
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; check_refuse - the end of a refused check
+;   In:       nothing
+;   Out:      CF set
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+check_refuse:
         stc
         ret
 

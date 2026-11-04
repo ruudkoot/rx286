@@ -22,6 +22,12 @@
 #   break: syscall              a debugger breakpoint, by kernel symbol...
 #   debugger: info gdt 0 11     ...and commands to run there; may repeat
 #   emulators: bochs dosbox-x   where the test applies (default: all)
+#   media: B ejected            change a drive: B ejected, B protected, D absent;
+#                               may repeat
+#   lpt1: text                  a line LPT1 must have printed; may repeat (the
+#                               whole of what it printed, in order); lpt2 too
+#   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
+#                               or D) must start with text; may repeat
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one
 #   (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
@@ -56,6 +62,10 @@ import rxlib
 
 ROOT = rxlib.ROOT
 IGNORED_PREFIXES = ('[trace]', 'regs:')
+# The image of each drive in a test's directory (`sector:`).
+DRIVE_IMAGES = {'A': 'run.img', 'B': 'disks/fdb.img', 'C': 'disks/hd0.img',
+                'D': 'disks/hd1.img'}
+SECTOR_SIZE = rxlib.LAYOUT['SECTOR_SIZE']
 EMULATORS = ('bochs', 'dosbox-x', 'mame')
 # A test's timeout is written for Bochs; the others boot slower (MAME runs
 # IBM's power-on test, about 6 s alone) and are heavier to run side by side.
@@ -78,6 +88,9 @@ class Test:
         self.breakpoint = None
         self.debugger = []
         self.emulators = list(EMULATORS)
+        self.media = []
+        self.printed = {}                   # 'lpt1' -> the lines it must print
+        self.sectors = []                   # (drive, sector, text)
         self.expected = []
         self.parse(open(path, encoding='utf-8').read())
 
@@ -113,6 +126,17 @@ class Test:
                 for e in self.emulators:
                     if e not in EMULATORS:
                         raise ValueError('%s: unknown emulator %r' % (self.path, e))
+            elif key == 'media':
+                if value not in rxlib.MEDIA:
+                    raise ValueError('%s: unknown media change %r' % (self.path, value))
+                self.media.append(value)
+            elif key in ('lpt1', 'lpt2'):
+                self.printed.setdefault(key, []).append(line.partition(':')[2].strip())
+            elif key == 'sector':
+                drive, number, text = (value.split(None, 2) + [''])[:3]
+                if drive not in DRIVE_IMAGES or not number.isdigit() or not text:
+                    raise ValueError('%s: bad sector line %r' % (self.path, line))
+                self.sectors.append((drive, int(number), text))
             else:
                 raise ValueError('%s: unknown header %r' % (self.path, key))
         self.expected = body.rstrip('\n').split('\n') if body.strip() else []
@@ -291,6 +315,33 @@ def compare(test, transcript, debugger_lines):
     return None
 
 
+def check_printers(test, printers):
+    """What LPT1 and LPT2 printed, against the test's lpt1: and lpt2: lines."""
+    for name, path in zip(('lpt1', 'lpt2'), printers):
+        if name not in test.printed:
+            continue
+        raw = open(path, 'rb').read() if os.path.exists(path) else b''
+        got = [l.rstrip() for l in raw.decode('latin-1').replace('\r', '').split('\n')]
+        while got and not got[-1]:
+            got.pop()
+        if got != test.printed[name]:
+            lines = diff(test.printed[name], got).split('\n', 1)[1]
+            return '%s printed otherwise (expected | got):\n%s' % (name, lines)
+    return None
+
+
+def check_sectors(test):
+    """Each sector: line against the drive's image after the run."""
+    for drive, number, text in test.sectors:
+        path = os.path.join(test.build_dir, DRIVE_IMAGES[drive])
+        with open(path, 'rb') as f:
+            f.seek(number * SECTOR_SIZE)
+            data = f.read(len(text))
+        if data != text.encode('latin-1'):
+            return 'sector %d of drive %s starts %r, not %r' % (number, drive, data, text)
+    return None
+
+
 def diff(expected, got):
     out = []
     for k in range(max(len(expected), len(got))):
@@ -312,12 +363,16 @@ def run(test):
     for f in (serial, dbglog):
         if os.path.exists(f):
             os.remove(f)
+    printers = [os.path.join(b, '%s.out' % p) for p in ('lpt1', 'lpt2')]
+    for f in printers:
+        if os.path.exists(f):
+            os.remove(f)
     bochsrc = os.path.join(b, 'test.bochsrc')
     disks = rxlib.private_disks(os.path.join(b, 'disks'))
     rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
-                        disks=disks)
+                        disks=disks, printers=printers, media=test.media)
     rc = []
     if test.breakpoint:
         rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))
@@ -340,14 +395,17 @@ def run(test):
         status, _ = rxlib.run_bochs(bochsrc, rc, timeout, until=until, serial=serial,
                                     log=os.path.join(b, 'bochs.log'), disks=disks)
     elif EMULATOR == 'dosbox-x':
-        status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, timeout, until)
+        status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, timeout, until,
+                                     printers=printers)
     else:
-        status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, timeout, until)
+        status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, timeout, until,
+                                   disks=disks)
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
         if os.path.exists(serial) else []
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
         if os.path.exists(dbglog) else []
-    error = compare(test, transcript, debugger_lines)
+    error = compare(test, transcript, debugger_lines) or check_printers(test, printers) \
+        or check_sectors(test)
     if status == 'timeout':
         error = 'timed out after %.0f s; %s' % (timeout, error or 'the transcript matched')
     return test, error, time.monotonic() - started

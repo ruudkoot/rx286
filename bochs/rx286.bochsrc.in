@@ -23,15 +23,17 @@ pci: enabled=0
 clock: sync=none, time0=599616000
 
 # Drive A: 1.2 MB 5.25", the boot disk; drive B: 360 KB 5.25" (roadmap D2).
+# A test may take B's diskette out or write-protect it.
 floppya: 1_2=@IMAGE@, status=inserted
-floppyb: 360k=@FDB@, status=inserted
+floppyb: 360k=@FDB@, status=@FDB_STATUS@, write_protected=@FDB_PROTECTED@
 boot: floppy
 floppy_bootsig_check: disabled=0
 
-# The fixed-disk controller with drive types 2 (20 MB) and 1 (10 MB).
+# The fixed-disk controller with drive types 2 (20 MB) and 1 (10 MB); a test
+# may leave the second out.
 ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14
 ata0-master: type=disk, path=@HD0@, mode=flat, cylinders=615, heads=4, spt=17
-ata0-slave: type=disk, path=@HD1@, mode=flat, cylinders=306, heads=4, spt=17
+ata0-slave: type=@HD1_TYPE@, path=@HD1@, mode=flat, cylinders=306, heads=4, spt=17
 ata1: enabled=0
 ata2: enabled=0
 ata3: enabled=0
@@ -41,8 +43,8 @@ com1: enabled=1, mode=file, dev=@SERIAL@
 com2: enabled=1, mode=null
 com3: enabled=1, mode=null
 com4: enabled=1, mode=null
-parport1: enabled=1, file=/dev/null
-parport2: enabled=1, file=/dev/null
+parport1: enabled=1, file=@LPT1@
+parport2: enabled=1, file=@LPT2@
 speaker: enabled=1, mode=gui
 
 # Debugging aids: magic breakpoints (xchg bx, bx), and the debugger's log.

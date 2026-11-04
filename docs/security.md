@@ -7,7 +7,7 @@ more than that.
 
 No program can make the kernel:
 
-- fault, panic, reset or hang;
+- fault, panic, reset or hang, whatever its devices do or fail to do;
 - read or write memory outside the program's own three segments;
 - touch an I/O port;
 - disable interrupts;
@@ -41,8 +41,16 @@ Every way out is a reported fault, after which the program starts again
   pass a selector it could load, which is one of its own or null; the checks
   hold even if that changes.
 - **No starvation.** The kernel runs with interrupts off only for short
-  stretches: `write` opens a window after every byte, and `read_key` sleeps
-  with interrupts on. A program that spins is stopped by Ctrl+Break.
+  stretches: `write` and `print` open a window after every byte, and
+  `read_key` and the drivers wait with interrupts on. A program that spins
+  is stopped by Ctrl+Break.
+- **No device can hang the kernel.** Every wait for a disk or printer has a
+  limit in ticks (*docs/storage.md*); a diskette that is not there, a fixed
+  disk that does not answer and a printer that stays busy are errors.
+- **Disk buffers** are checked like any other, before a device is touched;
+  a buffer the kernel fills must also pass `VERW`, so no read can land in
+  the program's code. The disks themselves are the program's: it may read
+  and write any sector of any drive, the boot diskette included.
 - **The way back.** Before every `IRET` to ring 3 the kernel checks the return
   IP against the program's code limit, so a return past it is the program's
   fault, not the kernel's. A single-step trap or a 287 overrun (vector 9)

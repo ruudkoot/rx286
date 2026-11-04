@@ -95,16 +95,30 @@ BOCHSRC_TEMPLATE = os.path.join(ROOT, 'bochs', 'rx286.bochsrc.in')
 DISKS = os.path.join(ROOT, 'build', 'disks')
 
 
+# What a test may change of the drives (tools/run-test's `media:`).
+MEDIA = ('B ejected', 'B protected', 'D absent')
+
+
 def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
-                  disks=DISKS):
+                  disks=DISKS, printers=('/dev/null', '/dev/null'), media=()):
     """Write a bochsrc for one run from bochs/rx286.bochsrc.in. Bochs locks
-    the hard-disk images, so runs at the same time need their own `disks`."""
+    the hard-disk images, so runs at the same time need their own `disks`.
+    `printers` are the files LPT1 and LPT2 print into; `media` a list of
+    MEDIA."""
+    for m in media:
+        if m not in MEDIA:
+            raise ValueError('unknown media change %r' % m)
     text = open(BOCHSRC_TEMPLATE, encoding='utf-8').read()
     subs = {
         '@IMAGE@': image,
         '@FDB@': os.path.join(disks, 'fdb.img'),
+        '@FDB_STATUS@': 'ejected' if 'B ejected' in media else 'inserted',
+        '@FDB_PROTECTED@': '1' if 'B protected' in media else '0',
         '@HD0@': os.path.join(disks, 'hd0.img'),
         '@HD1@': os.path.join(disks, 'hd1.img'),
+        '@HD1_TYPE@': 'none' if 'D absent' in media else 'disk',
+        '@LPT1@': printers[0],
+        '@LPT2@': printers[1],
         '@SERIAL@': serial,
         '@LOG@': log,
         '@DISPLAY@': display,
@@ -124,17 +138,18 @@ def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=Fa
 DISPLAY_HEADLESS = 'rfb, options="timeout=0"'
 
 
+DISK_IMAGES = ('fdb.img', 'hd0.img', 'hd1.img')     # drives B, C, D (tools/mkdisks)
+
+
 def private_disks(directory):
-    """Copies of drive B and the hard disks for one run (the hard disks are
-    sparse, so the copies cost nothing)."""
+    """Copies of drives B, C and D for one run, which may write to them. The
+    images are sparse (tools/mkdisks), and so are the copies."""
     import shutil
     shutil.rmtree(directory, ignore_errors=True)   # with any lock a killed Bochs left
     os.makedirs(directory)
-    shutil.copyfile(os.path.join(DISKS, 'fdb.img'), os.path.join(directory, 'fdb.img'))
-    for name in ('hd0.img', 'hd1.img'):
-        size = os.path.getsize(os.path.join(DISKS, name))
-        with open(os.path.join(directory, name), 'wb') as f:
-            f.truncate(size)
+    for name in DISK_IMAGES:
+        subprocess.run(['cp', '--sparse=always', os.path.join(DISKS, name),
+                        os.path.join(directory, name)], check=True)
     return directory
 
 
@@ -290,12 +305,15 @@ def normalise_transcript(raw):
 DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
 
 
-def run_dosbox(directory, image, serial, timeout, until):
+def run_dosbox(directory, image, serial, timeout, until,
+               printers=('/dev/null', '/dev/null')):
     """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
-    `until(lines)` holds of the serial transcript or `timeout` seconds. DOSBox-X
-    has no shutdown port and ignores SIGTERM: it is killed."""
+    `until(lines)` holds of the serial transcript or `timeout` seconds; LPT1
+    and LPT2 print into `printers`. DOSBox-X has no shutdown port and ignores
+    SIGTERM: it is killed."""
     text = open(DOSBOX_TEMPLATE, encoding='utf-8').read()
     text = text.replace('@IMAGE@', image).replace('@SERIAL@', serial)
+    text = text.replace('@LPT1@', printers[0]).replace('@LPT2@', printers[1])
     conf = os.path.join(directory, 'dosbox-x.conf')
     with open(conf, 'w', encoding='utf-8') as f:
         f.write(text)
@@ -347,15 +365,32 @@ def at_cmos():
     return bytes(c)
 
 
-def run_mame(directory, image, serial, timeout, until):
+MAME_STOP_SECONDS = 10       # for MAME to save its diskettes and stop, after SIGTERM
+
+
+def run_mame(directory, image, serial, timeout, until, disks=None):
     """Run MAME's IBM PC/AT (a real 80286 core, IBM's BIOS; roadmap M9) on an
     image without a window, until `until(lines)` holds of the serial
-    transcript or `timeout` seconds."""
+    transcript or `timeout` seconds. `disks` is the run's own directory of
+    drives B, C and D (private_disks). The AT has no printer port here: its
+    four slots hold the EGA, the diskette controller, the serial card and
+    the IDE card, which the diskettes need too (docs/emulators.md). MAME
+    writes a diskette back to its file only when it stops, so it is asked
+    to stop (SIGTERM) before it is killed."""
     nvram = os.path.join(directory, 'mame-nvram')
     os.makedirs(os.path.join(nvram, 'ibm5170'), exist_ok=True)
     with open(os.path.join(nvram, 'ibm5170', 'mb_rtc'), 'wb') as f:
         f.write(at_cmos())
     open(serial, 'wb').close()      # the null modem's file must exist
+    media = []
+    if disks:
+        # MAME knows a raw fixed disk by its name: .hd.
+        for name, drive in (('hd0.img', 'c.hd'), ('hd1.img', 'd.hd')):
+            link = os.path.join(disks, drive)
+            if not os.path.exists(link):
+                os.symlink(name, link)
+        media += ['-flop2', os.path.join(disks, 'fdb.img'), '-isa4:ide:ide:1', 'hdd',
+                  '-hard1', os.path.join(disks, 'c.hd'), '-hard2', os.path.join(disks, 'd.hd')]
     log = open(os.path.join(directory, 'mame.log'), 'w')
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -366,7 +401,7 @@ def run_mame(directory, image, serial, timeout, until):
          '-video', 'none', '-sound', 'none', '-nothrottle', '-skip_gameinfo',
          '-nvram_directory', nvram, '-cfg_directory', os.path.join(directory, 'mame-cfg'),
          '-autoboot_script', MAME_SCRIPT, '-autoboot_delay', '0',
-         '-seconds_to_run', str(int(timeout * 10))],
+         '-seconds_to_run', str(int(timeout * 10))] + media,
         stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory)
     status = 'exit'
     while proc.poll() is None:
@@ -378,8 +413,12 @@ def run_mame(directory, image, serial, timeout, until):
             break
         time.sleep(0.05)
     if proc.poll() is None:
-        proc.kill()
-        proc.wait()
+        proc.terminate()
+        try:
+            proc.wait(MAME_STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
     log.close()
     return status, time.monotonic() - started
 

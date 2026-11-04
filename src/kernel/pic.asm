@@ -22,10 +22,13 @@ begin_kdata
 irq_drivers:
         dw timer_irq                    ; IRQ0
         dw kbd_irq                      ; IRQ1
-        dw 0, 0, 0, 0, 0, 0             ; IRQ2-7
+        dw 0, 0, 0, 0                   ; IRQ2-5
+        dw fd_irq                       ; IRQ6
+        dw 0                            ; IRQ7
         dw 0, 0, 0, 0, 0                ; IRQ8-12
         dw fpu_irq                      ; IRQ13
-        dw 0, 0                         ; IRQ14-15
+        dw hd_irq                       ; IRQ14
+        dw 0                            ; IRQ15
 irq_spurious        dw 0                ; spurious IRQ7 and IRQ15 seen
 msg_unhandled       db "unhandled IRQ ", 0
 msg_masked          db ", now masked", CHAR_LF, 0

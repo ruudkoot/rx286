@@ -11,10 +11,28 @@
 %ifndef RX286_PORTS_INC
 %define RX286_PORTS_INC
 
-; ---------------------------------------------------------------- 8237A DMA (never touched)
+; ---------------------------------------------------------------- 8237A DMA
+; Channel 2 carries the diskette's sectors; channel 4, controller 2's first,
+; is the cascade from controller 1 (IBM 1-12 to 1-15). Controller 2's
+; registers sit at every other port.
 DMA1_BASE           equ 0x000       ; 000h-01Fh, channels 0-3
+DMA1_CH2_ADDRESS    equ 0x004       ; channel 2's address bits 0-15: low byte, then high
+DMA1_CH2_COUNT      equ 0x005       ; channel 2's count less one: low byte, then high
+DMA1_MASK           equ 0x00A       ; single mask: bits 0-1 the channel, bit 2 set to mask
+DMA1_MODE           equ 0x00B
+DMA1_CLEAR_FLIPFLOP equ 0x00C       ; any write: the next byte is a low byte
+DMA1_MASTER_CLEAR   equ 0x00D       ; any write: reset, every channel masked
 DMA_PAGE_BASE       equ 0x080       ; 080h-08Fh
+DMA_PAGE_CH2        equ 0x081       ; channel 2's address bits 16-23
 DMA2_BASE           equ 0x0C0       ; 0C0h-0DFh, channels 4-7
+DMA2_MASK           equ 0x0D4
+DMA2_MODE           equ 0x0D6
+DMA2_MASTER_CLEAR   equ 0x0DA
+DMA_CHANNEL_DISKETTE equ 2
+DMA_MASK_SET        equ 0x04
+DMA_MODE_TO_MEMORY  equ 0x44        ; single transfer, address up, no auto-init, device to memory
+DMA_MODE_FROM_MEMORY equ 0x48       ; the same, memory to device
+DMA_MODE_CASCADE    equ 0xC0        ; with channel 0 of controller 2: channel 4 cascades
 
 ; ---------------------------------------------------------------- 8259A interrupt controllers
 PIC1_CMD            equ 0x020       ; master: ICW1, OCW2, OCW3
@@ -84,7 +102,8 @@ FPU_RESET           equ 0x0F1       ; write 0: reset the 287 (never used)
 
 ; ---------------------------------------------------------------- fixed disk controller
 HDC_DATA            equ 0x1F0
-HDC_ERROR           equ 0x1F1
+HDC_ERROR           equ 0x1F1       ; read
+HDC_PRECOMP         equ 0x1F1       ; write: the cylinder where precompensation starts, / 4
 HDC_SECTOR_COUNT    equ 0x1F2
 HDC_SECTOR          equ 0x1F3
 HDC_CYLINDER_LOW    equ 0x1F4
@@ -93,13 +112,32 @@ HDC_DRIVE_HEAD      equ 0x1F6
 HDC_STATUS          equ 0x1F7       ; read
 HDC_COMMAND         equ 0x1F7       ; write
 HDC_CONTROL         equ 0x3F6
-HDC_STATUS_BSY      equ 0x80
-HDC_CMD_RECALIBRATE equ 0x10        ; test probe: makes the controller raise IRQ14
+HDC_STATUS_BSY      equ 0x80        ; busy: no other bit is valid
+HDC_STATUS_WRITE_FAULT equ 0x20
+HDC_STATUS_DRQ      equ 0x08        ; data request: the sector buffer wants service
+HDC_STATUS_ERR      equ 0x01        ; the error register says why
+HDC_DRIVE_HEAD_BASE equ 0xA0        ; bits 7 and 5 always set; bit 4 the drive, 0-3 the head
+HDC_DRIVE_1         equ 0x10
+HDC_CONTROL_RESET   equ 0x04        ; the fixed disk register: reset the controller
+HDC_CONTROL_RUN     equ 0x00        ; out of reset, at most 8 heads
+HDC_CMD_READ        equ 0x20        ; read sectors, with retries
+HDC_CMD_WRITE       equ 0x30        ; write sectors, with retries
+HDC_CMD_SET_PARAMETERS equ 0x91     ; heads (drive/head register) and sectors a track (count)
+HDC_PRECOMP_SHIFT   equ 2           ; the precompensation register holds the cylinder / 4
 
 ; ---------------------------------------------------------------- game port, printers, serial
 GAME_PORT           equ 0x201
 LPT1_BASE           equ 0x378
 LPT2_BASE           equ 0x278
+LPT_DATA            equ 0           ; offsets from an LPT*_BASE: the data latch
+LPT_STATUS          equ 1
+LPT_CONTROL         equ 2
+LPT_STATUS_NOT_BUSY equ 0x80        ; -BUSY: the printer takes a byte
+LPT_STATUS_PAPER_END equ 0x20
+LPT_CONTROL_INIT    equ 0x08        ; select, -INIT low: the printer resets
+LPT_CONTROL_READY   equ 0x0C        ; select, -INIT high; no line feed, no interrupt
+LPT_CONTROL_STROBE  equ 0x0D        ; the same with +STROBE: the printer takes the byte
+LPT_CONTROL_IRQ     equ 0x10        ; an interrupt when -ACK ends (test probe only)
 COM1_BASE           equ 0x3F8
 COM2_BASE           equ 0x2F8
 COM3_BASE           equ 0x3E8
@@ -131,9 +169,31 @@ CRTC_CURSOR_LOW     equ 0x0F
 FDC_DOR             equ 0x3F2       ; digital output register
 FDC_MSR             equ 0x3F4       ; main status
 FDC_DATA            equ 0x3F5
-FDC_DIR             equ 0x3F7
+FDC_DIR             equ 0x3F7       ; read: digital input (bit 7: the diskette was changed)
+FDC_CCR             equ 0x3F7       ; write: the data rate
 FDC_DOR_MOTORS_OFF  equ 0x0C        ; controller enabled, DMA/IRQ enabled, every motor off
-FDC_DOR_RESET       equ 0x00        ; controller in reset (test probe: IRQ6 on release)
+FDC_DOR_RESET       equ 0x00        ; controller in reset (IRQ6 on release)
+FDC_DOR_MOTOR_A     equ 0x10        ; drive A's motor; drive B's is the next bit
+FDC_DOR_MOTORS      equ 0x30        ; both motors' bits
+FDC_MSR_RQM         equ 0x80        ; the data register is ready
+FDC_MSR_DIO         equ 0x40        ; set: controller to processor
+FDC_RATE_500K       equ 0x00        ; 1.2 MB media in a 1.2 MB drive
+FDC_RATE_250K       equ 0x02        ; 360 KB media in a 360 KB drive
+FDC_CMD_SPECIFY     equ 0x03
+FDC_CMD_RECALIBRATE equ 0x07
+FDC_CMD_SENSE_INT   equ 0x08
+FDC_CMD_SEEK        equ 0x0F
+FDC_CMD_READ        equ 0x46        ; read data, MFM
+FDC_CMD_WRITE       equ 0x45        ; write data, MFM
+FDC_SPECIFY_1       equ 0xDF        ; step rate and head unload: the BIOS's (5-170)
+FDC_SPECIFY_2       equ 0x02        ; head load 2 ms, DMA
+FDC_SIZE_512        equ 2           ; N: 128 << 2 bytes a sector
+FDC_DTL             equ 0xFF        ; unused with N = 2
+FDC_GAP_1200K       equ 0x1B        ; gap 3: 1.2 MB media in a 1.2 MB drive (BIOS)
+FDC_GAP_360K        equ 0x2A        ; 360 KB media in a 360 KB drive
+FDC_ST0_CODE        equ 0xC0        ; ST0's interrupt code: 0 when the command succeeded
+FDC_ST0_SEEK_END    equ 0x20
+FDC_ST1_NOT_WRITABLE equ 0x02       ; the diskette is write-protected
 
 ; ---------------------------------------------------------------- Bochs only (test builds)
 BOCHS_SHUTDOWN_PORT equ 0x8900      ; write "Shutdown" to end Bochs

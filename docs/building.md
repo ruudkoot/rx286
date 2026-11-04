@@ -82,9 +82,13 @@ E5):
   window: they use `rfb`.
 - `make debugger` does the same, stopped at the kernel's entry with the
   symbols loaded (*docs/debugging.md*).
-- `make disks` makes drive B (an empty 360 KB floppy) and the two empty hard
-  disks in `build/disks/`; `run`, `debugger` and the tests make them when
-  needed.
+- `make disks` makes drives B, C and D in `build/disks/` with
+  `tools/mkdisks`: a 360 KB diskette and the two fixed disks, each with a
+  FAT12 partition, holding the sample files of `disks/`
+  (*docs/storage.md*). `run`, `debugger` and the tests make them when
+  needed; `make run` lets the shell write to them, and a change of `disks/`
+  or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
+  goes to `build/debug/lpt1.txt` and `lpt2.txt`.
 
 ## Checks
 

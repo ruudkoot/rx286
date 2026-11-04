@@ -35,6 +35,10 @@ aux = false
 serial1 = file file:@SERIAL@
 serial2 = disabled
 
+[parallel]
+parallel1 = file append:@LPT1@ timeout:20
+parallel2 = file append:@LPT2@ timeout:20
+
 [dos]
 xms = false
 ems = false

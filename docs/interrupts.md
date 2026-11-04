@@ -83,8 +83,10 @@ slave's; there are `IRQ_LINES` (16).
 | `IRQ_TIMER` (0) | the timer driver: 50 ticks a second |
 | `IRQ_KEYBOARD` (1) | the keyboard driver |
 | 2 | the cascade: never masked, never delivered |
+| 6 | the diskette driver: a command has ended |
 | `IRQ_FPU` (13) | the 287's error: a fault of the program |
-| `IRQ_RTC` (8) and every other line | no driver: the first interrupt is reported ("unhandled IRQ n"), acknowledged, and the line masked |
+| 14 | the fixed disk driver: a sector is ready, or written |
+| `IRQ_RTC` (8) and every other line | no driver: the first interrupt is reported ("unhandled IRQ n"), acknowledged, and the line masked. The printer ports' lines (7 and 5) stay quiet: the printer driver polls, with the ports' interrupts off |
 
 - **At start** every line is unmasked, IRQ2 too: masking the cascade would cut
   off IRQ8-15 and with them the 287's errors.
@@ -100,16 +102,22 @@ slave's; there are `IRQ_LINES` (16).
 ## Interrupts inside the kernel
 
 All gates but the double fault's are interrupt gates, so the kernel runs with
-IF clear and nothing interleaves with a half-done change. It sets IF at two
-points only, where its state is whole:
+IF clear and nothing interleaves with a half-done change. It sets IF only
+where it waits, and only where its state is whole:
 
 - **`read_key` waiting for a key**: `sti; hlt; cli` until a key arrives.
-- **`write`, after each byte it writes**: `sti; nop; cli`. `STI` takes effect
-  after the next instruction, so `sti; cli` would open nothing. A byte's work
-  is at most one scroll or one clear of the screen; without the window, a
-  `write` of 4,096 newlines, spaces or form feeds would keep IF clear for
-  seconds.
+- **`write` and `print`, after each byte**: `sti; nop; cli`. `STI` takes
+  effect after the next instruction, so `sti; cli` would open nothing. A
+  byte's work is at most one scroll or one clear of the screen; without the
+  window, a `write` of 4,096 newlines, spaces or form feeds would keep IF
+  clear for seconds.
+- **A driver waiting for its device** (*docs/storage.md*): `ksleep_until`
+  sleeps (`sti; hlt; cli`) until the device's interrupt handler sets a byte,
+  `kpoll` reads a port with a window (`sti; nop; cli`) after every 64 reads,
+  and `ksleep` sleeps for a number of ticks (a motor coming up). Every wait
+  has a limit in ticks.
 
-An IRQ at either point nests once on the kernel stack. A Ctrl+Break or a 287
-error that arrives during a system call sets a flag, and the call's return to
-ring 3 restarts the program instead.
+An IRQ at any of these points nests once on the kernel stack: handlers run
+with IF clear and never wait. A Ctrl+Break or a 287 error that arrives
+during a system call sets a flag, and the call's return to ring 3 restarts
+the program instead; a disk call finishes its sector first.

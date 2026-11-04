@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/mkdisks
+# Builds the images of drives B, C and D with their sample files (disks/):
+# the 360 KB diskette, and the two fixed disks, each with a master boot
+# record and one FAT12 partition, as DOS would lay them out.
+#
+#   tools/mkdisks build/disks
+#
+# Every image is the same, byte for byte, each time (SOURCE_DATE_EPOCH, fixed
+# serial numbers, files copied in sorted order). Besides disks/<drive>/, B
+# gets a file in two pieces (FRAG.TXT) and a directory of two clusters
+# (MANY), and C a file of several clusters (NUMBERS.TXT), so that the shell's
+# FAT12 code follows real chains. disks/README.md lists what is where.
+# ============================================================================
+
+import os
+import struct
+import subprocess
+import sys
+import tempfile
+
+import rxlib
+
+ROOT = rxlib.ROOT
+SECTOR = 512
+EPOCH = '599616000'                 # 1989-01-01 00:00:00, as the Makefile's
+FLOPPY_B = dict(image='fdb.img', sectors=720, label='RX286B', serial=0x52583842)
+# The AT's drive types 2 and 1 (IBM, Technical Reference, the BIOS's
+# fixed-disk parameter table); the partition starts at cylinder 0, head 1,
+# leaving the first track to the master boot record, as FDISK does.
+FIXED = [
+    dict(image='hd0.img', drive='c', cylinders=615, heads=4, spt=17, cluster=16,
+         label='RX286C', serial=0x52583843),
+    dict(image='hd1.img', drive='d', cylinders=306, heads=4, spt=17, cluster=8,
+         label='RX286D', serial=0x52583844),
+]
+PARTITION_FAT12 = 0x01
+MBR_SIGNATURE = b'\x55\xAA'
+
+
+def mtools(*args):
+    env = dict(os.environ, SOURCE_DATE_EPOCH=EPOCH, MTOOLS_SKIP_CHECK='1')
+    subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL)
+
+
+def copy_tree(image, source):
+    """Copy disks/<drive>/ into the image's root, text with CR LF ends."""
+    for directory, subdirs, files in os.walk(source):
+        subdirs.sort()
+        rel = os.path.relpath(directory, source)
+        target = '::' if rel == '.' else '::/' + rel.replace(os.sep, '/')
+        if rel != '.':
+            mtools('mmd', '-i', image, target)
+        for name in sorted(files):
+            mtools('mcopy', '-t', '-i', image, os.path.join(directory, name),
+                   target.rstrip('/') + '/' + name)
+
+
+def put(image, name, text, scratch):
+    """A generated text file, CR LF ends."""
+    path = os.path.join(scratch, 'put.tmp')
+    with open(path, 'wb') as f:
+        f.write(text.replace('\n', '\r\n').encode('ascii'))
+    mtools('mcopy', '-i', image, path, '::' + name)
+
+
+def chs(lba, heads, spt):
+    """A partition entry's three CHS bytes for a sector."""
+    cylinder, rest = divmod(lba, heads * spt)
+    head, sector = divmod(rest, spt)
+    return bytes([head, (sector + 1) | ((cylinder >> 8) << 6), cylinder & 0xFF])
+
+
+def make_floppy_b(out, scratch):
+    image = os.path.join(out, FLOPPY_B['image'])
+    with open(image, 'wb') as f:
+        f.truncate(FLOPPY_B['sectors'] * SECTOR)
+    mtools('mformat', '-i', image, '-f', '360', '-N', '%08X' % FLOPPY_B['serial'],
+           '-v', FLOPPY_B['label'], '::')
+    copy_tree(image, os.path.join(ROOT, 'disks', 'b'))
+    # FRAG.TXT fills the hole a deleted file leaves, then goes on past
+    # PAD.TXT: two pieces, so its chain jumps.
+    put(image, 'HOLE.TMP', 'x' * 2000 + '\n', scratch)
+    put(image, 'PAD.TXT', 'PAD.TXT sits between the two pieces of FRAG.TXT.\n', scratch)
+    mtools('mdel', '-i', image, '::HOLE.TMP')
+    put(image, 'FRAG.TXT', ''.join('line %02d of FRAG.TXT, a file in two pieces on B:\n' % n
+                                   for n in range(1, 65)), scratch)
+    # MANY: 40 files and the two dot entries, 42 entries of 32 bytes: two
+    # clusters of 1 KB, the second allocated after the first files' data.
+    mtools('mmd', '-i', image, '::MANY')
+    for n in range(1, 41):
+        put(image, 'MANY/FILE%02d.TXT' % n, 'This is file %02d of B:\\MANY.\n' % n, scratch)
+
+
+def make_fixed(out, disk, scratch):
+    image = os.path.join(out, disk['image'])
+    total = disk['cylinders'] * disk['heads'] * disk['spt']
+    start = disk['spt']                 # cylinder 0, head 1, sector 1
+    size = total - start
+    with open(image, 'wb') as f:
+        f.truncate(total * SECTOR)
+        entry = (b'\x00' + chs(start, disk['heads'], disk['spt']) +
+                 bytes([PARTITION_FAT12]) + chs(total - 1, disk['heads'], disk['spt']) +
+                 struct.pack('<II', start, size))
+        mbr = bytearray(SECTOR)
+        mbr[0x1BE:0x1BE + 16] = entry
+        mbr[0x1FE:0x200] = MBR_SIGNATURE
+        f.seek(0)
+        f.write(mbr)
+    volume = '%s@@%d' % (image, start * SECTOR)
+    mtools('mformat', '-i', volume, '-T', str(size), '-h', str(disk['heads']),
+           '-s', str(disk['spt']), '-H', str(start), '-c', str(disk['cluster']),
+           '-m', '0xF8', '-N', '%08X' % disk['serial'], '-v', disk['label'], '::')
+    copy_tree(volume, os.path.join(ROOT, 'disks', disk['drive']))
+    if disk['drive'] == 'c':
+        put(volume, 'NUMBERS.TXT', ''.join('line %04d of C:\\NUMBERS.TXT\n' % n
+                                           for n in range(1, 1001)), scratch)
+
+
+def main(args):
+    if len(args) != 1:
+        sys.exit('usage: mkdisks OUTPUT_DIR')
+    out = args[0]
+    os.makedirs(out, exist_ok=True)
+    with tempfile.TemporaryDirectory() as scratch:
+        make_floppy_b(out, scratch)
+        for disk in FIXED:
+            make_fixed(out, disk, scratch)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

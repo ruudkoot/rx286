@@ -52,11 +52,21 @@ rx286>
 ```
 
 Header lines (`tools/run-test` documents them all): `program` (shell,
-attack, fuzz), `keys` (what to type), `define` (a NASM define for the test
-image), `image` (a fragmented, missing or oversized kernel), `timeout`,
-`match` (full, prefix, contains), `break` and `debugger` (a debugger session
-at a kernel symbol). In expected lines, `{name}` is a program symbol's offset
-and `{k:name}` a kernel one.
+attack, fuzz, storage), `keys` (what to type), `define` (a NASM define for
+the test image), `image` (a fragmented, missing or oversized kernel),
+`timeout`, `match` (full, prefix, contains), `break` and `debugger` (a
+debugger session at a kernel symbol), `media` (B without a diskette or
+write-protected, no fixed disk D), `lpt1` and `lpt2` (what each printer must
+have printed, line by line), `sector` (text a sector of a drive's image must
+start with after the run, read on the host). In expected lines, `{name}` is
+a program symbol's offset and `{k:name}` a kernel one.
+
+Every run gets its own copies of drives B, C and D (`make disks`,
+*docs/storage.md*), and its printers print into files of its directory, so
+tests that write to them run side by side. A `sector` line checks where a
+write landed, which a write and a read back through the same kernel cannot:
+a wrong turn from sector number to cylinder, head and sector would read back
+what it wrote.
 
 How a test types: `test.asm` in the kernel's test build reads a byte stream
 compiled from the key script (`tools/rxlib.py`), and types each key through
@@ -77,9 +87,10 @@ The suites:
 | Suite | What |
 |---|---|
 | `tests/boot` | the boot sector and loader: every word of `KERNEL.BIN` arrives (contiguous and fragmented), a missing or oversized kernel, a disk without a loader |
-| `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break, Ctrl+Alt+Del, the rule for unhandled IRQs (three devices provoked), the 287's IRQ13, the timer against the RTC |
+| `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break, Ctrl+Alt+Del, the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
 | `tests/syscalls` | every system call with good and bad arguments; `write`'s interrupt window |
+| `tests/storage` | the disk and printer calls: known sectors of every drive, a marked sector written to each and found on the host's image, bad arguments, a line on each printer, a diskette missing or write-protected, a fixed disk missing |
 | `tests/shell` | every command of the shell, its editor, every `crash` |
 | `tests/attack` | 51 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3 |

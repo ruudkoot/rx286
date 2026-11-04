@@ -20,6 +20,7 @@ bits 16
 %include "vectors.inc"
 %include "descriptors.inc"
 %include "syscalls.inc"
+%include "disks.inc"
 %include "kernel.inc"
 
 section entry start=ENTRY_OFF vstart=0
@@ -35,6 +36,7 @@ entry_end:
 %endif
 
 section kdata
+kdata_start:
 %include "gdt.asm"
 %include "idt.asm"
 %include "tss.asm"
@@ -50,6 +52,11 @@ section ktext
 %include "keymap.asm"
 %include "rtc.asm"
 %include "fpu.asm"
+%include "dma.asm"
+%include "disk.asm"
+%include "diskette.asm"
+%include "fixeddisk.asm"
+%include "printer.asm"
 %include "console.asm"
 %include "serial.asm"
 %include "print.asm"

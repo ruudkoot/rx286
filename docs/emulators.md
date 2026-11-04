@@ -12,8 +12,10 @@ on Bochs; `make test-286` runs them on DOSBox-X's 286 and MAME's IBM PC/AT;
 | Video | VGA | `machine=ega` | IBM's EGA |
 | Configuration | `bochs/rx286.bochsrc.in` | `dosbox-x/rx286.conf.in` | `tools/rxlib.py` (`run_mame`), `mame/rx286.lua` |
 | Debugger | yes, scriptable, with symbols | not in this build | `-debug` (with a window) |
-| Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS |
-| Tests that run | all 30 | 22 | 27 |
+| Diskettes, fixed disks | both | neither (no IRQ6 from its controller, no fixed disk controller) | both: IBM's BIOS and a 765; the IDE card stands in for the fixed disk controller |
+| Printers | LPT1, LPT2, into files | LPT1, LPT2, into files | none: no slot for the card |
+| Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS, the disks |
+| Tests that run | all 35 | 24 | 29 |
 | A boot in a test | 0.3-0.5 s | about 1.5 s | about 6 s (IBM's power-on test) |
 
 ## Bochs and the AT
@@ -92,3 +94,25 @@ What MAME does not emulate:
 - **The 80287.** The AT's socket is empty: `ESC` instructions do nothing, so
   the 287's tests run on Bochs (and its arithmetic on DOSBox-X), and the
   attack program and `crash fpu` say "no 287 error arrived" and go on.
+
+## The drives and printers on each
+
+`tests/storage/` runs where the devices are (*docs/storage.md*):
+
+- **Bochs** has both diskette drives, both fixed disks and both printer
+  ports, and lets a test take B's diskette out, write-protect it or leave
+  fixed disk D out (`media:`). Its diskette controller does not mind a
+  wrong data rate or gap, so it cannot show such a slip.
+- **MAME's AT** has IBM's BIOS, a 765 that does mind, and an IDE card at
+  the AT's task file, which answers the AT controller's commands (Set
+  Parameters, Read and Write Sectors). The runner gives it drive B and both
+  fixed disks, the fixed disks as raw `.hd` images (links to the run's
+  copies). MAME writes a diskette back to its file only when it stops, so
+  the runner asks it to stop (SIGTERM) before it kills it. The AT's four
+  slots hold the EGA, the diskette controller, the serial card the tests
+  read and the IDE card, and the IDE card cannot make way for a printer
+  card: it also answers port 3F7h, which IBM's BIOS reads to boot from a
+  diskette (without it, the BIOS starts ROM BASIC). So MAME runs no printer
+  test.
+- **DOSBox-X** prints LPT1 and LPT2 into files (`[parallel]`), and runs the
+  printer test; it has no diskette interrupt and no fixed disk controller.

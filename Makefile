@@ -49,9 +49,10 @@ program_main_idle := tests/programs/idle.asm
 program_main_syscalls := tests/programs/syscalls.asm
 program_main_attack := tests/programs/attack.asm
 program_main_fuzz := tests/programs/fuzz.asm
+program_main_storage := tests/programs/storage.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack or fuzz, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz or storage, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
@@ -123,25 +124,21 @@ $(B)/rx286.sym: $(BINARIES) tools/map2sym
 
 
 # ---------------------------------------------------------------- the other drives
-# Drive B is an empty 360 KB FAT12 disk; the hard disks are sparse and empty
-# (AT drive types 2 and 1). Nothing in rx286 reads them.
+# Drive B, a 360 KB diskette, and the fixed disks C and D (AT drive types 2
+# and 1), each with one FAT12 partition: the sample files of disks/, built
+# by tools/mkdisks (disks/README.md). `make run` lets the shell write to
+# them; `make clean` or a change of disks/ makes them afresh.
 DISKS := build/disks
-disks: $(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img
+DISK_SOURCES := $(shell find disks -type f) tools/mkdisks
+disks: $(DISKS)/fdb.img
 
-$(DISKS)/fdb.img:
+$(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img &: $(DISK_SOURCES)
+	rm -rf $(DISKS).tmp
+	$(PYTHON) tools/mkdisks $(DISKS).tmp
 	@mkdir -p $(DISKS)
-	rm -f $@.tmp
-	dd if=/dev/zero of=$@.tmp bs=512 count=720 status=none
-	mformat -i $@.tmp -f 360 -N $(FLOPPY_SERIAL) -v RX286B ::
-	mv $@.tmp $@
-
-$(DISKS)/hd0.img:
-	@mkdir -p $(DISKS)
-	truncate -s $$((615 * 4 * 17 * 512)) $@
-
-$(DISKS)/hd1.img:
-	@mkdir -p $(DISKS)
-	truncate -s $$((306 * 4 * 17 * 512)) $@
+	rm -f $(DISKS)/*.lock
+	mv $(DISKS).tmp/fdb.img $(DISKS).tmp/hd0.img $(DISKS).tmp/hd1.img $(DISKS)/
+	rmdir $(DISKS).tmp
 
 # ---------------------------------------------------------------- running
 run: disks

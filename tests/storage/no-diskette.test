@@ -1,0 +1,13 @@
+# Drive B without a diskette, and no fixed disk D: the calls fail, within
+# their limits, and the kernel goes on (tests/programs/storage.asm).
+program: storage
+define: STORAGE_MEDIA
+media: B ejected
+media: D absent
+timeout: 60
+emulators: bochs
+---
+rx286, test build
+B: sector 0: error 5
+B: sector 700: error 5
+D: sector 0: error 5

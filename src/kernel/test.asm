@@ -14,8 +14,8 @@
 ; A test image asks for more with -d (tools/run-test):
 ;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK
 ;                       a kernel fault of that kind
-;   TEST_PROBES         make the diskette and fixed-disk controllers and the
-;                       RTC interrupt, though rx286 has no driver for them
+;   TEST_PROBES         make the printer port's -ACK and the RTC interrupt,
+;                       though rx286 has no driver for them
 ;   TEST_FPU_KERNEL     a 287 error raised by the kernel itself
 ;   TEST_TICKS          compare the timer with the RTC
 ;   TEST_KEYBOARD       print every key read (the program never starts)
@@ -39,7 +39,7 @@ TEST_OP_NOW         equ 2
 TEST_OP_WAIT        equ 3
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
-TEST_HDC_LIMIT      equ 10000           ; polls of the disk controller's BSY
+TEST_LPT_LIMIT      equ 10000           ; polls of the printer's BUSY
 TEST_CLOCK_SECONDS  equ 3
 TEST_FPU_CW_ZM      equ 0x037B          ; every exception masked but zero-divide
 FUZZ_ITERATIONS     equ 10000           ; starts of the fuzz program before the end
@@ -271,39 +271,37 @@ test_wait_ticks:
 
 %ifdef TEST_PROBES
 ; ----------------------------------------------------------------------------
-; test_probes - make three devices without a driver interrupt: each line
+; test_probes - make two devices without a driver interrupt: each line
 ; must be reported once and masked, and the RTC must not flood
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, DX, SI
 ; ----------------------------------------------------------------------------
 test_probes:
-        ; The diskette controller interrupts when it leaves reset (IRQ6).
-        mov dx, FDC_DOR
-        mov al, FDC_DOR_RESET
+        ; The printer port interrupts when -ACK ends, if told to (IRQ7): one
+        ; byte, a NUL, printed with the port's interrupt on.
+        mov dx, LPT1_BASE + LPT_CONTROL
+        mov al, LPT_CONTROL_READY | LPT_CONTROL_IRQ
         out dx, al
-        mov al, FDC_DOR_MOTORS_OFF
-        out dx, al
-        mov cx, TEST_PROBE_TICKS
-        call test_wait_ticks
-        ; The fixed-disk controller interrupts when a command ends (IRQ14).
-        mov dx, HDC_CONTROL
-        xor al, al                      ; nIEN clear: interrupts on
-        out dx, al
-        mov cx, TEST_HDC_LIMIT
-        mov dx, HDC_STATUS
+        mov cx, TEST_LPT_LIMIT
+        mov dx, LPT1_BASE + LPT_STATUS
 .busy:
         in al, dx
-        test al, HDC_STATUS_BSY
-        loopnz .busy
-        mov dx, HDC_DRIVE_HEAD
-        mov al, 0xA0                    ; drive 0, head 0
+        test al, LPT_STATUS_NOT_BUSY
+        loopz .busy
+        mov dx, LPT1_BASE + LPT_DATA
+        xor al, al
         out dx, al
-        mov dx, HDC_COMMAND
-        mov al, HDC_CMD_RECALIBRATE
+        mov dx, LPT1_BASE + LPT_CONTROL
+        mov al, LPT_CONTROL_STROBE | LPT_CONTROL_IRQ
+        out dx, al
+        mov al, LPT_CONTROL_READY | LPT_CONTROL_IRQ
         out dx, al
         mov cx, TEST_PROBE_TICKS
         call test_wait_ticks
+        mov dx, LPT1_BASE + LPT_CONTROL
+        mov al, LPT_CONTROL_READY
+        out dx, al
         ; The RTC's periodic interrupt, 1,024 a second (IRQ8). Reading C
         ; re-arms it: a flood if the line were not masked after the first.
         mov al, CMOS_REG_A

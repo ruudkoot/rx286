@@ -1,0 +1,4 @@
+rx286 printer test page
+-----------------------
+The kernel sent each of these bytes to the printer port,
+polling the printer's BUSY line, one strobe a byte.

@@ -6,16 +6,35 @@
 #   --mode run        start at once
 #   --mode debugger   load the symbols and stop at the kernel's entry
 # The serial log is <build>/com1.log, Bochs' log <build>/bochs.log and the
-# debugger's <build>/debugger.log. The window is Bochs' X11 display if the
-# package bochs-x is installed, else SDL2 (bochs-sdl), else wx (bochs-wx).
+# debugger's <build>/debugger.log; what LPT1 and LPT2 print goes to
+# <build>/lpt1.txt and <build>/lpt2.txt. Drives B, C and D are build/disks/
+# (make disks), which the shell may write to. The window is Bochs' X11
+# display if the package bochs-x is installed, else SDL2 (bochs-sdl), else
+# wx (bochs-wx).
 # ============================================================================
 
 import argparse
+import glob
 import os
 import subprocess
 import sys
 
 import rxlib
+
+
+def clear_stale_locks():
+    """Bochs locks its disk images with <image>.lock and leaves the lock
+    behind when it is stopped with Ctrl-C; with no Bochs running, every lock
+    in build/disks is stale."""
+    for pid in os.listdir('/proc'):
+        try:
+            with open('/proc/%s/comm' % pid) as f:
+                if f.read().strip() == 'bochs-bin':
+                    return
+        except (OSError, ValueError):
+            continue
+    for lock in glob.glob(os.path.join(rxlib.DISKS, '*.lock')):
+        os.remove(lock)
 
 
 def main():
@@ -24,6 +43,7 @@ def main():
     parser.add_argument('--build', default='build/debug')
     args = parser.parse_args()
     build = os.path.abspath(args.build)
+    clear_stale_locks()
     bochsrc = os.path.join(build, args.mode + '.bochsrc')
     rxlib.write_bochsrc(bochsrc,
                         image=os.path.join(build, 'rx286.img'),
@@ -31,7 +51,9 @@ def main():
                         log=os.path.join(build, 'bochs.log'),
                         display=rxlib.window_display(),
                         debugger_log=os.path.join(build, 'debugger.log'),
-                        magic=(args.mode == 'debugger'))
+                        magic=(args.mode == 'debugger'),
+                        printers=(os.path.join(build, 'lpt1.txt'),
+                                  os.path.join(build, 'lpt2.txt')))
     rc = bochsrc + '.rc'
     with open(rc, 'w', encoding='utf-8') as f:
         if args.mode == 'run':

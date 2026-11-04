@@ -1,15 +1,13 @@
-# Three devices without a driver interrupt: each line is reported once and
-# masked. The RTC is re-armed again and again afterwards, and stays quiet;
-# the keyboard still works.
+# Two devices without a driver interrupt: each line is reported once and
+# masked. The printer port's -ACK (IRQ7, a real one, not spurious) where
+# the emulator has a port that interrupts; the RTC, re-armed again and
+# again afterwards, stays quiet. The keyboard still works.
 define: TEST_PROBES
 define: TEST_KEYBOARD
 keys: a
 ---
 rx286, test build
-@bochs rx286: unhandled IRQ 6, now masked
-@mame rx286: unhandled IRQ 6, now masked
-@bochs rx286: unhandled IRQ 14, now masked
-@mame rx286: unhandled IRQ 14, now masked
+@bochs rx286: unhandled IRQ 7, now masked
 rx286: unhandled IRQ 8, now masked
 probe: the RTC kept interrupting; IRQ8 stayed masked
 key 1E 61

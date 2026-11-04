@@ -30,6 +30,7 @@ COVERED = {
     'selectors.inc': 'docs/protected-mode.md',
     'vectors.inc': 'docs/interrupts.md',
     'syscalls.inc': 'docs/syscalls.md',
+    'disks.inc': 'docs/storage.md',
 }
 
 
@@ -51,13 +52,16 @@ def main():
                 problems.append('%s: does not name %s (src/include/%s)' % (doc, name, inc))
 
     ports = rxlib.include_constants('ports.inc')
+    disks = rxlib.include_constants('disks.inc')
     rc = open(rxlib.BOCHSRC_TEMPLATE, encoding='utf-8').read()
     wants = [
         (r'^megs: 1$', 'megs: 1 (roadmap D6)'),
         (r'^ata0: enabled=1, ioaddr1=0x%x, ioaddr2=0x3f0, irq=14$' % ports['HDC_DATA'],
          'the fixed-disk controller at HDC_DATA, IRQ14'),
-        (r'cylinders=615, heads=4, spt=17', 'drive type 2'),
-        (r'cylinders=306, heads=4, spt=17', 'drive type 1'),
+        (r'cylinders=%d, heads=%d, spt=%d' % (disks['DISK_C_CYLINDERS'], disks['DISK_C_HEADS'],
+                                             disks['DISK_C_SECTORS']), 'drive C of disks.inc'),
+        (r'cylinders=%d, heads=%d, spt=%d' % (disks['DISK_D_CYLINDERS'], disks['DISK_D_HEADS'],
+                                             disks['DISK_D_SECTORS']), 'drive D of disks.inc'),
         (r'^floppya: 1_2=', 'drive A 1.2 MB (D2)'),
         (r'^floppyb: 360k=', 'drive B 360 KB (D2)'),
         (r'^keyboard: type=at$', 'the AT keyboard'),

@@ -62,4 +62,11 @@ its room. The kernel includes that binary at `UTEXT_OFF` with `incbin`.
 The kernel does not reset the program's data when it restarts the program:
 the program's entry code initialises what it needs.
 
+The kernel's data holds `disk_buffer`, the one sector every disk transfer
+passes through (*docs/storage.md*). DMA channel 2 writes and reads it by its
+physical address, which is fixed at assembly (`KDATA_PHYS` plus its
+offset); since the 8237's address counter has 16 bits, the build fails if
+the buffer crosses a 64 KB boundary, which in the kernel's data, 12100h to
+130FFh, it cannot.
+
 `make sizes` prints how full each room is.

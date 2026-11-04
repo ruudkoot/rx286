@@ -27,8 +27,9 @@ both the kernel and the program, each its own copy.
    to `pm_start`.
 4. `start.asm` zeroes the stacks, loads TR and a null LDTR, reprograms the
    8259As, initialises the 287, COM1 (debug and test builds) and the
-   console, prints the banner, sets up the timer, keyboard and clock (which
-   enables NMI), and unmasks every IRQ line.
+   console, prints the banner, sets up the timer, keyboard, clock, DMA
+   controllers and printer ports, unmasks every IRQ line and enables NMI.
+   The diskette and fixed disk controllers are set up when first used.
 5. `program.asm` starts the program in ring 3 with `IRET`.
 
 ## The kernel's image
@@ -56,10 +57,15 @@ with `incbin`: it can name nothing of the kernel's.
 | `program.asm` | the program: its first start, its restart, its fault report |
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, the five calls |
 | `pic.asm` | the 8259As; the driver of each line or the rule for none; spurious IRQ7 and IRQ15 |
-| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count |
+| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`) |
 | `keyboard.asm`, `keymap.asm` | the 8042, set-1 scancodes to US ASCII, the ring of keys, Ctrl+Break, Ctrl+Alt+Del |
 | `rtc.asm` | the MC146818: 24-hour BCD, read by polling |
 | `fpu.asm` | the 287: FNINIT, FSETPM; IRQ13 |
+| `dma.asm` | the 8237As: reset; channel 2 for a diskette sector |
+| `disk.asm` | `SYS_DISK_READ`, `SYS_DISK_WRITE`: the drives' table, sector numbers to cylinders, heads and sectors, the disk buffer |
+| `diskette.asm` | the NEC 765: drives A and B, IRQ6 |
+| `fixeddisk.asm` | the fixed disk controller: drives C and D, IRQ14 |
+| `printer.asm` | `SYS_PRINT`: LPT1 and LPT2, polled |
 | `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to COM1 |
 | `serial.asm` | COM1 output, polled (debug and test builds) |
 | `print.asm` | strings, numbers, the kernel's messages, trace lines, register dumps |
@@ -72,8 +78,9 @@ on the kernel stack (*kernel.inc*) and calls the vector's handler with BP at
 the frame. A handler changes the frame to change what the interrupted code
 gets back: a system call's results, or the program's entry for a restart.
 Every gate but the double fault's is an interrupt gate, so the kernel runs
-with IF clear, except while `read_key` waits and after each byte `write`
-writes (*docs/interrupts.md*). Before every `IRET` to ring 3 it checks the
+with IF clear, except where it waits: in `read_key`, after each byte `write`
+or `print` writes, and while a driver waits for its device
+(*docs/interrupts.md*). Before every `IRET` to ring 3 it checks the
 return IP against the program's code limit.
 
 A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
@@ -83,7 +90,9 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 ## The program
 
 The program sees three segments (code, data, stack: selectors 43h, 4Bh,
-53h) and `INT 30h` (*docs/syscalls.md*). It starts with its registers zero,
+53h) and `INT 30h` (*docs/syscalls.md*): the console, the keyboard, the
+clocks, the four drives a sector at a time and the two printers
+(*docs/storage.md*). It starts with its registers zero,
 IF on and IOPL 0; when it faults, exits or is broken off with Ctrl+Break,
 the kernel starts it again at its entry with a fresh stack. Its data
 survives, so the shell keeps its last line and knows it was restarted.
