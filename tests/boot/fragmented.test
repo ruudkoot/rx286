@@ -1,5 +1,7 @@
-# KERNEL.BIN in eleven pieces: the loader follows the cluster chain.
+# KERNEL.BIN in eleven pieces: the loader follows the cluster chain, every
+# word of it: the kernel sums the file before anything writes to it.
 image: fragmented
+define: TEST_IMAGE_SUM
 ---
-rx286 kernel stub: all of KERNEL.BIN is here
-rx286 kernel stub: interrupts are off
+rx286, test build
+rx286: kernel image sum {image_sum}

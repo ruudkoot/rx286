@@ -77,26 +77,33 @@ test-build:
 image: $(IMAGE)
 symbols: $(B)/rx286.sym
 
-# assemble OUTPUT SOURCE [EXTRA NASM FLAGS]: a binary, with its listing, map
-# and dependency file beside it.
+# assemble OUTPUT SOURCE [EXTRA NASM FLAGS]: a binary, with its listing and
+# map beside it.
 define assemble
 	@mkdir -p $(dir $(1))
-	$(NASM) $(NASMFLAGS) $(3) -MD $(1:.bin=.d) -MT $(1) \
-	    -dMAPFILE=$(1:.bin=.map) -l $(1:.bin=.lst) -o $(1) $(2)
+	$(NASM) $(NASMFLAGS) $(3) -dMAPFILE=$(1:.bin=.map) -l $(1:.bin=.lst) -o $(1) $(2)
 endef
 
-$(B)/boot-sector.bin: src/boot-sector/boot-sector.asm
+# Each binary depends on every file it could include: NASM 2.16.01's -MD
+# leaves %include'd files out of its dependency lists.
+COMMON_SRC := $(wildcard src/include/*.inc) $(wildcard src/lib/*.asm) Makefile
+BOOT_SRC := $(wildcard src/boot-sector/*.asm) $(COMMON_SRC)
+LOADER_SRC := $(wildcard src/boot-loader/*.asm) $(COMMON_SRC)
+KERNEL_SRC := $(wildcard src/kernel/*.asm src/kernel/*.inc) $(COMMON_SRC) $(TEST_KEYS_FILE)
+PROGRAM_SRC := $(PROGRAM_MAIN) $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
+
+$(B)/boot-sector.bin: src/boot-sector/boot-sector.asm $(BOOT_SRC)
 	$(call assemble,$@,$<)
 
-$(B)/boot-loader.bin: src/boot-loader/boot-loader.asm
+$(B)/boot-loader.bin: src/boot-loader/boot-loader.asm $(LOADER_SRC)
 	$(call assemble,$@,$<,-Isrc/boot-loader/)
 
-$(B)/user.bin: $(PROGRAM_MAIN)
-	$(call assemble,$@,$<,-Isrc/userland/)
+$(B)/user.bin: $(PROGRAM_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
 
 # On the floppy the kernel is KERNEL.BIN, upper case as FAT12 keeps names.
-$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin
-	$(call assemble,$@,$<,-Isrc/kernel/ -dUSER_BIN='"$(B)/user.bin"')
+$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin $(KERNEL_SRC)
+	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/ -dUSER_BIN='"$(B)/user.bin"')
 
 $(IMAGE): $(BINARIES)
 	rm -f $@.tmp
@@ -110,7 +117,6 @@ $(IMAGE): $(BINARIES)
 $(B)/rx286.sym: $(BINARIES) tools/map2sym
 	$(PYTHON) tools/map2sym $(B) > $@
 
--include $(wildcard $(B)/*.d)
 
 # ---------------------------------------------------------------- the other drives
 # Drive B is an empty 360 KB FAT12 disk; the hard disks are sparse and empty

@@ -1,0 +1,9 @@
+# A kernel stack overflow: the stack fault cannot be delivered on the same
+# stack, so it becomes a double fault, which the double-fault task reports
+# on its own stack instead of a triple fault and a silent reset.
+define: TEST_PANIC_STACK
+match: contains
+---
+rx286, test build
+rx286 PANIC: double fault
+#DF error 0000 at 0008:

@@ -1,0 +1,3 @@
+# The kernel enters protected mode and prints its banner.
+---
+rx286, test build

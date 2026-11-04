@@ -48,7 +48,13 @@ it into features:
 | `kernel.bin` | `KERNEL.BIN` on the floppy |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |
-| `*.lst`, `*.map`, `*.d` | NASM's listing, map and dependencies of each binary |
+| `*.lst`, `*.map` | NASM's listing and map of each binary |
+
+Each binary depends on every source it could include (its directory,
+`src/include/`, `src/lib/` and the Makefile), not on a list NASM writes:
+NASM 2.16.01's `-MD` leaves `%include`d files out of its dependency lists.
+A kernel takes a tenth of a second to assemble, so rebuilding a little more
+than needed costs nothing.
 
 ## The image
 

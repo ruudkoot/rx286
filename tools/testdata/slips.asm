@@ -57,6 +57,9 @@ label:  shld ax, bx, 4          ; SLIP
         fldpi
         fbstp [bx]
         db 0x66, 0x67, 0x0F, 0xA0
+message db 0x66, 0x65, 0x64, 0
+table   dw 0x6766
+pad     times 2 db 0x67
         dw 0x6766
         times 4 db 0x66
         jmp near label

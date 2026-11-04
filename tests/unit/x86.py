@@ -41,6 +41,7 @@ class Blob:
                '-I' + os.path.join(ROOT, 'src', 'kernel') + '/',
                '-I' + os.path.join(ROOT, 'src', 'userland') + '/',
                '-I' + os.path.join(ROOT, 'src', 'boot-loader') + '/',
+               '-I' + os.path.join(ROOT, 'src', 'lib') + '/',
                '-dMAPFILE=' + mapfile, '-o', out, src]
         cmd += ['-d' + d for d in defines]
         subprocess.run(cmd, check=True)

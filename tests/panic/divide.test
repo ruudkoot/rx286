@@ -1,0 +1,6 @@
+# A divide error in the kernel: a panic with the vector and where.
+define: TEST_PANIC_DIVIDE
+---
+rx286, test build
+rx286 PANIC: exception in the kernel
+#DE error 0000 at 0008:{k:test_start.divide}

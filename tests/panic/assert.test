@@ -1,0 +1,5 @@
+# A failed ASSERT in a test build: a panic with its text, no frame.
+define: TEST_PANIC_ASSERT
+---
+rx286, test build
+rx286 PANIC: assertion failed: AX is not zero

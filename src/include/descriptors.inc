@@ -26,6 +26,25 @@ ACC_INT_GATE_USER   equ 0xE6        ; present, DPL 3, 286 interrupt gate
 
 TSS286_SIZE         equ 44          ; Intel 8.2.1: the limit must be at least 43
 TSS286_LIMIT        equ TSS286_SIZE - 1
+; The fields of a 286 TSS (Intel figure 8-1), by offset.
+TSS286_BACK_LINK    equ 0
+TSS286_SP0          equ 2
+TSS286_SS0          equ 4
+TSS286_IP           equ 14
+TSS286_FLAGS        equ 16
+TSS286_AX           equ 18
+TSS286_CX           equ 20
+TSS286_DX           equ 22
+TSS286_BX           equ 24
+TSS286_SP           equ 26
+TSS286_BP           equ 28
+TSS286_SI           equ 30
+TSS286_DI           equ 32
+TSS286_ES           equ 34
+TSS286_CS           equ 36
+TSS286_SS           equ 38
+TSS286_DS           equ 40
+TSS286_LDT          equ 42
 
 ; segment_descriptor base, limit, access
 %macro segment_descriptor 3

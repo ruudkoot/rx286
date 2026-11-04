@@ -10,7 +10,8 @@
 #   header    the file starts with the banner and "; rx286 - <its path>"
 #   cpu       a file that includes build.inc (a top-level source) says `cpu 286`
 #   routine   in code, every label that is not local (.x) follows a routine
-#             header with In:, Out: and Destroys:
+#             header with In:, Out: and Destroys: (data labels have no colon;
+#             labels ending in _start or _end mark places, not routines)
 #   port      `in` and `out` name their port (a constant, or DX), never a number
 #   layout    no tabs, no trailing spaces, at most 100 characters a line
 # ============================================================================
@@ -23,7 +24,26 @@ import sys
 import rxlib
 
 ROOT = rxlib.ROOT
-CODE_SECTIONS = {'entry', 'ktext', 'utext', 'dftask', '.text'}
+CODE_SECTIONS = {'entry', 'ktext', 'utext', '.text'}
+
+
+def data_includes():
+    """Files kernel.asm includes while in a data section: lint reads them as
+    data from their first line."""
+    files = set()
+    section = None
+    path = os.path.join(ROOT, 'src', 'kernel', 'kernel.asm')
+    for line in open(path, encoding='utf-8'):
+        m = re.match(r'^\s*section\s+(\S+)', line)
+        if m:
+            section = m.group(1)
+        m = re.match(r'^\s*%include\s+"([^"]+)"', line)
+        if m and section is not None and section not in CODE_SECTIONS:
+            files.add(os.path.join(ROOT, 'src', 'kernel', m.group(1)))
+    return files
+
+
+DATA_FILES = data_includes()
 LABEL = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):')
 PORT_NUMBER = re.compile(
     r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:out\s+(\d\w*)\s*,|in\s+\w+\s*,\s*(\d\w*)\s*(?:;|$))',
@@ -46,7 +66,8 @@ def lint(path):
             not re.search(r'^\s*cpu 286\b', text, re.M):
         report(1, 'cpu', 'a top-level source must say `cpu 286`')
 
-    section = '.text'
+    section = 'kdata' if path in DATA_FILES else '.text'
+    saved = []
     for n, line in enumerate(lines, 1):
         if '\t' in line:
             report(n, 'layout', 'a tab')
@@ -57,10 +78,15 @@ def lint(path):
         m = re.match(r'^\s*section\s+(\S+)', line)
         if m:
             section = m.group(1)
+        if re.match(r'^\s*begin_kdata\b', line):
+            saved.append(section)
+            section = 'kdata'
+        elif re.match(r'^\s*end_kdata\b', line) and saved:
+            section = saved.pop()
         if PORT_NUMBER.match(line):
             report(n, 'port', 'name the port with a constant: ' + line.strip())
         m = LABEL.match(line)
-        if m and section in CODE_SECTIONS:
+        if m and section in CODE_SECTIONS and not m.group(1).endswith(('_end', '_start')):
             k = n - 2
             while k >= 0 and lines[k].strip() == '':
                 k -= 1

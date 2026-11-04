@@ -1,7 +1,14 @@
 ; ============================================================================
 ; rx286 - src/kernel/kernel.asm
-; Stub kernel (M3): proves the loader brought all of KERNEL.BIN and handed
-; over with interrupts off. M4 replaces it.
+; The kernel's image, KERNEL.BIN: every segment at its fixed offset, and the
+; program included at its own.
+;
+; layout.inc gives each segment's offset and room; NASM stops the build if
+; one outgrows its room, since the sections would overlap. The sections are
+; declared first, in file order, so that modules can add to kdata
+; (begin_kdata) from anywhere. The GDT, IDT and TSSs open kdata. The program
+; (src/userland, or a test program) is assembled on its own and included as
+; a binary: it can name nothing of the kernel's (roadmap D5).
 ; ============================================================================
 
 cpu 286
@@ -9,81 +16,49 @@ bits 16
 %include "build.inc"
 %include "ports.inc"
 %include "layout.inc"
+%include "selectors.inc"
+%include "vectors.inc"
+%include "descriptors.inc"
+%include "syscalls.inc"
+%include "kernel.inc"
 
-; ----------------------------------------------------------------------------
-; start - check the image's last word and the flags, report on COM1
-;   In:       CS = KERNEL_SEG, IP = 0
-;   Out:      does not return
-;   Destroys: everything
-; ----------------------------------------------------------------------------
-start:
-        mov ax, cs
-        mov ds, ax
-        mov si, msg_complete
-        cmp word [KERNEL_FILE_SIZE - 2], 0xA55A
-        je .size_ok
-        mov si, msg_incomplete
-.size_ok:
-        call send
-        pushf
-        pop ax
-        mov si, msg_if_off
-        test ax, 0x0200
-        jz .if_ok
-        mov si, msg_if_on
-.if_ok:
-        call send
-%ifdef WITH_TEST_HOOKS
-        mov si, msg_end
-        call send
-        mov dx, COM1_BASE + UART_LSR
-.drain:
-        in al, dx
-        test al, UART_LSR_TEMT
-        jz .drain
-        mov dx, BOCHS_SHUTDOWN_PORT
-        mov si, msg_shutdown
-.shut:
-        lodsb
-        test al, al
-        jz .halt
-        out dx, al
-        jmp .shut
+section entry start=ENTRY_OFF vstart=0
+section ktext start=KTEXT_OFF vstart=0
+section kdata start=KDATA_OFF vstart=0
+section user start=UTEXT_OFF vstart=0
+
+section entry
+%include "entry.asm"
+entry_end:
+%if ENTRY_ROOM < 256
+  %error "kernel.asm: the entry's room is too small"
 %endif
-.halt:
-        hlt
-        jmp .halt
 
-; ----------------------------------------------------------------------------
-; send - a zero-terminated string on COM1
-;   In:       DS:SI = the string
-;   Out:      nothing
-;   Destroys: AX, DX, SI
-; ----------------------------------------------------------------------------
-send:
-        lodsb
-        test al, al
-        jz .done
-        mov ah, al
-        mov dx, COM1_BASE + UART_LSR
-.wait:
-        in al, dx
-        test al, UART_LSR_THRE
-        jz .wait
-        mov al, ah
-        mov dx, COM1_BASE + UART_THR
-        out dx, al
-        jmp send
-.done:
-        ret
+section kdata
+%include "gdt.asm"
+%include "idt.asm"
+%include "tss.asm"
 
-msg_complete    db "rx286 kernel stub: all of KERNEL.BIN is here", 10, 0
-msg_incomplete  db "rx286 kernel stub: KERNEL.BIN is incomplete", 10, 0
-msg_if_off      db "rx286 kernel stub: interrupts are off", 10, 0
-msg_if_on       db "rx286 kernel stub: interrupts are ON", 10, 0
-msg_end         db "TEST END", 10, 0
-msg_shutdown    db "Shutdown", 0
+section ktext
+%include "interrupt.asm"
+%include "start.asm"
+%include "fault.asm"
+%include "panic.asm"
+%include "pic.asm"
+%include "fpu.asm"
+%include "console.asm"
+%include "serial.asm"
+%include "print.asm"
+%include "syscall.asm"
+%include "test.asm"
+%include "format.asm"
+ktext_end:
 
-        times KERNEL_FILE_SIZE - 2 - ($ - $$) db 0
-        dw 0xA55A                       ; the last word: the loader brought it all
-        incbin USER_BIN, 0, 0           ; the program arrives in M4
+section kdata
+kdata_end:
+
+; The program: USER_FILE_SIZE bytes, its data padded with zeros to the room.
+section user
+user_start:
+        incbin USER_BIN
+        times USER_FILE_SIZE - ($ - user_start) db 0

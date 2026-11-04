@@ -48,6 +48,8 @@ def mnemonic(source):
     words = source.split()
     if not words:
         return None
+    if len(words) > 1 and words[1].lower() in DATA | {'times'}:   # "label db ..."
+        return words[1].lower() if words[1].lower() in DATA else 'db'
     if words[0].lower() == 'times':
         rest = re.sub(r'^times\s+(\([^)]*\)|\S+)\s*', '', source, flags=re.I).split()
         return rest[0].lower() if rest else None

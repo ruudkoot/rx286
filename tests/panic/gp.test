@@ -1,0 +1,6 @@
+# A general protection fault in the kernel (a null selector used).
+define: TEST_PANIC_GP
+---
+rx286, test build
+rx286 PANIC: exception in the kernel
+#GP error 0000 at 0008:{k:test_start.gp}

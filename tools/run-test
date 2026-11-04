@@ -21,6 +21,8 @@
 #   debugger: info gdt 0 11     ...and commands to run there; may repeat
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one
+#   (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   {image_sum} the sum of kernel.bin's words
 #
 # full:     the transcript is exactly the expected lines, then `TEST END`.
 # prefix:   the transcript starts with the expected lines (the run stops then).
@@ -43,7 +45,7 @@ import time
 import rxlib
 
 ROOT = rxlib.ROOT
-IGNORED_PREFIXES = ('[trace]', '[regs]')
+IGNORED_PREFIXES = ('[trace]', 'regs:')
 
 
 class Test:
@@ -105,8 +107,19 @@ def build(test):
     b = test.build_dir
     os.makedirs(b, exist_ok=True)
     keys_inc = os.path.join(b, 'test-keys.inc')
-    with open(keys_inc, 'w', encoding='utf-8') as f:
-        f.write(rxlib.keys_include(test.keys))
+    text = rxlib.keys_include(test.keys)
+    if not os.path.exists(keys_inc) or open(keys_inc, encoding='utf-8').read() != text:
+        with open(keys_inc, 'w', encoding='utf-8') as f:
+            f.write(text)
+    # The defines are part of the build too: a change of them rebuilds.
+    stamp = os.path.join(b, 'defines.txt')
+    wanted = repr((test.program, test.defines))
+    if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
+        for name in ('kernel.bin', 'user.bin'):
+            if os.path.exists(os.path.join(b, name)):
+                os.remove(os.path.join(b, name))
+        with open(stamp, 'w', encoding='utf-8') as f:
+            f.write(wanted)
     defines = ["-dTEST_KEYS_INC='\"%s\"'" % keys_inc]
     if test.program == 'fuzz':
         defines.append('-dTEST_FUZZ')
@@ -115,6 +128,7 @@ def build(test):
     defines += ['-d' + d for d in test.defines]
     cmd = ['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=test', 'B=' + b,
            'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
+           'TEST_KEYS_FILE=' + keys_inc,
            'image', 'symbols']
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -172,15 +186,21 @@ def change_image(test, image):
 
 
 def substitute(test, line):
-    """{name} and {k:name} to four hex digits."""
+    """{name} (the program's) and {k:name} (the kernel's) to four upper-case
+    hex digits; {x:name} and {kx:name} to eight lower-case ones, as Bochs'
+    debugger prints them."""
     def lookup(m):
-        which, name = m.group(1), m.group(2)
-        mapfile = 'kernel.map' if which == 'k:' else 'user.map'
+        which, name = m.group(1) or '', m.group(2)
+        if name == 'image_sum':
+            data = open(os.path.join(test.build_dir, 'kernel.bin'), 'rb').read()
+            return '%04X' % (sum(data[i] | data[i + 1] << 8
+                                 for i in range(0, len(data) - 1, 2)) & 0xFFFF)
+        mapfile = 'kernel.map' if which.startswith('k') else 'user.map'
         symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
-        return '%04X' % symbols[name]
-    return re.sub(r'\{(k:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+        return ('%08x' if 'x' in which else '%04X') % symbols[name]
+    return re.sub(r'\{(k:|kx:|x:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
 
 
 def relevant(lines):
