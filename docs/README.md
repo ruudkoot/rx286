@@ -10,6 +10,7 @@
 | [interrupts.md](interrupts.md) | every vector and IRQ line, and what handles it |
 | [syscalls.md](syscalls.md) | the system calls |
 | [storage.md](storage.md) | the drives, their drivers, the printers, the sample disks |
+| [shell.md](shell.md) | the shell: its commands, drives and paths, its FAT12 library |
 | [security.md](security.md) | what no program can do, and how the tests show it |
 | [building.md](building.md) | the tools, the Makefile, the builds |
 | [testing.md](testing.md) | the layers of tests |

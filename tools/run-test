@@ -22,8 +22,9 @@
 #   break: syscall              a debugger breakpoint, by kernel symbol...
 #   debugger: info gdt 0 11     ...and commands to run there; may repeat
 #   emulators: bochs dosbox-x   where the test applies (default: all)
-#   media: B ejected            change a drive: B ejected, B protected, D absent;
-#                               may repeat
+#   media: B ejected            change a drive: B ejected, B protected, D absent,
+#                               B damaged (MANY's chain leaves the volume),
+#                               D blank (no partition); may repeat
 #   lpt1: text                  a line LPT1 must have printed; may repeat (the
 #                               whole of what it printed, in order); lpt2 too
 #   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
@@ -369,6 +370,7 @@ def run(test):
             os.remove(f)
     bochsrc = os.path.join(b, 'test.bochsrc')
     disks = rxlib.private_disks(os.path.join(b, 'disks'))
+    rxlib.damage_disks(disks, test.media)
     rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
@@ -399,7 +401,7 @@ def run(test):
                                      printers=printers)
     else:
         status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, timeout, until,
-                                   disks=disks)
+                                   disks=disks, media=test.media)
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
         if os.path.exists(serial) else []
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \

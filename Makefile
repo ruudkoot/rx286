@@ -101,7 +101,7 @@ $(B)/boot-sector.bin: src/boot-sector/boot-sector.asm $(BOOT_SRC)
 	$(call assemble,$@,$<)
 
 $(B)/boot-loader.bin: src/boot-loader/boot-loader.asm $(LOADER_SRC)
-	$(call assemble,$@,$<,-Isrc/boot-loader/)
+	$(call assemble,$@,$<,-Isrc/boot-loader/ -Isrc/lib/)
 
 $(B)/user.bin: $(PROGRAM_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)

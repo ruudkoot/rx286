@@ -95,8 +95,10 @@ BOCHSRC_TEMPLATE = os.path.join(ROOT, 'bochs', 'rx286.bochsrc.in')
 DISKS = os.path.join(ROOT, 'build', 'disks')
 
 
-# What a test may change of the drives (tools/run-test's `media:`).
-MEDIA = ('B ejected', 'B protected', 'D absent')
+# What a test may change of the drives (tools/run-test's `media:`): the
+# first three in the emulator, the others in the run's copies of the images
+# (damage_disks).
+MEDIA = ('B ejected', 'B protected', 'D absent', 'B damaged', 'D blank')
 
 
 def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
@@ -139,6 +141,39 @@ DISPLAY_HEADLESS = 'rfb, options="timeout=0"'
 
 
 DISK_IMAGES = ('fdb.img', 'hd0.img', 'hd1.img')     # drives B, C, D (tools/mkdisks)
+FAT12_BAD_LINK = 0xFF0          # a reserved value: no cluster of any volume
+
+
+def damage_disks(directory, media):
+    """The changes of MEDIA made to a run's copies of the images: 'D blank'
+    zeroes fixed disk D (no partition at all); 'B damaged' points the FAT
+    entry of B:\\MANY's first cluster outside the volume, in both FATs."""
+    if 'D blank' in media:
+        path = os.path.join(directory, 'hd1.img')
+        size = os.path.getsize(path)
+        with open(path, 'r+b') as f:
+            f.truncate(0)
+            f.truncate(size)
+    if 'B damaged' in media:
+        path = os.path.join(directory, 'fdb.img')
+        env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
+        chain = subprocess.run(['mshowfat', '-i', path, '::MANY'], capture_output=True,
+                               text=True, env=env, check=True).stdout
+        cluster = int(re.search(r'<(\d+)', chain).group(1))
+        with open(path, 'r+b') as f:
+            boot = f.read(512)
+            reserved = int.from_bytes(boot[0x0E:0x10], 'little')
+            fats, per_fat = boot[0x10], int.from_bytes(boot[0x16:0x18], 'little')
+            for n in range(fats):
+                at = (reserved + n * per_fat) * 512 + cluster * 3 // 2
+                f.seek(at)
+                pair = int.from_bytes(f.read(2), 'little')
+                if cluster & 1:
+                    pair = (pair & 0x000F) | (FAT12_BAD_LINK << 4)
+                else:
+                    pair = (pair & 0xF000) | FAT12_BAD_LINK
+                f.seek(at)
+                f.write(pair.to_bytes(2, 'little'))
 
 
 def private_disks(directory):
@@ -368,11 +403,13 @@ def at_cmos():
 MAME_STOP_SECONDS = 10       # for MAME to save its diskettes and stop, after SIGTERM
 
 
-def run_mame(directory, image, serial, timeout, until, disks=None):
+def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     """Run MAME's IBM PC/AT (a real 80286 core, IBM's BIOS; roadmap M9) on an
     image without a window, until `until(lines)` holds of the serial
     transcript or `timeout` seconds. `disks` is the run's own directory of
-    drives B, C and D (private_disks). The AT has no printer port here: its
+    drives B, C and D (private_disks), less what `media` takes out ('B
+    ejected', 'D absent'; MAME cannot write-protect a diskette from its
+    command line). The AT has no printer port here: its
     four slots hold the EGA, the diskette controller, the serial card and
     the IDE card, which the diskettes need too (docs/emulators.md). MAME
     writes a diskette back to its file only when it stops, so it is asked
@@ -382,15 +419,18 @@ def run_mame(directory, image, serial, timeout, until, disks=None):
     with open(os.path.join(nvram, 'ibm5170', 'mb_rtc'), 'wb') as f:
         f.write(at_cmos())
     open(serial, 'wb').close()      # the null modem's file must exist
-    media = []
+    args = []
     if disks:
         # MAME knows a raw fixed disk by its name: .hd.
         for name, drive in (('hd0.img', 'c.hd'), ('hd1.img', 'd.hd')):
             link = os.path.join(disks, drive)
             if not os.path.exists(link):
                 os.symlink(name, link)
-        media += ['-flop2', os.path.join(disks, 'fdb.img'), '-isa4:ide:ide:1', 'hdd',
-                  '-hard1', os.path.join(disks, 'c.hd'), '-hard2', os.path.join(disks, 'd.hd')]
+        if 'B ejected' not in media:
+            args += ['-flop2', os.path.join(disks, 'fdb.img')]
+        args += ['-hard1', os.path.join(disks, 'c.hd')]
+        if 'D absent' not in media:
+            args += ['-isa4:ide:ide:1', 'hdd', '-hard2', os.path.join(disks, 'd.hd')]
     log = open(os.path.join(directory, 'mame.log'), 'w')
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -401,7 +441,7 @@ def run_mame(directory, image, serial, timeout, until, disks=None):
          '-video', 'none', '-sound', 'none', '-nothrottle', '-skip_gameinfo',
          '-nvram_directory', nvram, '-cfg_directory', os.path.join(directory, 'mame-cfg'),
          '-autoboot_script', MAME_SCRIPT, '-autoboot_delay', '0',
-         '-seconds_to_run', str(int(timeout * 10))] + media,
+         '-seconds_to_run', str(int(timeout * 10))] + args,
         stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory)
     status = 'exit'
     while proc.poll() is None:

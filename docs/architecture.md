@@ -7,12 +7,14 @@ rx286 is four binaries on one FAT12 floppy:
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
 | kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 4 KB of code and data |
-| the program (the shell) | `src/userland/` | inside the kernel's image, ring 3 | about 3 KB |
+| the program (the shell) | `src/userland/` | inside the kernel's image, ring 3 | about 4 KB of code, 4 KB of data |
 
 `src/include/` holds what more than one part shares: the memory layout, the
-ports, the selectors, the vectors, the system calls, the descriptor macros and
-the build flavours. `src/lib/format.asm` (numbers as text) is assembled into
-both the kernel and the program, each its own copy.
+ports, the selectors, the vectors, the system calls, the drives, the
+descriptor macros and the build flavours. `src/lib/` holds pure routines
+more than one part assembles, each its own copy: `format.asm` (numbers as
+text) in the kernel and the program, `fat12.asm` in the loader and the
+program.
 
 ## From power-on to the shell
 
@@ -97,10 +99,14 @@ IF on and IOPL 0; when it faults, exits or is broken off with Ctrl+Break,
 the kernel starts it again at its entry with a fresh stack. Its data
 survives, so the shell keeps its last line and knows it was restarted.
 
-The shell (`src/userland/`) is `shell.asm` (the start, the line editor, the
-command table), `commands.asm`, `crash.asm`, `parse.asm` (pure, tested on the
-host), `uprint.asm` (output through `SYS_WRITE`) and `program.inc` (the
-sections and the `PRINT` macro every program uses).
+The shell (`src/userland/`, *docs/shell.md*) is `shell.asm` (the start, the
+line editor, the command table), `commands.asm`, `drives.asm` (the prompt,
+the drive letters, `dir`, `cd`, `type`, `print`), `fat.asm` (its FAT12
+library), `crash.asm`, `parse.asm` (pure, tested on the host), `uprint.asm`
+(output through `SYS_WRITE`) and `program.inc` (the sections and the
+`PRINT` macro every program uses). From `src/lib/` it takes `format.asm`,
+`fat12.asm` (the loader's FAT12 arithmetic) and `fatname.asm` (FAT names
+and time stamps as text), each pure and tested on the host.
 
 ## Builds
 

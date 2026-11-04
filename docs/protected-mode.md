@@ -24,15 +24,15 @@ writes the GDT except for the TSS's busy bit.
 | 00h | `SEL_NULL` | | | | |
 | 08h | `SEL_KCODE` | 10100h | size | 9Bh: present, DPL 0, code, readable | the kernel |
 | 10h | `SEL_KDATA` | 12100h | size | 93h: present, DPL 0, data, writable | its tables and variables |
-| 18h | `SEL_KSTACK` | 16100h | 3FFh | 93h | its stack (SS0 in the TSS) |
+| 18h | `SEL_KSTACK` | 17100h | 3FFh | 93h | its stack (SS0 in the TSS) |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
-| 30h | `SEL_DFSTACK` | 16500h | 1FFh | 93h | its stack |
+| 30h | `SEL_DFSTACK` | 17500h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
 | 43h | `SEL_UCODE` | 13100h | 1FFFh | FBh: present, DPL 3, code, readable | the program |
-| 4Bh | `SEL_UDATA` | 15100h | 0FFFh | F3h: present, DPL 3, data, writable | its data |
-| 53h | `SEL_USTACK` | 16700h | 7FFh | F3h | its stack |
-| 5Bh | `SEL_UFUZZ` | 15100h | 0FFFh | FBh | test builds with the fuzzer only: code over the program's data |
+| 4Bh | `SEL_UDATA` | 15100h | 1FFFh | F3h: present, DPL 3, data, writable | its data |
+| 53h | `SEL_USTACK` | 17700h | 7FFh | F3h | its stack |
+| 5Bh | `SEL_UFUZZ` | 15100h | 1FFFh | FBh | test builds with the fuzzer only: code over the program's data |
 
 `RPL_KERNEL` and `RPL_USER` are the two privilege levels in use. The GDT has
 `GDT_ENTRIES` descriptors and its limit is `GDT_LIMIT`: 57h, or 5Fh with the

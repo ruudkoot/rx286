@@ -5,7 +5,7 @@ define: STORAGE_MEDIA
 media: B ejected
 media: D absent
 timeout: 60
-emulators: bochs
+emulators: bochs mame
 ---
 rx286, test build
 B: sector 0: error 5

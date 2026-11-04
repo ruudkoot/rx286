@@ -26,7 +26,8 @@ relies on, and NASM refuses segments that overlap.
 ## 3. Pure routines on the host
 
 Routines that take registers and memory and touch no hardware (the scancode
-table, number formatting, the shell's parser, FAT12 decoding) are assembled
+table, number formatting, the shell's parser, FAT12 decoding, FAT names and
+time stamps) are assembled
 alone and run in Unicorn's 16-bit mode by pytest (`tests/unit/`, `make
 unit`). Unicorn is not a 286, so only pure code is tested this way.
 
@@ -56,7 +57,9 @@ attack, fuzz, storage), `keys` (what to type), `define` (a NASM define for
 the test image), `image` (a fragmented, missing or oversized kernel),
 `timeout`, `match` (full, prefix, contains), `break` and `debugger` (a
 debugger session at a kernel symbol), `media` (B without a diskette or
-write-protected, no fixed disk D), `lpt1` and `lpt2` (what each printer must
+write-protected, no fixed disk D, which the emulator is told; B's FAT
+damaged, D without a partition, which the runner does to the run's copy),
+`lpt1` and `lpt2` (what each printer must
 have printed, line by line), `sector` (text a sector of a drive's image must
 start with after the run, read on the host). In expected lines, `{name}` is
 a program symbol's offset and `{k:name}` a kernel one.
@@ -91,8 +94,9 @@ The suites:
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
 | `tests/syscalls` | every system call with good and bad arguments; `write`'s interrupt window |
 | `tests/storage` | the disk and printer calls: known sectors of every drive, a marked sector written to each and found on the host's image, bad arguments, a line on each printer, a diskette missing or write-protected, a fixed disk missing |
+| `tests/drives` | the shell's drives: `dir` on every drive, `cd` in all its forms, `type` through a fragmented file and a file of four clusters, `print` checked byte for byte, every refusal, a drive without a diskette, a disk without a partition, a damaged FAT |
 | `tests/shell` | every command of the shell, its editor, every `crash` |
-| `tests/attack` | 51 attacks (*docs/security.md*) |
+| `tests/attack` | 59 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3 |
 | `tests/unit` | the host tests (layer 3) |
 

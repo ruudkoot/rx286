@@ -1,10 +1,11 @@
 ; ============================================================================
-; rx286 - src/boot-loader/fat12.asm
-; Pure arithmetic of a FAT12 floppy: the next cluster of a chain, and the
+; rx286 - src/lib/fat12.asm
+; Pure arithmetic of a FAT12 disk: the next cluster of a chain, and the
 ; cylinder, head and sector of a logical sector.
 ;
 ; Neither routine touches hardware or the BIOS, so tests/unit runs them on
-; the host. The BPB's and a directory entry's field offsets are here too.
+; the host. The loader and the shell's FAT12 library each assemble their own
+; copy. The BPB's and a directory entry's field offsets are here too.
 ; ============================================================================
 
 ; The BPB, at the start of the boot sector (offsets in bytes).
@@ -17,6 +18,9 @@ BPB_TOTAL_SECTORS       equ 0x13    ; word
 BPB_SECTORS_PER_FAT     equ 0x16    ; word
 BPB_SECTORS_PER_TRACK   equ 0x18    ; word
 BPB_HEADS               equ 0x1A    ; word
+BPB_EXTENDED            equ 0x26    ; byte: BPB_EXTENDED_MARK if a label follows
+BPB_LABEL               equ 0x2B    ; DIR_NAME_LENGTH bytes
+BPB_EXTENDED_MARK       equ 0x29
 
 ; A directory entry.
 DIR_ENTRY_SIZE          equ 32
@@ -32,6 +36,8 @@ DIR_DELETED             equ 0xE5
 
 FAT12_FIRST_CLUSTER     equ 2       ; clusters 0 and 1 do not exist
 FAT12_RESERVED          equ 0xFF0   ; FF0h-FF6h reserved, FF7h bad, FF8h-FFFh end
+FAT12_END               equ 0xFF8   ; this and above: the chain's end
+FAT12_MAX_CLUSTERS      equ 4084    ; more clusters than this: FAT16
 
 ; ----------------------------------------------------------------------------
 ; fat12_next - the cluster after AX in a FAT12 chain

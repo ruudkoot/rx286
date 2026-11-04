@@ -28,6 +28,7 @@ FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 begin_udata
 next_attack         dw 0
 scratch             times 8 db 0
+scratch_sector      times SECTOR_SIZE db 0
 bounds              dw 0, 5
 fpu_cw              dw FPU_CW_ZM
 end_udata
@@ -211,6 +212,72 @@ attacks:
 .smsw:  smsw ax                         ; unprivileged on the 286: allowed
         PRINT "attack: smsw allowed", CHAR_LF
         jmp entry
+.dcode: push es                         ; a sector into the code: not writable
+        push cs
+        pop es
+        xor di, di
+        jmp disk_read_attack
+.dnull: push es                         ; a sector through a null ES
+        xor ax, ax
+        mov es, ax
+        xor di, di
+        jmp disk_read_attack
+.dlimit: push es                        ; a sector across the data's limit
+        mov di, UDATA_ROOM - SECTOR_SIZE / 2
+        jmp disk_read_attack
+.dwrap: push es                         ; a sector past FFFFh
+        mov di, 0x10000 - SECTOR_SIZE / 2
+        jmp disk_read_attack
+.dwnull: push ds                        ; a sector written from a null DS
+        xor ax, ax
+        mov ds, ax
+        xor si, si
+        mov al, DRIVE_B
+        xor cx, cx
+        sys SYS_DISK_WRITE
+        pop ds
+        call report_refusal
+        jmp entry
+.pnull: push ds                         ; printed from a null DS
+        xor ax, ax
+        mov ds, ax
+        xor si, si
+        mov al, PRINTER_LPT1
+        mov cx, 1
+        sys SYS_PRINT
+        pop ds
+        call report_refusal
+        jmp entry
+.drive: push es                         ; drive 80h: no such drive
+        mov di, scratch_sector
+        mov al, 0x80
+        xor cx, cx
+        sys SYS_DISK_READ
+        pop es
+        call report_refusal
+        jmp entry
+.sector: push es                        ; sector FFFFh: past A's end
+        mov di, scratch_sector
+        mov al, DRIVE_A
+        mov cx, 0xFFFF
+        sys SYS_DISK_READ
+        pop es
+        call report_refusal
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; disk_read_attack - SYS_DISK_READ of A's sector 0 into ES:DI, reported
+;   In:       ES:DI = the buffer; the program's ES pushed by the attack
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+disk_read_attack:
+        mov al, DRIVE_A
+        xor cx, cx
+        sys SYS_DISK_READ
+        pop es
+        call report_refusal
+        jmp entry
 
 ; ----------------------------------------------------------------------------
 ; report_refusal - "attack: refused, error N" after a system call
@@ -286,6 +353,14 @@ attack_table:
         attack "int 30h at the end of the code", attacks.edge
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
+        attack "read a sector into the code", attacks.dcode
+        attack "read a sector through a null ES", attacks.dnull
+        attack "read a sector across the limit", attacks.dlimit
+        attack "read a sector past FFFFh", attacks.dwrap
+        attack "write a sector from a null selector", attacks.dwnull
+        attack "print from a null selector", attacks.pnull
+        attack "read drive 80h", attacks.drive
+        attack "read sector FFFFh of A", attacks.sector
         dw 0
 end_udata
 

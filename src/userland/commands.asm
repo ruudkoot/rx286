@@ -46,6 +46,7 @@ cmd_help:
         add bx, COMMAND_ENTRY
         jmp .next
 .done:
+        call cmd_drive_help
         PRINT "Keys: Backspace, Esc (clear the line), Up (the last line);", CHAR_LF
         PRINT "Ctrl+Break restarts the shell, Ctrl+Alt+Del the machine.", CHAR_LF
         ret

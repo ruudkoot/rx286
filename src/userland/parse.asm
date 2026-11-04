@@ -1,6 +1,7 @@
 ; ============================================================================
 ; rx286 - src/userland/parse.asm
-; The shell's parsing of a command line: words separated by spaces.
+; The shell's parsing of a command line: words separated by spaces. A
+; command's word matches in any case, as in DOS (its table's are lower case).
 ;
 ; Pure routines (tests/unit/test_parse.py runs them on the host): they read
 ; DS:SI and ES:DI and touch nothing else.
@@ -22,9 +23,11 @@ parse_skip_spaces:
 
 ; ----------------------------------------------------------------------------
 ; parse_match - is the next word of the text this word?
-;   In:       DS:SI = text (zero-terminated); ES:DI = the word (zero-terminated)
+;   In:       DS:SI = text (zero-terminated); ES:DI = the word (zero-terminated,
+;             lower case)
 ;   Out:      CF clear and SI past the word and the spaces after it, if the
-;             text's next word is exactly the word; else CF set, SI as it was
+;             text's next word is the word, in any case; else CF set, SI as
+;             it was
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 parse_match:
@@ -33,10 +36,16 @@ parse_match:
         push di
         call parse_skip_spaces
 .next:
-        mov al, [es:di]
-        test al, al
-        jz .word_end
-        cmp al, [si]
+        mov al, [si]
+        cmp al, 'A'
+        jb .compare
+        cmp al, 'Z'
+        ja .compare
+        or al, 'a' - 'A'                ; the text's letter in lower case
+.compare:
+        cmp byte [es:di], 0
+        je .word_end
+        cmp al, [es:di]
         jne .no
         inc si
         inc di

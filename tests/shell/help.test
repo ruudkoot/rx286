@@ -4,10 +4,14 @@ keys: help\n
 ---
 rx286, test build
 rx286 shell: type help for the commands
-rx286> help
+A:\>help
   help     these lines
   echo     echo TEXT: write TEXT
   clear    clear the screen
+  dir      dir [PATH]: a directory's files, or a file's line
+  cd       cd [PATH]: show or change a drive's directory
+  type     type FILE: show a file
+  print    print FILE: send a file to the printer on LPT1
   uptime   time since the kernel started
   date     the date and time of the real-time clock
   keys     show each key's scancode and ASCII, until Esc
@@ -16,6 +20,7 @@ rx286> help
   crash    crash KIND: try what no program may (crash help)
   spin     loop forever; Ctrl+Break gets the shell back
   exit     end the shell; the kernel starts it again
+  A: B: C: D: make that drive the current one
 Keys: Backspace, Esc (clear the line), Up (the last line);
 Ctrl+Break restarts the shell, Ctrl+Alt+Del the machine.
-rx286>
+A:\>

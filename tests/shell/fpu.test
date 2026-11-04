@@ -5,7 +5,7 @@ emulators: bochs dosbox-x
 ---
 rx286, test build
 rx286 shell: type help for the commands
-rx286> fpu
+A:\>fpu
 sqrt(2) = 1.41421356237309505
 pi      = 3.14159265358979324
-rx286>
+A:\>

@@ -24,7 +24,11 @@ def call(routine, text, word=b''):
     (b'help', b'echo', False, None),
     (b'', b'echo', False, None),
     (b'crash gp', b'crash', True, b'gp'),
-    (b'Echo', b'echo', False, None),
+    (b'Echo', b'echo', True, b''),
+    (b'DIR C:\\', b'dir', True, b'C:\\'),
+    (b'eCHO x', b'echo', True, b'x'),
+    (b'ech0', b'echo', False, None),
+    (b'[cho', b'{cho', False, None),
 ])
 def test_parse_match(text, word, matches, rest):
     regs = call('parse_match', text, word)

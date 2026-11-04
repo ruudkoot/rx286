@@ -115,6 +115,32 @@ print_buffer:
         ret
 
 ; ----------------------------------------------------------------------------
+; print_dec32_right - DX:AX in decimal, right-aligned in CX columns
+;   In:       DX:AX = the number; CX = the columns; DS = ES = the program's data
+;   Out:      nothing
+;   Destroys: CX
+; ----------------------------------------------------------------------------
+print_dec32_right:
+        push di
+        push cx
+        mov di, print_buf
+        call fmt_dec32
+        sub di, print_buf               ; DI = its digits
+        pop cx
+        sub cx, di                      ; CX = the spaces before them
+        jle .digits
+        push ax
+        mov al, ' '
+.pad:
+        call print_char
+        loop .pad
+        pop ax
+.digits:
+        mov di, print_buf               ; again: print_char used the buffer
+        call fmt_dec32
+        jmp print_buffer
+
+; ----------------------------------------------------------------------------
 ; print_dec - AX in decimal
 ;   In:       AX = the number; DS = ES = the program's data
 ;   Out:      nothing

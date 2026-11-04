@@ -14,8 +14,8 @@ D7). This document explains each one.
 | 07E00h-083FFh | the loader: 3 sectors | `LOADER_PHYS`, `LOADER_SECTORS` | the boot sector loads it |
 | 08400h-097FFh | the loader's FAT buffer | `LOADER_FAT_BUF` | the loader |
 | 09800h-0FFFFh | the loader's root-directory buffer | `LOADER_ROOT_BUF`, `LOADER_BUF_END` | the loader |
-| 10000h-16EFFh | the kernel's image and its zeroed areas | `KERNEL_PHYS`, `KERNEL_END` | the loader loads, the kernel runs |
-| 16F00h-9FFFFh | free | | nobody |
+| 10000h-17EFFh | the kernel's image and its zeroed areas | `KERNEL_PHYS`, `KERNEL_END` | the loader loads, the kernel runs |
+| 17F00h-9FFFFh | free | | nobody |
 | A0000h-AFFFFh | EGA graphics memory | | nobody |
 | B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the console |
 | C0000h-C3FFFh | EGA BIOS ROM | | the BIOS |
@@ -45,10 +45,10 @@ segment.
 | kernel code | `KTEXT_OFF` 0100h | `KTEXT_ROOM` 8 KB | `KTEXT_PHYS` 10100h | yes | `SEL_KCODE`, limit = size |
 | kernel data | `KDATA_OFF` 2100h | `KDATA_ROOM` 4 KB | `KDATA_PHYS` 12100h | yes | `SEL_KDATA`, limit = size |
 | program code | `UTEXT_OFF` 3100h | `UTEXT_ROOM` 8 KB | `UTEXT_PHYS` 13100h | yes | `SEL_UCODE`, limit = room |
-| program data | `UDATA_OFF` 5100h | `UDATA_ROOM` 4 KB | `UDATA_PHYS` 15100h | yes | `SEL_UDATA`, limit = room |
-| kernel stack | `KSTACK_OFF` 6100h | `KSTACK_SIZE` 1 KB | `KSTACK_PHYS` 16100h | no: zeroed at start | `SEL_KSTACK` |
-| double-fault stack | `DFSTACK_OFF` 6500h | `DFSTACK_SIZE` 512 B | `DFSTACK_PHYS` 16500h | no: zeroed at start | `SEL_DFSTACK` |
-| program stack | `USTACK_OFF` 6700h | `USTACK_SIZE` 2 KB | `USTACK_PHYS` 16700h | no: zeroed at start | `SEL_USTACK` |
+| program data | `UDATA_OFF` 5100h | `UDATA_ROOM` 8 KB | `UDATA_PHYS` 15100h | yes | `SEL_UDATA`, limit = room |
+| kernel stack | `KSTACK_OFF` 7100h | `KSTACK_SIZE` 1 KB | `KSTACK_PHYS` 17100h | no: zeroed at start | `SEL_KSTACK` |
+| double-fault stack | `DFSTACK_OFF` 7500h | `DFSTACK_SIZE` 512 B | `DFSTACK_PHYS` 17500h | no: zeroed at start | `SEL_DFSTACK` |
+| program stack | `USTACK_OFF` 7700h | `USTACK_SIZE` 2 KB | `USTACK_PHYS` 17700h | no: zeroed at start | `SEL_USTACK` |
 
 `KERNEL.BIN`'s last word, which is the last word of the program's data room,
 is `KERNEL_END_MARK`: the loader refuses a kernel whose end did not arrive.

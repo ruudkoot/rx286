@@ -16,9 +16,9 @@ as recommended, and their reasons recorded; any of them can be revisited.
 | | State |
 |---|---|
 | S1: the drivers and the calls | done |
-| S2: the FAT12 library and the shell | in progress |
-| S3: hostile programs, the fuzzer, host tests | not started |
-| S4: the documents and the close | not started |
+| S2: the FAT12 library and the shell | done |
+| S3: hostile programs, the fuzzer, host tests | done |
+| S4: the documents and the close | done |
 
 ## The request
 
@@ -167,7 +167,7 @@ Bochs; the disks on MAME, the printers on DOSBox-X.
 
 ### S2: the FAT12 library and the shell
 
-`src/userland/fat12.asm` (mount a drive: its partition, its boot sector;
+`src/userland/fat.asm` (mount a drive: its partition, its boot sector;
 walk a directory; follow a chain; read a file), pure parts in `src/lib/`
 tested on the host; the shell's prompt and `A:`-`D:`, `dir`, `cd`, `type`,
 `print`; case-insensitive commands.

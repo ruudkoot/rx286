@@ -39,18 +39,18 @@ KDATA_ROOM          equ 0x1000
 UTEXT_OFF           equ 0x3100      ; the program's code (incbin)
 UTEXT_ROOM          equ 0x2000
 UDATA_OFF           equ 0x5100      ; the program's data (incbin)
-UDATA_ROOM          equ 0x1000
-KERNEL_FILE_SIZE    equ 0x6100      ; KERNEL.BIN is exactly this long
+UDATA_ROOM          equ 0x2000
+KERNEL_FILE_SIZE    equ 0x7100      ; KERNEL.BIN is exactly this long
 KERNEL_END_MARK     equ 0x286E      ; its last word: the loader checks it arrived
 
 ; Zeroed at start, not in the file.
-KSTACK_OFF          equ 0x6100      ; the kernel's stack (SS0 in the TSS)
+KSTACK_OFF          equ 0x7100      ; the kernel's stack (SS0 in the TSS)
 KSTACK_SIZE         equ 0x0400
-DFSTACK_OFF         equ 0x6500      ; the double-fault task's stack
+DFSTACK_OFF         equ 0x7500      ; the double-fault task's stack
 DFSTACK_SIZE        equ 0x0200
-USTACK_OFF          equ 0x6700      ; the program's stack
+USTACK_OFF          equ 0x7700      ; the program's stack
 USTACK_SIZE         equ 0x0800
-KERNEL_END          equ 0x6F00
+KERNEL_END          equ 0x7F00
 
 ; Physical addresses of the segments.
 KTEXT_PHYS          equ KERNEL_PHYS + KTEXT_OFF

@@ -3,7 +3,7 @@
 The AT's four drives and two printer ports, as rx286 drives them
 (`roadmaps/storage.md`). The program sees them through three system calls
 (*docs/syscalls.md*); the shell builds drive letters, directories and files
-on top (`roadmaps/storage.md`, S2).
+on top (*docs/shell.md*).
 
 ## The drives
 

@@ -1,0 +1,15 @@
+# print: a file to the printer on LPT1, every byte of it. (DOSBox-X has no
+# fixed disk; tests/storage/printers.test runs its printers.)
+program: shell
+keys: print c:\\docs\\printme.txt\n
+emulators: bochs
+lpt1: rx286 printer test page
+lpt1: -----------------------
+lpt1: The kernel sent each of these bytes to the printer port,
+lpt1: polling the printer's BUSY line, one strobe a byte.
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>print c:\docs\printme.txt
+printed 161 bytes on LPT1
+A:\>

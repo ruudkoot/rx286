@@ -112,4 +112,20 @@ attack: sgdt
 attack: sgdt allowed
 attack: smsw
 attack: smsw allowed
+attack: read a sector into the code
+attack: refused, error 1
+attack: read a sector through a null ES
+attack: refused, error 1
+attack: read a sector across the limit
+attack: refused, error 1
+attack: read a sector past FFFFh
+attack: refused, error 1
+attack: write a sector from a null selector
+attack: refused, error 1
+attack: print from a null selector
+attack: refused, error 1
+attack: read drive 80h
+attack: refused, error 3
+attack: read sector FFFFh of A
+attack: refused, error 3
 attack: done

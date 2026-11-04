@@ -44,17 +44,18 @@ def mtools(*args):
     subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL)
 
 
-def copy_tree(image, source):
-    """Copy disks/<drive>/ into the image's root, text with CR LF ends."""
+def copy_tree(image, source, scratch):
+    """Copy disks/<drive>/ into the image's root, text with CR LF ends (and
+    no Ctrl+Z after, which mcopy -t would add)."""
     for directory, subdirs, files in os.walk(source):
         subdirs.sort()
         rel = os.path.relpath(directory, source)
-        target = '::' if rel == '.' else '::/' + rel.replace(os.sep, '/')
         if rel != '.':
-            mtools('mmd', '-i', image, target)
+            mtools('mmd', '-i', image, '::/' + rel.replace(os.sep, '/'))
         for name in sorted(files):
-            mtools('mcopy', '-t', '-i', image, os.path.join(directory, name),
-                   target.rstrip('/') + '/' + name)
+            text = open(os.path.join(directory, name), encoding='ascii').read()
+            path = name if rel == '.' else rel.replace(os.sep, '/') + '/' + name
+            put(image, path, text, scratch)
 
 
 def put(image, name, text, scratch):
@@ -78,7 +79,7 @@ def make_floppy_b(out, scratch):
         f.truncate(FLOPPY_B['sectors'] * SECTOR)
     mtools('mformat', '-i', image, '-f', '360', '-N', '%08X' % FLOPPY_B['serial'],
            '-v', FLOPPY_B['label'], '::')
-    copy_tree(image, os.path.join(ROOT, 'disks', 'b'))
+    copy_tree(image, os.path.join(ROOT, 'disks', 'b'), scratch)
     # FRAG.TXT fills the hole a deleted file leaves, then goes on past
     # PAD.TXT: two pieces, so its chain jumps.
     put(image, 'HOLE.TMP', 'x' * 2000 + '\n', scratch)
@@ -112,7 +113,7 @@ def make_fixed(out, disk, scratch):
     mtools('mformat', '-i', volume, '-T', str(size), '-h', str(disk['heads']),
            '-s', str(disk['spt']), '-H', str(start), '-c', str(disk['cluster']),
            '-m', '0xF8', '-N', '%08X' % disk['serial'], '-v', disk['label'], '::')
-    copy_tree(volume, os.path.join(ROOT, 'disks', disk['drive']))
+    copy_tree(volume, os.path.join(ROOT, 'disks', disk['drive']), scratch)
     if disk['drive'] == 'c':
         put(volume, 'NUMBERS.TXT', ''.join('line %04d of C:\\NUMBERS.TXT\n' % n
                                            for n in range(1, 1001)), scratch)

@@ -63,7 +63,7 @@ Every way out is a reported fault, after which the program starts again
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 51 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 59 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -87,6 +87,8 @@ that faulted:
 | a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
 | `INT 30h` as the code segment's last two bytes | #GP(0000) at 0043:2000: the return IP is past the limit |
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
+| `disk_read` into the code, through a null ES, across the data's limit, past FFFFh; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
+| `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 
 The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core

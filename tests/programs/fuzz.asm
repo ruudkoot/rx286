@@ -27,7 +27,7 @@ FUZZ_CODE           equ 0x0100          ; where the bytes go in the data segment
 SEED_MIX            equ 0x9E37          ; spreads consecutive seeds apart
 SYSCALL_EVERY       equ 4               ; one iteration in four starts with INT 30h
 INT_30H             equ 0x30CD          ; CD 30, as a little-endian word
-SYSCALL_FUNCTIONS   equ 8               ; AH in those iterations: 0-7
+SYSCALL_FUNCTIONS   equ 16              ; AH in those iterations: every call, and as many past them
 
 begin_udata
 seed                dw 0                ; must stay the first word (test.asm)
@@ -93,7 +93,7 @@ entry:
         call xorshift                   ; AX: the state is not needed after this
         test byte [seed], SYSCALL_EVERY - 1
         jnz .go
-        and ah, SYSCALL_FUNCTIONS - 1   ; a call, or one of the few past them
+        and ah, SYSCALL_FUNCTIONS - 1   ; a call, or one past them
         and ch, 0x0F                    ; a length write may take
 .go:
         pop ds                          ; may fault too

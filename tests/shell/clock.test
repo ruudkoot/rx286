@@ -4,10 +4,10 @@ program: shell
 keys: uptime\ndate\nclear\n
 match: contains
 ---
-rx286> uptime
+A:\>uptime
 up 0:00:
-rx286> date
+A:\>date
 @bochs 1989-01-01 00:00:
-rx286> clear
+A:\>clear
 [form feed]
-rx286>
+A:\>

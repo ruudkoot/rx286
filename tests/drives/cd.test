@@ -1,0 +1,30 @@
+# cd: relative, absolute, "." and "..", up and down; each drive keeps its
+# own directory (cd b:\... from D, cd b: to show it); a file or a missing
+# name is no directory; commands in any case.
+program: shell
+keys: c:\ncd docs\ncd .\ncd ..\ncd \\docs\\..\\docs\ncd\nd:\nCd B:\\MANY\ncd b:\nb:\ncd ..\ncd readme.txt\ncd nowhere\ncd ..\n
+timeout: 60
+emulators: bochs mame
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>c:
+C:\>cd docs
+C:\DOCS>cd .
+C:\DOCS>cd ..
+C:\>cd \docs\..\docs
+C:\DOCS>cd
+C:\DOCS
+C:\DOCS>d:
+D:\>Cd B:\MANY
+D:\>cd b:
+B:\MANY
+D:\>b:
+B:\MANY>cd ..
+B:\>cd readme.txt
+Invalid directory
+B:\>cd nowhere
+Invalid directory
+B:\>cd ..
+Invalid directory
+B:\>

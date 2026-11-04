@@ -4,6 +4,8 @@
 ;
 ; It reads a line with a small editor (Backspace, Esc to clear, Up to
 ; recall the last line), finds the command's word in its table and runs it.
+; Its prompt and its drive commands are DOS's (drives.asm, on the FAT12
+; library fat.asm: storage roadmap D8).
 ; Every command reaches the kernel only through the system calls; `crash`
 ; does what no program may, and the kernel's report and the shell's restart
 ; show the sandbox at work. The kernel keeps the shell's data across a
@@ -37,12 +39,13 @@ entry:
         inc word [starts]
         cmp word [starts], 1
         jne .again
+        call drives_init
         PRINT "rx286 shell: type help for the commands", CHAR_LF
         jmp .loop
 .again:
         PRINT "rx286 shell, started again", CHAR_LF
 .loop:
-        PRINT "rx286> "
+        call print_prompt
         call read_line
         call run_line
         jmp .loop
@@ -151,6 +154,10 @@ run_line:
         mov di, last_line
         mov cx, LINE_MAX + 1
         rep movsb
+        mov si, line
+        call parse_skip_spaces
+        call drive_line                 ; "b:": done, if so
+        jnc .done
         mov bx, commands_start
 .next:
         mov di, [cs:bx]                 ; the command's word, or 0 at the end
@@ -190,6 +197,10 @@ commands_start      equ $
         command "help", cmd_help, "these lines"
         command "echo", cmd_echo, "echo TEXT: write TEXT"
         command "clear", cmd_clear, "clear the screen"
+        command "dir", cmd_dir, "dir [PATH]: a directory's files, or a file's line"
+        command "cd", cmd_cd, "cd [PATH]: show or change a drive's directory"
+        command "type", cmd_type, "type FILE: show a file"
+        command "print", cmd_print, "print FILE: send a file to the printer on LPT1"
         command "uptime", cmd_uptime, "time since the kernel started"
         command "date", cmd_date, "the date and time of the real-time clock"
         command "keys", cmd_keys, "show each key's scancode and ASCII, until Esc"
@@ -201,6 +212,10 @@ commands_start      equ $
         dw 0
 
 %include "commands.asm"
+%include "fat12.asm"
+%include "fatname.asm"
+%include "fat.asm"
+%include "drives.asm"
 %include "crash.asm"
 %include "parse.asm"
 %include "uprint.asm"

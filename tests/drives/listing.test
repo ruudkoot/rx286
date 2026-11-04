@@ -1,0 +1,98 @@
+# dir on every drive: the root, a subdirectory, one file, and a directory
+# of two clusters (B:\MANY: 42 entries of 32 bytes, 1 KB clusters), with
+# the volume label and the free space mtools gives for each image.
+program: shell
+keys: dir\nb:\ndir\nc:\ndir docs\nDIR C:\\DOCS\\HELLO.TXT\nd:\ndir \\\ndir b:\\many\n
+timeout: 60
+emulators: bochs mame
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>dir
+ Volume in drive A is RX286
+ Directory of A:\
+KERNEL   BIN     28928  1989-01-01  00:00
+        1 file(s)      28928 bytes
+                     1183232 bytes free
+A:\>b:
+B:\>dir
+ Volume in drive B is RX286B
+ Directory of B:\
+README   TXT        79  1989-01-01  00:00
+FRAG     TXT      3136  1989-01-01  00:00
+PAD      TXT        50  1989-01-01  00:00
+MANY         <DIR>      1989-01-01  00:00
+        4 file(s)       3265 bytes
+                      313344 bytes free
+B:\>c:
+C:\>dir docs
+ Volume in drive C is RX286C
+ Directory of C:\DOCS
+.            <DIR>      1989-01-01  00:00
+..           <DIR>      1989-01-01  00:00
+HELLO    TXT        21  1989-01-01  00:00
+PRINTME  TXT       161  1989-01-01  00:00
+        4 file(s)        182 bytes
+                    21307392 bytes free
+C:\>DIR C:\DOCS\HELLO.TXT
+ Volume in drive C is RX286C
+ Directory of C:\DOCS
+HELLO    TXT        21  1989-01-01  00:00
+        1 file(s)         21 bytes
+                    21307392 bytes free
+C:\>d:
+D:\>dir \
+ Volume in drive D is RX286D
+ Directory of D:\
+README   TXT       142  1989-01-01  00:00
+GAMES        <DIR>      1989-01-01  00:00
+        2 file(s)        142 bytes
+                    10604544 bytes free
+D:\>dir b:\many
+ Volume in drive B is RX286B
+ Directory of B:\MANY
+.            <DIR>      1989-01-01  00:00
+..           <DIR>      1989-01-01  00:00
+FILE01   TXT        29  1989-01-01  00:00
+FILE02   TXT        29  1989-01-01  00:00
+FILE03   TXT        29  1989-01-01  00:00
+FILE04   TXT        29  1989-01-01  00:00
+FILE05   TXT        29  1989-01-01  00:00
+FILE06   TXT        29  1989-01-01  00:00
+FILE07   TXT        29  1989-01-01  00:00
+FILE08   TXT        29  1989-01-01  00:00
+FILE09   TXT        29  1989-01-01  00:00
+FILE10   TXT        29  1989-01-01  00:00
+FILE11   TXT        29  1989-01-01  00:00
+FILE12   TXT        29  1989-01-01  00:00
+FILE13   TXT        29  1989-01-01  00:00
+FILE14   TXT        29  1989-01-01  00:00
+FILE15   TXT        29  1989-01-01  00:00
+FILE16   TXT        29  1989-01-01  00:00
+FILE17   TXT        29  1989-01-01  00:00
+FILE18   TXT        29  1989-01-01  00:00
+FILE19   TXT        29  1989-01-01  00:00
+FILE20   TXT        29  1989-01-01  00:00
+FILE21   TXT        29  1989-01-01  00:00
+FILE22   TXT        29  1989-01-01  00:00
+FILE23   TXT        29  1989-01-01  00:00
+FILE24   TXT        29  1989-01-01  00:00
+FILE25   TXT        29  1989-01-01  00:00
+FILE26   TXT        29  1989-01-01  00:00
+FILE27   TXT        29  1989-01-01  00:00
+FILE28   TXT        29  1989-01-01  00:00
+FILE29   TXT        29  1989-01-01  00:00
+FILE30   TXT        29  1989-01-01  00:00
+FILE31   TXT        29  1989-01-01  00:00
+FILE32   TXT        29  1989-01-01  00:00
+FILE33   TXT        29  1989-01-01  00:00
+FILE34   TXT        29  1989-01-01  00:00
+FILE35   TXT        29  1989-01-01  00:00
+FILE36   TXT        29  1989-01-01  00:00
+FILE37   TXT        29  1989-01-01  00:00
+FILE38   TXT        29  1989-01-01  00:00
+FILE39   TXT        29  1989-01-01  00:00
+FILE40   TXT        29  1989-01-01  00:00
+       42 file(s)       1160 bytes
+                      313344 bytes free
+D:\>
