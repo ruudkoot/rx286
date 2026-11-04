@@ -2,15 +2,15 @@
 ; rx286 - src/kernel/fault.asm
 ; The CPU's exceptions: a fault of the program, or a panic (roadmap D11, D13).
 ;
-; Who faulted is in the frame's CS: CPL 3 is the program, CPL 0 the kernel.
-; NMI is always a panic. (M4: there is no program yet; M6 adds its faults
-; and the restart.)
+; Who faulted is in the frame's CS: CPL 3 is the program (program.asm reports
+; it and starts the program again), CPL 0 the kernel (a panic). NMI is always
+; a panic. The single-step trap counts as the program's fault: only a
+; program sets TF.
 ; ============================================================================
 
 begin_kdata
 restart_pending     db 0                ; restart the program on the way back to ring 3
 msg_kernel_fault    db "exception in the kernel", 0
-msg_program_fault   db "a program fault, before any program runs", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -45,23 +45,3 @@ begin_kdata
 msg_nmi             db "NMI: a parity error or an I/O channel check; port 61h = "
 msg_nmi_status      db "??h", 0
 end_kdata
-
-; ----------------------------------------------------------------------------
-; fault_program - a fault of the program (M6)
-;   In:       BP = the frame; DS = SEL_KDATA
-;   Out:      does not return before M6
-;   Destroys: everything
-; ----------------------------------------------------------------------------
-fault_program:
-        mov si, msg_program_fault
-        jmp panic
-
-; ----------------------------------------------------------------------------
-; restart_program - make the frame return to the program's entry (M6)
-;   In:       BP = a frame from ring 3; DS = SEL_KDATA
-;   Out:      nothing before M6
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-restart_program:
-        mov byte [restart_pending], 0
-        ret

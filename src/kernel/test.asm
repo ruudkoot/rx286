@@ -93,13 +93,14 @@ test_start:
         ret
 
 ; ----------------------------------------------------------------------------
-; test_after_start - before there is a program: read keys, or end the test
+; test_after_start - TEST_KEYBOARD: the kernel reads and prints keys itself,
+; and the program never starts
 ;   In:       DS = ES = SEL_KDATA; interrupts off
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
-test_after_start:
 %ifdef TEST_KEYBOARD
+test_after_start:
 .next:
         call kbd_wait_key
         jz .abandoned
@@ -343,13 +344,40 @@ test_ticks:
 %endif
 
 ; ----------------------------------------------------------------------------
-; test_end - "TEST END" on COM1, then end Bochs
+; test_program_started - every start of the program (M8 adds its checks)
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+test_program_started:
+        ret
+
+; ----------------------------------------------------------------------------
+; test_fault_quiet - should this fault of the program go unreported?
+;   In:       BP = the frame; DS = SEL_KDATA
+;   Out:      CF set to keep quiet (the fuzzer counts its faults, M8)
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+test_fault_quiet:
+        clc
+        ret
+
+; ----------------------------------------------------------------------------
+; test_end - "TEST END" on COM1 on a line of its own, then end Bochs
 ;   In:       DS = SEL_KDATA
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 test_end:
         cli
+        mov ax, [con_pos]
+        mov dl, VIDEO_COLUMNS
+        div dl
+        test ah, ah                     ; the console's column
+        jz .line_start
+        mov al, CHAR_LF
+        call com_putc
+.line_start:
         mov si, msg_test_end
         call com_puts
         call com_drain

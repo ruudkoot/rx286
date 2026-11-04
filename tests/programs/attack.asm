@@ -1,0 +1,233 @@
+; ============================================================================
+; rx286 - tests/programs/attack.asm
+; The attack suite's program: one forbidden thing per start (roadmap M6, M8).
+;
+; At each start it takes the next attack from its table (its data segment
+; survives the kernel's restarts), prints the attack's name, and runs it. An
+; attack that faults is reported by the kernel, which starts the program
+; again; one that does not prints what happened and moves on. When the table
+; is done it says so and waits for a key, which ends the test.
+; tests/attack/attacks.test holds what each attack must give; docs/security.md
+; explains them. Bochs is not a 286: where the two differ, this file says.
+; ============================================================================
+
+cpu 286
+bits 16
+%include "build.inc"
+%include "ports.inc"
+%include "selectors.inc"
+%include "program.inc"
+
+FLAGS_TF            equ 0x0100
+FLAGS_IOPL3         equ 0x3000
+FLAGS_NT            equ 0x4000
+SEL_BEYOND_GDT      equ 0x60 | RPL_USER
+SEL_LDT_ENTRY       equ 0x08 | 0x04 | RPL_USER  ; index 1, TI = 1
+FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
+
+begin_udata
+next_attack         dw 0
+scratch             times 8 db 0
+bounds              dw 0, 5
+fpu_cw              dw FPU_CW_ZM
+end_udata
+
+; ----------------------------------------------------------------------------
+; entry - run the next attack, or end
+;   In:       the kernel's start (program.inc)
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+entry:
+        mov bx, [next_attack]
+        inc word [next_attack]
+        mov si, attack_table
+.find:
+        cmp word [si], 0
+        je .done                        ; past the last attack
+        test bx, bx
+        jz .found
+        add si, 2                       ; skip this entry: its address, its name
+.skip:
+        lodsb
+        test al, al
+        jnz .skip
+        dec bx
+        jmp .find
+.found:
+        mov bx, [si]
+        add si, 2
+        call print_str
+        call print_newline
+        jmp bx
+.done:
+        PRINT "attack: done", CHAR_LF
+.wait:
+        mov al, KEY_WAIT
+        sys SYS_READ_KEY
+        jmp .wait
+
+; ----------------------------------------------------------------------------
+; attacks - the attacks, each a local label; the kernel restarts the program
+; after each one that faults
+;   In:       DS = ES = the program's data
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+attacks:
+.cli:   cli
+.sti:   sti
+.in:    in al, KBC_DATA
+.out:   out SYS_PORT_B, al
+.hlt:   hlt
+.lgdt:  lgdt [scratch]
+.lidt:  lidt [scratch]
+.lmsw:  lmsw ax
+.clts:  clts
+.ltr:   mov ax, SEL_TSS
+.ltr_f: ltr ax
+.lldt:  xor ax, ax
+.lldt_f: lldt ax
+.kdata: mov ax, SEL_KDATA
+.kdata_f: mov ds, ax
+.kstack: mov ax, SEL_KSTACK
+.kstack_f: mov ss, ax
+.video: mov ax, SEL_VIDEO
+.video_f: mov es, ax
+.beyond: mov ax, SEL_BEYOND_GDT
+.beyond_f: mov es, ax
+.ldt:   mov ax, SEL_LDT_ENTRY
+.ldt_f: mov ds, ax
+.kcall: call SEL_KCODE:0
+.tss:   jmp SEL_TSS:0
+.dftss: call SEL_DFTSS:0
+.int31: int 0x31                        ; beyond the IDT's limit
+.int21: int 0x21                        ; IRQ1's gate: DPL 0
+.int3:  int3
+.into:  mov al, 127
+        add al, 1                       ; OF set
+.into_f: into
+.wcode: mov [cs:0], al                  ; code is not writable
+.limit: mov ax, [UDATA_ROOM]            ; past the data segment's limit
+.word:  mov ax, [UDATA_ROOM - 1]        ; a word across the limit
+.stack: mov sp, 0
+.stack_f: push ax                       ; SP wraps to FFFEh, past USTACK's limit
+.exec:  jmp SEL_UDATA:0                 ; data is not code
+.div:   xor ax, ax
+        xor dx, dx
+.div_f: div ax
+.ud:    db 0xFF, 0xFF                   ; FF /7: no such instruction
+.bound: mov ax, 9
+.bound_f: bound ax, [bounds]
+.tf:    pushf
+        pop ax
+        or ax, FLAGS_TF
+        push ax
+        popf
+        nop                             ; the trap comes after this instruction
+.tf_after:
+        nop
+.nt:    pushf
+        pop ax
+        or ax, FLAGS_NT
+        push ax
+        popf
+        push word SEL_UCODE
+        push word 0
+.nt_f:  iret                            ; a task return to back link 0
+.iopl:  pushf
+        pop ax
+        or ax, FLAGS_IOPL3              ; ignored at CPL 3
+        push ax
+        popf
+.iopl_f: cli
+.lock:  lock add [scratch], al          ; a 286 faults (CPL > IOPL); Bochs runs it
+        PRINT "attack: lock ran without a fault (not a 286)", CHAR_LF
+        jmp entry
+.loadall: db 0x0F, 0x05                 ; LOADALL on a 286; SYSCALL, #UD, on Bochs
+.fpu:   fldcw [fpu_cw]
+        fld1
+        fldz
+        fdivp st1, st0
+        fwait                           ; Bochs raises IRQ13 here
+        jmp $
+.write: mov si, UDATA_ROOM - 2
+        mov cx, 4
+        sys SYS_WRITE                   ; refused: past the limit
+        call report_refusal
+        jmp entry
+.sgdt:  sgdt [scratch]                  ; unprivileged on the 286: allowed
+        PRINT "attack: sgdt allowed", CHAR_LF
+        jmp entry
+.smsw:  smsw ax                         ; unprivileged on the 286: allowed
+        PRINT "attack: smsw allowed", CHAR_LF
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; report_refusal - "attack: refused, error N" after a system call
+;   In:       CF and AX as the call returned them
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+report_refusal:
+        jnc .accepted
+        PRINT "attack: refused, error "
+        call print_dec
+        call print_newline
+        ret
+.accepted:
+        PRINT "attack: ACCEPTED", CHAR_LF
+        ret
+
+begin_udata
+; Each attack: where it starts, then its name; a zero word ends the table.
+%macro attack 2
+        dw %2
+        db "attack: ", %1, 0
+%endmacro
+attack_table:
+        attack "cli", attacks.cli
+        attack "sti", attacks.sti
+        attack "in", attacks.in
+        attack "out", attacks.out
+        attack "hlt", attacks.hlt
+        attack "lgdt", attacks.lgdt
+        attack "lidt", attacks.lidt
+        attack "lmsw", attacks.lmsw
+        attack "clts", attacks.clts
+        attack "ltr", attacks.ltr
+        attack "lldt", attacks.lldt
+        attack "kernel data", attacks.kdata
+        attack "kernel stack", attacks.kstack
+        attack "video", attacks.video
+        attack "beyond the GDT", attacks.beyond
+        attack "an LDT selector", attacks.ldt
+        attack "call the kernel", attacks.kcall
+        attack "jump to the TSS", attacks.tss
+        attack "call the double-fault TSS", attacks.dftss
+        attack "int 31h", attacks.int31
+        attack "int 21h", attacks.int21
+        attack "int 3", attacks.int3
+        attack "into", attacks.into
+        attack "write code", attacks.wcode
+        attack "past the limit", attacks.limit
+        attack "a word across the limit", attacks.word
+        attack "stack overflow", attacks.stack
+        attack "execute data", attacks.exec
+        attack "divide by zero", attacks.div
+        attack "invalid opcode", attacks.ud
+        attack "bound", attacks.bound
+        attack "trap flag", attacks.tf
+        attack "NT and iret", attacks.nt
+        attack "IOPL through popf", attacks.iopl
+        attack "lock", attacks.lock
+        attack "loadall", attacks.loadall
+        attack "287 error", attacks.fpu
+        attack "write past the limit", attacks.write
+        attack "sgdt", attacks.sgdt
+        attack "smsw", attacks.smsw
+        dw 0
+end_udata
+
+%include "uprint.asm"
+%include "format.asm"

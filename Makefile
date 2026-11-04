@@ -44,11 +44,13 @@ NASMFLAGS := -f bin -w+all -w+error -Isrc/include/ $(FLAVOUR_DEFINE) $(TEST_DEFI
 
 # The program the kernel carries (test builds may choose another).
 program_main_shell := src/userland/shell.asm
+program_main_idle := tests/programs/idle.asm
+program_main_syscalls := tests/programs/syscalls.asm
 program_main_attack := tests/programs/attack.asm
 program_main_fuzz := tests/programs/fuzz.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, attack or fuzz, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack or fuzz, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
@@ -90,7 +92,8 @@ COMMON_SRC := $(wildcard src/include/*.inc) $(wildcard src/lib/*.asm) Makefile
 BOOT_SRC := $(wildcard src/boot-sector/*.asm) $(COMMON_SRC)
 LOADER_SRC := $(wildcard src/boot-loader/*.asm) $(COMMON_SRC)
 KERNEL_SRC := $(wildcard src/kernel/*.asm src/kernel/*.inc) $(COMMON_SRC) $(TEST_KEYS_FILE)
-PROGRAM_SRC := $(PROGRAM_MAIN) $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
+PROGRAM_SRC := $(PROGRAM_MAIN) $(wildcard src/userland/*.asm src/userland/*.inc tests/programs/*.asm) \
+    $(COMMON_SRC)
 
 $(B)/boot-sector.bin: src/boot-sector/boot-sector.asm $(BOOT_SRC)
 	$(call assemble,$@,$<)

@@ -10,7 +10,8 @@
 #
 # A test file is a header, a line `---`, and the expected transcript:
 #
-#   program: shell              shell (default), attack or fuzz
+#   program: idle               idle (default: waits for keys), shell, syscalls,
+#                               attack or fuzz
 #   keys: echo hi\n             a key script (tools/rxlib.py); may repeat
 #   define: TEST_PANIC_DIVIDE   a NASM define for the kernel; may repeat
 #   image: fragmented           change the floppy: fragmented, missing, oversized,
@@ -28,7 +29,8 @@
 # prefix:   the transcript starts with the expected lines (the run stops then).
 # contains: the expected lines appear in this order, among the transcript's
 #           and the debugger's lines.
-# Lines the kernel marks `[trace]` or `[regs]` are ignored. docs/testing.md
+# Lines the kernel marks `[trace]`, register lines (`regs:`) and blank lines
+# are ignored. docs/testing.md
 # explains the layers of tests.
 # ============================================================================
 
@@ -53,7 +55,7 @@ class Test:
         self.path = os.path.relpath(path, ROOT)
         self.suite = os.path.basename(os.path.dirname(path))
         self.name = os.path.splitext(os.path.basename(path))[0]
-        self.program = 'shell'
+        self.program = 'idle'
         self.keys = ''
         self.defines = []
         self.image = None
@@ -204,12 +206,14 @@ def substitute(test, line):
 
 
 def relevant(lines):
-    return [l for l in lines if not l.startswith(IGNORED_PREFIXES)]
+    """The lines a test compares: not the kernel's trace and register lines,
+    and not blank ones."""
+    return [l for l in lines if l and not l.startswith(IGNORED_PREFIXES)]
 
 
 def compare(test, transcript, debugger_lines):
     """Returns None if the test passes, else a description of the failure."""
-    expected = [substitute(test, l) for l in test.expected]
+    expected = [substitute(test, l) for l in test.expected if l]
     got = relevant(transcript)
     if any(l.startswith('PANIC') or 'rx286 PANIC' in l for l in got) and \
             not any('PANIC' in l for l in expected):

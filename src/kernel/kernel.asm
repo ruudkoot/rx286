@@ -54,6 +54,7 @@ section ktext
 %include "serial.asm"
 %include "print.asm"
 %include "syscall.asm"
+%include "program.asm"
 %include "test.asm"
 %include "format.asm"
 ktext_end:
@@ -62,6 +63,7 @@ section kdata
 kdata_end:
 
 ; The program: USER_FILE_SIZE bytes, its data padded with zeros to the room.
+; "TIMES value is negative" here means the program's data outgrew UDATA_ROOM.
 section user
 user_start:
         incbin USER_BIN

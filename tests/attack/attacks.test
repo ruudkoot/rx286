@@ -1,0 +1,87 @@
+# Every attack of the program tests/programs/attack.asm, and what the kernel
+# makes of it (on Bochs: docs/emulators.md lists where a 286 differs).
+program: attack
+timeout: 60
+---
+rx286, test build
+attack: cli
+rx286: program fault #GP(0000) at 0043:{attacks.cli}
+attack: sti
+rx286: program fault #GP(0000) at 0043:{attacks.sti}
+attack: in
+rx286: program fault #GP(0000) at 0043:{attacks.in}
+attack: out
+rx286: program fault #GP(0000) at 0043:{attacks.out}
+attack: hlt
+rx286: program fault #GP(0000) at 0043:{attacks.hlt}
+attack: lgdt
+rx286: program fault #GP(0000) at 0043:{attacks.lgdt}
+attack: lidt
+rx286: program fault #GP(0000) at 0043:{attacks.lidt}
+attack: lmsw
+rx286: program fault #GP(0000) at 0043:{attacks.lmsw}
+attack: clts
+rx286: program fault #GP(0000) at 0043:{attacks.clts}
+attack: ltr
+rx286: program fault #GP(0000) at 0043:{attacks.ltr_f}
+attack: lldt
+rx286: program fault #GP(0000) at 0043:{attacks.lldt_f}
+attack: kernel data
+rx286: program fault #GP(0010) at 0043:{attacks.kdata_f}
+attack: kernel stack
+rx286: program fault #GP(0018) at 0043:{attacks.kstack_f}
+attack: video
+rx286: program fault #GP(0038) at 0043:{attacks.video_f}
+attack: beyond the GDT
+rx286: program fault #GP(0060) at 0043:{attacks.beyond_f}
+attack: an LDT selector
+rx286: program fault #GP(000C) at 0043:{attacks.ldt_f}
+attack: call the kernel
+rx286: program fault #GP(0008) at 0043:{attacks.kcall}
+attack: jump to the TSS
+rx286: program fault #GP(0020) at 0043:{attacks.tss}
+attack: call the double-fault TSS
+rx286: program fault #GP(0028) at 0043:{attacks.dftss}
+attack: int 31h
+rx286: program fault #GP(018A) at 0043:{attacks.int31}
+attack: int 21h
+rx286: program fault #GP(010A) at 0043:{attacks.int21}
+attack: int 3
+rx286: program fault #GP(001A) at 0043:{attacks.int3}
+attack: into
+rx286: program fault #GP(0022) at 0043:{attacks.into_f}
+attack: write code
+rx286: program fault #GP(0000) at 0043:{attacks.wcode}
+attack: past the limit
+rx286: program fault #GP(0000) at 0043:{attacks.limit}
+attack: a word across the limit
+rx286: program fault #GP(0000) at 0043:{attacks.word}
+attack: stack overflow
+rx286: program fault #SS(0000) at 0043:{attacks.stack_f}
+attack: execute data
+rx286: program fault #GP(0048) at 0043:{attacks.exec}
+attack: divide by zero
+rx286: program fault #DE at 0043:{attacks.div_f}
+attack: invalid opcode
+rx286: program fault #UD at 0043:{attacks.ud}
+attack: bound
+rx286: program fault #BR at 0043:{attacks.bound_f}
+attack: trap flag
+rx286: program fault #DB at 0043:{attacks.tf_after}
+attack: NT and iret
+rx286: program fault #TS(0000) at 0043:{attacks.nt_f}
+attack: IOPL through popf
+rx286: program fault #GP(0000) at 0043:{attacks.iopl_f}
+attack: lock
+attack: lock ran without a fault (not a 286)
+attack: loadall
+rx286: program fault #UD at 0043:{attacks.loadall}
+attack: 287 error
+rx286: the 287 reported an error (IRQ13)
+attack: write past the limit
+attack: refused, error 1
+attack: sgdt
+attack: sgdt allowed
+attack: smsw
+attack: smsw allowed
+attack: done

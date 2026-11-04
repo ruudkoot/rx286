@@ -1,0 +1,24 @@
+# Every system call with good and bad arguments (tests/programs/syscalls.asm).
+program: syscalls
+keys: x
+timeout: 60
+---
+rx286, test build
+hello
+write: returned 5
+write: 0 bytes returned 0
+error 1
+error 1
+error 1
+error 3
+C
+write: from CS returned 1
+read_key: polled 0000
+read_key: waited for 2D78
+error 3
+ticks: counting up
+time: 1989-01-01 00
+error 2
+registers: kept
+window: ticks kept pace with the clock
+exit: the program started again, its data kept

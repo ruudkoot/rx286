@@ -72,9 +72,8 @@ pm_start:
 .ready:
 %ifdef WITH_TEST_HOOKS
         call test_start
+%endif
+%ifdef TEST_KEYBOARD
         jmp test_after_start
 %endif
-.idle:                                  ; no program yet (M6): keys are buffered,
-        sti                             ; Ctrl+Alt+Del works
-        hlt
-        jmp .idle
+        jmp enter_program

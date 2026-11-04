@@ -78,10 +78,10 @@ def lint(path):
         m = re.match(r'^\s*section\s+(\S+)', line)
         if m:
             section = m.group(1)
-        if re.match(r'^\s*begin_kdata\b', line):
+        if re.match(r'^\s*begin_[ku]data\b', line):
             saved.append(section)
             section = 'kdata'
-        elif re.match(r'^\s*end_kdata\b', line) and saved:
+        elif re.match(r'^\s*end_[ku]data\b', line) and saved:
             section = saved.pop()
         if PORT_NUMBER.match(line):
             report(n, 'port', 'name the port with a constant: ' + line.strip())
