@@ -31,7 +31,7 @@ UT_ARENA            equ 0x4F            ; slot 9: the rest of the arena
 MY_SPACE            equ 0x57            ; slot 10: its own space
 MY_THREAD           equ 0x5F            ; slot 11: its own thread
 MY_EMPTY            equ 0x67            ; slot 12: empty
-PAST_MY_SPACE       equ 0x87            ; slot 16: past its 16 slots
+PAST_MY_SPACE       equ 0x107           ; slot 32: past its 32 slots
 GDT_SELECTOR        equ 0x10            ; the kernel's data: no slot of anyone's
 ACC_DATA3           equ 0xF2            ; present, DPL 3, data, writable
 ACC_CODE3           equ 0xFA            ; present, DPL 3, code, readable

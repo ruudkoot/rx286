@@ -52,44 +52,49 @@ counter_ldt_pristine:
 
 [section ktext]
 ; ----------------------------------------------------------------------------
-; ldt_restore - the running thread's segments as its image describes them
+; ldt_restore - the running thread's segments as its image describes them:
+; each present descriptor of the pristine table into its slot again, with
+; its shadow entry (a probe, or the program's own KCALL_DELETE, may have
+; changed them); a slot the image leaves empty may hold a capability now,
+; and is left alone
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 ldt_restore:
+        push ax
         push bx
         push cx
+        push dx
         push si
         push di
-        push es
-        push ds
-        pop es
         mov bx, [cur_thread]
-        mov si, [bx + T_LDT_PRISTINE]
-        test si, si
+        mov dx, [bx + T_LDT_PRISTINE]
+        test dx, dx
         jz .done                        ; a thread made by the kernel's calls: none
-        mov di, [bx + T_LDT_LIVE]
-        mov cx, LDT_ENTRIES
-        cld
+        mov bx, [bx + T_SPACE]
+        xor cx, cx                      ; the slot
 .slot:
-        test byte [si + 5], ACC_PRESENT ; only the image's segments: a slot it
-        jz .skip                        ; leaves empty may hold a capability now
-        movsw
-        movsw
-        movsw
-        movsw
-        loop .slot
-        jmp .done
-.skip:
-        add si, 8
-        add di, 8
-        loop .slot
+        mov si, dx
+        test byte [si + 5], ACC_PRESENT
+        jz .next
+        mov ax, cx
+        call slot_at                    ; SI, DI = the slot
+        push bx
+        mov bx, dx
+        call slot_put_descriptor
+        pop bx
+.next:
+        add dx, 8
+        inc cx
+        cmp cx, LDT_ENTRIES
+        jb .slot
 .done:
-        pop es
         pop di
         pop si
+        pop dx
         pop cx
         pop bx
+        pop ax
         ret
 [section kdata]

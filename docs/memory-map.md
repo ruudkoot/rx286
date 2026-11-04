@@ -70,7 +70,7 @@ segments is untyped too, from `UMEM_PHYS`, `UMEM_SIZE` bytes.
 
 | Object | Bytes | What |
 |---|---|---|
-| a thread | 1,024 | its control block (128), then its kernel stack (896): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from ring 3 |
+| a thread | 1,024 | its control block (160), then its kernel stack (864): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from ring 3 |
 | a space | 16 + 24 a slot, rounded up to a power of two | its header, its LDT (8 a slot), a shadow entry a slot (16) |
 | an endpoint, a notification | 16 | |
 

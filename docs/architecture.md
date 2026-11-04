@@ -62,6 +62,7 @@ with `incbin`: it can name nothing of the kernel's.
 | `program.asm` | a program: its restart, its fault report |
 | `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump; the start of the first two |
 | `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*) |
+| `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
 | `ldt.asm` | the descriptors of the programs the image carries, copied into their spaces at start |
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
 | `pic.asm` | the 8259As; the driver of each line or the rule for none; spurious IRQ7 and IRQ15 |
@@ -135,6 +136,13 @@ more with the kernel's calls.
   thread that does not own it, and its first 287 instruction raises #NM,
   which saves the owner's state in the owner's control block and restores
   its own. IRQ13 is charged to the 287's owner, whichever thread runs.
+- **IPC** (`ipc.asm`; roadmap l4.md L4): threads call each other through
+  endpoints and signal notifications (*docs/kernel-calls.md*). A thread
+  waiting in IPC waits inside its own kernel call, on its own kernel
+  stack; a message is copied from the sender's frame into the receiver's,
+  registers only. A call or reply that wakes a thread at least as urgent
+  puts it first in its queue (the direct switch). A restart takes a thread
+  out of any queue and wakes it with `KE_STATE`.
 - **Debug and test builds** print every thread on the AT's Sys Req key:
   its state, priority, and how much of its kernel stack it has ever used.
 

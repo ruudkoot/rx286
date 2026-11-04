@@ -46,6 +46,7 @@ timer_irq:
         add word [ticks], 1
         adc word [ticks + 2], 0
         call thread_tick                ; the running thread's time slice
+        call timers_tick                ; the kernel's timers (ipc.asm)
         call fd_tick
         call mouse_tick
         call mouse_irq                  ; bytes whose interrupt was lost (an edge

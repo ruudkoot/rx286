@@ -21,7 +21,7 @@
 
 ARENA_PARA          equ ARENA_PHYS >> 4
 %ifdef TEST_CAPS
-BOOT_SLOTS          equ 16              ; room for the capabilities a test gives
+BOOT_SLOTS          equ 32              ; room for the capabilities a test gives and makes
 %else
 BOOT_SLOTS          equ LDT_ENTRIES     ; a program's space as the image describes it
 %endif
@@ -42,14 +42,22 @@ memory_untyped:
 thread_list         times THREAD_MAX dw 0   ; every thread, in the order made
 thread_count        dw 0
 kcall_table:
-        dw kc_done.nosys, kc_done.nosys, kc_done.nosys, kc_done.nosys   ; 0-3: IPC (L4)
-        dw kc_done.nosys, kc_done.nosys, kc_done.nosys             ; 4-6: IPC (L4)
+        dw kc_done.nosys                            ; 0
+        dw kc_call                                  ; KCALL_CALL (ipc.asm)
+        dw kc_reply_recv                            ; KCALL_REPLY_RECV
+        dw kc_recv                                  ; KCALL_RECV
+        dw kc_send                                  ; KCALL_SEND
+        dw kc_signal                                ; KCALL_SIGNAL
+        dw kc_poll                                  ; KCALL_POLL
         dw kc_retype                                ; KCALL_RETYPE
         dw kc_copy                                  ; KCALL_COPY
         dw kc_thread                                ; KCALL_THREAD
-        dw kc_done.nosys, kc_done.nosys                       ; 10, 11: interrupts, timer
+        dw kc_done.nosys                            ; 10: interrupts (L7)
+        dw kc_timer                                 ; KCALL_TIMER
         dw kc_segment                               ; KCALL_SEGMENT
-        dw kc_done.nosys, kc_done.nosys, kc_done.nosys, kc_done.nosys   ; 13-16
+        dw kc_delete                                ; KCALL_DELETE
+        dw kc_save_reply                            ; KCALL_SAVE_REPLY
+        dw kc_done.nosys, kc_done.nosys             ; 15, 16: revoke (L12), test
 kcall_table_end:
 msg_thread_made     db "thread", 0
 ; Temporaries of the calls: no kernel call waits, so none is ever two deep.
@@ -124,6 +132,9 @@ kc_done:
         jmp kc_done
 .nosys:
         mov al, KE_NOSYS
+        jmp kc_done
+.empty:
+        mov al, KE_EMPTY
         jmp kc_done
 
 ; ----------------------------------------------------------------------------
@@ -567,6 +578,7 @@ kc_retype:
         mov al, [bp + FRAME_AX]
         mov [si + SH_TYPE], al
         mov [si + SH_OBJECT], bx
+        mov byte [si + SH_RIGHTS], RIGHTS_ALL
         jmp kc_done.ok
 .segment:
         ; Only data, present, of DPL 1-3, and never from the arena (l4.md X14)
@@ -714,6 +726,10 @@ kc_copy:
         jne kc_done.ok
         mov ax, [bp + FRAME_BX]
         mov [bx + SH_BADGE], ax
+        mov al, [bp + FRAME_CX]         ; fewer rights, if CL names them
+        test al, al
+        jz kc_done.ok
+        and [bx + SH_RIGHTS], al
         jmp kc_done.ok
 .move:
         xor ax, ax                      ; the source slot empties: ES:DI its descriptor
@@ -726,12 +742,14 @@ kc_copy:
 
 ; ----------------------------------------------------------------------------
 ; kc_thread - KCALL_THREAD: configure a thread made by retype (its space,
-; entry and stack), or start it at a priority. A space's slots 0, 1 and 2
-; are its program's code, data and stack; slot 0's DPL is the thread's
-; ring, and IOPL 1 goes to a thread of ring 1 that asks for it, to no other
-; (l4.md D11)
+; entry and stack), or start it at a priority; or bind it to a notification,
+; in any state (one each: binding again unbinds the old). A space's slots
+; 0, 1 and 2 are its program's code, data and stack; slot 0's DPL is the
+; thread's ring, and IOPL 1 goes to a thread of ring 1 that asks for it, to
+; no other (l4.md D11)
 ;   In:       BP = the frame (DX thread, AL THREAD_*; configure: SI space,
-;             BX IP, CX SP; start: CL priority, CH 1 for IOPL)
+;             BX IP, CX SP; start: CL priority, CH 1 for IOPL; bind: SI a
+;             notification it may receive on)
 ;   Out:      the frame's status
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
@@ -741,14 +759,39 @@ kc_thread:
         call cap_get
         jc kc_done.cap
         mov bx, [si + SH_OBJECT]        ; the thread
+        mov al, [bp + FRAME_AX]
+        cmp al, THREAD_BIND
+        je .bind
         cmp byte [bx + T_STATE], TS_FREE
         jne kc_done.state                   ; started already
-        mov al, [bp + FRAME_AX]
         cmp al, THREAD_CONFIGURE
         je .configure
         cmp al, THREAD_START
         je .start
         jmp kc_done.arg
+.bind:
+        push bx                         ; its notification, bound both ways
+        mov ax, [bp + FRAME_SI]
+        mov cl, CAP_NOTIFY
+        call cap_get
+        pop bx
+        jc kc_done.cap
+        test byte [si + SH_RIGHTS], RIGHT_RECV
+        jz kc_done.cap
+        mov si, [si + SH_OBJECT]
+        mov di, [bx + T_BOUND]          ; one each: the thread's old notification...
+        test di, di
+        jz .unbound
+        mov word [di + N_BOUND], 0
+.unbound:
+        mov di, [si + N_BOUND]          ; ...and the notification's old thread, unbound
+        test di, di
+        jz .bound
+        mov word [di + T_BOUND], 0
+.bound:
+        mov [bx + T_BOUND], si
+        mov [si + N_BOUND], bx
+        jmp kc_done.ok
 .configure:
         push bx
         mov ax, [bp + FRAME_SI]

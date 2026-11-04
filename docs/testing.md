@@ -103,8 +103,10 @@ The suites:
 | `tests/shell` | every command of the shell, its editor, every `crash` |
 | `tests/threads` | the shell with the counter below it, at its priority and above it (which starves the shell, and only it); two threads keeping their own 287 states (Bochs); the thread dump on Sys Req |
 | `tests/caps` | the kernel's calls on capabilities: every kind of object retyped, every refusal, a space built for a new thread by copy, move and mint, the thread started (*docs/kernel-calls.md*) |
+| `tests/ipc` | IPC between threads the program makes: 1,000 calls; a segment passed, deleted, passed again, kept and refused; the kernel's timer; a saved reply; three callers queued, served in order with their badges; notifications, bound and not; a client above its server and below it; every refusal; a call nobody answers, ended by Ctrl+Break (Bochs and MAME) |
+| `tests/timing` | the instructions of an IPC round trip, on Bochs, against a budget: a regression check, since no emulator gives an AT's clocks |
 | `tests/attack` | 74 attacks (*docs/security.md*) |
-| `tests/fuzz` | 10,000 iterations of random code in ring 3 |
+| `tests/fuzz` | 10,000 iterations of random code in ring 3, with random calls on `INT 30h` and `INT 31h` |
 | `tests/unit` | the host tests (layer 3) |
 
 ## 5. The attack suite and the fuzzer

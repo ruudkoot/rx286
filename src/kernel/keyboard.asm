@@ -310,14 +310,12 @@ kbd_ctrl_break:
         call klog
         pop si
         mov bx, [fg_thread]             ; the program the keys are for
+        call thread_restart             ; (out of any IPC it waits in)
         cmp bx, [cur_thread]
-        jne .other
-        mov byte [restart_pending], 1
+        jne .later                      ; another thread runs: when it next runs
         test byte [bp + FRAME_CS], CPL_MASK
         jz .later                       ; in the kernel: on the way back to ring 3
         jmp restart_program
-.other:
-        mov byte [bx + T_RESTART], 1    ; when it next runs (it wakes now if it waits)
 .later:
         ret
 

@@ -1,0 +1,51 @@
+# IPC between threads (roadmap l4.md L4): a server and its clients, made by
+# the program from capabilities (tests/programs/ipc.asm). A thousand calls;
+# a segment passed, deleted, passed again, kept, refused; the kernel's
+# timer; a reply saved and answered after another; three callers queued and
+# served in order with their badges; signals; a bound notification; a
+# client above its server, which waits for a thread between them, and below
+# it, which does not; every refusal; and a call nobody answers, which
+# Ctrl+Break ends. DOSBox-X takes no timer interrupt in a test
+# (docs/emulators.md).
+program: ipc
+emulators: bochs mame
+define: TEST_CAPS
+keys: {wait 300}{ctrl-break}
+timeout: 90
+---
+rx286, test build
+ipc: the server runs
+ipc: 1000 calls answered; wrong answers: 0
+ipc: 1000 calls within the budget
+ipc: the server wrote into the buffer (19279): 19279
+ipc: and again, after it deleted its copy (19279): 19279
+ipc: kept, in the server's slot (47): 47
+ipc: passed to a full slot: arrived as (0): 0
+ipc: through an endpoint without the grant right (2): 2
+ipc: passing an empty slot (1): 1
+ipc: slept on the timer for 3 ticks or more (1): 1
+ipc: answered before the call it saved (55): 55
+client A: the saved reply answered, with 002C
+ipc: the server, woken
+server: a call from badge 000B
+server: a call from badge 000C
+server: a call from badge 000D
+client: served, badge 000B
+client: served, badge 000C
+client: served, badge 000D
+ipc: three signals, one receive: bits (7): 7
+ipc: polled again: empty (8): 8
+server: notified, bits 0001
+ipc: a client above its server: waited for the thread between (1): 1
+ipc: a client below its server: waited (0): 0
+ipc: receive on a segment (1): 1
+ipc: call a notification (1): 1
+ipc: signal an endpoint (1): 1
+ipc: a call labelled as a notification's bits (2): 2
+ipc: save a reply it does not owe (6): 6
+ipc: poll an endpoint nobody sends on (8): 8
+ipc: a timer of 0 ticks (2): 2
+ipc: delete an empty slot (1): 1
+ipc: a call to an endpoint nobody receives on
+rx286: Ctrl+Break: the program starts again
+ipc: done

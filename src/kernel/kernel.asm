@@ -71,6 +71,7 @@ section ktext
 %include "program.asm"
 %include "thread.asm"
 %include "cap.asm"
+%include "ipc.asm"
 %include "caps.asm"
 %include "test.asm"
 %include "format.asm"

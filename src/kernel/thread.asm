@@ -452,7 +452,7 @@ thread_restart:
         ret
 .other:
         mov byte [bx + T_RESTART], 1
-        ret
+        jmp ipc_cancel                  ; waiting in IPC: it wakes, to restart
 
 ; ----------------------------------------------------------------------------
 ; ready_push - a thread to the tail of its priority's queue; a reschedule if
@@ -483,6 +483,7 @@ ready_push:
         mov [rq_head + si], bx
 .tail:
         mov [rq_tail + si], bx
+.mark:
         mov al, 1
         shl al, cl
         or [ready_mask], al
@@ -498,6 +499,30 @@ ready_push:
         pop cx
         pop ax
         ret
+
+; ----------------------------------------------------------------------------
+; ready_first - a thread to the head of its priority's queue: it runs before
+; the others there (IPC's direct switch); a reschedule as ready_push
+;   In:       BX = the thread; DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ready_first:
+        push ax
+        push cx
+        push si
+        mov byte [bx + T_STATE], TS_READY
+        mov cl, [bx + T_PRIO]
+        xor ch, ch
+        mov si, cx
+        shl si, 1
+        mov ax, [rq_head + si]
+        mov [bx + T_NEXT], ax
+        mov [rq_head + si], bx
+        test ax, ax
+        jnz ready_push.mark
+        mov [rq_tail + si], bx
+        jmp ready_push.mark
 
 ; ----------------------------------------------------------------------------
 ; ready_pop - the head of the highest non-empty queue, taken out of it
@@ -541,6 +566,8 @@ msg_dump_thread     db "thread ", 0
 msg_dump_priority   db " priority ", 0
 msg_dump_stack      db ", kernel stack used ", 0
 msg_dump_states     db " free", 0, " ready", 0, " running", 0, " waiting", 0
+                    db " sending", 0, " receiving", 0, " awaiting its reply", 0
+                    db " awaiting a notification", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------

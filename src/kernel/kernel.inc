@@ -58,8 +58,19 @@ T_RUNS              equ 26      ; times it was switched to
 T_SPACE             equ 28      ; its space (kdata)
 T_ENTRY             equ 30      ; its program's entry: the IP of a start
 T_RING              equ 32      ; byte: its ring, its space's slot 0's DPL
-T_FPU               equ 34      ; its 287's state (FNSAVE: 94 bytes) while not the owner
-TCB_SIZE            equ 128
+T_IPC               equ 33      ; byte: TI_*, of the message it sends
+T_BADGE             equ 34      ; the badge of the capability it sends with, while queued
+T_RSLOT             equ 36      ; the slot it receives a capability into (a selector), or 0
+T_REPLY             equ 38      ; the thread waiting for its reply, or 0
+T_REPLY_SEQ         equ 40      ; that caller's T_CALLS when it called
+T_WAIT_OBJ          equ 42      ; what it waits on: an endpoint, a notification, a thread
+T_BOUND             equ 44      ; its bound notification, or 0
+T_CALLS             equ 46      ; the calls it has made: a stale reply cannot answer a later one
+T_FPU               equ 48      ; its 287's state (FNSAVE: 94 bytes) while not the owner
+TCB_SIZE            equ 160
+
+TI_CALLING          equ 0x01    ; T_IPC: a call, which waits for a reply
+TI_GRANT            equ 0x02    ;        it passes a capability (its frame's BP)
 
 ; A thread as an object of the arena (roadmap l4.md L3): its control block,
 ; then its kernel stack, a segment of its own from the GDT's pool.
@@ -85,11 +96,30 @@ SH_PARENT           equ 8       ; the space it was copied from (0: made, not cop
 SH_PARENT_SLOT      equ 10      ; and the slot there
 SHADOW_SIZE         equ 16
 SMALL_OBJECT_SIZE   equ 16      ; an endpoint, a notification
+; An endpoint (l4.md L4): a queue of senders or of receivers, never both
+E_HEAD              equ 0
+E_TAIL              equ 2
+E_KIND              equ 4       ; byte: EK_*
+EK_IDLE             equ 0
+EK_SEND             equ 1
+EK_RECV             equ 2
+; A notification: a word of bits, who waits on it, whom it is bound to
+N_BITS              equ 0
+N_WAITER            equ 2
+N_BOUND             equ 4
+; A reply capability's shadow: the caller (SH_OBJECT), the server that
+; saved it (SH_SERVER), the caller's T_CALLS then (SH_SEQ)
+SH_SERVER           equ 4
+SH_SEQ              equ 6
 
 TS_FREE             equ 0       ; T_STATE: no thread
 TS_READY            equ 1       ; in its ready queue
 TS_RUNNING          equ 2
 TS_WAITING          equ 3       ; inside the kernel, until the next interrupt
+TS_SEND             equ 4       ; queued on an endpoint, to send
+TS_RECV             equ 5       ; queued on an endpoint, to receive
+TS_REPLY            equ 6       ; waiting for its call's reply
+TS_NOTIFY           equ 7       ; waiting on a notification
 
 TF_FOREGROUND       equ 0x01    ; T_FLAGS: the keys and Ctrl+Break are its
 TF_CONFIGURED       equ 0x02    ; its space, entry and stack are set

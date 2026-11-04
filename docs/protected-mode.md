@@ -30,7 +30,7 @@ writes the GDT except for the TSS's busy bit.
 | 30h | `SEL_DFSTACK` | 1AD00h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
 | 40h-78h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`) |
-| 80h-B8h | `SEL_STACK_POOL` | in the arena | 37Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`): SS0 while it runs |
+| 80h-B8h | `SEL_STACK_POOL` | in the arena | 35Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`): SS0 while it runs |
 | C0h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory, to zero a retyped segment |
 
 Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can

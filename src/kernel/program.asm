@@ -70,6 +70,7 @@ program_reset:
         mov byte [restart_pending], 0
         call ldt_restore                ; undo any test probe's change
         call fpu_reset_thread           ; a clean 287, whatever the last run left
+        call ipc_reset                  ; a reply it owed will not come
         mov bx, [cur_thread]
         test byte [bx + T_FLAGS], TF_FOREGROUND
         jz .done

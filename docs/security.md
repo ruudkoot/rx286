@@ -64,6 +64,13 @@ Every way out is a reported fault, after which the program starts again
   it makes, and makes only data segments, never code. A segment moved or
   given away is gone at once: the way back nulls a DS or ES that still held
   it.
+- **IPC** (roadmap l4.md L4) copies only registers, from frame to frame in
+  the arena: no program names memory of another's through it. A badge is
+  set once, by whoever mints the capability, so a server knows who calls;
+  a capability passes only through an endpoint with the grant right, and
+  only into a slot the receiver named and left empty. A reply goes once,
+  and only to the call it answers: a sequence number refuses a saved reply
+  whose caller was restarted and has called again.
 - **No device can hang the kernel.** Every wait for a disk, printer or
   modem has a limit in ticks (*docs/storage.md*, *docs/devices.md*); a
   diskette that is not there, a fixed disk that does not answer and a
@@ -138,8 +145,10 @@ written as `sti; cli`, which opens nothing.
 
 `tests/programs/fuzz.asm` runs 10,000 iterations of 256 random bytes as code
 in ring 3, with random registers and random DS and ES (one choice in eight a
-selector it may not load). One iteration in four starts with `INT 30h`, so
-system calls run with random arguments. A watchdog restarts an iteration
+selector it may not load). One iteration in four starts with a call, so
+calls run with random arguments: `INT 30h`, or the kernel's `INT 31h` with
+selectors of the program's slots and others in DX, SI, DI and BP (deleting
+its own code or data, say, which the way back and the restart survive). A watchdog restarts an iteration
 that runs for 5 ticks. The kernel counts the faults by vector instead of
 reporting each, checks its code and tables at every start, and ends the
 test after 10,000 starts. It runs on Bochs and MAME. A typical run: three quarters of the iterations
