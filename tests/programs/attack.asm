@@ -225,8 +225,8 @@ attacks:
 .dlimit: push es                        ; a sector across the data's limit
         mov di, UDATA_ROOM - SECTOR_SIZE / 2
         jmp disk_read_attack
-.dwrap: push es                         ; a sector past FFFFh
-        mov di, 0x10000 - SECTOR_SIZE / 2
+.dwrap: push es                         ; a sector at FF00h: past the limit, and
+        mov di, 0x10000 - SECTOR_SIZE / 2   ; past FFFFh (the limit refuses it first)
         jmp disk_read_attack
 .dwnull: push ds                        ; a sector written from a null DS
         xor ax, ax
@@ -356,7 +356,7 @@ attack_table:
         attack "read a sector into the code", attacks.dcode
         attack "read a sector through a null ES", attacks.dnull
         attack "read a sector across the limit", attacks.dlimit
-        attack "read a sector past FFFFh", attacks.dwrap
+        attack "read a sector at FF00h", attacks.dwrap
         attack "write a sector from a null selector", attacks.dwnull
         attack "print from a null selector", attacks.pnull
         attack "read drive 80h", attacks.drive

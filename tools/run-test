@@ -24,11 +24,13 @@
 #   emulators: bochs dosbox-x   where the test applies (default: all)
 #   media: B ejected            change a drive: B ejected, B protected, D absent,
 #                               B damaged (MANY's chain leaves the volume),
-#                               D blank (no partition); may repeat
+#                               D blank (no partition), B deep (paths of 64
+#                               characters: rxlib.DEEP_PATH); may repeat
 #   lpt1: text                  a line LPT1 must have printed; may repeat (the
 #                               whole of what it printed, in order); lpt2 too
 #   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
-#                               or D) must start with text; may repeat
+#                               or D) must hold text, then each byte its own
+#                               offset (storage.asm's fill); may repeat
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one
 #   (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
@@ -337,9 +339,13 @@ def check_sectors(test):
         path = os.path.join(test.build_dir, DRIVE_IMAGES[drive])
         with open(path, 'rb') as f:
             f.seek(number * SECTOR_SIZE)
-            data = f.read(len(text))
-        if data != text.encode('latin-1'):
-            return 'sector %d of drive %s starts %r, not %r' % (number, drive, data, text)
+            data = f.read(SECTOR_SIZE)
+        wanted = text.encode('latin-1')
+        wanted += bytes(n & 0xFF for n in range(len(wanted), SECTOR_SIZE))
+        if data != wanted:
+            first = next(i for i in range(SECTOR_SIZE) if i >= len(data) or data[i] != wanted[i])
+            return 'sector %d of drive %s differs from byte %d: %r, not %r' % (
+                number, drive, first, data[first:first + 16], wanted[first:first + 16])
     return None
 
 
@@ -428,9 +434,8 @@ def main():
     if not paths:
         print('run-test: no tests')
         return 1
-    if not os.path.exists(os.path.join(rxlib.DISKS, 'fdb.img')):
-        subprocess.run(['make', '--no-print-directory', '-C', ROOT, 'disks'], check=True,
-                       capture_output=True)
+    subprocess.run(['make', '--no-print-directory', '-C', ROOT, 'disks'], check=True,
+                   capture_output=True)            # afresh if disks/ or mkdisks changed
     tests = [Test(os.path.abspath(p)) for p in paths]
     skipped = [t for t in tests if EMULATOR not in t.emulators]
     tests = [t for t in tests if EMULATOR in t.emulators]

@@ -24,12 +24,13 @@ import rxlib
 
 def clear_stale_locks():
     """Bochs locks its disk images with <image>.lock and leaves the lock
-    behind when it is stopped with Ctrl-C; with no Bochs running, every lock
-    in build/disks is stale."""
+    behind when it is stopped with Ctrl-C; with no Bochs running (Debian's
+    is bochs-bin behind a script, others bochs), every lock in build/disks is
+    stale."""
     for pid in os.listdir('/proc'):
         try:
             with open('/proc/%s/comm' % pid) as f:
-                if f.read().strip() == 'bochs-bin':
+                if f.read().strip() in ('bochs-bin', 'bochs'):
                     return
         except (OSError, ValueError):
             continue

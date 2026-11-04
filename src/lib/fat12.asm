@@ -38,6 +38,7 @@ FAT12_FIRST_CLUSTER     equ 2       ; clusters 0 and 1 do not exist
 FAT12_RESERVED          equ 0xFF0   ; FF0h-FF6h reserved, FF7h bad, FF8h-FFFh end
 FAT12_END               equ 0xFF8   ; this and above: the chain's end
 FAT12_MAX_CLUSTERS      equ 4084    ; more clusters than this: FAT16
+FAT12_MAX_FAT_SECTORS   equ 12      ; a FAT this long holds any FAT12 volume's entries
 
 ; ----------------------------------------------------------------------------
 ; fat12_next - the cluster after AX in a FAT12 chain

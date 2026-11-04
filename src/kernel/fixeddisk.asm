@@ -5,9 +5,12 @@
 ;
 ; One sector at a time through the disk buffer, synchronous, every wait with
 ; a limit, as for the diskettes. Before a drive's first transfer, and after
-; any failure, the controller is reset (the fixed disk register's bit 2) and
-; told the drive's heads and sectors a track (Set Parameters), as the BIOS
-; does at start; a drive that is not there fails with E_TIMEOUT then. The
+; any failure, the controller is reset (the fixed disk register's bit 2),
+; told the drive's heads and sectors a track (Set Parameters), and the heads
+; are sent to cylinder 0 (Restore), as the BIOS does at start: a reset
+; leaves the step rate at 7.5 ms, and Restore sets the rate implied seeks
+; use (IBM, Fixed Disk and Diskette Adapter, 7-8; the BIOS's "recal to reset
+; seek speed"). A drive that is not there fails with E_TIMEOUT then. The
 ; controller seeks (an implied seek) and retries by itself; the kernel tries
 ; a sector HD_TRIES times, a timeout ending it at once. A read interrupts
 ; when the sector waits in the controller's buffer; a write takes its sector
@@ -119,9 +122,10 @@ hd_transfer:
 
 ; ----------------------------------------------------------------------------
 ; hd_setup - reset the controller if no drive is set up, then set this
-; drive's heads and sectors a track
+; drive's heads and sectors a track, and restore its heads to cylinder 0
 ;   In:       BX = the drive's entry; DS = ES = SEL_KDATA; interrupts off
-;   Out:      CF clear; or CF set and AX = E_IO or E_TIMEOUT
+;   Out:      CF clear; or CF set, AX = E_IO or E_TIMEOUT, and neither drive
+;             set up (the next transfer resets the controller)
 ;   Destroys: AX, CX, DX, SI
 ; ----------------------------------------------------------------------------
 hd_setup:
@@ -155,16 +159,27 @@ hd_setup:
         jc .late
         test al, HDC_STATUS_ERR
         jnz .error
+        xor al, al                      ; head 0
+        call hd_drive_head
+        mov byte [hd_irq_seen], 0
+        mov al, HDC_CMD_RESTORE
+        mov dx, HDC_COMMAND
+        out dx, al
+        call hd_wait_irq
+        jc .late
+        test al, HDC_STATUS_ERR
+        jnz .error
         call hd_unit_ready
         mov byte [si], 1
         clc
         ret
 .late:
         mov ax, E_TIMEOUT
-        stc
-        ret
+        jmp .failed
 .error:
         mov ax, E_IO
+.failed:
+        call hd_forget
         stc
         ret
 
@@ -189,7 +204,7 @@ hd_drive_head:
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      CF clear and AL = the status; or CF set: still busy after
 ;             HD_TICKS
-;   Destroys: AL, CX, DX
+;   Destroys: AH, CX, DX
 ; ----------------------------------------------------------------------------
 hd_wait_idle:
         mov dx, HDC_STATUS

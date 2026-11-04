@@ -207,3 +207,57 @@ testing and emulator documents; *At the close* below.
 - The printer's interrupt, and printing while the program runs.
 - MAME's own fixed disk controller (the `hdc` card, which needs a ROM not
   in the IBM set).
+
+## At the close
+
+2026-11-04, on branch `implementation`: S1 07ba03c, then 3c280eb (a test
+helper's wait), S2 and S3 33bad91, the review's fixes after it. `make check`
+passes: 70 host tests, 43 on Bochs, 24 on DOSBox-X's 286, 37 on MAME's AT;
+`check-286` finds only 286 instructions in 372 listings.
+
+**What was built.** The kernel drives both diskette drives, both fixed disks
+and both printer ports, behind `SYS_DISK_READ`, `SYS_DISK_WRITE` and
+`SYS_PRINT`; the shell has DOS's prompt and drive letters, `dir`, `cd`,
+`type` and `print`, on a FAT12 library in ring 3. The release kernel's code
+grew from 2,835 to 4,311 bytes and its data from 1,373 to 1,972 (512 of them
+the disk buffer); the shell's code from 1,457 to 3,986 bytes and its data
+from 1,713 to 4,355, for which the program's data room grew to 8 KB.
+
+**What the tests found.**
+
+- A test helper slept until the tick count *equalled* a value; once the
+  kernel image grew, interrupts handled back to back carried the count past
+  it on MAME, and the test slept for the wrap (22 minutes). The helpers use
+  the kernel's `ksleep` now, which counts the ticks elapsed.
+- MAME's AT boots from a diskette only with its IDE card in place (the card
+  answers port 3F7h), and its four slots are full, so it has no printer;
+  DOSBox-X runs the printer test.
+- `mcopy -t` ends text with Ctrl+Z; the sample disks are copied without.
+
+**What an independent review found**, all fixed and, where the emulators
+can show it, tested:
+
+- The diskette's data rate was set after the seek, so a seek on B after A
+  stepped at A's rate (the 765's step rate scales with the data rate):
+  harmless on the emulators, lost steps on a real 360 KB drive.
+- After a reset, the fixed disk controller steps at 7.5 ms until a Seek or
+  Restore; the kernel now restores after Set Parameters, as the BIOS does.
+  A failed set-up now forgets both drives, as the module says.
+- Paths were refused from 52 characters on, not 65; `tests/drives/deep.test`
+  now checks 64 and 66.
+- `SYS_PRINT` lost the count of bytes printed before an error; it returns it
+  in CX now, and `print` says it.
+- The write tests could not see a short write (zeros after a short text);
+  the sector is now a text and a fill of every byte, compared whole in the
+  emulator and on the host. A write-only DMA count of 256 is caught.
+- Smaller: a sector number that would wrap past FFFFh, a FAT too short for
+  its clusters, two routine headers, a test's name, the runner's stale
+  disks, `bochs-run`'s idea of a running Bochs.
+
+**What is open.**
+
+- Real hardware: nothing here has met a real 765, WD1003 or printer. The
+  printer's errors (`E_PAPER`, `E_TIMEOUT`) and the fixed disk's step rate
+  cannot be seen on the emulators.
+- *Later*, above, is as it was.
+- The owner merges `implementation`.

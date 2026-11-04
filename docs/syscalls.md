@@ -24,7 +24,7 @@ numbers and the macro `sys`:
 | 4 | `SYS_TIME` | | the RTC, in BCD: CH century, CL year, DH month, DL day, BH hours, BL minutes, AL seconds (roadmap D20) |
 | 5 | `SYS_DISK_READ` | AL = the drive, CX = the sector, ES:DI = `SECTOR_SIZE` bytes to fill | nothing: every register kept; CF with `E_INVAL` (no such drive, or the sector past its end), `E_FAULT` (a buffer the program may not write), `E_IO`, `E_TIMEOUT` |
 | 6 | `SYS_DISK_WRITE` | AL = the drive, CX = the sector, DS:SI = `SECTOR_SIZE` bytes | nothing; CF with `E_INVAL`, `E_FAULT` (a buffer it may not read), `E_IO`, `E_TIMEOUT`, `E_PROTECTED` |
-| 7 | `SYS_PRINT` | AL = the printer, DS:SI buffer, CX length (at most `PRINT_MAX`, 4,096) | AX = bytes printed; CF with `E_INVAL`, `E_FAULT`, `E_PAPER`, `E_TIMEOUT` |
+| 7 | `SYS_PRINT` | AL = the printer, DS:SI buffer, CX length (at most `PRINT_MAX`, 4,096) | AX = bytes printed; CF with `E_INVAL`, `E_FAULT`, or `E_PAPER` or `E_TIMEOUT` with CX = the bytes printed before |
 | other | | | CF, AX = `E_NOSYS` |
 
 `SYSCALL_COUNT` is the number of calls.

@@ -395,7 +395,7 @@ print_entry:
 ; print_stamp - `stamp` up to DI
 ;   In:       DI = the end of the text in stamp
 ;   Out:      nothing
-;   Destroys: CX
+;   Destroys: AX, CX
 ; ----------------------------------------------------------------------------
 print_stamp:
         push si
@@ -414,7 +414,7 @@ end_udata
 ; print_name_part - a padded name or label without its trailing spaces
 ;   In:       SI = DIR_NAME_LENGTH bytes
 ;   Out:      nothing
-;   Destroys: CX, DI
+;   Destroys: AX, CX, DI
 ; ----------------------------------------------------------------------------
 print_name_part:
         mov cx, DIR_NAME_LENGTH
@@ -553,16 +553,24 @@ cmd_print:
 .out:
         ret
 .printer:
+        add [printed], cx               ; what the printer took before it failed
+        adc word [printed + 2], 0
         cmp ax, E_PAPER
         jne .not_answering
-        PRINT "Printer out of paper", CHAR_LF
-        ret
+        PRINT "Printer out of paper"
+        jmp .after
 .not_answering:
         cmp ax, E_TIMEOUT
         jne .other
-        PRINT "Printer not answering", CHAR_LF
-        ret
+        PRINT "Printer not answering"
+        jmp .after
 .other:
         PRINT "Error "
         call print_dec
-        jmp print_newline
+.after:
+        PRINT " after "
+        mov ax, [printed]
+        mov dx, [printed + 2]
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        ret

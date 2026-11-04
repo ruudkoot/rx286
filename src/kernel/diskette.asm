@@ -85,11 +85,11 @@ fd_transfer:
         call fd_motor_on
         mov byte [fd_tries], FD_TRIES
 .try:
+        mov al, [bx + DRIVE_RATE]       ; before the seek: the step rate
+        mov dx, FDC_CCR                 ; scales with the data rate (IBM's
+        out dx, al                      ; SRT table, and the BIOS's order)
         call fd_seek
         jc .seek_failed
-        mov al, [bx + DRIVE_RATE]
-        mov dx, FDC_CCR
-        out dx, al
         mov al, [fd_dma_mode]
         call dma_diskette
         mov al, [disk_head]

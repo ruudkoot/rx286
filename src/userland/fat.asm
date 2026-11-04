@@ -33,7 +33,7 @@ PARTITION_START     equ 8               ; dword: its first sector on the disk
 PARTITION_FAT12     equ 0x01
 BOOT_SIGNATURE      equ 0xAA55
 PATH_MAX            equ 64              ; DOS's longest path, the drive's letter not counted
-PATH_STEP_MAX       equ 1 + FAT_BASE_LENGTH + 1 + FAT_EXT_LENGTH   ; "\NAME.EXT"
+NAME_TEXT_MAX       equ FAT_BASE_LENGTH + 1 + FAT_EXT_LENGTH   ; NAME.EXT
 
 ; A drive's current directory, kept by the shell: its first cluster (0 the
 ; root) and its path ("\" the root), as fat_find takes and gives them.
@@ -69,6 +69,7 @@ found               times WHERE_SIZE db 0   ; what fat_find found: its cluster a
 found_dir           db 0                ; 1 if a directory (the root too)
 found_entry         times DIR_ENTRY_SIZE db 0   ; its entry, unless the root
 wanted              times DIR_NAME_LENGTH db 0
+name_text           times NAME_TEXT_MAX db 0
 path_rest           dw 0
 no_label            db "NO NAME    "
 end_udata
@@ -147,6 +148,9 @@ fat_mount:
         jc .not_fat12
         mov [vol_data], ax
         mov ax, [io_sector + BPB_TOTAL_SECTORS]
+        add ax, [vol_start]
+        jc .not_fat12                   ; it would end past sector FFFFh
+        mov ax, [io_sector + BPB_TOTAL_SECTORS]
         sub ax, [vol_data]              ; 0 total sectors (a 32-bit count) fails here too
         jbe .not_fat12
         xor dx, dx
@@ -156,6 +160,18 @@ fat_mount:
         test ax, ax
         jz .not_fat12
         mov [vol_clusters], ax
+        mov dx, [io_sector + BPB_SECTORS_PER_FAT]
+        cmp dx, FAT12_MAX_FAT_SECTORS
+        jae .fat_holds                  ; enough for any FAT12 volume
+        add ax, FAT12_FIRST_CLUSTER     ; entries: the clusters and the two before
+        mov cx, ax
+        shr cx, 1
+        add ax, cx
+        inc ax                          ; bytes: 1.5 an entry, rounded up
+        shl dx, SECTOR_SHIFT
+        cmp ax, dx
+        ja .not_fat12                   ; a FAT too short for its clusters
+.fat_holds:
         mov si, io_sector + BPB_LABEL
         cmp byte [io_sector + BPB_EXTENDED], BPB_EXTENDED_MARK
         je .label
@@ -182,9 +198,13 @@ fat_mount:
 vol_read:
         mov cx, ax
         add cx, [vol_start]
+        jc .past                        ; past sector FFFFh: no drive has it
         mov al, [vol_drive]
         sys SYS_DISK_READ
         ret
+.past:
+        mov ax, E_BROKEN
+        ret                             ; CF set by the ADD
 
 ; ----------------------------------------------------------------------------
 ; fat_next - the cluster after a cluster, from the FAT
@@ -480,7 +500,8 @@ fat_find:
 ; found_path_add - the path in `found` after a step to `wanted`: ".." takes
 ;   its last name off, another name goes on the end
 ;   In:       wanted; found_entry (its name); DS = ES = the program's data
-;   Out:      CF clear; or CF set: longer than PATH_MAX
+;   Out:      CF clear; or CF set: it would be longer than PATH_MAX (and is
+;             unchanged)
 ;   Destroys: AX, CX, SI, DI
 ; ----------------------------------------------------------------------------
 found_path_add:
@@ -503,15 +524,28 @@ found_path_add:
         clc
         ret
 .add:
-        cmp di, found + WHERE_PATH + PATH_MAX - PATH_STEP_MAX
+        push di
+        mov si, found_entry + DIR_NAME
+        mov di, name_text
+        call fat_name_text
+        mov cx, di
+        sub cx, name_text               ; CX = the name's length
+        pop di
+        mov ax, di                      ; AX = where the path's zero would go:
+        add ax, cx                      ; after the name, and a separator
+        cmp di, found + WHERE_PATH + 1  ; unless the path is the root's
+        je .room
+        inc ax
+.room:
+        cmp ax, found + WHERE_PATH + PATH_MAX
         ja .long                        ; checked before anything is written
         cmp di, found + WHERE_PATH + 1
-        je .name                        ; the root's separator is there already
+        je .name
         mov al, CHAR_PATH_SEPARATOR
         stosb
 .name:
-        mov si, found_entry + DIR_NAME
-        call fat_name_text
+        mov si, name_text
+        rep movsb
         xor al, al
         stosb
         clc

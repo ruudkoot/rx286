@@ -120,6 +120,7 @@ HDC_DRIVE_HEAD_BASE equ 0xA0        ; bits 7 and 5 always set; bit 4 the drive, 
 HDC_DRIVE_1         equ 0x10
 HDC_CONTROL_RESET   equ 0x04        ; the fixed disk register: reset the controller
 HDC_CONTROL_RUN     equ 0x00        ; out of reset, at most 8 heads
+HDC_CMD_RESTORE     equ 0x10        ; heads to cylinder 0; implied seeks step at 35 us
 HDC_CMD_READ        equ 0x20        ; read sectors, with retries
 HDC_CMD_WRITE       equ 0x30        ; write sectors, with retries
 HDC_CMD_SET_PARAMETERS equ 0x91     ; heads (drive/head register) and sectors a track (count)

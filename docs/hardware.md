@@ -122,6 +122,7 @@ numbers below are the Technical Reference's.
   precompensation cylinder shifted right by `HDC_PRECOMP_SHIFT`. In the fixed
   disk register, `HDC_CONTROL_RESET` resets the controller and
   `HDC_CONTROL_RUN` lets it run. The commands: `HDC_CMD_SET_PARAMETERS`,
+  `HDC_CMD_RESTORE` (whose step rate, 35 us, implied seeks then use),
   `HDC_CMD_READ`, `HDC_CMD_WRITE`.
 - **Printer** (`LPT_*`, offsets `LPT_DATA`, `LPT_STATUS`, `LPT_CONTROL` from
   an `LPT*_BASE`; the Serial/Parallel Adapter's section): `LPT_STATUS_NOT_BUSY`

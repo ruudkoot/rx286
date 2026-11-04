@@ -9,7 +9,9 @@
 ; and IRQ5 keep the rule of a line without a driver. After each byte, as
 ; SYS_WRITE does, interrupts are let in, and a restart asked for meanwhile
 ; ends the call early. A port with no printer reads busy and out of paper,
-; as on the AT: the call fails with E_PAPER after LPT_BUSY_TICKS.
+; as on the AT: the call fails with E_PAPER after LPT_BUSY_TICKS. A call that
+; fails says in CX how many bytes the printer took first, so the caller
+; knows where to go on.
 ; ============================================================================
 
 LPT_BUSY_TICKS      equ 100 + 1         ; 2 s for the printer to take a byte
@@ -46,7 +48,8 @@ printer_init:
 ; ----------------------------------------------------------------------------
 ; sys_print - SYS_PRINT: the caller's DS:SI, CX bytes, to a printer
 ;   In:       BP = the frame (AL the printer); DS = SEL_KDATA
-;   Out:      the frame's AX = bytes printed, or an error
+;   Out:      the frame's AX = bytes printed; or an error, and the frame's CX
+;             = bytes printed before it (E_PAPER, E_TIMEOUT)
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 sys_print:
@@ -88,7 +91,9 @@ sys_print:
         jmp sys_fail
 .fault:
         mov ax, E_FAULT
+        jmp sys_fail
 .fail:
+        mov [bp + FRAME_CX], bx
         jmp sys_fail
 
 ; ----------------------------------------------------------------------------

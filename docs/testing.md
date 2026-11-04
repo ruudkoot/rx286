@@ -58,10 +58,11 @@ the test image), `image` (a fragmented, missing or oversized kernel),
 `timeout`, `match` (full, prefix, contains), `break` and `debugger` (a
 debugger session at a kernel symbol), `media` (B without a diskette or
 write-protected, no fixed disk D, which the emulator is told; B's FAT
-damaged, D without a partition, which the runner does to the run's copy),
+damaged, D without a partition, B with paths of 64 characters, which the
+runner makes in the run's copy),
 `lpt1` and `lpt2` (what each printer must
-have printed, line by line), `sector` (text a sector of a drive's image must
-start with after the run, read on the host). In expected lines, `{name}` is
+have printed, line by line), `sector` (what a sector of a drive's image must
+hold after the run, read on the host: a text, then each byte its offset). In expected lines, `{name}` is
 a program symbol's offset and `{k:name}` a kernel one.
 
 Every run gets its own copies of drives B, C and D (`make disks`,
@@ -94,7 +95,7 @@ The suites:
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
 | `tests/syscalls` | every system call with good and bad arguments; `write`'s interrupt window |
 | `tests/storage` | the disk and printer calls: known sectors of every drive, a marked sector written to each and found on the host's image, bad arguments, a line on each printer, a diskette missing or write-protected, a fixed disk missing |
-| `tests/drives` | the shell's drives: `dir` on every drive, `cd` in all its forms, `type` through a fragmented file and a file of four clusters, `print` checked byte for byte, every refusal, a drive without a diskette, a disk without a partition, a damaged FAT |
+| `tests/drives` | the shell's drives: `dir` on every drive, `cd` in all its forms, `type` through a fragmented file and a file of four clusters, `print` checked byte for byte, every refusal, a drive without a diskette, a disk without a partition, a damaged FAT, paths of exactly 64 characters and of 66 |
 | `tests/shell` | every command of the shell, its editor, every `crash` |
 | `tests/attack` | 59 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3 |

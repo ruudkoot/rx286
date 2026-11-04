@@ -98,7 +98,11 @@ DISKS = os.path.join(ROOT, 'build', 'disks')
 # What a test may change of the drives (tools/run-test's `media:`): the
 # first three in the emulator, the others in the run's copies of the images
 # (damage_disks).
-MEDIA = ('B ejected', 'B protected', 'D absent', 'B damaged', 'D blank')
+MEDIA = ('B ejected', 'B protected', 'D absent', 'B damaged', 'D blank', 'B deep')
+# 'B deep': directories whose paths reach DOS's 64 characters (PATH_MAX).
+DEEP_PATH = '/'.join(c * 8 for c in 'ABCDEF')      # 54 characters as \AAAAAAAA...
+DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
+DEEP_TOO_LONG = 'ABCDEFGH.XY'    # 66
 
 
 def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
@@ -147,7 +151,18 @@ FAT12_BAD_LINK = 0xFF0          # a reserved value: no cluster of any volume
 def damage_disks(directory, media):
     """The changes of MEDIA made to a run's copies of the images: 'D blank'
     zeroes fixed disk D (no partition at all); 'B damaged' points the FAT
-    entry of B:\\MANY's first cluster outside the volume, in both FATs."""
+    entry of B:\\MANY's first cluster outside the volume, in both FATs;
+    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG."""
+    if 'B deep' in media:
+        path = os.path.join(directory, 'fdb.img')
+        env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
+        parts = DEEP_PATH.split('/')
+        for n in range(len(parts)):
+            subprocess.run(['mmd', '-i', path, '::/' + '/'.join(parts[:n + 1])],
+                           env=env, check=True, capture_output=True)
+        for name in (DEEP_FITS, DEEP_TOO_LONG):
+            subprocess.run(['mmd', '-i', path, '::/%s/%s' % (DEEP_PATH, name)],
+                           env=env, check=True, capture_output=True)
     if 'D blank' in media:
         path = os.path.join(directory, 'hd1.img')
         size = os.path.getsize(path)

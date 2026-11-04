@@ -51,10 +51,12 @@ The NEC 765 of IBM's adapter, IRQ6 and DMA channel 2 (`diskette.asm`,
 1. resets the controller and gives it IBM's timings (Specify), the first
    time and after a timeout;
 2. selects the drive and runs its motor, waiting a second if it was off;
-3. recalibrates the drive if its cylinder is not known, then seeks (the 765
-   has no implied seek) and lets the heads settle;
-4. sets the data rate (500 kbit/s for A, 250 kbit/s for B), points DMA
-   channel 2 at the buffer for 512 bytes, and sends Read Data or Write Data
+3. sets the data rate (500 kbit/s for A, 250 kbit/s for B) first, since
+   the step rate scales with it, then recalibrates the drive if its
+   cylinder is not known, seeks (the 765 has no implied seek) and lets the
+   heads settle;
+4. points DMA channel 2 at the buffer for 512 bytes, and sends Read Data
+   or Write Data
    with the BIOS's gap (`FDC_GAP_1200K`, `FDC_GAP_360K`); the DMA's terminal
    count ends the transfer after one sector;
 5. sleeps until IRQ6, reads the seven result bytes, and checks ST0.
@@ -68,8 +70,10 @@ transfer, as the BIOS's does. The diskette change line is not read.
 
 The task file of IBM's adapter at 1F0h-1F7h, IRQ14, programmed I/O
 (`fixeddisk.asm`). Before a drive's first transfer, and after any failure,
-the kernel resets the controller and tells it the drive's heads and sectors
-a track (Set Parameters), as the BIOS does at start. Then, for each sector:
+the kernel resets the controller, tells it the drive's heads and sectors
+a track (Set Parameters) and sends the heads to cylinder 0 (Restore), as
+the BIOS does at start: a reset leaves the step rate at 7.5 ms, and Restore
+sets the one the controller's implied seeks use. Then, for each sector:
 the precompensation cylinder / 4, a count of 1, the sector, cylinder and
 head, and Read Sectors or Write Sectors with retries. A read interrupts
 when the sector is in the controller's buffer, and the kernel reads its 256
@@ -83,7 +87,9 @@ LPT1 at 378h and LPT2 at 278h (`printer.asm`), both reset (-INIT) at start.
 For each byte, as IBM's BIOS does: wait while BUSY, put the byte on the data
 lines, pulse STROBE. The port's interrupt stays off. A printer that stays
 busy for two seconds ends the call: `E_PAPER` if it says it is out of paper
-(as a port with no printer does), else `E_TIMEOUT`.
+(as a port with no printer does), else `E_TIMEOUT`, with the bytes it took
+before in CX. Neither can be seen on the emulators here: their printers
+never stay busy.
 
 ## The sample disks
 

@@ -87,7 +87,7 @@ that faulted:
 | a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
 | `INT 30h` as the code segment's last two bytes | #GP(0000) at 0043:2000: the return IP is past the limit |
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
-| `disk_read` into the code, through a null ES, across the data's limit, past FFFFh; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
+| `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 

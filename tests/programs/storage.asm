@@ -324,7 +324,8 @@ read_sector:
 
 ; ----------------------------------------------------------------------------
 ; write_pattern - "X: sector N: " and the outcome of writing "rx286 wrote
-; this to X: sector N" (zeros after) there, then reading it back
+; this to X: sector N" there, every byte after it its own offset in the
+; sector (so a short write shows), then reading it back
 ;   In:       AL = the drive; CX = the sector; DS = ES = the program's data
 ;   Out:      nothing
 ;   Destroys: everything
@@ -335,11 +336,13 @@ write_pattern:
         add al, 'A'
         mov [drive_letter], al
         mov di, pattern
-        mov cx, SECTOR_SIZE
-        push di
         xor al, al
-        rep stosb
-        pop di
+.fill:
+        stosb
+        inc al
+        cmp di, pattern + SECTOR_SIZE
+        jb .fill
+        mov di, pattern
         mov si, wrote_text
         mov cx, wrote_text_end - wrote_text
         rep movsb
