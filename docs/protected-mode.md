@@ -29,18 +29,37 @@ writes the GDT except for the TSS's busy bit.
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
 | 30h | `SEL_DFSTACK` | 17500h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
-| 43h | `SEL_UCODE` | 13100h | 1FFFh | FBh: present, DPL 3, code, readable | the program |
-| 4Bh | `SEL_UDATA` | 15100h | 1FFFh | F3h: present, DPL 3, data, writable | its data |
-| 53h | `SEL_USTACK` | 17700h | 7FFh | F3h | its stack |
-| 5Bh | `SEL_UFUZZ` | 15100h | 1FFFh | FBh | test builds with the fuzzer only: code over the program's data |
+| 40h | `SEL_LDT` | in KDATA | `LDT_LIMIT` | 82h: present, DPL 0, an LDT | the program's LDT |
 
-`RPL_KERNEL` and `RPL_USER` are the two privilege levels in use. The GDT has
-`GDT_ENTRIES` descriptors and its limit is `GDT_LIMIT`: 57h, or 5Fh with the
-fuzzer. Any selector beyond the limit is a general protection fault.
+Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
+be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
+levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
+`GDT_LIMIT`, 47h. Any selector beyond the limit is a general protection
+fault.
 
-There is no LDT, and the kernel loads LDTR with a null selector at start:
-Bochs starts with a live LDT at address 0 that a program could otherwise use
-(roadmap X8).
+## The program's LDT
+
+The program's segments live in an LDT (`src/kernel/ldt.asm`), which the
+kernel loads at start: LDTR is never left as Bochs' live LDT at address 0
+(roadmap X8). A selector of the LDT has its table indicator set
+(`SEL_TI_LDT`). The LDT has `LDT_ENTRIES` slots and its limit is
+`LDT_LIMIT`, 3Fh:
+
+| Selector | Constant | Base | Limit | Access | What |
+|---|---|---|---|---|---|
+| 07h | `SEL_UCODE` | 13100h | 1FFFh | FBh: present, DPL 3, code, readable | the program |
+| 0Fh | `SEL_UDATA` | 15100h | 1FFFh | F3h: present, DPL 3, data, writable | its data |
+| 17h | `SEL_USTACK` | 17700h | 7FFh | F3h | its stack |
+| 1Fh | `SEL_UFUZZ` | 15100h | 1FFFh | FBh | test builds with the fuzzer only: code over the program's data; empty in every other build |
+| 27h-3Fh | | | | 00h | empty |
+
+An empty slot is all zeros: not present, DPL 0, no valid type. Ring 3 can
+neither load it (#GP) nor learn anything of it: `LAR`, `LSL`, `VERR` and
+`VERW` all refuse it (roadmap l4.md E2; the attack "every slot of the LDT").
+
+The kernel keeps a pristine copy of the table and copies it over the live
+one at every start of the program (`ldt_restore`), so a test probe that
+changed a descriptor (*docs/syscalls.md*, `SYS_TEST_PROBE`) is undone.
 
 ## The TSSs
 

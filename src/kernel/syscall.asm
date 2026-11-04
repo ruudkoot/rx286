@@ -6,7 +6,9 @@
 ; results go back through the frame, and an error sets the frame's CF with
 ; its code in AX. A buffer is checked with the 286's own instructions before
 ; the kernel uses it: ARPL against the caller's CS, VERR (or VERW, for a
-; buffer the kernel fills), LSL, and bounds (docs/syscalls.md). Interrupts
+; buffer the kernel fills), LAR's present bit, LSL, and bounds
+; (docs/syscalls.md); and checked again after every interrupt window, since
+; a descriptor may change while interrupts are in (l4.md X2). Interrupts
 ; stay off but where the kernel waits (D15): while read_key waits, after
 ; each byte write or print writes, and while a disk or printer works.
 ; ============================================================================
@@ -50,6 +52,10 @@ syscall:
         shl bx, 1
         jmp [syscall_table + bx]
 .nosys:
+%ifdef TEST_ATTACK
+        cmp byte [bp + FRAME_AX + 1], SYS_TEST_PROBE
+        je test_probe
+%endif
         mov ax, E_NOSYS
         ; falls through
 
@@ -92,6 +98,8 @@ sys_write:
         jc .fault
         xor bx, bx                      ; BX = bytes written
 .next:
+        call recheck_buffer             ; after a window, the descriptor may differ
+        jc .gone
         mov al, [es:si]
         call con_emit
         inc si
@@ -116,6 +124,22 @@ sys_write:
 .fault:
         mov ax, E_FAULT
         jmp sys_fail
+.gone:
+        call con_cursor
+        mov ax, E_FAULT
+        jmp sys_fail
+
+; ----------------------------------------------------------------------------
+; recheck_buffer - may the caller still read CX bytes at its DS:SI? Its
+; segment's descriptor may have changed during an interrupt window (l4.md X2)
+;   In:       BP = the frame (FRAME_DS the caller's selector); SI = offset;
+;             CX = bytes left (> 0)
+;   Out:      as check_buffer
+;   Destroys: AX, DX
+; ----------------------------------------------------------------------------
+recheck_buffer:
+        mov ax, [bp + FRAME_DS]
+        ; falls through
 
 ; ----------------------------------------------------------------------------
 ; check_buffer - may the caller read CX bytes at AX:SI?
@@ -157,6 +181,8 @@ check_bounds:
         jnz check_refuse
         push dx
         lar dx, ax                      ; DH = the access byte
+        test dh, ACC_PRESENT            ; VERR and VERW pass a segment that is
+        jz .absent                      ; not present (l4.md E2, X4)
         test dh, ACC_EXPAND_DOWN        ; expand-down data (or conforming code):
         pop dx                          ; 0..limit is not its range; refuse it
         jnz check_refuse
@@ -169,6 +195,10 @@ check_bounds:
         pop si
         mov es, ax
         clc
+        ret
+.absent:
+        pop dx
+        stc
         ret
 .wraps:
         pop si

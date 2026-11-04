@@ -71,6 +71,8 @@ sys_print:
         jc .fault
         xor bx, bx                      ; BX = bytes printed
 .next:
+        call recheck_buffer             ; after a window, the descriptor may differ
+        jc .gone
         mov al, [es:si]
         call lpt_byte
         jc .fail
@@ -92,6 +94,8 @@ sys_print:
 .fault:
         mov ax, E_FAULT
         jmp sys_fail
+.gone:
+        mov ax, E_FAULT
 .fail:
         mov [bp + FRAME_CX], bx
         jmp sys_fail

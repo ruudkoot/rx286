@@ -40,6 +40,7 @@ kdata_start:
 %include "gdt.asm"
 %include "idt.asm"
 %include "tss.asm"
+%include "ldt.asm"
 
 section ktext
 %include "interrupt.asm"

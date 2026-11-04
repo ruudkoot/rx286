@@ -68,16 +68,19 @@ sys_disk_read:
         mov ax, [bp + FRAME_ES]
         mov si, [bp + FRAME_DI]
         mov cx, SECTOR_SIZE
-        call check_buffer_writable      ; ES = the caller's segment
+        call check_buffer_writable      ; before any device is touched
         jc .fault
-        push es
         push ds
         pop es
         mov cx, [bp + FRAME_CX]
         mov al, DISK_READ
-        call disk_transfer
-        pop es
+        call disk_transfer              ; waits, with interrupts in
         jc .fail
+        mov ax, [bp + FRAME_ES]         ; so the buffer again: its descriptor
+        mov si, [bp + FRAME_DI]         ; may have changed meanwhile (l4.md X2)
+        mov cx, SECTOR_SIZE
+        call check_buffer_writable      ; ES = the caller's segment
+        jc .fault
         mov si, disk_buffer
         mov di, [bp + FRAME_DI]
         mov cx, SECTOR_SIZE / 2

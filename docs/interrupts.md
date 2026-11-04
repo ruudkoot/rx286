@@ -63,6 +63,21 @@ What happens next depends on who was running (the frame's CS):
   instruction of a fault's handler, Intel 9.7.1: dropped), and vector 9, the
   287 overrunning a segment after the CPU moved on (Intel 9.6.3: the program
   is restarted on its way back, like IRQ13).
+- **The way back checks the segments** (roadmap l4.md L1, X3). Before the
+  POPs and the `IRET` load them, the kernel checks each of the frame's
+  segment registers for its own use (`way_back_check`), since the
+  program's LDT may have changed during the call:
+  - a DS or ES that is not null, present and readable at the program's
+    privilege becomes null;
+  - an SS that is not present, writable data of the program's privilege
+    is the program's fault: #SS(selector) if not present, as a 286 says,
+    else #GP(selector);
+  - a CS that is not present, non-conforming code of the program's
+    privilege is the program's fault: #NP(selector) if not present, else
+    #GP(selector).
+
+  A check of presence alone would not do: a slot refilled with
+  execute-only code under DS faults the `POP DS` all the same (l4.md E10).
 - **An `IRET` that would return past the program's code limit** (after a
   system call in the segment's last bytes, or an interrupt at an IP past the
   limit, which a 286 checks at the fetch) would fault in ring 0; the kernel

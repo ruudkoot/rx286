@@ -20,10 +20,16 @@ Every way out is a reported fault, after which the program starts again
 ## What holds the program in
 
 - **Segments.** The program has three descriptors of DPL 3, for its code (not
-  writable), data and stack (not executable), each with a limit. Every
-  other descriptor has DPL 0, so the program cannot load it; there is no
-  LDT, and LDTR is loaded with a null selector because Bochs starts with a
-  live one (roadmap X8). The GDT ends at 57h, so any selector past it faults.
+  writable), data and stack (not executable), each with a limit, in its own
+  LDT (*docs/protected-mode.md*). Every descriptor of the GDT has DPL 0, so
+  the program cannot load any of them; the LDT's empty slots are all zeros,
+  invisible to it. LDTR always holds the program's LDT, never Bochs' live
+  one at address 0 (roadmap X8). The GDT ends at 47h and the LDT at 3Fh, so
+  any selector past either faults.
+- **The way back.** Every segment register the kernel's POPs and `IRET`
+  load is checked for its own use first (*docs/interrupts.md*), so a
+  descriptor changed during a call is the program's fault, never the
+  kernel's (roadmap l4.md X3).
 - **IOPL 0.** `IN`, `OUT`, `INS`, `OUTS`, `CLI`, `STI` and (on a 286) the
   `LOCK` prefix fault in ring 3, and `POPF` and `IRET` cannot change IOPL or
   IF there.
@@ -65,7 +71,7 @@ Every way out is a reported fault, after which the program starts again
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 59 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 67 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -73,10 +79,14 @@ that faulted:
 |---|---|
 | `CLI`, `STI`, `IN`, `OUT`, `INSB`, `OUTSB`, `HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT` | #GP(0000) |
 | the kernel's data, the kernel's stack, the screen (DS, SS, ES) | #GP(selector) |
-| a selector beyond the GDT; an LDT selector; a null SS | #GP(0060), #GP(000C), #GP(0000) |
+| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(0060), #GP(0044), #GP(003C), #GP(0000) |
+| every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments as they are; every empty slot refused by all four |
+| the test probe (`SYS_TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
+| the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |
+| the probe: the code's descriptor not present; refilled with data | #NP(0004); #GP(0004), at the return address |
 | a far call to the kernel's code; a jump to the TSS; a call to the double-fault TSS; a jump through the null selector | #GP(0008), #GP(0020), #GP(0028), #GP(0000) |
 | `INT 31h`; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(018A), #GP(010A), #GP(001A), #GP(0022) |
-| writing through CS; reading past the data's limit; a word across it; executing data | #GP(0000), #GP(0000), #GP(0000), #GP(0048) |
+| writing through CS; reading past the data's limit; a word across it; executing data | #GP(0000), #GP(0000), #GP(0000), #GP(000C) |
 | pushing past the stack's bottom; popping past its top | #SS(0000) |
 | divide by zero; an invalid opcode; `BOUND` | #DE, #UD, #BR |
 | the trap flag through `POPF` | #DB, after the next instruction |
@@ -87,7 +97,7 @@ that faulted:
 | `LOADALL` (0Fh 05h) | #UD on Bochs; #GP(0000) on MAME's 286 |
 | a 287 error, unmasked | IRQ13: reported, the program restarted (MAME has no 287) |
 | a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
-| `INT 30h` as the code segment's last two bytes | #GP(0000) at 0043:2000: the return IP is past the limit |
+| `INT 30h` as the code segment's last two bytes | #GP(0000) at 0007:2000: the return IP is past the limit |
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
 | `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |

@@ -5,7 +5,8 @@
 ; docs/protected-mode.md explains each descriptor. Every base is a constant
 ; of layout.inc, or kdata's base plus a label of kdata (the TSSs); every
 ; segment's accessed bit is preset, so the CPU never writes this table but
-; for the TSS's busy bit.
+; for the TSS's busy bit. Every descriptor has DPL 0: the program's segments
+; are in its LDT (ldt.asm), and the GDT holds none a program could load.
 ; ============================================================================
 
 ; kdata_descriptor offset, limit, access - a descriptor of something in kdata.
@@ -32,12 +33,7 @@ gdt:
         kdata_descriptor df_tss, TSS286_LIMIT, ACC_TSS              ; SEL_DFTSS
         segment_descriptor DFSTACK_PHYS, DFSTACK_SIZE - 1, ACC_KDATA    ; SEL_DFSTACK
         segment_descriptor VIDEO_PHYS, VIDEO_SIZE - 1, ACC_KDATA    ; SEL_VIDEO
-        segment_descriptor UTEXT_PHYS, UTEXT_ROOM - 1, ACC_UCODE    ; SEL_UCODE
-        segment_descriptor UDATA_PHYS, UDATA_ROOM - 1, ACC_UDATA    ; SEL_UDATA
-        segment_descriptor USTACK_PHYS, USTACK_SIZE - 1, ACC_UDATA  ; SEL_USTACK
-%ifdef TEST_FUZZ
-        segment_descriptor UDATA_PHYS, UDATA_ROOM - 1, ACC_UCODE    ; SEL_UFUZZ
-%endif
+        kdata_descriptor program_ldt, LDT_LIMIT, ACC_LDT            ; SEL_LDT
 gdt_end:
 
 %if GDT_ENTRIES * 8 - 1 != GDT_LIMIT

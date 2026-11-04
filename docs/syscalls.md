@@ -35,6 +35,25 @@ numbers and the macro `sys`:
 
 `SYSCALL_COUNT` is the number of calls.
 
+### The test probe
+
+Attack test builds only (`TEST_ATTACK`) have one more call, `SYS_TEST_PROBE`
+(7Eh). It changes one of the program's own descriptors during the call, as
+a revocation would, so that the way back to ring 3 can be tested (roadmap
+l4.md L1; *docs/interrupts.md*). AL says which:
+
+| AL | Constant | The change |
+|---|---|---|
+| 1 | `PROBE_DS_ABSENT` | the data segment's descriptor not present |
+| 2 | `PROBE_DS_EXEC` | the data segment's slot refilled with execute-only code |
+| 3 | `PROBE_SS_ABSENT` | the stack's descriptor not present |
+| 4 | `PROBE_SS_READONLY` | the stack's slot refilled with read-only data |
+| 5 | `PROBE_CS_ABSENT` | the code's descriptor not present |
+| 6 | `PROBE_CS_DATA` | the code's slot refilled with data |
+
+Another AL, up to `PROBE_COUNT`, is `E_INVAL`. The next start of the
+program undoes the change.
+
 ### Errors
 
 | Code | Constant | Meaning |
@@ -86,18 +105,23 @@ caller's DS from the interrupt frame and:
 
 1. `ARPL`s it against the caller's CS, so its RPL is at least 3;
 2. `VERR`s it: is it readable at that privilege?
-3. `LSL`s its limit, and checks that SI + CX − 1 neither wraps nor passes it
+3. `LAR`s it: is it present? `VERR` and `VERW` say yes to a segment that is
+   not present (roadmap l4.md E2), and a copy from it would fault in ring 0;
+4. `LSL`s its limit, and checks that SI + CX − 1 neither wraps nor passes it
    (CX = 0 writes nothing);
-4. loads it into ES and copies from it.
+5. loads it into ES and copies from it.
 
 For `SYS_DISK_READ` it does the same with the caller's ES:DI and `VERW`:
 the buffer must be writable at the caller's privilege, which no code
 segment is. Both checks come before any device is touched.
 
 It also refuses an expand-down segment (and a conforming code segment, whose
-bit is the same), for which 0..limit is not the valid range (`LAR`). The GDT
-never changes and there is no LDT, so the check cannot go stale, even across
-`write`'s interrupt windows. Any selector the program can name has DPL 3 or
+bit is the same), for which 0..limit is not the valid range (`LAR`). A
+descriptor may change while interrupts are in (roadmap l4.md X2), so a call
+that lets them in checks the buffer again before it next touches it:
+`write`, `print` and `serial_write` before every byte, `disk_read` before it
+copies the sector out. No call keeps a program's segment loaded across an
+interrupt window. Any selector the program can name has DPL 3 or
 is refused, so the kernel never reads through a selector the program could
 not use itself. A buffer ending at FFFFh exactly is refused too: no program
 segment is that large.

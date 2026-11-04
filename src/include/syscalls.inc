@@ -30,6 +30,18 @@ SYS_WAIT            equ 13  ; AL WAIT_* events, CX ticks at most (0: no limit)
                             ;    -> AL the events that are there (0: the time ran out)
 SYSCALL_COUNT       equ 14
 
+; Attack test builds only (TEST_ATTACK): change one of the program's own
+; descriptors as a revocation would, so the way back to ring 3 can be tested
+; (roadmap l4.md L1). AL says which; the next start of the program undoes it.
+SYS_TEST_PROBE      equ 0x7E
+PROBE_DS_ABSENT     equ 1   ; the data segment's descriptor not present
+PROBE_DS_EXEC       equ 2   ; the data segment's slot refilled with execute-only code
+PROBE_SS_ABSENT     equ 3   ; the stack's descriptor not present
+PROBE_SS_READONLY   equ 4   ; the stack's slot refilled with read-only data
+PROBE_CS_ABSENT     equ 5   ; the code's descriptor not present
+PROBE_CS_DATA       equ 6   ; the code's slot refilled with data
+PROBE_COUNT         equ 7
+
 SYS_TICKS_HZ        equ 50
 WRITE_MAX           equ 4096
 KEY_WAIT            equ 0

@@ -79,6 +79,7 @@ restart_program:
 ; ----------------------------------------------------------------------------
 program_reset:
         mov byte [restart_pending], 0
+        call ldt_restore                ; undo any test probe's change
         fninit                          ; a clean 287, whatever the last run left
         call kbd_clear
 %ifdef WITH_TEST_HOOKS

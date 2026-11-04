@@ -699,6 +699,55 @@ test_fuzz_seed:
         jmp kputc
 %endif
 
+%ifdef TEST_ATTACK
+PROBE_ACC_EXEC_ONLY equ 0xF9            ; present, DPL 3, code, not readable, accessed
+PROBE_ACC_READ_ONLY equ 0xF1            ; present, DPL 3, data, not writable, accessed
+
+begin_kdata
+; Each probe: the LDT slot it changes (an offset in program_ldt), and the
+; access byte it leaves there (0: only the present bit cleared).
+test_probes:
+        dw 0, 0                                         ; (no probe 0)
+        dw SEL_UDATA & ~7, 0                            ; PROBE_DS_ABSENT
+        dw SEL_UDATA & ~7, PROBE_ACC_EXEC_ONLY          ; PROBE_DS_EXEC
+        dw SEL_USTACK & ~7, 0                           ; PROBE_SS_ABSENT
+        dw SEL_USTACK & ~7, PROBE_ACC_READ_ONLY         ; PROBE_SS_READONLY
+        dw SEL_UCODE & ~7, 0                            ; PROBE_CS_ABSENT
+        dw SEL_UCODE & ~7, ACC_UDATA                    ; PROBE_CS_DATA
+end_kdata
+
+; ----------------------------------------------------------------------------
+; test_probe - SYS_TEST_PROBE: change one of the program's descriptors, as a
+; revocation would; the way back to ring 3 must then null a DS or ES it may
+; no longer load, and report a CS or SS it may not as the program's fault,
+; never fault itself (roadmap l4.md L1). ldt_restore undoes it at the next
+; start of the program.
+;   In:       BP = the frame (AL the probe); DS = SEL_KDATA
+;   Out:      the program's LDT changed; or E_INVAL
+;   Destroys: AX, BX
+; ----------------------------------------------------------------------------
+test_probe:
+        mov bl, [bp + FRAME_AX]
+        test bl, bl
+        jz .invalid
+        cmp bl, PROBE_COUNT
+        jae .invalid
+        xor bh, bh
+        shl bx, 2
+        mov ax, [test_probes + bx + 2]
+        mov bx, [test_probes + bx]
+        test al, al
+        jz .absent
+        mov [program_ldt + bx + 5], al  ; the access byte
+        ret
+.absent:
+        and byte [program_ldt + bx + 5], ~ACC_PRESENT
+        ret
+.invalid:
+        mov ax, E_INVAL
+        jmp sys_fail
+%endif
+
 ; ----------------------------------------------------------------------------
 ; test_end - "TEST END" on the log on a line of its own, then end Bochs
 ;   In:       DS = SEL_KDATA

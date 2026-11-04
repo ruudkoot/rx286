@@ -142,6 +142,8 @@ sys_serial_write:
         call kpoll
         pop cx
         jc .late
+        call recheck_buffer             ; after kpoll's windows, the descriptor
+        jc .gone                        ; may differ (l4.md X2)
         mov al, [es:si]
         mov dx, COM2_BASE + UART_THR
         out dx, al
@@ -160,6 +162,10 @@ sys_serial_write:
 .late:
         mov [bp + FRAME_CX], bx
         mov ax, E_TIMEOUT
+        jmp sys_fail
+.gone:
+        mov [bp + FRAME_CX], bx
+        mov ax, E_FAULT
         jmp sys_fail
 .invalid:
         mov ax, E_INVAL

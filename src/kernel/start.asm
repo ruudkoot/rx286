@@ -4,8 +4,8 @@
 ;
 ; entry.asm jumps here at CPL 0 with interrupts and NMI off. The order
 ; matters: the stacks are zeroed before one is used; the TSS is loaded before
-; anything could interrupt from ring 3; LDTR is loaded with a null selector,
-; since Bochs starts with a live LDT at address 0 (roadmap X8); the 8259As
+; anything could interrupt from ring 3; LDTR is loaded with the program's
+; LDT, never left as Bochs' live one at address 0 (roadmap X8); the 8259As
 ; are reprogrammed before interrupts are enabled (X1); the devices are set
 ; up before their lines are unmasked. NMI comes on with the clock's set-up
 ; (any write of the CMOS index with bit 7 clear enables it), once every
@@ -38,7 +38,6 @@ pm_start:
         cld
         zero_segment SEL_KSTACK, KSTACK_SIZE
         zero_segment SEL_DFSTACK, DFSTACK_SIZE
-        zero_segment SEL_USTACK, USTACK_SIZE
         mov ax, SEL_KSTACK
         mov ss, ax
         mov sp, KSTACK_SIZE
@@ -46,8 +45,11 @@ pm_start:
         mov es, ax
         mov ax, SEL_TSS
         ltr ax
-        xor ax, ax                      ; no LDT
-        lldt ax
+        mov ax, SEL_LDT                 ; the program's LDT: never Bochs' live one
+        lldt ax                         ; at address 0 (roadmap X8)
+        zero_segment SEL_USTACK, USTACK_SIZE    ; an LDT selector: after LLDT
+        mov ax, SEL_KDATA
+        mov es, ax
         call pic_init
         call fpu_init
         call serial_quiet

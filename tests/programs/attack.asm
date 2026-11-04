@@ -22,7 +22,8 @@ FLAGS_TF            equ 0x0100
 FLAGS_IOPL3         equ 0x3000
 FLAGS_NT            equ 0x4000
 SEL_BEYOND_GDT      equ 0x60 | RPL_USER
-SEL_LDT_ENTRY       equ 0x08 | 0x04 | RPL_USER  ; index 1, TI = 1
+SEL_PAST_LDT        equ LDT_ENTRIES * 8 | SEL_TI_LDT | RPL_USER    ; one slot past the LDT
+SEL_EMPTY_SLOT      equ (LDT_ENTRIES - 1) * 8 | SEL_TI_LDT | RPL_USER  ; its last slot: empty
 FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 
 begin_udata
@@ -97,7 +98,7 @@ attacks:
 .video_f: mov es, ax
 .beyond: mov ax, SEL_BEYOND_GDT
 .beyond_f: mov es, ax
-.ldt:   mov ax, SEL_LDT_ENTRY
+.ldt:   mov ax, SEL_PAST_LDT
 .ldt_f: mov ds, ax
 .kcall: call SEL_KCODE:0
 .tss:   jmp SEL_TSS:0
@@ -264,6 +265,74 @@ attacks:
         pop es
         call report_refusal
         jmp entry
+.empty: mov ax, SEL_EMPTY_SLOT          ; an empty slot of the LDT: all zeros
+.empty_f: mov ds, ax
+.slots: mov bx, SEL_UCODE               ; what ring 3 learns of every LDT slot
+        jmp ldt_slots
+; The probes (roadmap l4.md L1): the kernel changes one of the program's
+; descriptors during a system call, as a revocation would. On the way back
+; a DS it may no longer load becomes null, and a CS or SS is the program's
+; fault, reported at the return address.
+.pds:   mov al, PROBE_DS_ABSENT
+        sys SYS_TEST_PROBE
+.pds_f: mov ax, [0]                     ; DS is null now
+.pdsx:  mov al, PROBE_DS_EXEC
+        sys SYS_TEST_PROBE
+.pdsx_f: mov ax, [0]
+.pss:   mov al, PROBE_SS_ABSENT
+        sys SYS_TEST_PROBE
+.pss_r: PRINT "attack: back, with a stack not present", CHAR_LF
+        jmp entry
+.pssr:  mov al, PROBE_SS_READONLY
+        sys SYS_TEST_PROBE
+.pssr_r: PRINT "attack: back, with a read-only stack", CHAR_LF
+        jmp entry
+.pcs:   mov al, PROBE_CS_ABSENT
+        sys SYS_TEST_PROBE
+.pcs_r: PRINT "attack: back, with code not present", CHAR_LF
+        jmp entry
+.pcsd:  mov al, PROBE_CS_DATA
+        sys SYS_TEST_PROBE
+.pcsd_r: PRINT "attack: back, with data for code", CHAR_LF
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; ldt_slots - every slot of the program's LDT as ring 3 sees it: LAR's
+; access rights (FFFF if refused), LSL's limit (FFFF if refused), r if VERR
+; passes, w if VERW does
+;   In:       BX = the first slot's selector
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+ldt_slots:
+        PRINT "attack: slot "
+        mov ax, bx
+        call print_hex16
+        PRINT " lar "
+        mov ax, 0xFFFF
+        lar ax, bx
+        call print_hex16
+        PRINT " lsl "
+        mov ax, 0xFFFF
+        lsl ax, bx
+        call print_hex16
+        mov al, ' '
+        call print_char
+        mov al, '-'
+        verr bx
+        jnz .read
+        mov al, 'r'
+.read:  call print_char
+        mov al, '-'
+        verw bx
+        jnz .write
+        mov al, 'w'
+.write: call print_char
+        call print_newline
+        add bx, 8
+        cmp bx, SEL_PAST_LDT
+        jb ldt_slots
+        jmp entry
 
 ; ----------------------------------------------------------------------------
 ; disk_read_attack - SYS_DISK_READ of A's sector 0 into ES:DI, reported
@@ -317,7 +386,7 @@ attack_table:
         attack "kernel stack", attacks.kstack
         attack "video", attacks.video
         attack "beyond the GDT", attacks.beyond
-        attack "an LDT selector", attacks.ldt
+        attack "a selector past the LDT", attacks.ldt
         attack "call the kernel", attacks.kcall
         attack "jump to the TSS", attacks.tss
         attack "call the double-fault TSS", attacks.dftss
@@ -361,6 +430,14 @@ attack_table:
         attack "print from a null selector", attacks.pnull
         attack "read drive 80h", attacks.drive
         attack "read sector FFFFh of A", attacks.sector
+        attack "an empty slot of the LDT", attacks.empty
+        attack "every slot of the LDT", attacks.slots
+        attack "probe: data not present", attacks.pds
+        attack "probe: execute-only code for data", attacks.pdsx
+        attack "probe: stack not present", attacks.pss
+        attack "probe: read-only stack", attacks.pssr
+        attack "probe: code not present", attacks.pcs
+        attack "probe: data for code", attacks.pcsd
         dw 0
 end_udata
 
