@@ -80,6 +80,24 @@ attack: 287 error
 rx286: the 287 reported an error (IRQ13)
 attack: write past the limit
 attack: refused, error 1
+attack: insb
+rx286: program fault #GP(0000) at 0043:{attacks.ins_f}
+attack: outsb
+rx286: program fault #GP(0000) at 0043:{attacks.outs_f}
+attack: a null SS
+rx286: program fault #GP(0000) at 0043:{attacks.nullss_f}
+attack: jump through the null selector
+rx286: program fault #GP(0000) at 0043:{attacks.nulljmp}
+attack: pop past the stack's top
+rx286: program fault #SS(0000) at 0043:{attacks.pop_f}
+attack: a 287 operand across the limit
+rx286: program fault #GP(0000) at 0043:{attacks.fpuop}
+attack: write from a null selector
+attack: refused, error 1
+attack: write past FFFFh
+attack: refused, error 1
+attack: unprivileged reads
+attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed
 attack: sgdt
 attack: sgdt allowed
 attack: smsw

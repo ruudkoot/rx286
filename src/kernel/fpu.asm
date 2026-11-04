@@ -35,7 +35,11 @@ fpu_irq:
         xor al, al
         out FPU_CLEAR_BUSY, al          ; release the latched BUSY first
         fnclex
+%ifdef TEST_FUZZ
+        inc word [fuzz_fpu_errors]      ; the fuzzer counts, quietly
+%else
         mov si, msg_fpu_error
         call klog
+%endif
         mov byte [restart_pending], 1
         ret

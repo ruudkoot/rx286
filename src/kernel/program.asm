@@ -48,6 +48,9 @@ enter_program:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 restart_program:
+%ifdef WITH_TEST_HOOKS
+        call test_restart_check
+%endif
         push ax
         mov word [bp + FRAME_IP], 0
         mov word [bp + FRAME_CS], SEL_UCODE

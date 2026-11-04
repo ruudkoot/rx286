@@ -18,8 +18,13 @@
 ;                       RTC interrupt, though rx286 has no driver for them
 ;   TEST_FPU_KERNEL     a 287 error raised by the kernel itself
 ;   TEST_TICKS          compare the timer with the RTC
-;   TEST_KEYBOARD       print every key read (before there is a program)
+;   TEST_KEYBOARD       print every key read (the program never starts)
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
+;   TEST_ATTACK         the attack program runs: check the kernel's code and
+;                       tables before every restart (M8)
+;   TEST_FUZZ           the fuzzer runs: the same checks, faults counted
+;                       instead of reported, a watchdog, and the end after
+;                       FUZZ_ITERATIONS starts (M8)
 ; Release and debug builds assemble none of this.
 ; ============================================================================
 
@@ -34,6 +39,13 @@ TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
 TEST_HDC_LIMIT      equ 10000           ; polls of the disk controller's BSY
 TEST_CLOCK_SECONDS  equ 3
 TEST_FPU_CW_ZM      equ 0x037B          ; every exception masked but zero-divide
+FUZZ_ITERATIONS     equ 10000           ; starts of the fuzz program before the end
+FUZZ_WATCHDOG       equ 5               ; ticks a fuzz iteration may run
+%ifdef TEST_ATTACK
+  %define TEST_KERNEL_CHECKS
+%elifdef TEST_FUZZ
+  %define TEST_KERNEL_CHECKS
+%endif
 
 begin_kdata
 %ifdef TEST_KEYS_INC
@@ -52,6 +64,27 @@ msg_probe_rtc       db "probe: the RTC kept interrupting; IRQ8 stayed masked", C
 msg_ticks_ok        db "timer: 50 ticks a second, by the clock", CHAR_LF, 0
 msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
+msg_kernel_changed  db "the kernel's code or tables changed", 0
+msg_stack_leak      db "a frame from ring 3 is not at the kernel stack's top", 0
+%ifdef TEST_KERNEL_CHECKS
+test_sum            dw 0
+test_sum_known      db 0
+%endif
+%ifdef TEST_FUZZ
+fuzz_starts         dw 0
+fuzz_ticks          dw 0
+fuzz_faults         times VEC_CPU_LAST + 1 dw 0
+fuzz_watchdogs      dw 0
+fuzz_fpu_errors     dw 0
+fuzz_in_random      dw 0                ; faults inside the random bytes (CS = UFUZZ)
+msg_fuzz_done       db "fuzz: ", 0
+msg_fuzz_done2      db " iterations; the kernel's code and tables unchanged", CHAR_LF, 0
+msg_fuzz_faults     db "fuzz: faults", 0
+msg_fuzz_watchdog   db " watchdog ", 0
+msg_fuzz_fpu        db " IRQ13 ", 0
+msg_fuzz_random     db "fuzz: faults inside the random bytes: ", 0
+msg_fuzz_seed       db "fuzz: the program's seed was ", 0
+%endif
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -143,6 +176,18 @@ test_recurse:
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 test_tick:
+%ifdef TEST_FUZZ
+        inc word [fuzz_ticks]
+        cmp word [fuzz_ticks], FUZZ_WATCHDOG
+        jb .keys
+        mov word [fuzz_ticks], 0
+        inc word [fuzz_watchdogs]
+        mov byte [restart_pending], 1   ; in the kernel: on the way back
+        test byte [bp + FRAME_CS], CPL_MASK
+        jz .keys
+        call restart_program            ; in ring 3: now
+.keys:
+%endif
         mov si, [test_key_ptr]
         mov al, [si]
         cmp al, TEST_OP_WAIT
@@ -157,7 +202,11 @@ test_tick:
         cmp bl, [kbd_tail]
         jne .done
         cmp al, TEST_OP_END
+%ifdef TEST_FUZZ
+        je .done                        ; the fuzzer ends by its count, not by keys
+%else
         je test_end
+%endif
 .now:
         in al, KBC_STATUS
         test al, KBC_STATUS_OBF
@@ -344,23 +393,183 @@ test_ticks:
 %endif
 
 ; ----------------------------------------------------------------------------
-; test_program_started - every start of the program (M8 adds its checks)
+; test_program_started - every start of the program: in attack and fuzz
+; builds, the kernel's code and tables must be as they were at the first
+; start; the fuzzer counts its starts and ends the test after enough
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      nothing
+;   Out:      nothing (or never: a panic, or the fuzzer's end)
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_program_started:
+%ifdef TEST_KERNEL_CHECKS
+        pusha
+        call test_kernel_sum
+        cmp byte [test_sum_known], 0
+        jne .compare
+        mov [test_sum], ax
+        mov byte [test_sum_known], 1
+        jmp .checked
+.compare:
+        cmp ax, [test_sum]
+        je .checked
+        mov si, msg_kernel_changed
+        xor bp, bp
+        jmp panic
+.checked:
+  %ifdef TEST_FUZZ
+        mov word [fuzz_ticks], 0
+        inc word [fuzz_starts]
+        cmp word [fuzz_starts], FUZZ_ITERATIONS
+        ja test_fuzz_end
+  %endif
+        popa
+%endif
+        ret
+
+; ----------------------------------------------------------------------------
+; test_restart_check - a frame from ring 3 must sit at the kernel stack's
+; top (SP0): anything else is a leak of the kernel's stack
+;   In:       BP = the frame being restarted; DS = SEL_KDATA
+;   Out:      nothing (or never: a panic)
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+test_restart_check:
+        cmp bp, KSTACK_SIZE - FRAME_SIZE_USER
+        je .ok
+        mov si, msg_stack_leak
+        xor bp, bp
+        jmp panic
+.ok:
         ret
 
 ; ----------------------------------------------------------------------------
 ; test_fault_quiet - should this fault of the program go unreported?
 ;   In:       BP = the frame; DS = SEL_KDATA
-;   Out:      CF set to keep quiet (the fuzzer counts its faults, M8)
+;   Out:      CF set to keep quiet: the fuzzer counts its faults instead
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_fault_quiet:
+%ifdef TEST_FUZZ
+        push bx
+        mov bx, [bp + FRAME_VECTOR]
+        shl bx, 1
+        inc word [fuzz_faults + bx]
+        cmp word [bp + FRAME_CS], SEL_UFUZZ
+        jne .counted
+        inc word [fuzz_in_random]
+.counted:
+        pop bx
+        stc
+%else
         clc
+%endif
         ret
+
+%ifdef TEST_KERNEL_CHECKS
+; ----------------------------------------------------------------------------
+; test_kernel_sum - the sum of the words of the kernel's code, its GDT, IDT
+; and both TSSs (accessed bits are preset; the TSS's busy bit was set
+; before the first start, and nothing else of these may change)
+;   In:       DS = SEL_KDATA
+;   Out:      AX = the sum
+;   Destroys: BX, CX, SI
+; ----------------------------------------------------------------------------
+test_kernel_sum:
+        xor ax, ax
+        xor si, si
+        mov cx, ktext_end
+        shr cx, 1                       ; words of code
+.code:
+        add ax, [cs:si]
+        add si, 2
+        loop .code
+        mov si, gdt
+        mov cx, (gdt_end - gdt) / 2
+        call .data
+        mov si, idt
+        mov cx, IDT_ENTRIES * 4
+        call .data
+        mov si, tss
+        mov cx, TSS286_SIZE                ; both TSSs, one after the other
+.data:
+        add ax, [si]
+        add si, 2
+        loop .data
+        ret
+%endif
+
+%ifdef TEST_FUZZ
+; ----------------------------------------------------------------------------
+; test_fuzz_end - the fuzzer's summary, then the end of the test
+;   In:       DS = SEL_KDATA
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+test_fuzz_end:
+        mov si, msg_fuzz_faults
+        call kputs
+        xor bx, bx
+.vector:
+        mov ax, [fuzz_faults + bx]
+        test ax, ax
+        jz .next
+        mov al, ' '
+        call kputc
+        mov ax, bx
+        shr ax, 1
+        call kput_vector
+        mov al, ' '
+        call kputc
+        mov ax, [fuzz_faults + bx]
+        xor dx, dx
+        call kput_dec32
+.next:
+        add bx, 2
+        cmp bx, (VEC_CPU_LAST + 1) * 2
+        jb .vector
+        mov si, msg_fuzz_watchdog
+        call kputs
+        mov ax, [fuzz_watchdogs]
+        xor dx, dx
+        call kput_dec32
+        mov si, msg_fuzz_fpu
+        call kputs
+        mov ax, [fuzz_fpu_errors]
+        call kput_dec32
+        mov al, CHAR_LF
+        call kputc
+        mov si, msg_fuzz_random
+        call kputs
+        mov ax, [fuzz_in_random]
+        call kput_dec32
+        mov al, CHAR_LF
+        call kputc
+        mov si, msg_fuzz_done
+        call kputs
+        mov ax, FUZZ_ITERATIONS
+        xor dx, dx
+        call kput_dec32
+        mov si, msg_fuzz_done2
+        call kputs
+        jmp test_end
+
+; ----------------------------------------------------------------------------
+; test_fuzz_seed - on a panic: the seed the fuzz program had (the first word
+; of its data), to replay the failing iteration
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, SI, ES
+; ----------------------------------------------------------------------------
+test_fuzz_seed:
+        mov si, msg_fuzz_seed
+        call kputs
+        mov ax, SEL_UDATA
+        mov es, ax
+        mov ax, [es:0]
+        call kput_hex16
+        mov al, CHAR_LF
+        jmp kputc
+%endif
 
 ; ----------------------------------------------------------------------------
 ; test_end - "TEST END" on COM1 on a line of its own, then end Bochs

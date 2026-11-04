@@ -1,0 +1,11 @@
+# 10,000 iterations of random code in ring 3 (tests/programs/fuzz.asm): no
+# panic, no reset, no hang, and the kernel's code and tables the same at
+# every start. The kernel prints its counts of faults by vector.
+program: fuzz
+match: contains
+timeout: 300
+---
+fuzz: starting
+fuzz: faults
+fuzz: faults inside the random bytes:
+fuzz: 10000 iterations; the kernel's code and tables unchanged

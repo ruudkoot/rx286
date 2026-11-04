@@ -66,6 +66,9 @@ panic:
         call kputs
         call kput_regs
 .halt:
+%ifdef TEST_FUZZ
+        call test_fuzz_seed
+%endif
 %ifdef WITH_TEST_HOOKS
         call test_end
 %endif

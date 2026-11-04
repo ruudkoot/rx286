@@ -156,6 +156,44 @@ attacks:
         sys SYS_WRITE                   ; refused: past the limit
         call report_refusal
         jmp entry
+.ins:   mov dx, KBC_DATA
+.ins_f: insb                            ; IOPL 0
+.outs:  mov dx, SYS_PORT_B
+        xor si, si
+.outs_f: outsb                          ; IOPL 0
+.nullss: xor ax, ax
+.nullss_f: mov ss, ax                   ; a null SS
+.nulljmp: jmp SEL_NULL:0                ; a far jump through the null selector
+.pop:   mov sp, USTACK_SIZE
+.pop_f: pop ax                          ; past the stack's top
+.fpuop: fld tword [UDATA_ROOM - 4]      ; a 287 operand across the limit:
+        fwait                           ; #MP (vector 9) on a 286, #GP on Bochs
+        jmp $
+.nullw: push ds
+        xor ax, ax
+        mov ds, ax
+        xor si, si
+        mov cx, 1
+        sys SYS_WRITE                   ; refused: a null selector
+        pop ds
+        call report_refusal
+        jmp entry
+.wrap:  mov si, 0xFFF0
+        mov cx, 0x20
+        sys SYS_WRITE                   ; refused: past FFFFh
+        call report_refusal
+        jmp entry
+.reads: sidt [scratch]                  ; unprivileged on the 286: all allowed
+        str ax
+        sldt ax
+        mov bx, cs
+        lar ax, bx
+        lsl ax, bx
+        verr bx
+        verw bx
+        arpl ax, bx
+        PRINT "attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed", CHAR_LF
+        jmp entry
 .sgdt:  sgdt [scratch]                  ; unprivileged on the 286: allowed
         PRINT "attack: sgdt allowed", CHAR_LF
         jmp entry
@@ -224,6 +262,15 @@ attack_table:
         attack "loadall", attacks.loadall
         attack "287 error", attacks.fpu
         attack "write past the limit", attacks.write
+        attack "insb", attacks.ins
+        attack "outsb", attacks.outs
+        attack "a null SS", attacks.nullss
+        attack "jump through the null selector", attacks.nulljmp
+        attack "pop past the stack's top", attacks.pop
+        attack "a 287 operand across the limit", attacks.fpuop
+        attack "write from a null selector", attacks.nullw
+        attack "write past FFFFh", attacks.wrap
+        attack "unprivileged reads", attacks.reads
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
         dw 0
