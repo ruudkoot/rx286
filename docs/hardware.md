@@ -150,8 +150,10 @@ numbers below are the Technical Reference's.
   log), `UART_MCR_RUN` raises OUT2 too (the mouse, the modem), and
   `UART_MCR_OFF` drops them all (a mouse's reset); `UART_IER_RECEIVED`
   interrupts when a byte comes; `UART_LSR_DATA` (a byte waits),
-  `UART_LSR_THRE` (room for a byte) and `UART_LSR_TEMT` (the last byte has
-  gone); `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the modem),
+  `UART_LSR_OVERRUN` (one was lost), `UART_LSR_THRE` (room for a byte) and
+  `UART_LSR_TEMT` (the last byte has gone), and `UART_LSR_ABSENT`, what a port
+  without a UART reads; `UART_FCR` takes `UART_FCR_FIFO` to turn on a
+  16550's FIFO (an 8250 or 16450 has none, and ignores it); `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the modem),
   `UART_DIVISOR_1200` (the mouse).
 - **EGA**: `CRTC_CURSOR_HIGH` and `CRTC_CURSOR_LOW` hold the cursor's
   position.

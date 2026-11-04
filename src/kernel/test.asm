@@ -20,7 +20,8 @@
 ;                       though rx286 has no driver for them
 ;   TEST_FPU_KERNEL     a 287 error raised by the kernel itself
 ;   TEST_TICKS          compare the timer with the RTC
-;   TEST_SOUND          measure every tone SYS_SOUND starts, by its output
+;   TEST_SOUND          measure every tone SYS_SOUND starts, by its output and
+;                       port B's bits, and check the silence after each sound
 ;   TEST_KEYBOARD       print every key read (the program never starts)
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
 ;   TEST_TYPE_DIRECT    type keys by handing each byte to the driver instead
@@ -71,6 +72,9 @@ msg_key_abandoned   db "key: waiting abandoned for a restart", CHAR_LF, 0
 msg_probe_rtc       db "probe: the RTC kept interrupting; IRQ8 stayed masked", CHAR_LF, 0
 msg_sound_ok        db "probe: the speaker sounds at the frequency asked", CHAR_LF, 0
 msg_sound_bad       db "probe: the speaker's output changed this often in a tick: ", 0
+msg_sound_unwired   db "probe: the speaker is NOT CONNECTED", CHAR_LF, 0
+msg_silent          db "probe: silent", CHAR_LF, 0
+msg_not_silent      db "probe: STILL SOUNDING", CHAR_LF, 0
 msg_ticks_ok        db "timer: 50 ticks a second, by the clock", CHAR_LF, 0
 msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
@@ -341,6 +345,13 @@ test_probes:
 ; ----------------------------------------------------------------------------
 test_sound:
         push cx
+        in al, SYS_PORT_B
+        and al, SYS_PORT_B_GATE2 | SYS_PORT_B_SPEAKER
+        cmp al, SYS_PORT_B_GATE2 | SYS_PORT_B_SPEAKER
+        je .wired
+        mov si, msg_sound_unwired
+        call kputs
+.wired:
         mov si, [ticks]
 .edge:
         sti
@@ -391,6 +402,43 @@ test_sound:
         call kputc
         pop cx
         ret
+
+; ----------------------------------------------------------------------------
+; test_silence - after a sound or a rest: port B's gate and speaker bits
+; clear, and channel 2's output still over a whole tick
+;   In:       DS = SEL_KDATA
+;   Out:      a probe line
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+test_silence:
+        in al, SYS_PORT_B
+        test al, SYS_PORT_B_GATE2 | SYS_PORT_B_SPEAKER
+        jnz .sounding
+        and al, SYS_PORT_B_OUT2
+        mov ah, al
+        mov si, [ticks]
+.edge:
+        sti
+        nop
+        cli
+        cmp si, [ticks]
+        je .edge
+        mov si, [ticks]
+.watch:
+        in al, SYS_PORT_B
+        and al, SYS_PORT_B_OUT2
+        cmp al, ah
+        jne .sounding
+        sti
+        nop
+        cli
+        cmp si, [ticks]
+        je .watch
+        mov si, msg_silent
+        jmp kputs
+.sounding:
+        mov si, msg_not_silent
+        jmp kputs
 %endif
 
 %ifdef TEST_FPU_KERNEL

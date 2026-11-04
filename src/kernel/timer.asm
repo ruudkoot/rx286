@@ -47,6 +47,8 @@ timer_irq:
         adc word [ticks + 2], 0
         call fd_tick
         call mouse_tick
+        call mouse_irq                  ; bytes whose interrupt was lost: IRQ3
+        call modem_irq                  ; and IRQ4 are shared, and an edge can go
 %ifdef WITH_TEST_HOOKS
         call test_tick
 %endif

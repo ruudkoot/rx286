@@ -3,7 +3,7 @@
 # left button, far down against the screen's edge, then both buttons, which
 # end the command.
 program: shell
-keys: mouse\n{wait 5}{mouse 16 8 -}{wait 2}{mouse -40 0 L}{wait 2}{mouse 127 127 -}{wait 2}{mouse 0 0 LR}
+keys: {wait 20}mouse\n{wait 5}{mouse 16 8 -}{wait 2}{mouse -40 0 L}{wait 2}{mouse 127 127 -}{wait 2}{mouse 0 0 LR}
 ---
 rx286, test build
 rx286 shell: type help for the commands

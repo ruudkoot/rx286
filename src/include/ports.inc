@@ -157,6 +157,7 @@ UART_DLL            equ 0           ; divisor latch, low (DLAB = 1)
 UART_DLM            equ 1           ; divisor latch, high (DLAB = 1)
 UART_IER            equ 1           ; interrupt enable
 UART_IER_RECEIVED   equ 0x01        ; an interrupt when a byte has come
+UART_FCR            equ 2           ; write: FIFO control (a 16550's; nothing on an 8250 or 16450)
 UART_LCR            equ 3           ; line control
 UART_MCR            equ 4           ; modem control
 UART_LSR            equ 5           ; line status
@@ -167,6 +168,9 @@ UART_MCR_DTR_RTS    equ 0x03        ; OUT2 clear: the UART's interrupt stays off
 UART_MCR_RUN        equ 0x0B        ; DTR, RTS and OUT2: interrupts reach the bus
 UART_MCR_OFF        equ 0x00        ; DTR and RTS low: a serial mouse's reset
 UART_LSR_DATA       equ 0x01        ; a byte waits in the receive buffer
+UART_LSR_OVERRUN    equ 0x02        ; a byte came before the last was read: lost
+UART_LSR_ABSENT     equ 0xFF        ; what a port with no UART reads
+UART_FCR_FIFO       equ 0x07        ; FIFOs on and emptied, an interrupt for each byte
 UART_LSR_THRE       equ 0x20        ; transmit holding register empty
 UART_LSR_TEMT       equ 0x40        ; transmitter empty: the last byte has gone
 UART_DIVISOR_115200 equ 1           ; 1.8432 MHz / 16 / 1

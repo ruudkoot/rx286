@@ -10,8 +10,17 @@
 ; SYS_SERIAL_READ, which never waits: SYS_WAIT waits for it.
 ; SYS_SERIAL_WRITE sends as SYS_PRINT prints: each byte once the UART can
 ; take it (2 s at most), interrupts let in after each, a restart ending it
-; early. A machine without COM4 (MAME's AT) reads as a UART always ready and
-; never receiving.
+; early. A machine without COM4 (MAME's AT) reads all ones: always ready to
+; send, never receiving.
+;
+; COM4 shares IRQ3 with COM2, whose UART the kernel keeps quiet (OUT2 clear);
+; but an edge can still be lost (Bochs drops COM4's when COM2, the log, is
+; touched), so every tick also fetches what COM4 holds (timer_irq). A 16450
+; holds one byte: at 9600 baud one comes every 1.04 ms, and the kernel's
+; longest stretches with interrupts off (the game port's timing, 4 ms; a
+; scroll of the screen, a few ms on a real AT) can lose some, which
+; modem_overruns counts. A 16550's FIFO, turned on where there is one,
+; holds 16.
 ; ============================================================================
 
 
@@ -24,6 +33,7 @@ modem_ring          times MODEM_RING db 0
 modem_head          db 0                ; the next byte to take
 modem_tail          db 0                ; where the next byte goes
 modem_dropped       dw 0                ; bytes lost to a full ring
+modem_overruns      dw 0                ; bytes the UART lost before they were read
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -46,6 +56,9 @@ modem_init:
         mov dx, COM4_BASE + UART_LCR
         mov al, UART_LCR_8N1
         out dx, al
+        mov dx, COM4_BASE + UART_FCR
+        mov al, UART_FCR_FIFO
+        out dx, al
         mov dx, COM4_BASE + UART_RBR
         in al, dx                       ; nothing stale
         mov dx, COM4_BASE + UART_IER
@@ -57,7 +70,7 @@ modem_init:
         ret
 
 ; ----------------------------------------------------------------------------
-; modem_irq - IRQ3: the bytes COM4 has, into the ring
+; modem_irq - IRQ3, and every tick: the bytes COM4 has, into the ring
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing (the dispatcher sends EOI)
 ;   Destroys: AX, BX, CX, DX
@@ -67,6 +80,12 @@ modem_irq:
 .next:
         mov dx, COM4_BASE + UART_LSR
         in al, dx
+        cmp al, UART_LSR_ABSENT
+        je .done                        ; no UART there
+        test al, UART_LSR_OVERRUN
+        jz .no_overrun
+        inc word [modem_overruns]
+.no_overrun:
         test al, UART_LSR_DATA
         jz .done
         mov dx, COM4_BASE + UART_RBR

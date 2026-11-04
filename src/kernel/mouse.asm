@@ -9,14 +9,17 @@
 ; bit 6 set:
 ;   1 L R Y7 Y6 X7 X6     0 X5 X4 X3 X2 X1 X0     0 Y5 Y4 Y3 Y2 Y1 Y0
 ; X and Y are signed: right and down are positive. A Logitech mouse's fourth
-; byte (its middle button) is passed over. The kernel adds each packet's
+; byte (its middle button) is passed over, and so is a Plug and Play mouse's
+; identity, which follows its "M" between parentheses (its letters would
+; begin packets). The kernel adds each packet's
 ; movement to a position it keeps as DOS's mouse driver does in text mode,
 ; 0-MOUSE_X_MAX and 0-MOUSE_Y_MAX, eight to a character cell, starting in the
 ; middle; and keeps the buttons. A mouse that never says "M" is reported
 ; absent, but its packets still count: nothing is detected.
 ; ============================================================================
 
-MOUSE_RESET_TICKS   equ 5               ; DTR and RTS low for 100 ms
+MOUSE_RESET_TICKS   equ 12              ; DTR and RTS low 200 ms at least: the first
+                                        ; two ticks may come at once after start
 MOUSE_ID            equ 'M'
 MOUSE_SYNC          equ 0x40            ; a packet's first byte
 MOUSE_BYTE          equ 0x7F            ; seven bits a byte
@@ -26,6 +29,8 @@ MOUSE_PACKET_RIGHT  equ 0x10
 MOUSE_PACKET_Y_HIGH equ 0x0C
 MOUSE_PACKET_X_HIGH equ 0x03
 MOUSE_IRQ_BYTES     equ 16              ; bytes taken at most in one interrupt
+MOUSE_PNP_BEGIN     equ '('             ; a Plug and Play identity's first byte
+MOUSE_PNP_END       equ ')'             ; and its last
 
 begin_kdata
 mouse_reset_left    db 0                ; ticks until DTR and RTS rise again
@@ -36,6 +41,7 @@ mouse_x             dw (MOUSE_X_MAX + 1) / 2
 mouse_y             dw (MOUSE_Y_MAX + 1) / 2
 mouse_buttons       db 0
 mouse_changed       db 0                ; set by a packet, cleared by SYS_MOUSE
+mouse_pnp           db 0                ; 1 inside a Plug and Play identity
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -90,7 +96,7 @@ mouse_tick:
         ret
 
 ; ----------------------------------------------------------------------------
-; mouse_irq - IRQ4: the bytes COM1 has
+; mouse_irq - IRQ4, and every tick: the bytes COM1 has
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing (the dispatcher sends EOI)
 ;   Destroys: AX, BX, CX, DX
@@ -100,6 +106,8 @@ mouse_irq:
 .next:
         mov dx, COM1_BASE + UART_LSR
         in al, dx
+        cmp al, UART_LSR_ABSENT
+        je .done                        ; no UART there
         test al, UART_LSR_DATA
         jz .done
         mov dx, COM1_BASE + UART_RBR
@@ -117,6 +125,8 @@ mouse_irq:
 ; ----------------------------------------------------------------------------
 mouse_byte:
         and al, MOUSE_BYTE
+        cmp byte [mouse_pnp], 0
+        jne .pnp
         test al, MOUSE_SYNC
         jz .data
         cmp byte [mouse_present], 0
@@ -129,10 +139,20 @@ mouse_byte:
         mov [mouse_packet], al
         mov byte [mouse_index], 1
         ret
+.pnp:
+        cmp al, MOUSE_PNP_END
+        jne .done
+        mov byte [mouse_pnp], 0
+        ret
 .data:
         mov bl, [mouse_index]
         cmp bl, MOUSE_PACKET
-        jae .done                       ; no packet begun, or a fourth byte
+        jb .packet
+        cmp al, MOUSE_PNP_BEGIN         ; outside a packet: an identity begins?
+        jne .done                       ; else no packet begun, or a fourth byte
+        mov byte [mouse_pnp], 1
+        ret
+.packet:
         xor bh, bh
         mov [mouse_packet + bx], al
         inc bl

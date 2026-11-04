@@ -41,7 +41,11 @@ sys_sound:
         mov si, restart_pending         ; Ctrl+Break ends it
         call ksleep_until
 .done:
-        jmp speaker_off
+        call speaker_off
+%ifdef TEST_SOUND
+        call test_silence
+%endif
+        ret
 .invalid:
         mov ax, E_INVAL
         jmp sys_fail

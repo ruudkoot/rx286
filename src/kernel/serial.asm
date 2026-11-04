@@ -8,6 +8,27 @@
 ; fires for it. Transmit only. Release builds assemble none of this.
 ; ============================================================================
 
+; ----------------------------------------------------------------------------
+; serial_quiet - COM2 and COM3, which no driver serves, with their interrupts
+; off and OUT2 clear, whatever ran before: they share IRQ3 and IRQ4 with the
+; modem and the mouse (in debug and test builds com_init then makes COM2
+; the log, its interrupt still off)
+;   In:       interrupts off
+;   Out:      nothing
+;   Destroys: AL, DX
+; ----------------------------------------------------------------------------
+serial_quiet:
+        xor al, al
+        mov dx, COM2_BASE + UART_IER
+        out dx, al
+        mov dx, COM2_BASE + UART_MCR
+        out dx, al
+        mov dx, COM3_BASE + UART_IER
+        out dx, al
+        mov dx, COM3_BASE + UART_MCR
+        out dx, al
+        ret
+
 %ifdef WITH_SERIAL
 
 ; ----------------------------------------------------------------------------

@@ -8,11 +8,15 @@ timeout: 60
 ---
 rx286, test build
 probe: the speaker sounds at the frequency asked
+probe: silent
 sound: 440 Hz: no error
 probe: the speaker sounds at the frequency asked
+probe: silent
 sound: 1000 Hz: no error
 probe: the speaker sounds at the frequency asked
+probe: silent
 sound: 2000 Hz: no error
+probe: silent
 sound: a rest of 5 ticks: 5 ticks
 sound: 18 Hz: error 3
 sound: 20001 Hz: error 3

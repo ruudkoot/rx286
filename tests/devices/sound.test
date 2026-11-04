@@ -9,17 +9,31 @@ rx286, test build
 rx286 shell: type help for the commands
 A:\>beep
 probe: the speaker sounds at the frequency asked
+probe: silent
 A:\>play
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 probe: the speaker sounds at the frequency asked
+probe: silent
 A:\>

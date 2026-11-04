@@ -50,6 +50,7 @@ pm_start:
         lldt ax
         call pic_init
         call fpu_init
+        call serial_quiet
 %ifdef WITH_SERIAL
         call com_init
 %endif

@@ -260,9 +260,10 @@ def compile_keys(script):
     {up}, {down}, {left}, {right}, {esc}, {f1}, {caps}, {scroll-lock}, {del},
     {ctrl-X} and {alt-X} for a key X,
     {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
-    not wait), {wait N} (N ticks), and {mouse DX DY B}: a Microsoft mouse's
+    not wait), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's
     packet, DX right and DY down (-128 to 127), B the buttons down (L, R, LR
-    or -)."""
+    or -), and {mouse-bytes A B C}: three bytes from the mouse as they are,
+    in hexadecimal."""
     out = []
 
     def press(code, op=OP_WHEN_WAITING):
@@ -285,6 +286,12 @@ def compile_keys(script):
             i = end + 1
             if name in NAMED:
                 press(NAMED[name])
+            elif name.startswith('mouse-bytes '):
+                raw = [int(b, 16) for b in name.split()[1:]]
+                if len(raw) != 3 or not all(0 <= b < 0x80 for b in raw):
+                    raise ValueError('key script: bad mouse bytes {%s}' % name)
+                out.append(OP_MOUSE)
+                out.extend(raw)
             elif name.startswith('mouse '):
                 out.append(OP_MOUSE)
                 out.extend(mouse_packet(name))

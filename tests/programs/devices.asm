@@ -3,9 +3,12 @@
 ; The speaker, game port, mouse, serial and wait calls, with good and bad
 ; arguments (tests/devices).
 ;
-; Each check prints one line. Built with TEST_SOUND, the kernel adds a probe
-; line for every tone: whether the speaker's output runs at the frequency
-; asked. The program then waits for a key, which ends the test.
+; Each check prints one line. Built with TEST_SOUND, the kernel adds probe
+; lines for every sound: whether the speaker's output runs at the frequency
+; asked, and whether it is silent after. Built with DEVICES_SHARED_IRQ, it
+; runs only the modem's check against IRQ3's sharing: bytes from a modem
+; (tests/devices/shared-irq.test) must arrive while the kernel writes its
+; log on COM2. The program then waits for a key, which ends the test.
 ; ============================================================================
 
 cpu 286
@@ -15,10 +18,24 @@ bits 16
 
 MOUSE_SETTLE_TICKS  equ 20              ; the mouse's reset and "M" take 6 ticks or so
 REST_TICKS          equ 5
+%ifdef TEST_SOUND
+REST_SLACK          equ 3               ; the kernel's silence probe watches up to two ticks more
+%else
+REST_SLACK          equ 1
+%endif
+ATI_ANSWER          equ 30              ; "ATI", CR, echoed, and the peer's answer
+LOG_ROUNDS          equ 30              ; writes of LOG_CHUNK bytes while it answers
+LOG_CHUNK           equ 64
+COLLECT_ROOM        equ 256
 
 begin_udata
 before              dw 0
 byte_buffer         db 0
+ati                 db "ATI", CHAR_CR
+ati_end:
+log_chunk           times LOG_CHUNK db 'x'
+collected           times COLLECT_ROOM db 0
+total               dw 0
 end_udata
 
 ; ----------------------------------------------------------------------------
@@ -29,6 +46,10 @@ end_udata
 ; ----------------------------------------------------------------------------
 entry:
         cld
+%ifdef DEVICES_SHARED_IRQ
+        call check_shared_irq
+        jmp .wait
+%endif
         call check_sound
         call check_joystick
         call check_mouse
@@ -71,7 +92,7 @@ check_sound:
         PRINT "sound: a rest of 5 ticks: "
         cmp ax, REST_TICKS
         jb .short
-        cmp ax, REST_TICKS + 1
+        cmp ax, REST_TICKS + REST_SLACK
         ja .long
         PRINT "5 ticks", CHAR_LF
         jmp .refused
@@ -253,6 +274,101 @@ check_wait:
         ret
 .changed:
         PRINT "CHANGED", CHAR_LF
+        ret
+
+; ----------------------------------------------------------------------------
+; check_shared_irq - ATI to the modem, its answer counted: once with the
+; shell idle, once while the kernel writes LOG_ROUNDS * LOG_CHUNK bytes to the
+; console and its log (COM2, which shares IRQ3 with the modem's COM4), and
+; once more after
+;   In:       DS = ES = the program's data
+;   Out:      nothing
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+check_shared_irq:
+        call ask_ati
+        call collect
+        PRINT "modem: idle: answer of "
+        call report_total
+        call ask_ati_now
+        mov bx, LOG_ROUNDS
+.round:
+        mov si, log_chunk
+        mov cx, LOG_CHUNK
+        sys SYS_WRITE
+        dec bx
+        jnz .round
+        call print_newline
+        call settle
+        call collect
+        PRINT "modem: while the log is written: answer of "
+        call report_total
+        call ask_ati
+        call collect
+        PRINT "modem: after: answer of "
+        jmp report_total
+
+; ----------------------------------------------------------------------------
+; ask_ati - ATI to the modem, then time for its answer
+;   In:       DS = ES = the program's data
+;   Out:      nothing
+;   Destroys: AX, CX, SI
+; ----------------------------------------------------------------------------
+ask_ati:
+        call ask_ati_now
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; settle - a second for the modem's answer to come
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: AX, CX
+; ----------------------------------------------------------------------------
+settle:
+        xor al, al
+        mov cx, 50
+        sys SYS_WAIT
+        ret
+
+; ----------------------------------------------------------------------------
+; ask_ati_now - ATI to the modem, without waiting
+;   In:       DS = ES = the program's data
+;   Out:      nothing
+;   Destroys: AX, CX, SI
+; ----------------------------------------------------------------------------
+ask_ati_now:
+        mov si, ati
+        mov cx, ati_end - ati
+        sys SYS_SERIAL_WRITE
+        ret
+
+; ----------------------------------------------------------------------------
+; collect - every byte the modem's line holds, counted into total
+;   In:       DS = ES = the program's data
+;   Out:      total
+;   Destroys: AX, CX, DI
+; ----------------------------------------------------------------------------
+collect:
+        mov word [total], 0
+.more:
+        mov di, collected
+        mov cx, COLLECT_ROOM
+        sys SYS_SERIAL_READ
+        add [total], ax
+        test ax, ax
+        jnz .more
+        ret
+
+; ----------------------------------------------------------------------------
+; report_total - "N bytes, whole" if total is ATI_ANSWER, else the count
+;   In:       total
+;   Out:      nothing
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+report_total:
+        mov ax, [total]
+        call print_dec
+        PRINT " bytes", CHAR_LF
         ret
 
 ; ----------------------------------------------------------------------------

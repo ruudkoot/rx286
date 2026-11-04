@@ -138,6 +138,9 @@ class Test:
             elif key == 'modem':
                 if value != 'hayes':
                     raise ValueError('%s: unknown modem %r' % (self.path, value))
+                if 'mame' in self.emulators and 'emulators:' not in text:
+                    raise ValueError('%s: a modem needs COM4, which MAME has not: '
+                                     'say emulators:' % self.path)
                 self.modem = value
             elif key == 'media':
                 if value not in rxlib.MEDIA:
@@ -193,14 +196,18 @@ class HayesPeer(threading.Thread):
                 if not data:
                     return
                 self.received += data
-                for b in data:
-                    conn.sendall(bytes([b]))
-                    if b == 13:
-                        if line:
-                            conn.sendall(self.ANSWERS.get(line.upper(), b'\r\nERROR\r\n'))
-                        line = b''
-                    else:
-                        line += bytes([b])
+                try:
+                    for b in data:
+                        conn.sendall(bytes([b]))
+                        if b == 13:
+                            if line:
+                                conn.sendall(self.ANSWERS.get(line.upper(),
+                                                              b'\r\nERROR\r\n'))
+                            line = b''
+                        else:
+                            line += bytes([b])
+                except OSError:             # the emulator has gone
+                    return
 
     def close(self):
         self.server.close()
