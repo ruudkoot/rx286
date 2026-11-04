@@ -22,7 +22,7 @@ mformat writes the BPB (bytes 3-61) around its code. It:
 
 On an error it prints "rx286: cannot read the loader" or "rx286: no loader
 on this disk", waits for a key and asks the BIOS to boot again (INT 19h).
-Debug and test builds copy the message to COM1 (115200, 8N1).
+Debug and test builds copy the message to the log, COM2 (115200, 8N1).
 
 ## 3. The loader (`src/boot-loader/`)
 
@@ -49,7 +49,7 @@ retried `BOOT_TRIES` times. The errors are "this disk's format is not one I
 can read", "cannot read the disk", "no KERNEL.BIN on this disk",
 "KERNEL.BIN is larger than its room" and "KERNEL.BIN's cluster chain is
 broken", each followed by a key and INT 19h. Debug and test builds trace
-"started" and "KERNEL.BIN loaded" on COM1.
+"started" and "KERNEL.BIN loaded" on the log (COM2).
 
 ## 4. The kernel
 

@@ -28,7 +28,7 @@ program.
 3. `entry.asm` (real mode) loads the GDT and IDT, sets PE and MP, and jumps
    to `pm_start`.
 4. `start.asm` zeroes the stacks, loads TR and a null LDTR, reprograms the
-   8259As, initialises the 287, COM1 (debug and test builds) and the
+   8259As, initialises the 287, the log on COM2 (debug and test builds) and the
    console, prints the banner, sets up the timer, keyboard, clock, DMA
    controllers and printer ports, unmasks every IRQ line and enables NMI.
    The diskette and fixed disk controllers are set up when first used.
@@ -68,8 +68,8 @@ with `incbin`: it can name nothing of the kernel's.
 | `diskette.asm` | the NEC 765: drives A and B, IRQ6 |
 | `fixeddisk.asm` | the fixed disk controller: drives C and D, IRQ14 |
 | `printer.asm` | `SYS_PRINT`: LPT1 and LPT2, polled |
-| `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to COM1 |
-| `serial.asm` | COM1 output, polled (debug and test builds) |
+| `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to the log |
+| `serial.asm` | the log, polled: COM2, or COM3 when COM2 is the modem (debug and test builds) |
 | `print.asm` | strings, numbers, the kernel's messages, trace lines, register dumps |
 | `test.asm` | test builds only: typed keys, probes, faults on purpose, the end of a test |
 

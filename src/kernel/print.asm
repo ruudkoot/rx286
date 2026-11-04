@@ -3,8 +3,8 @@
 ; The kernel's own output: strings, numbers, its messages, trace lines and
 ; register dumps.
 ;
-; Everything goes through the console (and so to COM1 in debug and test
-; builds), except trace lines in test builds, which go to COM1 only. Numbers
+; Everything goes through the console (and so to the log in debug and test
+; builds), except trace lines in test builds, which go to the log only. Numbers
 ; are formatted by src/lib/format.asm into a buffer in kdata.
 ; ============================================================================
 
@@ -163,8 +163,8 @@ klog_number:
         ret
 
 ; ----------------------------------------------------------------------------
-; ktrace - a trace line "[trace] <text>": screen and COM1 in debug builds,
-; COM1 only in test builds
+; ktrace - a trace line "[trace] <text>": screen and log in debug builds,
+; the log only in test builds
 ;   In:       SI = the text in kdata; DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: nothing

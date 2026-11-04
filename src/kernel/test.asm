@@ -9,7 +9,7 @@
 ; would and raises IRQ1 (roadmap E7). It types only while something waits in
 ; kbd_wait_key with nothing buffered, unless the script says "now". When the
 ; script is done and something waits again, the test ends: "TEST END" on
-; COM1, then the shutdown port.
+; the log, then the shutdown port.
 ;
 ; A test image asks for more with -d (tools/run-test):
 ;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK
@@ -569,7 +569,7 @@ test_fuzz_seed:
 %endif
 
 ; ----------------------------------------------------------------------------
-; test_end - "TEST END" on COM1 on a line of its own, then end Bochs
+; test_end - "TEST END" on the log on a line of its own, then end Bochs
 ;   In:       DS = SEL_KDATA
 ;   Out:      does not return
 ;   Destroys: everything

@@ -23,7 +23,7 @@ numbers below are the Technical Reference's.
 | DMA | two 8237A: channels 0-3 8-bit, 4 cascade, 5-7 16-bit | channel 2, for the diskettes |
 | Diskette | controller at 3F0h-3F7h, IRQ6, DMA 2; A: 1.2 MB 5.25", B: 360 KB 5.25" | the diskette driver (and the BIOS, in the boot code) |
 | Fixed disk | controller at 1F0h-1F7h, IRQ14; drive 0 type 2 (615/4/17, 20 MB), drive 1 type 1 (306/4/17, 10 MB) | the fixed disk driver |
-| Serial | COM1 3F8h IRQ4, COM2 2F8h IRQ3, COM3 3E8h IRQ4, COM4 2E8h IRQ3 | COM1 output in debug and test builds |
+| Serial | COM1 3F8h IRQ4, COM2 2F8h IRQ3, COM3 3E8h IRQ4, COM4 2E8h IRQ3 | COM2: the log in debug and test builds |
 | Parallel | LPT1 378h IRQ7, LPT2 278h IRQ5 | the printer driver, polled |
 | Video | IBM EGA, colour display, 80x25 text at B8000h | the console |
 
@@ -46,14 +46,14 @@ numbers below are the Technical Reference's.
 | 201h | game port | `GAME_PORT` | never |
 | 278h-27Ah | LPT2 | `LPT2_BASE` | the printer driver |
 | 2E8h-2EFh | COM4 | `COM4_BASE` | never |
-| 2F8h-2FFh | COM2 | `COM2_BASE` | never |
+| 2F8h-2FFh | COM2 | `COM2_BASE` | the log in debug and test builds |
 | 378h-37Ah | LPT1 | `LPT1_BASE` | the printer driver |
 | 3C0h-3CFh | EGA attribute, sequencer, graphics, misc | `EGA_ATTR` | never (the loader's INT 10h sets the mode) |
 | 3D4h-3D5h | EGA CRTC (colour) | `CRTC_INDEX`, `CRTC_DATA` | the cursor's location |
 | 3DAh | EGA input status 1 | `EGA_STATUS1` | never |
 | 3E8h-3EFh | COM3 | `COM3_BASE` | never |
 | 3F0h-3F7h | diskette controller | `FDC_DOR`, `FDC_MSR`, `FDC_DATA`, `FDC_DIR`, `FDC_CCR` | the diskette driver; DOR: the loader stops the motor |
-| 3F8h-3FFh | COM1 | `COM1_BASE` | debug and test builds |
+| 3F8h-3FFh | COM1 | `COM1_BASE` | never yet: the mouse's (devices roadmap) |
 | 8900h | Bochs' shutdown port, not AT hardware | `BOCHS_SHUTDOWN_PORT` | test builds only |
 
 ### Bits and commands
@@ -151,8 +151,8 @@ gives the rule for each line.
 | 0 | 20h | timer channel 0 | timer driver |
 | 1 | 21h | keyboard (8042) | keyboard driver |
 | 2 | 22h | cascade from PIC 2 | never delivered; never masked |
-| 3 | 23h | COM2, COM4 | unhandled: reported once, then masked |
-| 4 | 24h | COM1, COM3 | unhandled (the log is polled, its interrupt off) |
+| 3 | 23h | COM2, COM4 | unhandled: reported once, then masked (the log is polled, its interrupt off) |
+| 4 | 24h | COM1, COM3 | unhandled |
 | 5 | 25h | LPT2 | unhandled: the printer driver keeps the port's interrupt off |
 | 6 | 26h | diskette | diskette driver |
 | 7 | 27h | LPT1; PIC 1's spurious interrupt | unhandled, after the spurious check (the printer driver keeps it off) |

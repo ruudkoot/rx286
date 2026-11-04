@@ -39,7 +39,7 @@ builds, and to nothing in a release build. `make debugger` turns Bochs'
 
 | File | What |
 |---|---|
-| `build/debug/com1.log` | the console's copy and every trace line |
+| `build/debug/com2.log` | the console's copy and every trace line |
 | `build/debug/bochs.log` | Bochs' own log: its `e[CPU0]` lines explain every exception it raises, in words ("load_seg_reg(DS, 0x0010): RPL & CPL must be <= DPL") |
 | `build/debug/debugger.log` | everything the debugger printed |
 

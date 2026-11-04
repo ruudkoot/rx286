@@ -8,7 +8,7 @@
 ; 0, sectors 2-4 on any floppy, so no file system is read here. The loader
 ; must start with a short jump over the word LOADER_MAGIC; anything else is
 ; "no loader". On an error the boot sector prints a message (and copies it
-; to COM1 in debug and test builds), waits for a key and asks the BIOS to
+; to the log in debug and test builds), waits for a key and asks the BIOS to
 ; boot again (INT 19h).
 ; ============================================================================
 
@@ -81,7 +81,7 @@ fail:
         int 0x19                        ; boot again
 
 ; ----------------------------------------------------------------------------
-; print - write a zero-terminated string on the screen (and COM1)
+; print - write a zero-terminated string on the screen (and the log)
 ;   In:       SI = the string, DS = 0
 ;   Out:      nothing
 ;   Destroys: AX, BX, SI, DX
@@ -95,13 +95,13 @@ print:
         int 0x10
 %ifdef WITH_SERIAL
         mov ah, al
-        mov dx, COM1_BASE + UART_LSR
+        mov dx, LOG_PORT + UART_LSR
 .wait:
         in al, dx
         test al, UART_LSR_THRE
         jz .wait
         mov al, ah
-        mov dx, COM1_BASE + UART_THR
+        mov dx, LOG_PORT + UART_THR
         out dx, al
 %endif
         jmp print
@@ -110,28 +110,28 @@ print:
 
 %ifdef WITH_SERIAL
 ; ----------------------------------------------------------------------------
-; serial_init - COM1 at 115200, 8N1, no interrupt (debug and test builds)
+; serial_init - the log's UART at 115200, 8N1, no interrupt (debug and test builds)
 ;   In:       nothing
 ;   Out:      nothing
 ;   Destroys: AX, DX
 ; ----------------------------------------------------------------------------
 serial_init:
-        mov dx, COM1_BASE + UART_LCR
+        mov dx, LOG_PORT + UART_LCR
         mov al, UART_LCR_DLAB
         out dx, al
-        mov dx, COM1_BASE + UART_DLL
+        mov dx, LOG_PORT + UART_DLL
         mov al, UART_DIVISOR_115200
         out dx, al
-        mov dx, COM1_BASE + UART_DLM
+        mov dx, LOG_PORT + UART_DLM
         xor al, al
         out dx, al
-        mov dx, COM1_BASE + UART_LCR
+        mov dx, LOG_PORT + UART_LCR
         mov al, UART_LCR_8N1
         out dx, al
-        mov dx, COM1_BASE + UART_IER
+        mov dx, LOG_PORT + UART_IER
         xor al, al
         out dx, al
-        mov dx, COM1_BASE + UART_MCR
+        mov dx, LOG_PORT + UART_MCR
         mov al, UART_MCR_DTR_RTS
         out dx, al
         ret

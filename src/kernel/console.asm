@@ -6,7 +6,7 @@
 ; LF, BS, TAB and FF are control characters; every other byte is shown as
 ; its glyph. Scrolling copies 24 lines up. The hardware cursor is moved
 ; through the CRTC once per call of con_putc, not per character. Debug and
-; test builds copy every byte to COM1, which is the transcript the tests
+; test builds copy every byte to the log (COM2), the transcript the tests
 ; read. The loader set text mode 3 through the BIOS (roadmap D14); this
 ; module programs only the cursor.
 ; ============================================================================

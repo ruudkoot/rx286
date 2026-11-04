@@ -32,8 +32,9 @@ apmbios = false
 aux = false
 
 [serial]
-serial1 = file file:@SERIAL@
-serial2 = disabled
+serial1 = serialmouse
+serial2 = @COM2@
+serial3 = @COM3@
 
 [parallel]
 parallel1 = file append:@LPT1@ timeout:20

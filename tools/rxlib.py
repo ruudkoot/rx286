@@ -106,11 +106,14 @@ DEEP_TOO_LONG = 'ABCDEFGH.XY'    # 66
 
 
 def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
-                  disks=DISKS, printers=('/dev/null', '/dev/null'), media=()):
+                  disks=DISKS, printers=('/dev/null', '/dev/null'), media=(),
+                  log_port='com2', modem=None):
     """Write a bochsrc for one run from bochs/rx286.bochsrc.in. Bochs locks
     the hard-disk images, so runs at the same time need their own `disks`.
-    `printers` are the files LPT1 and LPT2 print into; `media` a list of
-    MEDIA."""
+    `serial` is the file the log goes to, from `log_port` ('com2', or 'com3'
+    when COM2 is the modem); `modem` the host:port COM2 connects to, if it
+    is the modem. `printers` are the files LPT1 and LPT2 print into; `media`
+    a list of MEDIA."""
     for m in media:
         if m not in MEDIA:
             raise ValueError('unknown media change %r' % m)
@@ -125,7 +128,9 @@ def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=Fa
         '@HD1_TYPE@': 'none' if 'D absent' in media else 'disk',
         '@LPT1@': printers[0],
         '@LPT2@': printers[1],
-        '@SERIAL@': serial,
+        '@COM2@': ('mode=file, dev=' + serial if log_port == 'com2' else
+                   'mode=socket-client, dev=' + modem if modem else 'mode=null'),
+        '@COM3@': 'mode=file, dev=' + serial if log_port == 'com3' else 'mode=null',
         '@LOG@': log,
         '@DISPLAY@': display,
         '@CONFIG_INTERFACE@': 'wx' if display == 'wx' else 'textconfig',
@@ -356,13 +361,19 @@ DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
 
 
 def run_dosbox(directory, image, serial, timeout, until,
-               printers=('/dev/null', '/dev/null')):
+               printers=('/dev/null', '/dev/null'), log_port='com2', modem=None):
     """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
-    `until(lines)` holds of the serial transcript or `timeout` seconds; LPT1
-    and LPT2 print into `printers`. DOSBox-X has no shutdown port and ignores
-    SIGTERM: it is killed."""
+    `until(lines)` holds of the transcript, the log in `serial` (from
+    `log_port`, as write_bochsrc), or `timeout` seconds; LPT1 and LPT2 print
+    into `printers`; COM2 connects to `modem` (host:port) if it is the
+    modem. DOSBox-X has no shutdown port and ignores SIGTERM: it is killed."""
     text = open(DOSBOX_TEMPLATE, encoding='utf-8').read()
-    text = text.replace('@IMAGE@', image).replace('@SERIAL@', serial)
+    log = 'file file:' + serial
+    host, _, port = (modem or '').partition(':')
+    text = text.replace('@IMAGE@', image)
+    text = text.replace('@COM2@', log if log_port == 'com2' else
+                        'nullmodem server:%s port:%s' % (host, port) if modem else 'disabled')
+    text = text.replace('@COM3@', log if log_port == 'com3' else 'disabled')
     text = text.replace('@LPT1@', printers[0]).replace('@LPT2@', printers[1])
     conf = os.path.join(directory, 'dosbox-x.conf')
     with open(conf, 'w', encoding='utf-8') as f:
@@ -451,7 +462,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     proc = subprocess.Popen(
         ['mame', 'ibm5170', '-rompath', MAME_ROMS, '-ramsize', '640K',
          '-isa2:fdc:fdc:0', '525hd', '-isa2:fdc:fdc:1', '525dd',
-         '-isa3:comat:serport0', 'null_modem', '-bitb', serial,
+         '-isa3:comat:serport0', 'microsoft_mouse',     # COM1: the mouse
+         '-isa3:comat:serport1', 'null_modem', '-bitb', serial,   # COM2: the log
          '-flop1', image,                # isa4 stays the IDE card: the AT's task file at 1F0h
          '-video', 'none', '-sound', 'none', '-nothrottle', '-skip_gameinfo',
          '-nvram_directory', nvram, '-cfg_directory', os.path.join(directory, 'mame-cfg'),

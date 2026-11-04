@@ -65,7 +65,7 @@ which is why the attack suite and the fuzzer run on Bochs and MAME instead:
 
 Running it: `tools/run-test --emulator dosbox-x` writes `dosbox-x.conf` from
 the template, runs DOSBox-X with `SDL_VIDEODRIVER=dummy`, and kills it once
-COM1 shows `TEST END` (it has no shutdown port, and ignores SIGTERM).
+the log shows `TEST END` (it has no shutdown port, and ignores SIGTERM).
 
 ## MAME's IBM PC/AT
 
@@ -81,7 +81,7 @@ firmware, IBM's EGA. What it needs:
   rx286's AT (drive A 1.2 MB, B 360 KB, no fixed disk, two diskette drives, a
   287, an EGA, 640 KB, the checksum) into a fresh nvram directory per run.
 - **The machine's slots**: drive A `525hd`, drive B `525dd`, `-ramsize 640K`,
-  a null modem on COM1 writing to a file (`-bitb`), and MAME's IDE card,
+  a null modem on COM2 writing to a file (`-bitb`), and MAME's IDE card,
   which has the AT's task file at 1F0h.
 - **The null modem at 115200 baud**: `mame/rx286.lua` sets it at start.
 - **Typed keys**: IBM's 8042 firmware has no command D2h, so MAME's test

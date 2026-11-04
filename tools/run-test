@@ -365,7 +365,8 @@ def run(test):
     if error:
         return test, error, time.monotonic() - started
     b = test.build_dir
-    serial = os.path.join(b, 'com1.log' if EMULATOR == 'bochs' else 'com1-%s.log' % EMULATOR)
+    serial = os.path.join(b, 'transcript.log' if EMULATOR == 'bochs' else
+                          'transcript-%s.log' % EMULATOR)
     dbglog = os.path.join(b, 'debugger.log')
     for f in (serial, dbglog):
         if os.path.exists(f):
@@ -449,8 +450,9 @@ def main():
             if error:
                 failures += 1
                 print('      ' + error.replace('\n', '\n      '))
+                name = 'transcript.log' if EMULATOR == 'bochs' else 'transcript-%s.log' % EMULATOR
                 print('      (transcript: %s)' % os.path.relpath(
-                    os.path.join(test.build_dir, 'com1.log'), ROOT))
+                    os.path.join(test.build_dir, name), ROOT))
     print('run-test: %d of %d passed on %s' % (len(tests) - failures, len(tests), EMULATOR))
     return 1 if failures else 0
 

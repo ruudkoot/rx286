@@ -31,8 +31,8 @@ it into features:
 | Feature | release | debug | test |
 |---|---|---|---|
 | faults, unhandled IRQs, panics on the screen | yes | yes | yes |
-| trace lines (boot steps, the tables, every system call) | no | screen and COM1 | COM1 |
-| the screen mirrored to COM1 (`WITH_SERIAL`) | no | yes | yes |
+| trace lines (boot steps, the tables, every system call) | no | screen and the log | the log |
+| the screen mirrored to the log, on COM2 (`WITH_SERIAL`, `LOG_PORT`) | no | yes | yes |
 | registers in fault reports (`WITH_REGISTERS`) | no | yes | yes |
 | `ASSERT` and magic breakpoints (`WITH_CHECKS`) | no | yes | yes |
 | typed keys, device probes, the end through Bochs (`WITH_TEST_HOOKS`) | no | no | yes |

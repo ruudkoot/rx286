@@ -297,7 +297,7 @@ trace:
         ret
 
 ; ----------------------------------------------------------------------------
-; print - write a zero-terminated string on the screen (and COM1)
+; print - write a zero-terminated string on the screen (and the log)
 ;   In:       SI = the string, DS = 0
 ;   Out:      nothing
 ;   Destroys: AX, BX, DX, SI
@@ -311,13 +311,13 @@ print:
         int 0x10
 %ifdef WITH_SERIAL
         mov ah, al
-        mov dx, COM1_BASE + UART_LSR
+        mov dx, LOG_PORT + UART_LSR
 .wait:
         in al, dx
         test al, UART_LSR_THRE
         jz .wait
         mov al, ah
-        mov dx, COM1_BASE + UART_THR
+        mov dx, LOG_PORT + UART_THR
         out dx, al
 %endif
         jmp print
@@ -326,28 +326,28 @@ print:
 
 %ifdef WITH_SERIAL
 ; ----------------------------------------------------------------------------
-; serial_init - COM1 at 115200, 8N1, no interrupt (debug and test builds)
+; serial_init - the log's UART at 115200, 8N1, no interrupt (debug and test builds)
 ;   In:       nothing
 ;   Out:      nothing
 ;   Destroys: AX, DX
 ; ----------------------------------------------------------------------------
 serial_init:
-        mov dx, COM1_BASE + UART_LCR
+        mov dx, LOG_PORT + UART_LCR
         mov al, UART_LCR_DLAB
         out dx, al
-        mov dx, COM1_BASE + UART_DLL
+        mov dx, LOG_PORT + UART_DLL
         mov al, UART_DIVISOR_115200
         out dx, al
-        mov dx, COM1_BASE + UART_DLM
+        mov dx, LOG_PORT + UART_DLM
         xor al, al
         out dx, al
-        mov dx, COM1_BASE + UART_LCR
+        mov dx, LOG_PORT + UART_LCR
         mov al, UART_LCR_8N1
         out dx, al
-        mov dx, COM1_BASE + UART_IER
+        mov dx, LOG_PORT + UART_IER
         xor al, al
         out dx, al
-        mov dx, COM1_BASE + UART_MCR
+        mov dx, LOG_PORT + UART_MCR
         mov al, UART_MCR_DTR_RTS
         out dx, al
         ret

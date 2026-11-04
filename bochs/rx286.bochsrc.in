@@ -39,9 +39,13 @@ ata2: enabled=0
 ata3: enabled=0
 
 keyboard: type=at
-com1: enabled=1, mode=file, dev=@SERIAL@
-com2: enabled=1, mode=null
-com3: enabled=1, mode=null
+# COM1: a Microsoft serial mouse, captured in a window with Ctrl+F10. COM2:
+# the log in debug and test builds, the modem in release builds; COM3: the
+# log when COM2 is the modem (devices roadmap D1, D2).
+mouse: type=serial, enabled=0, toggle=ctrl+f10
+com1: enabled=1, mode=mouse
+com2: enabled=1, @COM2@
+com3: enabled=1, @COM3@
 com4: enabled=1, mode=null
 parport1: enabled=1, file=@LPT1@
 parport2: enabled=1, file=@LPT2@

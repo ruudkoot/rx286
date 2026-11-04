@@ -34,7 +34,7 @@ unit`). Unicorn is not a 286, so only pure code is tested this way.
 ## 4. Boot tests in Bochs
 
 `tools/run-test` builds a test image for every `tests/*/*.test`, boots it in
-Bochs without a window (`rfb`, the clock fixed) and compares what COM1 shows
+Bochs without a window (`rfb`, the clock fixed) and compares what the log (COM2) shows
 with the test's expected transcript. A boot costs about half a second, and
 tests run in parallel. Bochs instances that start at the same moment can race
 for an `rfb` port, and the loser stops before its machine starts ("RFB could
@@ -79,7 +79,7 @@ raises IRQ1 (roadmap E7). A key is pressed only while the program waits in
 `read_key` with nothing buffered, so tests never race; its release is typed
 at once. `{ctrl-break}` and `{ctrl-alt-del}` are typed whatever the program
 does. When the keys run out and the program waits again, the kernel prints
-`TEST END` on COM1, waits for the UART to empty and writes Bochs' shutdown
+`TEST END` on the log, waits for the UART to empty and writes Bochs' shutdown
 port. On MAME, whose IBM 8042 firmware has no D2h, the kernel hands each byte
 to its keyboard driver directly (`TEST_TYPE_DIRECT`).
 
