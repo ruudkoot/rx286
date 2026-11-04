@@ -251,24 +251,6 @@ test_type:
         out KBC_DATA, al
         ret
 
-; ----------------------------------------------------------------------------
-; test_wait_ticks - sleep for CX ticks, with interrupts on meanwhile
-;   In:       CX = ticks; DS = SEL_KDATA; interrupts off
-;   Out:      nothing
-;   Destroys: AX, CX
-; ----------------------------------------------------------------------------
-test_wait_ticks:
-        mov ax, [ticks]
-        add cx, ax
-.sleep:
-        sti
-        hlt
-        cli
-        mov ax, [ticks]
-        cmp ax, cx
-        jne .sleep
-        ret
-
 %ifdef TEST_PROBES
 ; ----------------------------------------------------------------------------
 ; test_probes - make two devices without a driver interrupt: each line
@@ -298,7 +280,7 @@ test_probes:
         mov al, LPT_CONTROL_READY | LPT_CONTROL_IRQ
         out dx, al
         mov cx, TEST_PROBE_TICKS
-        call test_wait_ticks
+        call ksleep
         mov dx, LPT1_BASE + LPT_CONTROL
         mov al, LPT_CONTROL_READY
         out dx, al
@@ -313,14 +295,14 @@ test_probes:
         mov al, CMOS_REG_B_24H_BCD | CMOS_REG_B_PIE
         out CMOS_DATA, al
         mov cx, TEST_PROBE_TICKS
-        call test_wait_ticks
+        call ksleep
         mov bx, TEST_RTC_TICKS
 .rearm:
         mov al, CMOS_REG_C
         out CMOS_INDEX, al
         in al, CMOS_DATA
         mov cx, 1
-        call test_wait_ticks
+        call ksleep
         dec bx
         jnz .rearm
         call rtc_init                   ; the periodic interrupt off again
@@ -344,7 +326,7 @@ test_fpu_kernel:
         fdivp st1, st0
         fwait                           ; Bochs raises IRQ13 here (roadmap E8)
         mov cx, 2
-        call test_wait_ticks
+        call ksleep
         cli
         fninit
         mov byte [restart_pending], 0
@@ -390,7 +372,7 @@ test_ticks:
 .same:
         mov cx, 1
         push dx
-        call test_wait_ticks
+        call ksleep
         call rtc_read
         pop dx
         cmp al, dl
