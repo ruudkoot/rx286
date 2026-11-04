@@ -17,6 +17,7 @@ cpu 286
 bits 16
 %include "build.inc"
 %include "program.inc"
+%include "kcalls.inc"
 
 LINE_MAX            equ 70              ; characters a line may hold
 CHAR_DEL            equ 0x7F

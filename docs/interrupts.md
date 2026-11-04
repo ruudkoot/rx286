@@ -50,10 +50,14 @@ them like any other exception.
 
 What happens next depends on who was running (the frame's CS):
 
-- **The program faulted** (CPL 3): the kernel prints a report (the
-  exception, its error code, CS:IP; registers too in debug and test builds),
-  then restarts the program at its entry with a fresh stack. The single-step
-  trap, set by a program through `POPF`, counts as a fault.
+- **A program faulted** (CPL 1-3): if its thread has a fault endpoint, the
+  fault is a call on it (roadmap l4.md D18; *docs/kernel-calls.md*), and
+  its handler, the root, reports it (the exception, its error code, CS:IP)
+  and replies, which restarts the program at its entry with a fresh stack.
+  A thread without one - the root itself, a thread a program made - is
+  reported by the kernel (registers too in debug and test builds) and
+  restarted the same way. The single-step trap, set by a program through
+  `POPF`, counts as a fault.
 - **The kernel faulted** (CPL 0), or **NMI**: a panic. The screen turns red
   with the vector, error code, CS:IP and registers (and port 61h's NMI bits),
   NMI is masked, and the CPU halts.

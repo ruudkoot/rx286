@@ -1,0 +1,8 @@
+# A boot image past 64 KB (padded before its end mark): the loader brings
+# all of it, every word: the kernel sums the image before anything writes
+# to it (roadmap l4.md L5, E8).
+image: large
+define: TEST_IMAGE_SUM
+---
+rx286, test build
+rx286: kernel image sum {image_sum}

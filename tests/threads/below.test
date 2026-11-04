@@ -9,5 +9,6 @@ rx286 shell: type help for the commands
 A:\>echo hello
 hello
 A:\>
+rx286: thread root ran
 rx286: thread program ran
 rx286: thread counter ran

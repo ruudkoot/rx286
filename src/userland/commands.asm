@@ -246,38 +246,35 @@ print_bcd18:
         jmp print_newline
 
 ; ----------------------------------------------------------------------------
-; cmd_mem - the shell's segments: where layout.inc puts them, and their
-; limits as the CPU sees them (LSL)
+; cmd_mem - the shell's segments: where the root put them, as the kernel
+; says (KCALL_SEGMENT on each capability), and their limits as the CPU sees
+; them (LSL)
 ;   In:       DS = ES = the program's data
 ;   Out:      nothing
-;   Destroys: AX, BX, DX
+;   Destroys: AX, BX, CX, DX
 ; ----------------------------------------------------------------------------
 cmd_mem:
         PRINT "code:  selector "
         mov bx, cs
-        mov dl, UTEXT_PHYS >> 16
-        mov ax, UTEXT_PHYS & 0xFFFF
         call print_segment
         PRINT "data:  selector "
         mov bx, ds
-        mov dl, UDATA_PHYS >> 16
-        mov ax, UDATA_PHYS & 0xFFFF
         call print_segment
         PRINT "stack: selector "
         mov bx, ss
-        mov dl, USTACK_PHYS >> 16
-        mov ax, USTACK_PHYS & 0xFFFF
         call print_segment
         PRINT "Nothing else is reachable: the kernel's selectors fault here.", CHAR_LF
         ret
 
 ; ----------------------------------------------------------------------------
 ; print_segment - "SSSSh, base BBBBBh, limit LLLLh"
-;   In:       BX = the selector; DL:AX = its base (20 bits)
+;   In:       BX = the selector, a segment capability of the shell's
 ;   Out:      nothing
-;   Destroys: AX
+;   Destroys: AX, CX, DX
 ; ----------------------------------------------------------------------------
 print_segment:
+        mov dx, bx
+        kcall KCALL_SEGMENT             ; DL:AX = its base
         push ax
         mov ax, bx
         call print_hex16

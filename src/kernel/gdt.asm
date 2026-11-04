@@ -3,18 +3,20 @@
 ; The global descriptor table, written out at assembly time.
 ;
 ; docs/protected-mode.md explains each descriptor. Every base is a constant
-; of layout.inc, or kdata's base plus a label of kdata (the TSSs); every
+; of layout.inc, or a label of kdata at its physical address (the TSSs);
+; every
 ; segment's accessed bit is preset, so the CPU never writes this table but
 ; for the TSS's busy bit. Every descriptor has DPL 0: the program's segments
 ; are in its LDT (ldt.asm), and the GDT holds none a program could load.
 ; ============================================================================
 
-; kdata_descriptor offset, limit, access - a descriptor of something in kdata.
-; A label cannot be split into bytes, but KDATA_PHYS's low word plus a kdata
-; offset never carries (checked below), so the base is written in two parts.
+; kdata_descriptor label, limit, access - a descriptor of something in kdata.
+; A label cannot be split into bytes, but KDATA_PHYS's low word plus a
+; label's place in kdata (the label less KDATA_VSTART) never carries
+; (checked below), so the base is written in two parts.
 %macro kdata_descriptor 3
     dw (%2)
-    dw (KDATA_PHYS & 0xFFFF) + (%1)
+    dw (KDATA_PHYS & 0xFFFF) + (%1) - KDATA_VSTART
     db KDATA_PHYS >> 16
     db (%3)
     dw 0                            ; reserved: zero
@@ -27,7 +29,7 @@
 gdt:
         segment_descriptor 0, 0, 0                                  ; SEL_NULL
         segment_descriptor KTEXT_PHYS, ktext_end - 1, ACC_KCODE     ; SEL_KCODE
-        segment_descriptor KDATA_PHYS, 0xFFFF, ACC_KDATA            ; SEL_KDATA: and the arena
+        segment_descriptor KDATA_BASE, 0xFFFF, ACC_KDATA            ; SEL_KDATA: and the arena
         segment_descriptor KSTACK_PHYS, KSTACK_SIZE - 1, ACC_KDATA  ; SEL_KSTACK
         kdata_descriptor tss, TSS286_LIMIT, ACC_TSS                 ; SEL_TSS
         kdata_descriptor df_tss, TSS286_LIMIT, ACC_TSS              ; SEL_DFTSS
@@ -37,6 +39,7 @@ gdt:
         segment_descriptor 0, 0, 0
 %endrep
         segment_descriptor 0, 0, 0                                  ; SEL_SCRATCH
+        segment_descriptor 0, 0, 0                                  ; SEL_SCRATCH2
 gdt_end:
 
 %if GDT_ENTRIES * 8 - 1 != GDT_LIMIT
@@ -46,5 +49,5 @@ gdt_end:
 ; The pseudo-descriptor LGDT reads: limit, 24-bit base, a zero byte.
 gdt_pointer:
         dw GDT_LIMIT
-        dw (KDATA_PHYS & 0xFFFF) + gdt
+        dw (KDATA_PHYS & 0xFFFF) + gdt - KDATA_VSTART
         db KDATA_PHYS >> 16, 0

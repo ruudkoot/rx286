@@ -1,7 +1,8 @@
 # ============================================================================
 # rx286 - Makefile
-# Builds the boot sector, the loader, the program and the kernel, and puts
-# them on a 1.2 MB FAT12 floppy image; runs Bochs; runs the tests.
+# Builds the boot sector, the loader, the kernel and the modules (the root,
+# the program, the counter), the boot image of them all, and puts them on a
+# 1.2 MB FAT12 floppy image; runs Bochs; runs the tests.
 #
 #   make                 release and debug images
 #   make release|debug|test-build
@@ -58,8 +59,14 @@ program_main_ipc := tests/programs/ipc.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
-# timings stay their own.
-COUNTER_DEFINE := $(if $(or $(filter shell,$(PROGRAM)),$(findstring TEST_COUNTER,$(TEST_DEFINES))),,-dNO_COUNTER)
+# timings stay their own. Its priority is below the program's (3), or as a
+# test says.
+WITH_COUNTER := $(or $(filter shell,$(PROGRAM)),$(findstring TEST_COUNTER,$(TEST_DEFINES)))
+COUNTER_PRIORITY := $(if $(findstring TEST_COUNTER_SAME,$(TEST_DEFINES)),3,$(if \
+    $(findstring TEST_COUNTER_ABOVE,$(TEST_DEFINES)),4,1))
+# The modules of the boot image (tools/mkimage): NAME=BINARY:RING:PRIORITY[:fg]
+MODULES := root=$(B)/root.bin:2:6 program=$(B)/user.bin:3:3:fg \
+    $(if $(WITH_COUNTER),counter=$(B)/counter.bin:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
 $(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps or ipc, not '$(PROGRAM)')
 endif
@@ -72,8 +79,8 @@ FLOPPY_SECTORS := 2400
 FLOPPY_SERIAL := 52583836
 
 IMAGE := $(B)/rx286.img
-BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/counter.bin \
-    $(B)/kernel.bin
+BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.bin $(B)/user.bin \
+    $(B)/counter.bin $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
@@ -116,14 +123,22 @@ $(B)/boot-loader.bin: src/boot-loader/boot-loader.asm $(LOADER_SRC)
 $(B)/user.bin: $(PROGRAM_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
 
-# The counter, the second program the kernel starts (roadmap l4.md L2).
+# The counter, which runs beside the shell (roadmap l4.md L2).
 $(B)/counter.bin: src/userland/counter.asm $(COMMON_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/)
 
-# On the floppy the kernel is KERNEL.BIN, upper case as FAT12 keeps names.
-$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin $(B)/counter.bin $(KERNEL_SRC)
-	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/ -dUSER_BIN='"$(B)/user.bin"' \
-	    -dCOUNTER_BIN='"$(B)/counter.bin"' $(COUNTER_DEFINE))
+# The root task, the first module (roadmap l4.md L5).
+$(B)/root.bin: src/root/root.asm $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
+
+$(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
+	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/)
+
+# The boot image: the kernel, the module table and the modules. On the
+# floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
+$(B)/image.bin: $(B)/kernel.bin $(B)/root.bin $(B)/user.bin $(B)/counter.bin tools/mkimage \
+    tools/rxlib.py
+	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 
 $(IMAGE): $(BINARIES)
 	rm -f $@.tmp
@@ -131,7 +146,7 @@ $(IMAGE): $(BINARIES)
 	mformat -i $@.tmp -f 1200 -R 4 -m 0xF9 -N $(FLOPPY_SERIAL) -v RX286 \
 	    -B $(B)/boot-sector.bin ::
 	dd if=$(B)/boot-loader.bin of=$@.tmp bs=512 seek=1 conv=notrunc status=none
-	mcopy -i $@.tmp $(B)/kernel.bin ::KERNEL.BIN
+	mcopy -i $@.tmp $(B)/image.bin ::KERNEL.BIN
 	mv $@.tmp $@
 
 $(B)/rx286.sym: $(BINARIES) tools/map2sym

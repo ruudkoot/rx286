@@ -61,25 +61,84 @@ def read_map(path):
     return symbols
 
 
+def map_sections(path):
+    """name -> (file offset, length) for every section of a NASM map file."""
+    sections = {}
+    for line in open(path, encoding='utf-8', errors='replace'):
+        m = re.match(r'^\s*([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]{8})\s+'
+                     r'(progbits|nobits)\s+(\S+)', line)
+        if m:
+            sections[m.group(6)] = (int(m.group(2), 16), int(m.group(4), 16))
+    return sections
+
+
+# ---------------------------------------------------------------- the boot image
+
+def image_modules(image):
+    """The modules of a boot image (bytes): a list of dicts of the module
+    table's fields (layout.inc), the first the root's."""
+    L = LAYOUT
+    table = L['MODULE_TABLE_OFF']
+    count = int.from_bytes(image[table + L['MH_COUNT']:table + L['MH_COUNT'] + 2], 'little')
+    modules = []
+    for n in range(count):
+        e = table + L['MODULE_HEADER_SIZE'] + n * L['MODULE_ENTRY_SIZE']
+
+        def word(field):
+            return int.from_bytes(image[e + field:e + field + 2], 'little')
+        modules.append({
+            'name': image[e:e + L['M_NAME_SIZE']].split(b'\0', 1)[0].decode('ascii'),
+            'code': word(L['M_CODE']) * 16, 'code_size': word(L['M_CODE_SIZE']),
+            'data': word(L['M_DATA']) * 16, 'data_size': word(L['M_DATA_SIZE']),
+            'data_room': word(L['M_DATA_ROOM']), 'stack': word(L['M_STACK']),
+            'entry': word(L['M_ENTRY']), 'ring': image[e + L['M_RING']],
+            'priority': image[e + L['M_PRIORITY']], 'flags': image[e + L['M_FLAGS']],
+        })
+    return modules
+
+
+def fletcher(data):
+    """The boot tests' sum of an image (entry.asm): over its words, the sum
+    of the running sums, 16 bits."""
+    plain = total = 0
+    for i in range(0, len(data) - 1, 2):
+        plain = (plain + data[i] + 256 * data[i + 1]) & 0xFFFF
+        total = (total + plain) & 0xFFFF
+    return total
+
+
 def symbol_offsets(path):
     """name -> offset in its segment, for every symbol of a map file."""
     return {name: virt for _, _, virt, name in read_map(path)}
 
 
-# Where each binary's file offset 0 lies in memory.
-def binary_bases():
-    return {
+# The modules' binaries, by their names in the module table, and the
+# prefixes of their symbols.
+MODULE_BINARIES = {'root': ('root', 'r.'), 'program': ('user', 'u.'),
+                   'counter': ('counter', 'c.')}
+
+
+def binary_bases(build_dir):
+    """Where each binary's file offset 0 lies in memory: for a module, where
+    its code is in the image (its data is copied elsewhere at start)."""
+    bases = {
         'boot-sector': (LAYOUT['BOOT_SECTOR_PHYS'], 'bs.'),
         'boot-loader': (LAYOUT['LOADER_PHYS'], 'ld.'),
         'kernel': (LAYOUT['KERNEL_PHYS'], ''),
-        'user': (LAYOUT['KERNEL_PHYS'] + LAYOUT['UTEXT_OFF'], 'u.'),
     }
+    path = os.path.join(build_dir, 'image.bin')
+    if os.path.exists(path):
+        for module in image_modules(open(path, 'rb').read()):
+            if module['name'] in MODULE_BINARIES:
+                binary, prefix = MODULE_BINARIES[module['name']]
+                bases[binary] = (LAYOUT['KERNEL_PHYS'] + module['code'], prefix)
+    return bases
 
 
 def bochs_symbols(build_dir):
     """Lines of a Bochs symbol file: every symbol at its linear address."""
     lines = []
-    for binary, (base, prefix) in binary_bases().items():
+    for binary, (base, prefix) in binary_bases(build_dir).items():
         path = os.path.join(build_dir, binary + '.map')
         if not os.path.exists(path):
             continue

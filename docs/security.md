@@ -15,7 +15,9 @@ No program can make the kernel:
   arrive.
 
 Every way out is a reported fault, after which the program starts again
-(roadmap D11).
+(roadmap D11): reported by the root, which handles the faults of what it
+started (roadmap l4.md L5, D18), or by the kernel for a thread without a
+handler.
 
 ## What holds the program in
 

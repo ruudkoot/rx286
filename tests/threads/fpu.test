@@ -10,5 +10,6 @@ define: TEST_THREAD_REPORT
 ---
 rx286, test build
 program: its 287 state kept
+rx286: thread root ran
 rx286: thread program ran
 rx286: thread counter ran

@@ -1,0 +1,8 @@
+# A boot image whose first module is not the root (tests/run-test renames
+# it): the loader refuses it and waits for a key (roadmap l4.md L5).
+image: noroot
+match: prefix
+timeout: 15
+---
+rx286 loader: KERNEL.BIN has no root module
+Press a key to try again.

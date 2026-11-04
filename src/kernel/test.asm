@@ -37,7 +37,8 @@
 ;                       the counter beside a test program (Makefile)
 ;   TEST_COUNTER_FPU    the counter checks its 287 state (counter.asm)
 ;   TEST_THREAD_REPORT  at the end: which threads ran
-;   TEST_CAPS           the program gets capabilities to try (roadmap l4.md L3)
+;   TEST_CAPS           the root gives the program capabilities to try
+;                       (src/root; roadmap l4.md L3)
 ;   TEST_END_TICKS=n    end the test after n ticks, keys or not
 ; Release and debug builds assemble none of this.
 ; ============================================================================
@@ -718,7 +719,7 @@ PROBE_ACC_EXEC_ONLY equ 0xF9            ; present, DPL 3, code, not readable, ac
 PROBE_ACC_READ_ONLY equ 0xF1            ; present, DPL 3, data, not writable, accessed
 
 begin_kdata
-; Each probe: the LDT slot it changes (an offset in program_ldt), and the
+; Each probe: the LDT slot it changes (an offset in the LDT), and the
 ; access byte it leaves there (0: only the present bit cleared).
 test_probes:
         dw 0, 0                                         ; (no probe 0)
@@ -728,14 +729,16 @@ test_probes:
         dw SEL_USTACK & ~7, PROBE_ACC_READ_ONLY         ; PROBE_SS_READONLY
         dw SEL_UCODE & ~7, 0                            ; PROBE_CS_ABSENT
         dw SEL_UCODE & ~7, ACC_UDATA                    ; PROBE_CS_DATA
+probe_changed       dw 0                ; the descriptor the last probe changed, or 0
+probe_access        db 0                ; its access byte before
 end_kdata
 
 ; ----------------------------------------------------------------------------
 ; test_probe - SYS_TEST_PROBE: change one of the program's descriptors, as a
 ; revocation would; the way back to ring 3 must then null a DS or ES it may
 ; no longer load, and report a CS or SS it may not as the program's fault,
-; never fault itself (roadmap l4.md L1). ldt_restore undoes it at the next
-; start of the program.
+; never fault itself (roadmap l4.md L1). test_probe_undo undoes it at the
+; next start of the program.
 ;   In:       BP = the frame (AL the probe); DS = SEL_KDATA
 ;   Out:      the program's LDT changed; or E_INVAL
 ;   Destroys: AX, BX, SI
@@ -752,6 +755,10 @@ test_probe:
         mov bx, [test_probes + bx]
         mov si, [cur_thread]
         add bx, [si + T_LDT_LIVE]       ; the program's live LDT, in its space
+        call test_probe_undo            ; one probe at a time
+        mov [probe_changed], bx
+        mov ah, [bx + 5]
+        mov [probe_access], ah
         test al, al
         jz .absent
         mov [bx + 5], al                ; the access byte
@@ -762,38 +769,59 @@ test_probe:
 .invalid:
         mov ax, E_INVAL
         jmp sys_fail
+
+; ----------------------------------------------------------------------------
+; test_probe_undo - the descriptor the last probe changed, as it was
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+test_probe_undo:
+        push ax
+        push si
+        mov si, [probe_changed]
+        test si, si
+        jz .done
+        mov al, [probe_access]
+        mov [si + 5], al
+        mov word [probe_changed], 0
+.done:
+        pop si
+        pop ax
+        ret
 %endif
 
-%ifdef TEST_CAPS
-TEST_CAPS_SLOT      equ 8               ; the first slot of the capabilities given
-
+%ifdef TEST_FUZZ
 ; ----------------------------------------------------------------------------
-; test_caps_give - TEST_CAPS: give the program capabilities to try (roadmap
-; l4.md L3), in its slots 8-11: the memory for segments and the rest of the
-; arena as untyped, its own space and its own thread. After every object of
-; the start is made: the kernel uses its untyped no more.
-;   In:       DS = ES = SEL_KDATA
-;   Out:      nothing
-;   Destroys: AX, BX, CX, DX, SI, DI
+; test_fuzz_alias - the fuzzer's code alias of its data, SEL_UFUZZ: slot 1's
+; descriptor as code in slot 3 of the program's space, at its every start
+; (the random code may have deleted it). No program can make code (l4.md
+; X14), so the test build's kernel does.
+;   In:       BX = the thread; DS = SEL_KDATA
+;   Out:      nothing (for a thread not the program's, nothing done)
+;   Destroys: nothing
 ; ----------------------------------------------------------------------------
-test_caps_give:
-        mov dx, [fg_thread]
-        mov bx, dx
+test_fuzz_alias:
+        test byte [bx + T_FLAGS], TF_FOREGROUND
+        jz .out
+        push ax
+        push bx
+        push si
+        push di
         mov bx, [bx + T_SPACE]
-        mov ax, TEST_CAPS_SLOT
-        call slot_at
-        mov di, si
-        mov si, memory_untyped
-        mov cx, SHADOW_SIZE / 2
-        cld
-        rep movsw
-        mov si, boot_untyped            ; the arena: its next shadow entry follows
-        mov cx, SHADOW_SIZE / 2
-        rep movsw
-        mov byte [di + SH_TYPE], CAP_SPACE
-        mov [di + SH_OBJECT], bx
-        mov byte [di + SHADOW_SIZE + SH_TYPE], CAP_THREAD
-        mov [di + SHADOW_SIZE + SH_OBJECT], dx
+        test byte [bx + SP_LDT + (SEL_UDATA & ~7) + 5], ACC_PRESENT
+        jz .done                        ; no data: nothing to alias
+        mov ax, SEL_UFUZZ >> 3
+        call slot_at                    ; SI, DI = slot 3
+        add bx, SP_LDT + (SEL_UDATA & ~7)
+        call slot_put_descriptor
+        mov byte [di + 5], ACC_UCODE
+.done:
+        pop di
+        pop si
+        pop bx
+        pop ax
+.out:
         ret
 %endif
 

@@ -7,5 +7,6 @@ define: TEST_THREAD_REPORT
 define: TEST_END_TICKS=100
 ---
 rx286, test build
+rx286: thread root ran
 rx286: thread program did not run
 rx286: thread counter ran

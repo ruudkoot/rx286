@@ -26,5 +26,5 @@ idt:
 ; The pseudo-descriptor LIDT reads.
 idt_pointer:
         dw IDT_LIMIT
-        dw (KDATA_PHYS & 0xFFFF) + idt
+        dw (KDATA_PHYS & 0xFFFF) + idt - KDATA_VSTART
         db KDATA_PHYS >> 16, 0

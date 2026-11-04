@@ -72,7 +72,8 @@ isr_exit:
         je .check_segments
         call restart_program
 .check_segments:
-        call way_back_check             ; may report a fault: the frame restarts
+        call way_back_check             ; may report a fault: the frame restarts,
+        jc .check_segments              ; and its segments are checked in turn
 .check_ip:
         ; IRET checks the return IP against CS's limit (Intel B-51) and would
         ; fault here, in ring 0: a program whose INT 30h is its segment's last
@@ -85,6 +86,7 @@ isr_exit:
         mov word [bp + FRAME_VECTOR], VEC_GP
         mov word [bp + FRAME_ERROR], 0
         call fault_program
+        jmp .check_segments
 .restore:
         pop es
         pop ds
@@ -102,8 +104,8 @@ isr_exit:
 ;   In:       BP = a frame from ring 3; DS = SEL_KDATA
 ;   Out:      the frame changed: a DS or ES that may not be loaded is null;
 ;             a CS or SS that may not has been reported as the program's
-;             fault, and the frame restarts it
-;   Destroys: AX, BX, CX, DX, SI
+;             fault, and the frame restarts it (CF set); else CF clear
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 way_back_check:
         mov cx, [bp + FRAME_CS]         ; its RPL is the program's privilege
@@ -132,7 +134,9 @@ way_back_check:
         mov [bp + FRAME_VECTOR], si
         and bx, ~CPL_MASK               ; the error code: the selector, as the CPU gives it
         mov [bp + FRAME_ERROR], bx
-        jmp fault_program
+        call fault_program
+        stc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; check_data_selector - may the program's DS or ES be reloaded?

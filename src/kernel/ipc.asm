@@ -407,27 +407,17 @@ ipc_send:
         or byte [bx + T_IPC], TI_GRANT
 .send:
         mov si, [si + SH_OBJECT]        ; the endpoint
+        test byte [bx + T_IPC], TI_CALLING
+        jnz ep_call
         cmp byte [si + E_KIND], EK_RECV
-        jne .queue
+        jne ep_queue
         ; a receiver waits: the message now
         mov dx, bx                      ; the sender
         call ep_pop                     ; BX = the receiver
         mov si, dx
         call deliver
-        test byte [si + T_IPC], TI_CALLING
-        jz .sent
-        call ipc_link
-        call ipc_wake
-        jmp schedule                    ; the caller waits; its reply comes in its frame
-.sent:
         call ready_push
         jmp kc_done.ok
-.queue:
-        call ep_push
-        mov byte [si + E_KIND], EK_SEND
-        mov byte [bx + T_STATE], TS_SEND
-        mov [bx + T_WAIT_OBJ], si
-        jmp schedule                    ; the receiver (or a cancel) sets the status
 .reply:
         push si
         push di
@@ -445,6 +435,73 @@ ipc_send:
         popf
         jc kc_done.state
         jmp kc_done.ok
+
+; ----------------------------------------------------------------------------
+; ep_call - the running thread calls on an endpoint (its message in its
+; frame, T_IPC and T_BADGE set): to the first receiver, or queued; it waits
+; for the reply, which comes in its frame
+;   In:       SI = the endpoint; BX = the running thread
+;   Out:      returns when it runs again
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+ep_call:
+        cmp byte [si + E_KIND], EK_RECV
+        jne ep_queue
+        mov dx, bx                      ; the caller
+        call ep_pop                     ; BX = the receiver
+        mov si, dx
+        call deliver
+        call ipc_link
+        call ipc_wake
+        jmp schedule
+
+; ----------------------------------------------------------------------------
+; ep_queue - the running thread waits in an endpoint's queue of senders
+;   In:       SI = the endpoint (no receiver waits); BX = the running thread
+;   Out:      returns when it runs again: the receiver (or a cancel) has set
+;             its frame's status
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+ep_queue:
+        call ep_push
+        mov byte [si + E_KIND], EK_SEND
+        mov byte [bx + T_STATE], TS_SEND
+        mov [bx + T_WAIT_OBJ], si
+        jmp schedule
+
+; ----------------------------------------------------------------------------
+; ipc_fault - the running thread's fault, as a call on its fault endpoint
+; (l4.md D18): the vector as the label, BX the error code, CX:SI the CS:IP,
+; DI the flags, with its capability's badge; it waits for the reply, whose
+; BX is where it starts again
+;   In:       BP = its frame (from rings 1-3); BX = the thread; DI = FAULT_*
+;   Out:      its T_ENTRY the reply's BX, if a reply came (KE_STATE: a
+;             restart cancelled the wait)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+ipc_fault:
+        mov ax, [bp + FRAME_VECTOR]
+        mov [bp + FRAME_AX], ax
+        mov ax, [bp + FRAME_ERROR]
+        mov [bp + FRAME_BX], ax
+        mov ax, [bp + FRAME_CS]
+        mov [bp + FRAME_CX], ax
+        mov ax, [bp + FRAME_IP]
+        mov [bp + FRAME_SI], ax
+        mov [bp + FRAME_DI], di
+        mov word [bp + FRAME_BP], 0
+        mov byte [bx + T_IPC], TI_CALLING
+        mov ax, [bx + T_FAULT_BADGE]
+        mov [bx + T_BADGE], ax
+        mov si, [bx + T_FAULT]
+        call ep_call
+        cmp byte [bp + FRAME_AX], KE_OK
+        jne .done
+        mov bx, [cur_thread]
+        mov ax, [bp + FRAME_BX]
+        mov [bx + T_ENTRY], ax
+.done:
+        ret
 
 ; ----------------------------------------------------------------------------
 ; slot_clear - empty a slot: its descriptor and its shadow entry

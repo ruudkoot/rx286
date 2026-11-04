@@ -23,16 +23,6 @@
 ; interrupt windows (kpreempt), never in the middle of a handler.
 ; ============================================================================
 
-; PROGRAM_PRIORITY - the program's; the counter's below it, or as a test says
-PROGRAM_PRIORITY    equ 3
-%ifdef TEST_COUNTER_SAME
-COUNTER_PRIORITY    equ PROGRAM_PRIORITY
-%elifdef TEST_COUNTER_ABOVE
-COUNTER_PRIORITY    equ PROGRAM_PRIORITY + 1
-%else
-COUNTER_PRIORITY    equ 1
-%endif
-
 begin_kdata
 ; The kernel's own context: the start, then the idle loop, on SEL_KSTACK.
 ; (Threads are objects of the arena: cap.asm makes them.)
@@ -50,8 +40,6 @@ resched             db 0                ; a thread should give way: at the next 
 ready_mask          db 0                ; bit n: queue n is not empty
 rq_head             times PRIORITIES dw 0
 rq_tail             times PRIORITIES dw 0
-msg_thread_program  db "program", 0
-msg_thread_counter  db "counter", 0
 msg_thread_idle     db "idle", 0
 ; prio_table - for a mask of non-empty queues, the highest priority in it
 prio_table:
@@ -72,44 +60,16 @@ end_kdata
 
 
 ; ----------------------------------------------------------------------------
-; threads_start - start the program's thread and the counter's, and become
-; the idle loop
+; threads_start - start the root's thread, which builds and starts every
+; other (roadmap l4.md L5), and become the idle loop
 ;   In:       on the kernel stack (SEL_KSTACK), interrupts off; DS = SEL_KDATA
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 threads_start:
-        mov si, program_ldt_pristine    ; the program, from the image
-        mov cx, USTACK_SIZE
-        mov ax, msg_thread_program
-        call boot_program               ; BX = its thread
-        mov byte [bx + T_PRIO], PROGRAM_PRIORITY
-        or byte [bx + T_FLAGS], TF_FOREGROUND
-        mov [fg_thread], bx
-        mov ax, USTACK_PHYS & 0xFFFF    ; its stack, zeroed
-        mov dl, USTACK_PHYS >> 16
-        mov cx, USTACK_SIZE
-        call phys_zero
-        mov bx, [fg_thread]
+        call boot_root                  ; BX = its thread (cap.asm)
         call thread_init
-%ifndef NO_COUNTER
-        mov si, counter_ldt_pristine    ; the counter, from the image
-        mov cx, CSTACK_SIZE
-        mov ax, msg_thread_counter
-        call boot_program
-        mov byte [bx + T_PRIO], COUNTER_PRIORITY
-        push bx
-        mov ax, CSTACK_PHYS & 0xFFFF
-        mov dl, CSTACK_PHYS >> 16
-        mov cx, CSTACK_SIZE
-        call phys_zero
-        pop bx
-        call thread_init
-%endif
-%ifdef TEST_CAPS
-        call test_caps_give             ; capabilities to try (test.asm)
-%endif
-        TRACE "kernel: threads ready"
+        TRACE "kernel: the root ready"
         ; falls through
 
 ; ----------------------------------------------------------------------------

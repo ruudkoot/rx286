@@ -27,17 +27,20 @@ SEL_DFSTACK         equ 0x30        ; the double-fault task's stack
 SEL_VIDEO           equ 0x38        ; colour text, page 0
 ; Pools the kernel takes descriptors from (roadmap l4.md L3): one LDT
 ; descriptor for each space, one kernel stack for each thread; a free one
-; is all zeros. Then the kernel's window on any memory, for zeroing it.
+; is all zeros. Then the kernel's two windows on any memory, for zeroing
+; and copying it.
 SEL_LDT_POOL        equ 0x40                                ; SPACE_MAX of them
 SEL_STACK_POOL      equ SEL_LDT_POOL + SPACE_MAX * 8        ; THREAD_MAX of them
 SEL_SCRATCH         equ SEL_STACK_POOL + THREAD_MAX * 8
+SEL_SCRATCH2        equ SEL_SCRATCH + 8
 
-GDT_ENTRIES         equ SEL_SCRATCH / 8 + 1
+GDT_ENTRIES         equ SEL_SCRATCH2 / 8 + 1
 GDT_LIMIT           equ GDT_ENTRIES * 8 - 1
 
 ; A program's LDT: its three segments, the fuzzer's alias in test builds
-; with the fuzzer, and empty slots (all zeros: invisible to ring 3). The
-; counter's LDT has the same slots, so the same selectors name its own.
+; with the fuzzer, and empty slots (all zeros: invisible to ring 3). Every
+; space the root builds has these slots, so the same selectors name each
+; program's own segments.
 SEL_UCODE           equ 0x00 | SEL_TI_LDT | RPL_USER    ; the program's code
 SEL_UDATA           equ 0x08 | SEL_TI_LDT | RPL_USER    ; its data
 SEL_USTACK          equ 0x10 | SEL_TI_LDT | RPL_USER    ; its stack

@@ -21,8 +21,12 @@ ROOMS = [
     ('kernel', 'entry', 'kernel: real-mode entry', L['ENTRY_ROOM']),
     ('kernel', 'ktext', 'kernel: code', L['KTEXT_ROOM']),
     ('kernel', 'kdata', 'kernel: data', L['KDATA_ROOM']),
+    ('root', 'utext', 'root: code', L['UTEXT_ROOM']),
+    ('root', 'udata', 'root: data', L['UDATA_ROOM']),
     ('user', 'utext', 'program: code', L['UTEXT_ROOM']),
     ('user', 'udata', 'program: data', L['UDATA_ROOM']),
+    ('counter', 'ctext', 'counter: code', L['CTEXT_ROOM']),
+    ('counter', 'cdata', 'counter: data', L['CDATA_ROOM']),
 ]
 
 
@@ -60,6 +64,12 @@ def main(build):
         flag = '  <- over 90%' if full > 90 else ''
         warn = warn or bool(flag)
         print('%-26s %7d %7d %4.0f%%%s' % (label, used, room, full, flag))
+    image = os.path.join(build, 'image.bin')
+    if os.path.exists(image):
+        used, room = os.path.getsize(image), L['IMAGE_MAX']
+        full = 100.0 * used / room
+        flag = '  <- over 90%' if full > 90 else ''
+        print('%-26s %7d %7d %4.0f%%%s' % ('boot image (KERNEL.BIN)', used, room, full, flag))
     return 0
 
 

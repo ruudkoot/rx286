@@ -1,0 +1,12 @@
+# The root and the boot image's modules (roadmap l4.md L5): through the
+# capabilities the kernel gave it, the root finds each module's code where
+# the module table says, and its code and data as assembled (Fletcher sums
+# of what it reads, against the image's).
+program: shell
+define: TEST_ROOT_REPORT
+---
+rx286, test build
+root: module program: code at {m:program.base}h, sum {m:program.codesum}, data sum {m:program.datasum}
+root: module counter: code at {m:counter.base}h, sum {m:counter.codesum}, data sum {m:counter.datasum}
+rx286 shell: type help for the commands
+A:\>

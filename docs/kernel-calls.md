@@ -2,7 +2,7 @@
 
 `INT 31h` (`KCALL_VECTOR`), an interrupt gate of DPL 3, is the kernel's own
 interface: calls on capabilities and IPC between threads (roadmap l4.md
-L3-L4, D20). Today's system
+L3-L5, D20). Today's system
 calls stay on `INT 30h` (*docs/syscalls.md*) until the OS server takes them
 over. `src/include/kcalls.inc` holds the numbers, the types and the macro
 `kcall`:
@@ -69,7 +69,7 @@ milestone.
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots | the object made, zeroed, its capability in the slot |
 | 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; BX a badge (mint) | the capability there |
-| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH 1 to ask for IOPL) or `THREAD_BIND` (SI a notification) | |
+| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification) or `THREAD_FAULT` (SI an endpoint) | |
 | 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 or more | |
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
@@ -108,11 +108,16 @@ A thread made by retype is configured, then started:
 - **Configure** gives it a space whose slots 0, 1 and 2 are its program's
   code, data and stack, an entry and a stack's top. Slot 0 must be code;
   its DPL is the thread's ring (never 0).
-- **Start** puts it in the scheduler at a priority. IOPL 1 goes only to a
-  thread of ring 1 that asks for it (roadmap l4.md D11).
+- **Start** puts it in the scheduler at a priority. `START_IOPL` asks for
+  IOPL 1, which goes only to a thread of ring 1 (roadmap l4.md D11);
+  `START_FOREGROUND` makes it the program the keys and Ctrl+Break are for,
+  which only a thread of ring 1 or 2 may say (the root does, until the
+  keyboard leaves the kernel: l4.md L8).
 - A thread is configured and started once: `KE_STATE` after that.
 - **Bind** ties it to a notification it may receive on, in any state: one
   each, so binding again unbinds the old.
+- **Fault** gives it a fault endpoint, one it may send on, in any state
+  (*Faults*, below).
 
 ## IPC
 
@@ -169,6 +174,18 @@ to timeouts: a driver waits on one notification, bound or not, for its
 interrupt or its timer, whichever comes first. Eight timers can be armed at
 once across the system: `KE_POOL` after that.
 
+### Faults
+
+A thread with a fault endpoint does not fault alone (roadmap l4.md D18):
+its fault - an exception of its own, or a frame the way back to its ring
+refuses - is a call on that endpoint, with the badge of the capability it
+was given. The label is the vector; BX the error code (0 if none); CX:SI
+the CS:IP; DI `FAULT_COUNTED` if a test build counted the fault already
+(the fuzzer), which the handler then does not report. The thread waits
+for the reply, and the reply restarts it at the IP in its BX, with fresh
+registers and a fresh stack; until one comes it waits. A thread without a
+fault endpoint is reported and restarted by the kernel, as before.
+
 ### Delete
 
 `KCALL_DELETE` empties a slot of the caller's. What it named lives on:
@@ -189,10 +206,36 @@ segment deleted while DS or ES holds it is gone at once, as for a move.
 | 7 | `KE_NOSYS` | no such call |
 | 8 | `KE_EMPTY` | `KCALL_POLL`: nothing there |
 
+## The root's capabilities
+
+The kernel builds the root from the boot image's first module, in ring 2,
+and gives it everything (roadmap l4.md L5; *docs/memory-map.md*). Its space
+has `ROOT_SLOTS` slots:
+
+| Slot | Constant | What |
+|---|---|---|
+| 0, 1, 2 | | its code, its data (initialised from its module) and its stack |
+| 3 | `ROOT_SLOT_UNTYPED` | the memory for programs, as untyped: what its data and stack left |
+| 4 | `ROOT_SLOT_ARENA` | the arena, as untyped: what its space and thread left |
+| 5 | `ROOT_SLOT_MODULES` | the module table, read-only |
+| 6 | `ROOT_SLOT_SPACE` | its own space |
+| 7 | `ROOT_SLOT_THREAD` | its own thread |
+| 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
+
+The root (`src/root/root.asm`) builds a space and a thread for every other
+module: the module's code copied in as slot 0; a data segment of its room,
+initialised from its data, as slot 1; a stack as slot 2; itself as their
+fault handler, through an endpoint minted with the module's number as the
+badge. It starts each at the priority the table gives, the program the keys
+are for with `START_FOREGROUND`. Then it waits for faults: it reports each
+as the kernel did ("rx286: program fault #GP(0000) at 0007:0123", the
+module's name for "program"), copies back any of the three slots the
+program emptied, and replies with the module's entry.
+
 ## In test builds
 
-`TEST_CAPS` gives the program, in slots 8-11 of a space of 32, the memory
-for segments and the rest of the arena as untyped, its own space and its
-own thread; `tests/caps/calls.test` and `tests/ipc/ipc.test` use them
-(*docs/testing.md*). `tests/timing/ipc.test` counts a round trip's
+In `TEST_CAPS` builds the root gives the program, in slots 8-11 of a space
+of 32, the rest of the memory for segments and of the arena as untyped, its
+own space and its own thread; `tests/caps/calls.test` and
+`tests/ipc/ipc.test` use them (*docs/testing.md*). `tests/timing/ipc.test` counts a round trip's
 instructions on Bochs: 872 at L4.

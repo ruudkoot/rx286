@@ -13,7 +13,8 @@
 ; entry - enter protected mode
 ;   In:       CS = KERNEL_SEG; interrupts off (the loader)
 ;   Out:      does not return: jumps to SEL_KCODE:pm_start
-;   Destroys: AX, DS (and BX, CX, DX, SI in test images that sum the file)
+;   Destroys: AX, DS (and BX, CX, DX, SI, DI in test images that sum the
+;             image)
 ; ----------------------------------------------------------------------------
 entry:
         cli
@@ -22,20 +23,30 @@ entry:
 %ifdef TEST_IMAGE_SUM
         ; The boot tests' proof that the loader brought every byte, each in
         ; its place: a Fletcher sum of KERNEL.BIN's words (the second sum
-        ; weighs each word by its position), before anything writes to it.
-        xor si, si
+        ; weighs each word by its position), before anything writes to it;
+        ; a paragraph at a time, since the image may pass 64 KB.
+        mov cx, [MODULE_TABLE_OFF + MH_PARAGRAPHS]
         xor bx, bx                      ; the plain sum
         xor dx, dx                      ; the sum of the plain sums
-        mov cx, KERNEL_FILE_SIZE / 2
+.paragraph:
+        xor si, si
+        mov di, 8
 .sum:
         add bx, [si]
         add dx, bx
         add si, 2
-        loop .sum
-        mov [KDATA_OFF + test_image_sum], dx
+        dec di
+        jnz .sum
+        mov ax, ds
+        inc ax
+        mov ds, ax
+        loop .paragraph
+        mov ax, cs
+        mov ds, ax
+        mov [KDATA_OFF + test_image_sum - KDATA_VSTART], dx
 %endif
-        lgdt [KDATA_OFF + gdt_pointer]
-        lidt [KDATA_OFF + idt_pointer]
+        lgdt [KDATA_OFF + gdt_pointer - KDATA_VSTART]
+        lidt [KDATA_OFF + idt_pointer - KDATA_VSTART]
         smsw ax
         or ax, MSW_PE | MSW_MP
         lmsw ax

@@ -44,8 +44,9 @@ it into features:
 |---|---|
 | `boot-sector.bin` | sector 0 of the floppy |
 | `boot-loader.bin` | sectors 1-3 |
-| `user.bin` | the program, which the kernel includes |
-| `kernel.bin` | `KERNEL.BIN` on the floppy |
+| `kernel.bin` | the kernel: the boot image's first part |
+| `root.bin`, `user.bin`, `counter.bin` | the modules: the root, the program, the counter |
+| `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules (*docs/memory-map.md*) |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |
 | `*.lst`, `*.map` | NASM's listing and map of each binary |
@@ -67,7 +68,7 @@ E5):
    the BPB around the boot sector's code, 4 reserved sectors, the media byte
    F9h (`-R` alone would make it F0h), a fixed serial.
 3. `dd` the loader into sectors 1-3.
-4. `mcopy kernel.bin ::KERNEL.BIN`.
+4. `mcopy image.bin ::KERNEL.BIN`.
 
 `SOURCE_DATE_EPOCH` is set for all of it, so every time stamp is 1989-01-01.
 `make check-repro` builds the release image twice and compares the bytes.

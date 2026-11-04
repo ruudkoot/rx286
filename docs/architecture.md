@@ -1,14 +1,17 @@
 # Architecture
 
-rx286 is four binaries on one FAT12 floppy:
+rx286 is the boot sector, the loader and a boot image on one FAT12 floppy;
+the boot image, `KERNEL.BIN`, is the kernel and its modules (roadmap l4.md
+L5):
 
 | Part | Source | Where it runs | Size (release) |
 |---|---|---|---|
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
-| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 8 KB of code and data |
-| the program (the shell) | `src/userland/` | inside the kernel's image, ring 3 | about 4 KB of code, 4 KB of data |
-| the counter | `src/userland/counter.asm` | inside the kernel's image, ring 3, beside the shell | a few bytes |
+| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 13 KB of code and data |
+| the root | `src/root/` | a module of the image, ring 2 | about 1 KB of code |
+| the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 5 KB of code, 5 KB of data |
+| the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
@@ -24,8 +27,9 @@ program.
 1. The BIOS loads the boot sector, which loads the loader from the floppy's
    reserved sectors.
 2. The loader finds `KERNEL.BIN` in the FAT12 root directory, loads it to
-   1000:0000h one sector at a time, sets text mode 3, stops the floppy
-   motor, disables interrupts and NMI, and jumps to it.
+   1000:0000h one sector at a time, checks its end mark and its module
+   table, sets text mode 3, stops the floppy motor, disables interrupts and
+   NMI, and jumps to it.
 3. `entry.asm` (real mode) loads the GDT and IDT, sets PE and MP, and jumps
    to `pm_start`.
 4. `start.asm` zeroes the stacks, loads TR and a null LDTR, reprograms the
@@ -33,21 +37,26 @@ program.
    console, prints the banner, sets up the timer, keyboard, clock, DMA
    controllers and printer ports, unmasks every IRQ line and enables NMI.
    The diskette and fixed disk controllers are set up when first used.
-5. `thread.asm` starts a thread for the program and one for the counter
-   (roadmap l4.md L2), and becomes the idle loop; the first switch to each
-   starts its program in ring 3 with `IRET`.
+5. `cap.asm` builds the root from the image's first module and gives it
+   every other capability there is; `thread.asm` starts it, and becomes the
+   idle loop. The first switch starts the root in ring 2 with `IRET`.
+6. The root (`src/root/`) builds a space and a thread for every other
+   module - the shell, the counter beside it - and starts them, the shell
+   in the foreground; then it waits for their faults.
 
-## The kernel's image
+## The boot image
 
-`KERNEL.BIN` is one flat binary in which every segment sits at an offset fixed
-by `layout.inc`, so every descriptor base is a constant (*docs/memory-map.md*).
-`kernel.asm` declares the sections first, then includes the modules;
-a module can add to the data segment from anywhere with `begin_kdata` /
-`end_kdata`. The GDT, IDT and TSSs open the data segment
-(*docs/protected-mode.md*). The program is assembled on its own and included
-with `incbin`: it can name nothing of the kernel's.
+`KERNEL.BIN` is the kernel, a module table and the modules
+(*docs/memory-map.md*), which `tools/mkimage` puts together. In the kernel
+every segment sits at an offset fixed by `layout.inc`, so every descriptor
+base is a constant. `kernel.asm` declares the sections first, then includes
+the kernel's own files; any of them can add to the data segment with
+`begin_kdata` / `end_kdata`. The GDT, IDT and TSSs open the data segment
+(*docs/protected-mode.md*). Each module is assembled on its own: it can
+name nothing of the kernel's, and reaches it only through `INT 30h` and
+`INT 31h`.
 
-## The kernel's modules
+## The kernel's files
 
 | Module | What it does |
 |---|---|
@@ -59,11 +68,10 @@ with `incbin`: it can name nothing of the kernel's.
 | `interrupt.asm` | a stub per vector, the common entry and exit, dispatch by vector, the deferred restart |
 | `fault.asm` | the CPU's exceptions: the program's fault, a kernel panic, NMI, a carried single-step trap |
 | `panic.asm` | the red screen and halt; the double-fault task |
-| `program.asm` | a program: its restart, its fault report |
+| `program.asm` | a program: its restart; its fault, to its fault endpoint or reported |
 | `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump; the start of the first two |
-| `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*) |
+| `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*); the root, built at start from the image |
 | `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
-| `ldt.asm` | the descriptors of the programs the image carries, copied into their spaces at start |
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
 | `pic.asm` | the 8259As; the driver of each line or the rule for none; spurious IRQ7 and IRQ15 |
 | `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
@@ -103,15 +111,15 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 ## Threads
 
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
-the program the kernel carries (the shell, or a test program), and the
-counter beside the shell. A thread is an object of the arena
+the root, the program in the foreground (the shell, or a test program), and
+the counter beside the shell. A thread is an object of the arena
 (*docs/memory-map.md*): a control block and a kernel stack of its own (a
 segment from the GDT's pool), at whose top the CPU puts the frame of every
-interrupt from ring 3. It runs in a space: an LDT and its slots, which hold
-its capabilities (`cap.asm`, *docs/kernel-calls.md*; roadmap l4.md L3). The
-kernel makes the first two spaces and threads at its start from its own
-untyped memory; a program that holds untyped memory and a space can make
-more with the kernel's calls.
+interrupt from rings 1-3. It runs in a space: an LDT and its slots, which
+hold its capabilities (`cap.asm`, *docs/kernel-calls.md*; roadmap l4.md L3).
+The kernel makes the root's space and thread at its start from its own
+untyped memory; the root makes every other, and a program that holds
+untyped memory and a space can make more with the kernel's calls.
 
 - **The switch** is in software, through the one TSS (l4.md D2): the
   running thread's registers are pushed on its kernel stack and its SS:SP
@@ -146,15 +154,29 @@ more with the kernel's calls.
 - **Debug and test builds** print every thread on the AT's Sys Req key:
   its state, priority, and how much of its kernel stack it has ever used.
 
+## The root
+
+The root (`src/root/root.asm`; roadmap l4.md L5, D12) is the first thread,
+in ring 2, which the kernel builds from the image's first module and gives
+everything else: the untyped memory left, the module table, each other
+module's code and data. For each other module it builds a space - the
+module's code, a data segment initialised from the module, a stack - and a
+thread, makes itself the thread's fault handler (l4.md D18), and starts it
+at the priority the module table gives. Then it serves faults: it reports
+each with the kernel's old line, puts back any of the program's segments
+that is gone from its slot, and restarts it at its entry
+(*docs/kernel-calls.md*).
+
 ## The program
 
-The program sees three segments (code, data, stack: selectors 43h, 4Bh,
-53h) and `INT 30h` (*docs/syscalls.md*): the console, the keyboard, the
+The program sees three segments (code, data, stack: selectors 07h, 0Fh,
+17h) and `INT 30h` (*docs/syscalls.md*): the console, the keyboard, the
 clocks, the four drives a sector at a time and the two printers
 (*docs/storage.md*). It starts with its registers zero,
-IF on and IOPL 0; when it faults, exits or is broken off with Ctrl+Break,
-the kernel starts it again at its entry with a fresh stack. Its data
-survives, so the shell keeps its last line and knows it was restarted.
+IF on and IOPL 0; when it faults, the root reports it and restarts it at
+its entry with a fresh stack; when it exits or is broken off with
+Ctrl+Break, the kernel does. Its data survives, so the shell keeps its last
+line and knows it was restarted.
 
 The shell (`src/userland/`, *docs/shell.md*) is `shell.asm` (the start, the
 line editor, the command table), `commands.asm`, `drives.asm` (the prompt,

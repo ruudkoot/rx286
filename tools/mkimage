@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/mkimage
+# Builds the boot image, KERNEL.BIN (roadmap l4.md L5, D13): the kernel, a
+# module table, and the modules, the root's first.
+#
+#   tools/mkimage OUT KERNEL.BIN-PART NAME=BINARY:RING:PRIORITY[:fg] ...
+#
+# The kernel's part is padded to MODULE_TABLE_OFF. Each module is a program
+# assembled on its own, with its code and data in sections of its NASM map:
+# utext and udata (a program's rooms: UDATA_ROOM of data, USTACK_SIZE of
+# stack), or ctext and cdata (the counter's). Its code goes in whole; its
+# data without the zeros it ends with, which a fresh segment has anyway;
+# each on a paragraph. `fg` marks the program the keys are for. The image
+# ends with a paragraph whose last word is KERNEL_END_MARK, which the
+# loader checks; the table gives its length (layout.inc, docs/memory-map.md).
+# ============================================================================
+
+import os
+import struct
+import sys
+
+import rxlib
+
+L = rxlib.LAYOUT
+
+# section names -> (data room, stack)
+ROOMS = {
+    ('utext', 'udata'): (L['UDATA_ROOM'], L['USTACK_SIZE']),
+    ('ctext', 'cdata'): (L['CDATA_ROOM'], L['CSTACK_SIZE']),
+}
+
+
+def paragraph(data):
+    return data + bytes(-len(data) % 16)
+
+
+def module_parts(binary):
+    """A module's code and data as assembled, its data room and its stack."""
+    blob = open(binary, 'rb').read()
+    sections = rxlib.map_sections(os.path.splitext(binary)[0] + '.map')
+    for (text, data), (room, stack) in ROOMS.items():
+        if text in sections:
+            start, length = sections[text]
+            code = blob[start:start + length]
+            start, length = sections.get(data, (0, 0))
+            initial = blob[start:start + length].rstrip(b'\0')
+            initial += bytes(len(initial) % 2)
+            if len(initial) > room:
+                sys.exit('mkimage: %s: its data outgrew its room' % binary)
+            return code, initial, room, stack
+    sys.exit('mkimage: %s: no code section that it knows' % binary)
+
+
+def main(args):
+    if len(args) < 3:
+        sys.exit('usage: mkimage OUT KERNEL NAME=BINARY:RING:PRIORITY[:fg] ...')
+    out, kernel_path, specs = args[0], args[1], args[2:]
+    kernel = open(kernel_path, 'rb').read()
+    if len(kernel) > L['MODULE_TABLE_OFF']:
+        sys.exit('mkimage: the kernel is longer than MODULE_TABLE_OFF')
+    if len(specs) > L['MODULE_MAX']:
+        sys.exit('mkimage: more than MODULE_MAX modules')
+    image = bytearray(kernel + bytes(L['MODULES_OFF'] - len(kernel)))
+    entries = []
+    for spec in specs:
+        name, _, rest = spec.partition('=')
+        fields = rest.split(':')
+        binary, ring, priority = fields[0], int(fields[1]), int(fields[2])
+        flags = L['MF_FOREGROUND'] if 'fg' in fields[3:] else 0
+        if len(name) >= L['M_NAME_SIZE'] or name != name.lower():
+            sys.exit('mkimage: %s: a name of lower case, at most %d characters'
+                     % (name, L['M_NAME_SIZE'] - 1))
+        code, initial, room, stack = module_parts(binary)
+        code_at = len(image)
+        image += paragraph(code)
+        data_at = len(image)
+        image += paragraph(initial)
+        entry = bytearray(L['MODULE_ENTRY_SIZE'])
+        entry[0:len(name)] = name.encode('ascii')
+        for field, value in (('M_CODE', code_at // 16), ('M_CODE_SIZE', len(code)),
+                             ('M_DATA', data_at // 16), ('M_DATA_SIZE', len(initial)),
+                             ('M_DATA_ROOM', room), ('M_STACK', stack), ('M_ENTRY', 0)):
+            struct.pack_into('<H', entry, L[field], value)
+        entry[L['M_RING']] = ring
+        entry[L['M_PRIORITY']] = priority
+        entry[L['M_FLAGS']] = flags
+        entries.append(bytes(entry))
+    image += bytes(14) + struct.pack('<H', L['KERNEL_END_MARK'])
+    if len(image) > L['IMAGE_MAX']:
+        sys.exit('mkimage: the image is %d bytes, more than IMAGE_MAX' % len(image))
+    table = bytearray(L['MODULE_TABLE_SIZE'])
+    table[0:2] = b'MT'                  # MODULE_MAGIC, as NASM stores 'MT'
+    struct.pack_into('<HH', table, L['MH_COUNT'], len(entries), len(image) // 16)
+    for n, entry in enumerate(entries):
+        at = L['MODULE_HEADER_SIZE'] + n * L['MODULE_ENTRY_SIZE']
+        table[at:at + len(entry)] = entry
+    image[L['MODULE_TABLE_OFF']:L['MODULES_OFF']] = table
+    with open(out + '.tmp', 'wb') as f:
+        f.write(image)
+    os.replace(out + '.tmp', out)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

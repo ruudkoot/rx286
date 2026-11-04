@@ -53,7 +53,7 @@ T_SLICE             equ 18      ; byte: ticks left of its time slice
 T_FLAGS             equ 19      ; byte: TF_*
 T_RUN_TICKS         equ 20      ; ticks during which it was running
 T_LDT_LIVE          equ 22      ; its LDT (kdata)
-T_LDT_PRISTINE      equ 24      ; the LDT as built (kdata)
+T_FAULT             equ 24      ; the endpoint its faults go to, or 0 (l4.md D18)
 T_RUNS              equ 26      ; times it was switched to
 T_SPACE             equ 28      ; its space (kdata)
 T_ENTRY             equ 30      ; its program's entry: the IP of a start
@@ -67,7 +67,11 @@ T_WAIT_OBJ          equ 42      ; what it waits on: an endpoint, a notification,
 T_BOUND             equ 44      ; its bound notification, or 0
 T_CALLS             equ 46      ; the calls it has made: a stale reply cannot answer a later one
 T_FPU               equ 48      ; its 287's state (FNSAVE: 94 bytes) while not the owner
+T_FAULT_BADGE       equ 142     ; the badge of the fault endpoint's capability
 TCB_SIZE            equ 160
+%if T_FPU + 94 > T_FAULT_BADGE
+  %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
+%endif
 
 TI_CALLING          equ 0x01    ; T_IPC: a call, which waits for a reply
 TI_GRANT            equ 0x02    ;        it passes a capability (its frame's BP)

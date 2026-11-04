@@ -1,0 +1,14 @@
+# A fault of a module goes to its fault endpoint, the root's (roadmap l4.md
+# L5, D18): the counter faults once (TEST_COUNTER_FAULT) while the shell
+# waits for a key; the root reports it with the module's name, and restarts
+# it; the shell goes on.
+program: shell
+define: TEST_COUNTER_FAULT
+keys: {wait 20}echo hi\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>rx286: counter fault #UD at 0007:{c:entry.fault}
+echo hi
+hi
+A:\>

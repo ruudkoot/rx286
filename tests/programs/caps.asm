@@ -2,9 +2,9 @@
 ; rx286 - tests/programs/caps.asm
 ; The kernel's calls on capabilities (roadmap l4.md L3), from ring 3.
 ;
-; In a TEST_CAPS build the kernel gives this program, in slots 8-11, the
-; memory for segments and the rest of the arena as untyped, its own space
-; and its own thread. It retypes every kind of object, is refused every way
+; In a TEST_CAPS build the root gives this program, in slots 8-11, the rest
+; of the memory for segments and of the arena as untyped, its own space and
+; its own thread (src/root). It retypes every kind of object, is refused every way
 ; it can think of, builds a space for a new thread from what it made -
 ; code copied from its own, data and stack moved in, an endpoint minted
 ; with a badge - and starts that thread. Last, it loads a capability that is
@@ -87,8 +87,8 @@ entry:
         mov bx, ax
         mov ax, dx
         report "its base, high byte (3)"
-        mov ax, bx
-        report "its base, low word (0)"
+        mov ax, bx                      ; past the root's data and stack, and its own
+        report "its base, low word (20480)"
         mov ax, cx
         report "its limit (255)"
         mov dx, UT_ARENA
@@ -301,6 +301,9 @@ entry:
         mov es, ax
 .done:
         PRINT "caps: done", CHAR_LF
+        mov al, WAIT_MOUSE              ; a few ticks for the new thread, below
+        mov cx, 5                       ; this program, before the test ends
+        sys SYS_WAIT
 .wait:
         mov al, KEY_WAIT
         sys SYS_READ_KEY

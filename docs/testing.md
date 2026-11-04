@@ -54,7 +54,9 @@ rx286>
 
 Header lines (`tools/run-test` documents them all): `program` (shell,
 attack, fuzz, storage), `keys` (what to type), `define` (a NASM define for
-the test image), `image` (a fragmented, missing or oversized kernel),
+the test image), `image` (a fragmented, missing, truncated or oversized
+`KERNEL.BIN`, one past 64 KB, one whose first module is not the root or
+whose table places a module outside it, a disk without a loader),
 `timeout`, `match` (full, prefix, contains), `break` and `debugger` (a
 debugger session at a kernel symbol), `media` (B without a diskette or
 write-protected, no fixed disk D, which the emulator is told; B's FAT
@@ -66,7 +68,11 @@ answers come in the ticks they would),
 `lpt1` and `lpt2` (what each printer must
 have printed, line by line), `sector` (what a sector of a drive's image must
 hold after the run, read on the host: a text, then each byte its offset). In expected lines, `{name}` is
-a program symbol's offset and `{k:name}` a kernel one.
+a program symbol's offset, `{k:name}` a kernel one, `{c:name}` the
+counter's and `{r:name}` the root's; `{m:module.base}`, `{m:module.limit}`,
+`{m:module.codesum}` and `{m:module.datasum}` say where a module's code is
+in the boot image and what it and its data sum to; `{image_sum}`,
+`{image_size}` and `{image_free}` describe `KERNEL.BIN` and the floppy.
 
 Every run gets its own copies of drives B, C and D (`make disks`,
 *docs/storage.md*), and its printers print into files of its directory, so
@@ -93,7 +99,8 @@ The suites:
 
 | Suite | What |
 |---|---|
-| `tests/boot` | the boot sector and loader: every word of `KERNEL.BIN` arrives (contiguous and fragmented), a missing or oversized kernel, a disk without a loader |
+| `tests/boot` | the boot sector and loader: every word of `KERNEL.BIN` arrives (contiguous, fragmented, and past 64 KB), a missing, truncated or oversized one, a disk without a loader |
+| `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a module's fault reported by the root with the module's name; a boot image without a root, or with a module outside it, refused by the loader |
 | `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break, Ctrl+Alt+Del, the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
 | `tests/syscalls` | every system call with good and bad arguments; `write`'s interrupt window |

@@ -1,15 +1,18 @@
 ; ============================================================================
 ; rx286 - src/kernel/program.asm
-; A program in ring 3: started, faulted, started again (roadmap D11).
+; A program in rings 1-3: started, faulted, started again (roadmap D11).
 ;
-; Each thread runs a program (thread.asm): the program, and the counter
-; beside it (roadmap l4.md L2). A program's code is UCODE:0000, its data
-; UDATA, its stack USTACK, in its own LDT; it starts with its registers
-; zero, IF on and IOPL 0. A fault of a program is reported (and its
-; registers, in debug and test builds), and the program starts again at its
-; entry with a fresh stack and a fresh 287; the program the keys are for
-; also with an empty keyboard ring. The kernel does not reset a program's
-; data: its entry code initialises what it needs.
+; Each thread runs a program (thread.asm): the root, and what the root
+; builds and starts (roadmap l4.md L5). A program's code, data and stack are
+; slots 0, 1 and 2 of its space; it starts with its registers zero, IF on
+; and IOPL 0 (or 1: D11). A fault of a thread that has a fault endpoint is
+; a call on that endpoint, which its handler - the root - answers by
+; reporting it and restarting it (l4.md D18); a thread without one is
+; reported by the kernel (and its registers, in debug and test builds). A
+; restart begins at its entry with a fresh stack and a fresh 287; the
+; program the keys are for also with an empty keyboard ring. The kernel
+; does not reset a program's data: its entry code initialises what it
+; needs.
 ; ============================================================================
 
 begin_kdata
@@ -68,7 +71,9 @@ restart_program:
 program_reset:
         push bx
         mov byte [restart_pending], 0
-        call ldt_restore                ; undo any test probe's change
+%ifdef TEST_ATTACK
+        call test_probe_undo            ; undo a test probe's change
+%endif
         call fpu_reset_thread           ; a clean 287, whatever the last run left
         call ipc_reset                  ; a reply it owed will not come
         mov bx, [cur_thread]
@@ -78,21 +83,37 @@ program_reset:
 %ifdef WITH_TEST_HOOKS
         call test_program_started
 %endif
+%ifdef TEST_FUZZ
+        call test_fuzz_alias
+%endif
 .done:
         pop bx
         ret
 
 ; ----------------------------------------------------------------------------
-; fault_program - report the program's fault, then restart it
-;   In:       BP = the frame (from ring 3); DS = SEL_KDATA
+; fault_program - a program's fault: to its fault endpoint, whose handler's
+; reply restarts it; or, without one, reported (and its registers, in
+; debug and test builds) and restarted here
+;   In:       BP = the frame (from rings 1-3); DS = SEL_KDATA
 ;   Out:      the frame changed to restart the program
-;   Destroys: AX, SI
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 fault_program:
+        xor di, di                      ; FAULT_*
 %ifdef WITH_TEST_HOOKS
         call test_fault_quiet           ; the fuzzer counts faults instead
-        jc .restart
+        jnc .flagged
+        mov di, FAULT_COUNTED
+.flagged:
 %endif
+        mov bx, [cur_thread]
+        cmp word [bx + T_FAULT], 0
+        je .kernel
+        call ipc_fault                  ; waits for the handler (ipc.asm)
+        jmp restart_program
+.kernel:
+        test di, di
+        jnz .restart
         mov al, ATTR_KERNEL
         call con_set_attr
         mov si, msg_log_prefix

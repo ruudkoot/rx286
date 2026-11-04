@@ -5,9 +5,9 @@
 ; kernel's calls on INT 31h (roadmap l4.md L3; D4, D7, D8, D20).
 ;
 ; The kernel allocates nothing of its own after its start. Its objects -
-; spaces, threads, endpoints, notifications - live in the arena, the upper
-; half of its data segment's 64 KB, and are made by retyping untyped memory
-; that a program holds as a capability; memory for programs' segments is
+; spaces, threads, endpoints, notifications - live in the arena, within its
+; data segment's 64 KB, and are made by retyping untyped memory that a
+; program holds as a capability; memory for programs' segments is
 ; retyped likewise, from untyped memory outside the arena, and zeroed
 ; (l4.md X14). A space is an LDT and a shadow entry for each of its slots:
 ; a slot's selector is the capability's name. A segment capability is the
@@ -16,25 +16,24 @@
 ; shadow entry says what it is. The GDT gives each space an LDT descriptor
 ; and each thread a kernel stack from two pools, and holds nothing else a
 ; program could load. No call here waits, so they need not be serialised as
-; the system calls are (thread.asm).
+; the system calls are (thread.asm). At its start the kernel makes one
+; space and one thread, the root's, from the image's first module, and
+; gives the root everything else (l4.md L5).
 ; ============================================================================
 
 ARENA_PARA          equ ARENA_PHYS >> 4
-%ifdef TEST_CAPS
-BOOT_SLOTS          equ 32              ; room for the capabilities a test gives and makes
-%else
-BOOT_SLOTS          equ LDT_ENTRIES     ; a program's space as the image describes it
-%endif
+ROOT_MODULE         equ MODULE_TABLE_VOFF + MODULE_HEADER_SIZE  ; the first entry
 
 begin_kdata
-; The kernel's own untyped memory: the arena, from which it makes the first
-; spaces and threads at start; what is left is given out (TEST_CAPS; the
-; root, later). Laid out as a shadow entry.
+; The kernel's own untyped memory: the arena, from which it makes the
+; root's space and thread at start; what is left is the root's. Laid out as
+; a shadow entry.
 boot_untyped:
         db CAP_UNTYPED, 0
         dw ARENA_PARA, ARENA_SIZE >> 4, 0, 0, 0
         times SHADOW_SIZE - 12 db 0
-; The memory for programs' segments, likewise.
+; The memory for programs' segments, likewise: the root's data and stack
+; first.
 memory_untyped:
         db CAP_UNTYPED, 0
         dw UMEM_PHYS >> 4, UMEM_SIZE >> 4, 0, 0, 0
@@ -68,10 +67,10 @@ retype_paragraphs   dw 0
 retype_base         dw 0
 retype_base_low     dw 0
 retype_base_high    db 0
-boot_name           dw 0
-boot_stack          dw 0
-boot_table          dw 0
 boot_space          dw 0
+boot_thread         dw 0
+boot_base           times 3 db 0        ; boot_root's: a segment's base
+boot_descriptor     times 8 db 0
 end_kdata
 
 %if (kcall_table_end - kcall_table) / 2 != KCALL_COUNT
@@ -231,27 +230,20 @@ arena_object:
         mov al, KE_CAP
         cmp word [si + SH_OBJECT], ARENA_PARA
         jne .refuse
+        push cx                         ; its bytes
         shr cx, 4
         mov dx, cx                      ; aligned to its size
-        call untyped_carve
-        mov cl, al                      ; (keep AX's place across the error path)
+        call untyped_carve              ; AX = its place, in paragraphs
+        pop cx
         jc .full
         sub ax, ARENA_PARA
         shl ax, 4
         add ax, ARENA_OFF
-        mov bx, ax
-        mov cx, dx                      ; zero it (l4.md X14): its paragraphs
-        shl cx, 3                       ; ... as words: (watermark - place) * 8
-        mov dx, [si + SH_WATERMARK]
-        sub dx, [si + SH_OBJECT]
-        shl dx, 4
-        add dx, ARENA_OFF               ; DX = the object's end
-        mov cx, dx
-        sub cx, bx
-        shr cx, 1
-        push ds
+        mov bx, ax                      ; BX = the object
+        push ds                         ; zeroed (l4.md X14): exactly its bytes
         pop es
         mov di, bx
+        shr cx, 1
         xor ax, ax
         cld
         rep stosw
@@ -264,15 +256,14 @@ arena_object:
         ret
 
 ; ----------------------------------------------------------------------------
-; phys_zero - zero memory by its physical address, through SEL_SCRATCH
-;   In:       DL:AX = the base; CX = bytes (even, up to 64 KB; 0 for 64 KB)
+; scratch_window - one of the kernel's windows on memory, set to some
+;   In:       DI = its descriptor (gdt + SEL_SCRATCH or SEL_SCRATCH2); DL:AX =
+;             the base; CX = bytes (0 for 64 KB)
 ;   Out:      nothing
-;   Destroys: AX, CX, DI, ES
+;   Destroys: nothing
 ; ----------------------------------------------------------------------------
-phys_zero:
-        push bx
+scratch_window:
         push cx
-        mov di, gdt + SEL_SCRATCH
         dec cx
         mov [di], cx                    ; the limit
         mov [di + 2], ax
@@ -280,6 +271,17 @@ phys_zero:
         mov byte [di + 5], ACC_KDATA
         mov word [di + 6], 0
         pop cx
+        ret
+
+; ----------------------------------------------------------------------------
+; phys_zero - zero memory by its physical address, through SEL_SCRATCH
+;   In:       DL:AX = the base; CX = bytes (even, up to 64 KB; 0 for 64 KB)
+;   Out:      nothing
+;   Destroys: AX, CX, DI, ES
+; ----------------------------------------------------------------------------
+phys_zero:
+        mov di, gdt + SEL_SCRATCH
+        call scratch_window
         mov ax, SEL_SCRATCH
         mov es, ax
         xor di, di
@@ -292,7 +294,36 @@ phys_zero:
         rep stosw
         push ds
         pop es
-        pop bx
+        ret
+
+; ----------------------------------------------------------------------------
+; phys_copy - copy memory by physical addresses, through SEL_SCRATCH (the
+; destination) and SEL_SCRATCH2 (the source)
+;   In:       DL:AX = the destination; DH:BX = the source; CX = bytes (even,
+;             1 to 65,534)
+;   Out:      nothing
+;   Destroys: AX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+phys_copy:
+        mov di, gdt + SEL_SCRATCH
+        call scratch_window
+        mov ax, bx
+        mov dl, dh
+        mov di, gdt + SEL_SCRATCH2
+        call scratch_window
+        push ds
+        mov ax, SEL_SCRATCH
+        mov es, ax
+        mov ax, SEL_SCRATCH2
+        mov ds, ax
+        xor si, si
+        xor di, di
+        shr cx, 1
+        cld
+        rep movsw
+        pop ds
+        push ds
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
@@ -360,9 +391,9 @@ space_make:
         mov [di], cx                    ; the LDT's limit
         mov ax, bx
         add ax, SP_LDT
-        add ax, KDATA_PHYS & 0xFFFF     ; its base: kdata's, plus the offset
+        add ax, KDATA_BASE & 0xFFFF     ; its base: kdata's, plus the offset
         mov [di + 2], ax
-        mov al, KDATA_PHYS >> 16
+        mov al, KDATA_BASE >> 16
         adc al, 0
         mov [di + 4], al
         mov byte [di + 5], ACC_LDT
@@ -403,9 +434,9 @@ tcb_make:
         mov word [di], TCB_STACK_SIZE - 1
         mov ax, bx
         add ax, TCB_STACK_OFF
-        add ax, KDATA_PHYS & 0xFFFF
+        add ax, KDATA_BASE & 0xFFFF
         mov [di + 2], ax
-        mov al, KDATA_PHYS >> 16
+        mov al, KDATA_BASE >> 16
         adc al, 0
         mov [di + 4], al
         mov byte [di + 5], ACC_KDATA
@@ -459,56 +490,277 @@ slot_put_descriptor:
         ret
 
 ; ----------------------------------------------------------------------------
-; boot_program - at start: a program's space and thread, from the kernel's
-; own untyped memory, its segments copied from a table of descriptors (the
-; programs the kernel's image carries; the root's job, from L5)
-;   In:       SI = the descriptors (LDT_ENTRIES of them); CX = its stack's
-;             size; AX = its name; DS = SEL_KDATA
-;   Out:      BX = the thread, configured, not started
+; boot_root - at start: the root's space and thread, from the image's first
+; module and the kernel's own untyped memory (roadmap l4.md L5), with the
+; capabilities the root starts with (kcalls.inc, ROOT_SLOT_*): its code,
+; its data (initialised from the module) and its stack; what is left of the
+; memory for segments and of the arena, as untyped; the module table and
+; each other module's code and data, read-only; its own space and thread
+;   In:       DS = ES = SEL_KDATA
+;   Out:      BX = the root's thread, configured, not started
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
-boot_program:
-        mov [boot_name], ax
-        mov [boot_stack], cx
-        mov [boot_table], si
+boot_root:
         mov si, boot_untyped
-        mov cx, BOOT_SLOTS
+        mov cx, ROOT_SLOTS
         call space_make                 ; BX = the space
-        ASSERT nc, "boot_program: no room for a space"
+        ASSERT nc, "boot_root: no room for a space"
         mov [boot_space], bx
-        xor ax, ax
-.slot:
-        push ax
-        mov bx, [boot_space]
-        call slot_at                    ; SI, DI = the slot
-        pop ax
-        push ax
-        mov bx, ax
-        shl bx, 3
-        add bx, [boot_table]
-        call slot_put_descriptor
-        pop ax
-        inc ax
-        cmp ax, LDT_ENTRIES
-        jb .slot
         mov si, boot_untyped
         call tcb_make                   ; BX = the thread
-        ASSERT nc, "boot_program: no room for a thread"
-        mov ax, [boot_name]
-        mov [bx + T_NAME], ax
-        mov ax, [boot_stack]
+        ASSERT nc, "boot_root: no room for a thread"
+        mov [boot_thread], bx
+        mov si, ROOT_MODULE
+        mov [bx + T_NAME], si           ; (M_NAME: zero-terminated)
+        mov al, [si + M_RING]
+        mov [bx + T_RING], al
+        mov al, [si + M_PRIORITY]
+        mov [bx + T_PRIO], al
+        mov ax, [si + M_ENTRY]
+        mov [bx + T_ENTRY], ax
+        mov ax, [si + M_STACK]
         mov [bx + T_USTACK_TOP], ax
-        mov word [bx + T_ENTRY], 0
-        mov byte [bx + T_RING], RPL_USER
         mov di, [boot_space]
         mov [bx + T_SPACE], di
         mov ax, [di + SP_GDT_SELECTOR]
         mov [bx + T_LDT], ax
-        add di, SP_LDT
-        mov [bx + T_LDT_LIVE], di
-        mov ax, [boot_table]
-        mov [bx + T_LDT_PRISTINE], ax
+        lea ax, [di + SP_LDT]
+        mov [bx + T_LDT_LIVE], ax
         or byte [bx + T_FLAGS], TF_CONFIGURED
+        ; slots 0, 1, 2: its code; its data and stack, from the memory for
+        ; segments
+        mov si, ROOT_MODULE
+        xor ax, ax
+        call boot_module_code
+        call boot_root_data
+        ; slots 3, 4: what is left of the untyped memory
+        mov ax, ROOT_SLOT_UNTYPED
+        mov dx, memory_untyped
+        call boot_slot_shadow
+        mov ax, ROOT_SLOT_ARENA
+        mov dx, boot_untyped
+        call boot_slot_shadow
+        ; slot 5: the module table, read-only
+        mov ax, MODULE_TABLE_PHYS & 0xFFFF
+        mov dl, MODULE_TABLE_PHYS >> 16
+        mov cx, MODULE_TABLE_SIZE - 1
+        call root_read_access
+        mov bx, ROOT_SLOT_MODULES
+        call boot_slot_segment
+        ; slots 6, 7: its own space and thread
+        mov bx, [boot_space]
+        mov ax, ROOT_SLOT_SPACE
+        call slot_at
+        mov byte [si + SH_TYPE], CAP_SPACE
+        mov [si + SH_OBJECT], bx
+        mov ax, ROOT_SLOT_THREAD
+        call slot_at
+        mov byte [si + SH_TYPE], CAP_THREAD
+        mov ax, [boot_thread]
+        mov [si + SH_OBJECT], ax
+        ; the other modules: each one's code and its data as assembled
+        mov cx, [MODULE_TABLE_VOFF + MH_COUNT]
+        dec cx
+        cmp cx, (ROOT_SLOTS - ROOT_SLOT_MODULE) / 2
+        ASSERT be, "boot_root: more modules than the root has slots for"
+        mov si, ROOT_MODULE
+        mov ax, ROOT_SLOT_MODULE
+.module:
+        jcxz .done
+        add si, MODULE_ENTRY_SIZE
+        push cx
+        push ax
+        call boot_module_code
+        pop ax
+        inc ax
+        push ax
+        call boot_module_data
+        pop ax
+        inc ax
+        pop cx
+        dec cx
+        jmp .module
+.done:
+        mov bx, [boot_thread]
+        ret
+
+; ----------------------------------------------------------------------------
+; boot_module_code - a module's code, as a segment, into a slot of the
+; root's space: of the DPL its table entry says
+;   In:       SI = the module's entry; AX = the slot
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, DI
+; ----------------------------------------------------------------------------
+boot_module_code:
+        mov bx, ax
+        mov ax, [si + M_CODE]
+        call module_base                ; DL:AX
+        mov cx, [si + M_CODE_SIZE]
+        dec cx
+        mov dh, [si + M_RING]
+        shl dh, ACC_DPL_SHIFT
+        or dh, ACC_PRESENT | ACC_SEGMENT | ACC_CODE | ACC_RW | ACC_ACCESSED
+        jmp boot_slot_segment
+
+; ----------------------------------------------------------------------------
+; boot_module_data - a module's data as assembled, as a read-only segment of
+; the root's (at least a byte), into a slot of the root's space
+;   In:       SI = the module's entry; AX = the slot
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, DI
+; ----------------------------------------------------------------------------
+boot_module_data:
+        mov bx, ax
+        mov ax, [si + M_DATA]
+        call module_base                ; DL:AX
+        mov cx, [si + M_DATA_SIZE]
+        jcxz .limit
+        dec cx
+.limit:
+        call root_read_access
+        jmp boot_slot_segment
+
+; ----------------------------------------------------------------------------
+; root_read_access - the access byte of read-only data at the root's ring
+;   In:       nothing
+;   Out:      DH = the access byte
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+root_read_access:
+        mov dh, [ROOT_MODULE + M_RING]
+        shl dh, ACC_DPL_SHIFT
+        or dh, ACC_PRESENT | ACC_SEGMENT | ACC_ACCESSED
+        ret
+
+; ----------------------------------------------------------------------------
+; boot_root_data - the root's data and stack, from the memory for segments:
+; its data initialised from its module, the rest of it and its stack zeroed
+;   In:       nothing
+;   Out:      slots 1 and 2 of the root's space
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+boot_root_data:
+        mov si, ROOT_MODULE
+        mov cx, [si + M_DATA_ROOM]
+        call boot_carve                 ; DL:AX = its base, zeroed
+        mov [boot_base], ax
+        mov [boot_base + 2], dl
+        mov si, ROOT_MODULE
+        mov ax, [si + M_DATA]
+        call module_base
+        mov bx, ax
+        mov dh, dl                      ; DH:BX = its data as assembled
+        mov cx, [si + M_DATA_SIZE]
+        jcxz .copied
+        inc cx
+        and cx, ~1
+        mov ax, [boot_base]
+        mov dl, [boot_base + 2]
+        call phys_copy
+.copied:
+        mov ax, [boot_base]
+        mov dl, [boot_base + 2]
+        mov si, ROOT_MODULE
+        mov cx, [si + M_DATA_ROOM]
+        mov bx, 1
+        call boot_root_segment
+        mov cx, [si + M_STACK]
+        call boot_carve
+        mov si, ROOT_MODULE
+        mov cx, [si + M_STACK]
+        mov bx, 2
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; boot_root_segment - writable data at the root's ring into a slot of its
+; space
+;   In:       BX = the slot; DL:AX = the base; CX = bytes (1 or more)
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, DI
+; ----------------------------------------------------------------------------
+boot_root_segment:
+        dec cx
+        mov dh, [ROOT_MODULE + M_RING]
+        shl dh, ACC_DPL_SHIFT
+        or dh, ACC_PRESENT | ACC_SEGMENT | ACC_RW | ACC_ACCESSED
+        jmp boot_slot_segment
+
+; ----------------------------------------------------------------------------
+; boot_carve - memory for one of the root's segments, zeroed
+;   In:       CX = bytes (even, 2 to 65,534)
+;   Out:      DL:AX = its base
+;   Destroys: BX, CX, SI, DI, ES
+; ----------------------------------------------------------------------------
+boot_carve:
+        push cx
+        add cx, 15
+        shr cx, 4
+        mov si, memory_untyped
+        mov dx, 1
+        call untyped_carve              ; AX = its base in paragraphs
+        ASSERT nc, "boot_carve: no memory for the root"
+        mov dx, ax
+        shl ax, 4
+        shr dx, 12
+        pop cx
+        push ax
+        push dx
+        call phys_zero
+        pop dx
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; module_base - a part of the image as a physical address
+;   In:       AX = paragraphs from the image's start
+;   Out:      DL:AX = its physical address
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+module_base:
+        add ax, KERNEL_SEG
+        mov dl, ah
+        shr dl, 4
+        shl ax, 4
+        ret
+
+; ----------------------------------------------------------------------------
+; boot_slot_segment - a segment capability into a slot of the root's space
+;   In:       BX = the slot; DL:AX = the base; CX = the limit; DH = the
+;             access byte
+;   Out:      nothing
+;   Destroys: AX, BX, DI
+; ----------------------------------------------------------------------------
+boot_slot_segment:
+        push si
+        mov [boot_descriptor], cx
+        mov [boot_descriptor + 2], ax
+        mov [boot_descriptor + 4], dl
+        mov [boot_descriptor + 5], dh
+        mov ax, bx
+        mov bx, [boot_space]
+        call slot_at                    ; SI, DI = the slot
+        mov bx, boot_descriptor
+        call slot_put_descriptor
+        pop si
+        ret
+
+; ----------------------------------------------------------------------------
+; boot_slot_shadow - an untyped capability of the kernel's into a slot of
+; the root's space: a copy of its shadow entry
+;   In:       AX = the slot; DX = the shadow entry
+;   Out:      nothing
+;   Destroys: AX, BX, CX, SI, DI, ES
+; ----------------------------------------------------------------------------
+boot_slot_shadow:
+        mov bx, [boot_space]
+        call slot_at
+        mov di, si
+        mov si, dx
+        push ds
+        pop es
+        mov cx, SHADOW_SIZE / 2
+        cld
+        rep movsw
         ret
 
 ; ----------------------------------------------------------------------------
@@ -742,14 +994,15 @@ kc_copy:
 
 ; ----------------------------------------------------------------------------
 ; kc_thread - KCALL_THREAD: configure a thread made by retype (its space,
-; entry and stack), or start it at a priority; or bind it to a notification,
-; in any state (one each: binding again unbinds the old). A space's slots
-; 0, 1 and 2 are its program's code, data and stack; slot 0's DPL is the
-; thread's ring, and IOPL 1 goes to a thread of ring 1 that asks for it, to
-; no other (l4.md D11)
+; entry and stack), or start it at a priority; or, in any state, bind it to
+; a notification (one each: binding again unbinds the old) or give it a
+; fault endpoint (l4.md D18). A space's slots 0, 1 and 2 are its program's
+; code, data and stack; slot 0's DPL is the thread's ring, and IOPL 1 goes
+; to a thread of ring 1 that asks for it, to no other (l4.md D11)
 ;   In:       BP = the frame (DX thread, AL THREAD_*; configure: SI space,
-;             BX IP, CX SP; start: CL priority, CH 1 for IOPL; bind: SI a
-;             notification it may receive on)
+;             BX IP, CX SP; start: CL priority, CH START_*; bind: SI a
+;             notification it may receive on; fault: SI an endpoint it may
+;             send on)
 ;   Out:      the frame's status
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
@@ -762,6 +1015,8 @@ kc_thread:
         mov al, [bp + FRAME_AX]
         cmp al, THREAD_BIND
         je .bind
+        cmp al, THREAD_FAULT
+        je .fault
         cmp byte [bx + T_STATE], TS_FREE
         jne kc_done.state                   ; started already
         cmp al, THREAD_CONFIGURE
@@ -792,6 +1047,20 @@ kc_thread:
         mov [bx + T_BOUND], si
         mov [si + N_BOUND], bx
         jmp kc_done.ok
+.fault:
+        push bx                         ; its fault endpoint, and the badge
+        mov ax, [bp + FRAME_SI]
+        mov cl, CAP_ENDPOINT
+        call cap_get
+        pop bx
+        jc kc_done.cap
+        test byte [si + SH_RIGHTS], RIGHT_SEND
+        jz kc_done.cap
+        mov ax, [si + SH_OBJECT]
+        mov [bx + T_FAULT], ax
+        mov ax, [si + SH_BADGE]
+        mov [bx + T_FAULT_BADGE], ax
+        jmp kc_done.ok
 .configure:
         push bx
         mov ax, [bp + FRAME_SI]
@@ -817,7 +1086,7 @@ kc_thread:
         mov [bx + T_LDT], ax
         add di, SP_LDT
         mov [bx + T_LDT_LIVE], di
-        mov word [bx + T_LDT_PRISTINE], 0
+        call thread_module_name
         mov ax, [bp + FRAME_BX]
         mov [bx + T_ENTRY], ax
         mov ax, [bp + FRAME_CX]
@@ -831,14 +1100,52 @@ kc_thread:
         cmp cl, PRIORITY_MAX
         ja kc_done.arg
         mov [bx + T_PRIO], cl
-        test ch, 1
+        test ch, START_FOREGROUND
+        jz .iopl
+        mov si, [cur_thread]            ; the keys' program: chosen by ring 1 or 2
+        cmp byte [si + T_RING], RPL_USER
+        je kc_done.arg
+        or byte [bx + T_FLAGS], TF_FOREGROUND
+        mov [fg_thread], bx
+.iopl:
+        test ch, START_IOPL
         jz .go
         cmp byte [bx + T_RING], 1       ; IOPL only for a ring-1 thread
         jne .go
         or byte [bx + T_FLAGS], TF_IOPL
 .go:
         call thread_init                ; into its ready queue
+%ifdef TEST_FUZZ
+        call test_fuzz_alias
+%endif
         jmp kc_done.ok
+
+; ----------------------------------------------------------------------------
+; thread_module_name - a thread named after the module whose code its space's
+; slot 0 holds, if any (the dump, the tests' reports)
+;   In:       BX = the thread; DI = its space's LDT
+;   Out:      its T_NAME
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+thread_module_name:
+        mov ax, [di + 2]                ; slot 0's base, in paragraphs
+        shr ax, 4
+        mov dl, [di + 4]
+        xor dh, dh
+        shl dx, 12
+        or dx, ax
+        sub dx, KERNEL_SEG              ; ... from the image's start
+        mov si, ROOT_MODULE
+        mov cx, [MODULE_TABLE_VOFF + MH_COUNT]
+.module:
+        cmp [si + M_CODE], dx
+        je .named
+        add si, MODULE_ENTRY_SIZE
+        loop .module
+        ret
+.named:
+        mov [bx + T_NAME], si
+        ret
 
 ; ----------------------------------------------------------------------------
 ; kc_segment - KCALL_SEGMENT: a segment capability's physical base and
