@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# ============================================================================
+# rx286 - tools/doctor
+# `make doctor`: is every tool the build and the tests use installed, at the
+# version this project was tested with (docs/building.md)?
+#
+# Prints one line a tool and exits non-zero if a required one is missing or
+# too old. Optional tools only warn.
+# ============================================================================
+
+set -u
+status=0
+
+# version_ge FOUND WANTED - true if FOUND >= WANTED, compared as versions
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]
+}
+
+# check NAME REQUIRED|optional WANTED FOUND [NOTE]
+check() {
+    local name=$1 need=$2 wanted=$3 found=$4 note=${5:-}
+    local state
+    if [ -z "$found" ]; then
+        state=MISSING
+    elif version_ge "$found" "$wanted"; then
+        state=OK
+    else
+        state="TOO OLD"
+    fi
+    if [ "$state" != OK ] && [ "$need" = required ]; then
+        status=1
+    fi
+    if [ "$state" != OK ] && [ "$need" = optional ]; then
+        state="$state (optional)"
+    fi
+    printf '%-12s %-12s wanted %-10s found %-12s %s\n' "$name" "$state" "$wanted" "${found:--}" "$note"
+}
+
+ver() { "$@" 2>&1 | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n 1; }
+
+check nasm      required 2.16    "$(ver nasm -v)"
+check mtools    required 4.0.43  "$(ver mtools --version)"
+check make      required 4.0     "$(ver make --version)"
+check python3   required 3.10    "$(ver python3 --version)"
+check pytest    required 7.4     "$(python3 -c 'import pytest; print(pytest.__version__)' 2>/dev/null)"
+check unicorn   required 2.0     "$(python3 -c 'import unicorn; print(unicorn.__version__)' 2>/dev/null)"
+check fsck.fat  required 4.2     "$(dpkg-query -W -f='${Version}' dosfstools 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+')" "(dosfstools)"
+check dosbox-x  optional 2024.03 "$(ver dosbox-x -version)" "M9: a 286 core"
+check mame      optional 0.264   "$(ver mame -version)" "M9: the IBM PC/AT"
+
+# Bochs: 2.7.x exactly, since its configuration syntax changes between releases.
+bochs_found=$(dpkg-query -W -f='${Version}' bochs 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+' )
+if [ -z "$bochs_found" ]; then
+    bochs_found=$(ver bochs --help)
+fi
+case "$bochs_found" in
+    2.7*) check bochs required 2.7 "$bochs_found" ;;
+    "")   check bochs required 2.7 "" ;;
+    *)    printf '%-12s %-12s wanted %-10s found %-12s\n' bochs "WRONG" "2.7.x" "$bochs_found"; status=1 ;;
+esac
+
+# What Bochs must have, besides its version.
+probe() { # probe NAME TEST...
+    local name=$1; shift
+    if "$@" >/dev/null 2>&1; then
+        printf '%-12s %-12s %s\n' "$name" OK ""
+    else
+        printf '%-12s %-12s %s\n' "$name" MISSING ""
+        status=1
+    fi
+}
+bochs_debugger() {
+    local rc
+    rc=$(mktemp)
+    printf 'megs: 1\nromimage: file=/usr/share/bochs/BIOS-bochs-legacy\nvgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest\ndisplay_library: rfb, options="timeout=0"\nlog: /dev/null\n' > "$rc"
+    echo quit | (cd /tmp && timeout 20 bochs -q -f "$rc") 2>&1 | grep -q '<bochs:1>'
+    local r=$?
+    rm -f "$rc"
+    return $r
+}
+probe "bochs: debugger" bochs_debugger
+probe "bochs: rfb"      test -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_rfb_gui.so
+probe "bochs: 287 IRQ"  test -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_extfpuirq.so
+probe "bochs: BIOS"     test -f /usr/share/bochs/BIOS-bochs-legacy
+probe "bochs: VGABIOS"  test -f /usr/share/bochs/VGABIOS-lgpl-latest
+probe "mformat -R"      sh -c 'f=$(mktemp); dd if=/dev/zero of=$f bs=512 count=2400 status=none; MTOOLS_SKIP_CHECK=1 mformat -i $f -f 1200 -R 4 :: ; r=$?; rm -f $f; exit $r'
+probe "mame: ibm5170"   sh -c 'cd /tmp && mame -verifyroms ibm5170 2>/dev/null | grep -q "1 were OK"'
+
+if [ $status -ne 0 ]; then
+    echo "doctor: something required is missing (docs/building.md says what to install)"
+else
+    echo "doctor: everything required is here"
+fi
+exit $status

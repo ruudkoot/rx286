@@ -1,0 +1,183 @@
+# ============================================================================
+# rx286 - Makefile
+# Builds the boot sector, the loader, the program and the kernel, and puts
+# them on a 1.2 MB FAT12 floppy image; runs Bochs; runs the tests.
+#
+#   make                 release and debug images
+#   make release|debug|test-build
+#   make run             Bochs with a window, on the debug image
+#   make debugger        Bochs stopped at the kernel's entry, with symbols
+#   make test            every suite (tests/)
+#   make check           test, plus check-286, the image checks, the
+#                        reproducibility check, lint and the documents' checks
+#   make doctor          the tools and their versions
+#   make sizes           each segment against its room
+#   make clean
+#
+# One flavour at a time is built into build/<flavour>/ (FLAVOUR=release,
+# debug or test). Test images get their own directory B=... and defines from
+# tools/run-test. docs/building.md explains all of it.
+# ============================================================================
+
+.SUFFIXES:
+.DELETE_ON_ERROR:
+SHELL := /bin/bash
+
+FLAVOUR ?= debug
+B ?= build/$(FLAVOUR)
+PROGRAM ?= shell
+TEST_DEFINES ?=
+
+NASM ?= nasm
+PYTHON ?= python3
+BOCHS ?= bochs
+
+flavour_define_release := -dRELEASE
+flavour_define_debug := -dDEBUG
+flavour_define_test := -dTEST
+FLAVOUR_DEFINE := $(flavour_define_$(FLAVOUR))
+ifeq ($(FLAVOUR_DEFINE),)
+$(error FLAVOUR must be release, debug or test, not '$(FLAVOUR)')
+endif
+
+NASMFLAGS := -f bin -w+all -w+error -Isrc/include/ $(FLAVOUR_DEFINE) $(TEST_DEFINES)
+
+# The program the kernel carries (test builds may choose another).
+program_main_shell := src/userland/shell.asm
+program_main_attack := tests/programs/attack.asm
+program_main_fuzz := tests/programs/fuzz.asm
+PROGRAM_MAIN := $(program_main_$(PROGRAM))
+ifeq ($(PROGRAM_MAIN),)
+$(error PROGRAM must be shell, attack or fuzz, not '$(PROGRAM)')
+endif
+
+# Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
+# serial and media byte, and every time stamp from SOURCE_DATE_EPOCH.
+export SOURCE_DATE_EPOCH := 599616000
+export MTOOLS_SKIP_CHECK := 1
+FLOPPY_SECTORS := 2400
+FLOPPY_SERIAL := 52583836
+
+IMAGE := $(B)/rx286.img
+BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/kernel.bin
+
+.PHONY: all release debug test-build image symbols run debugger test check \
+        check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
+
+all:
+	$(MAKE) FLAVOUR=release image symbols
+	$(MAKE) FLAVOUR=debug image symbols
+
+release debug:
+	$(MAKE) FLAVOUR=$@ image symbols
+
+test-build:
+	$(MAKE) FLAVOUR=test image symbols
+
+image: $(IMAGE)
+symbols: $(B)/rx286.sym
+
+# assemble OUTPUT SOURCE [EXTRA NASM FLAGS]: a binary, with its listing, map
+# and dependency file beside it.
+define assemble
+	@mkdir -p $(dir $(1))
+	$(NASM) $(NASMFLAGS) $(3) -MD $(1:.bin=.d) -MT $(1) \
+	    -dMAPFILE=$(1:.bin=.map) -l $(1:.bin=.lst) -o $(1) $(2)
+endef
+
+$(B)/boot-sector.bin: src/boot-sector/boot-sector.asm
+	$(call assemble,$@,$<)
+
+$(B)/boot-loader.bin: src/boot-loader/boot-loader.asm
+	$(call assemble,$@,$<)
+
+$(B)/user.bin: $(PROGRAM_MAIN)
+	$(call assemble,$@,$<,-Isrc/userland/)
+
+# On the floppy the kernel is KERNEL.BIN, upper case as FAT12 keeps names.
+$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin
+	$(call assemble,$@,$<,-Isrc/kernel/ -dUSER_BIN='"$(B)/user.bin"')
+
+$(IMAGE): $(BINARIES)
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=512 count=$(FLOPPY_SECTORS) status=none
+	mformat -i $@.tmp -f 1200 -R 4 -m 0xF9 -N $(FLOPPY_SERIAL) -v RX286 \
+	    -B $(B)/boot-sector.bin ::
+	dd if=$(B)/boot-loader.bin of=$@.tmp bs=512 seek=1 conv=notrunc status=none
+	mcopy -i $@.tmp $(B)/kernel.bin ::KERNEL.BIN
+	mv $@.tmp $@
+
+$(B)/rx286.sym: $(BINARIES) tools/map2sym
+	$(PYTHON) tools/map2sym $(B) > $@
+
+-include $(wildcard $(B)/*.d)
+
+# ---------------------------------------------------------------- the other drives
+# Drive B is an empty 360 KB FAT12 disk; the hard disks are sparse and empty
+# (AT drive types 2 and 1). Nothing in rx286 reads them.
+DISKS := build/disks
+disks: $(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img
+
+$(DISKS)/fdb.img:
+	@mkdir -p $(DISKS)
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=512 count=720 status=none
+	mformat -i $@.tmp -f 360 -N $(FLOPPY_SERIAL) -v RX286B ::
+	mv $@.tmp $@
+
+$(DISKS)/hd0.img:
+	@mkdir -p $(DISKS)
+	truncate -s $$((615 * 4 * 17 * 512)) $@
+
+$(DISKS)/hd1.img:
+	@mkdir -p $(DISKS)
+	truncate -s $$((306 * 4 * 17 * 512)) $@
+
+# ---------------------------------------------------------------- running
+run: disks
+	$(MAKE) FLAVOUR=debug image symbols
+	$(PYTHON) tools/bochs-run --mode run --build build/debug
+
+debugger: disks
+	$(MAKE) FLAVOUR=debug image symbols
+	$(PYTHON) tools/bochs-run --mode debugger --build build/debug
+
+# ---------------------------------------------------------------- checks
+test: disks
+	$(PYTHON) tools/run-test
+
+unit:
+	$(PYTHON) -m pytest -q -W ignore::DeprecationWarning tests/unit
+
+check-286: all test-build
+	$(PYTHON) tools/check-286 --self-test
+	$(PYTHON) tools/check-286 build/release/*.lst build/debug/*.lst build/test/*.lst
+
+check-image: all
+	$(PYTHON) tools/check-image build/release
+	$(PYTHON) tools/check-image build/debug
+
+check-repro:
+	rm -rf build/repro-a build/repro-b
+	$(MAKE) FLAVOUR=release B=build/repro-a image
+	$(MAKE) FLAVOUR=release B=build/repro-b image
+	cmp build/repro-a/rx286.img build/repro-b/rx286.img
+	@echo "check-repro: two release images are identical"
+
+lint:
+	$(PYTHON) tools/lint
+
+check-docs:
+	$(PYTHON) tools/check-docs
+
+check: check-286 check-image check-repro lint check-docs unit test
+	@echo "make check: all checks passed"
+
+doctor:
+	@tools/doctor
+
+sizes: release
+	$(PYTHON) tools/sizes build/release
+
+clean:
+	rm -rf build

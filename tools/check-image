@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/check-image
+# Checks a build's floppy image against what the boot code relies on.
+#
+#   tools/check-image build/release
+#
+# - the BPB of a 1.2 MB FAT12 disk, media byte F9h in the BPB and the FAT,
+#   and the boot signature 55AAh;
+# - 4 reserved sectors, with the loader's bytes in sectors 1-3;
+# - the boot sector's code is the build's;
+# - KERNEL.BIN present, the build's bytes, in one run of clusters;
+# - fsck.fat finds nothing wrong.
+# ============================================================================
+
+import os
+import struct
+import subprocess
+import sys
+
+import rxlib
+
+LAYOUT = rxlib.LAYOUT
+
+
+def mtools(*args):
+    env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
+    return subprocess.run(list(args), capture_output=True, text=True, env=env)
+
+
+def check(build):
+    errors = []
+    image_path = os.path.join(build, 'rx286.img')
+    image = open(image_path, 'rb').read()
+    boot = open(os.path.join(build, 'boot-sector.bin'), 'rb').read()
+    loader = open(os.path.join(build, 'boot-loader.bin'), 'rb').read()
+    kernel = open(os.path.join(build, 'kernel.bin'), 'rb').read()
+
+    if len(image) != 2400 * 512:
+        errors.append('image is %d bytes, not 1.2 MB' % len(image))
+    (bps, spc, reserved, fats, root, total, media, spf, spt, heads) = \
+        struct.unpack_from('<HBHBHHBHHH', image, 11)
+    want = dict(bps=512, spc=1, reserved=LAYOUT['RESERVED_SECTORS'], fats=2, root=224,
+                total=2400, media=0xF9, spf=7, spt=15, heads=2)
+    got = dict(bps=bps, spc=spc, reserved=reserved, fats=fats, root=root, total=total,
+               media=media, spf=spf, spt=spt, heads=heads)
+    for key in want:
+        if want[key] != got[key]:
+            errors.append('BPB %s is %#x, not %#x' % (key, got[key], want[key]))
+    if image[510:512] != b'\x55\xAA':
+        errors.append('no boot signature 55AAh')
+    fat0 = reserved * 512
+    if image[fat0] != 0xF9:
+        errors.append('the FAT starts with %#x, not the media byte F9h' % image[fat0])
+    # The boot sector's code: everything but the BPB (bytes 3-61) is the build's.
+    if image[:3] != boot[:3] or image[62:512] != boot[62:512]:
+        errors.append("the boot sector's code is not the build's")
+    if len(loader) > LAYOUT['LOADER_SECTORS'] * 512:
+        errors.append('the loader is %d bytes, more than its %d sectors'
+                      % (len(loader), LAYOUT['LOADER_SECTORS']))
+    if image[512:512 + len(loader)] != loader:
+        errors.append("sectors 1-3 are not the build's loader")
+
+    copied = os.path.join(build, 'check-image.kernel')
+    r = mtools('mcopy', '-n', '-i', image_path, '::KERNEL.BIN', copied)
+    if r.returncode != 0:
+        errors.append('no KERNEL.BIN: ' + r.stderr.strip())
+    else:
+        if open(copied, 'rb').read() != kernel:
+            errors.append("KERNEL.BIN is not the build's kernel.bin")
+        os.remove(copied)
+        fat = mtools('mshowfat', '-i', image_path, '::KERNEL.BIN').stdout
+        if fat.count('<') != 1:
+            errors.append('KERNEL.BIN is not in one run of clusters: ' + fat.strip())
+    r = subprocess.run(['fsck.fat', '-n', image_path], capture_output=True, text=True)
+    if r.returncode != 0:
+        errors.append('fsck.fat: ' + (r.stdout + r.stderr).strip())
+    return errors
+
+
+def main(builds):
+    if not builds:
+        sys.exit('usage: check-image BUILD_DIR...')
+    failed = False
+    for build in builds:
+        errors = check(build)
+        for e in errors:
+            print('%s: %s' % (build, e))
+        if errors:
+            failed = True
+        else:
+            print('check-image: %s/rx286.img is as the boot code expects' % build)
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

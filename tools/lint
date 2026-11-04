@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/lint
+# Holds the assembly sources to docs/style.md.
+#
+#   tools/lint                every source of src/ and tests/programs/
+#   tools/lint FILE...
+#
+# Rules:
+#   header    the file starts with the banner and "; rx286 - <its path>"
+#   cpu       a file that includes build.inc (a top-level source) says `cpu 286`
+#   routine   in code, every label that is not local (.x) follows a routine
+#             header with In:, Out: and Destroys:
+#   port      `in` and `out` name their port (a constant, or DX), never a number
+#   layout    no tabs, no trailing spaces, at most 100 characters a line
+# ============================================================================
+
+import glob
+import os
+import re
+import sys
+
+import rxlib
+
+ROOT = rxlib.ROOT
+CODE_SECTIONS = {'entry', 'ktext', 'utext', 'dftask', '.text'}
+LABEL = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):')
+PORT_NUMBER = re.compile(
+    r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:out\s+(\d\w*)\s*,|in\s+\w+\s*,\s*(\d\w*)\s*(?:;|$))',
+    re.I)
+
+
+def lint(path):
+    problems = []
+    rel = os.path.relpath(path, ROOT)
+    lines = open(path, encoding='utf-8').read().split('\n')
+
+    def report(n, rule, text):
+        problems.append('%s:%d: %s: %s' % (rel, n, rule, text))
+
+    if len(lines) < 2 or not lines[0].startswith('; ====') or \
+            lines[1].strip() != '; rx286 - ' + rel:
+        report(1, 'header', 'the file must start with the banner and "; rx286 - %s"' % rel)
+    text = '\n'.join(lines)
+    if re.search(r'^%include "build.inc"', text, re.M) and \
+            not re.search(r'^\s*cpu 286\b', text, re.M):
+        report(1, 'cpu', 'a top-level source must say `cpu 286`')
+
+    section = '.text'
+    for n, line in enumerate(lines, 1):
+        if '\t' in line:
+            report(n, 'layout', 'a tab')
+        if line != line.rstrip():
+            report(n, 'layout', 'trailing spaces')
+        if len(line) > 100:
+            report(n, 'layout', 'longer than 100 characters')
+        m = re.match(r'^\s*section\s+(\S+)', line)
+        if m:
+            section = m.group(1)
+        if PORT_NUMBER.match(line):
+            report(n, 'port', 'name the port with a constant: ' + line.strip())
+        m = LABEL.match(line)
+        if m and section in CODE_SECTIONS:
+            k = n - 2
+            while k >= 0 and lines[k].strip() == '':
+                k -= 1
+            block = []
+            while k >= 0 and lines[k].lstrip().startswith(';'):
+                block.append(lines[k])
+                k -= 1
+            header = '\n'.join(block)
+            if not all(word in header for word in ('In:', 'Out:', 'Destroys:')):
+                report(n, 'routine', '%s needs a header with In:, Out: and Destroys:'
+                       % m.group(1))
+    return problems
+
+
+def main(args):
+    paths = args or sorted(
+        glob.glob(os.path.join(ROOT, 'src', '**', '*.asm'), recursive=True) +
+        glob.glob(os.path.join(ROOT, 'src', '**', '*.inc'), recursive=True) +
+        glob.glob(os.path.join(ROOT, 'tests', 'programs', '*.asm')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'unit', '*.asm')))
+    problems = []
+    for p in paths:
+        problems += lint(os.path.abspath(p))
+    for p in problems:
+        print(p)
+    print('lint: %d file(s), %d problem(s)' % (len(paths), len(problems)))
+    return 1 if problems else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

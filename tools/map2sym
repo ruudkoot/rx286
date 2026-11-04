@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/map2sym
+# Prints a Bochs symbol file for a build directory: every symbol of every
+# binary's NASM map at its linear address (`ldsym global "rx286.sym"`).
+#
+#   tools/map2sym build/debug > build/debug/rx286.sym
+#
+# The boot sector's symbols get the prefix `bs.`, the loader's `ld.`, the
+# program's `u.`; the kernel's have none. Bochs looks symbols up by linear
+# address, so they work in segments whose base is not 0 (roadmap E6).
+# ============================================================================
+
+import sys
+
+import rxlib
+
+if len(sys.argv) != 2:
+    sys.exit('usage: map2sym BUILD_DIR')
+print('\n'.join(rxlib.bochs_symbols(sys.argv[1])))

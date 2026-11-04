@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/check-286
+# Finds 386 (and later) instructions in NASM listings, which NASM's `cpu 286`
+# lets through (roadmap E4, E10) and Bochs then runs without a word.
+#
+#   tools/check-286 build/*/*.lst
+#   tools/check-286 --self-test       assembles tools/testdata/slips.asm and
+#                                     checks that exactly its SLIP lines fail
+#
+# It reads listings, not binaries, so data is never taken for code. For each
+# instruction it fails on:
+#   - a 66h, 67h, 64h or 65h byte anywhere among its prefixes
+#     (operand size, address size, FS, GS);
+#   - 8Ch or 8Eh with FS or GS in the ModRM byte;
+#   - a 0Fh opcode outside the 286's: 00h-03h, 05h (LOADALL), 06h (CLTS);
+#   - the 387's own opcodes (FUCOM..., FPREM1, FSIN, FCOS, FSINCOS);
+#   - F1h (the 386's ICEBP).
+# ============================================================================
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+PREFIXES = {0xF0, 0xF2, 0xF3, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67}
+FORBIDDEN_PREFIXES = {0x64: 'FS override', 0x65: 'GS override',
+                      0x66: 'operand-size prefix', 0x67: 'address-size prefix'}
+OPCODES_0F_286 = {0x00, 0x01, 0x02, 0x03, 0x05, 0x06}
+FPU_387 = {(0xD9, 0xF5): 'FPREM1', (0xD9, 0xFB): 'FSINCOS', (0xD9, 0xFE): 'FSIN',
+           (0xD9, 0xFF): 'FCOS', (0xDA, 0xE9): 'FUCOMPP'}
+DATA = {'db', 'dw', 'dd', 'dq', 'dt', 'do', 'incbin', 'resb', 'resw', 'resd', 'align',
+        'alignb', 'equ', 'section', 'segment', 'org', 'bits', 'cpu', 'istruc', 'iend',
+        'at', 'struc', 'endstruc'}
+
+LINE = re.compile(r'^\s*(\d+)\s+([0-9A-F]{8})\s+([0-9A-F()\[\]]+)(-?)(?:<rep [0-9A-Fa-f]+h>)?\s*(.*)$')
+
+
+def instruction_bytes(text):
+    return [int(text[i:i + 2], 16) for i in range(0, len(text) - 1, 2)]
+
+
+def mnemonic(source):
+    source = re.sub(r'^\s*<\d+>', '', source)          # a macro's expansion
+    source = source.split(';', 1)[0].strip()
+    source = re.sub(r'^[A-Za-z_.$?@][\w.$?@]*:\s*', '', source)   # a label
+    words = source.split()
+    if not words:
+        return None
+    if words[0].lower() == 'times':
+        rest = re.sub(r'^times\s+(\([^)]*\)|\S+)\s*', '', source, flags=re.I).split()
+        return rest[0].lower() if rest else None
+    return words[0].lower()
+
+
+def check_instruction(code):
+    """A reason this instruction is not the 286's, or None."""
+    i = 0
+    while i < len(code) and code[i] in PREFIXES:
+        if code[i] in FORBIDDEN_PREFIXES:
+            return FORBIDDEN_PREFIXES[code[i]]
+        i += 1
+    if i < len(code) and code[i] == 0x9B and i + 1 < len(code):   # WAIT before an ESC
+        i += 1
+    if i >= len(code):
+        return None
+    op = code[i]
+    nxt = code[i + 1] if i + 1 < len(code) else None
+    if op == 0x0F:
+        if nxt is None or nxt not in OPCODES_0F_286:
+            return 'opcode 0F %s' % ('%02X' % nxt if nxt is not None else '??')
+    elif op in (0x8C, 0x8E) and nxt is not None and ((nxt >> 3) & 7) in (4, 5):
+        return 'FS or GS'
+    elif op == 0xF1:
+        return 'ICEBP'
+    elif (op, nxt) in FPU_387:
+        return FPU_387[(op, nxt)]
+    elif op == 0xDD and nxt is not None and 0xE0 <= nxt <= 0xEF:
+        return 'FUCOM/FUCOMP'
+    return None
+
+
+def check_listing(path):
+    problems = []
+    seen = set()
+    for raw in open(path, encoding='latin-1'):
+        m = LINE.match(raw.rstrip('\n'))
+        if not m:
+            continue
+        lineno, addr, hexbytes, _, source = m.groups()
+        key = (lineno, source)
+        if key in seen:       # a continuation line of the same instruction
+            continue
+        seen.add(key)
+        word = mnemonic(source)
+        if word is None or word in DATA or word.startswith('%'):
+            continue
+        hexbytes = re.sub(r'[()\[\]]', '', hexbytes)
+        reason = check_instruction(instruction_bytes(hexbytes))
+        if reason:
+            problems.append((path, int(lineno), addr, reason, source.strip()))
+    return problems
+
+
+def self_test():
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = os.path.join(here, 'testdata', 'slips.asm')
+    with tempfile.TemporaryDirectory() as tmp:
+        lst = os.path.join(tmp, 'slips.lst')
+        subprocess.run(['nasm', '-f', 'bin', '-w-all', '-o', os.devnull, '-l', lst, src], check=True)
+        found = {line for _, line, _, _, _ in check_listing(lst)}
+    wanted = {n for n, text in enumerate(open(src, encoding='utf-8'), 1) if '; SLIP' in text}
+    if found != wanted:
+        print('check-286 self-test FAILED: missed lines %s, wrongly flagged %s'
+              % (sorted(wanted - found), sorted(found - wanted)))
+        return 1
+    print('check-286 self-test: all %d slips found, nothing else' % len(wanted))
+    return 0
+
+
+def main(args):
+    if args == ['--self-test']:
+        return self_test()
+    problems = []
+    for path in args:
+        problems += check_listing(path)
+    for path, line, addr, reason, source in problems:
+        print('%s:%d: %s at %s: %s' % (path, line, reason, addr, source))
+    if problems:
+        print('check-286: %d instruction(s) a 286 cannot run' % len(problems))
+        return 1
+    print('check-286: %d listing(s), only 286 instructions' % len(args))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

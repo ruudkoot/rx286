@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/bochs-run
+# Runs Bochs on a build's image, with a window: `make run` and `make debugger`.
+#
+#   --mode run        start at once
+#   --mode debugger   load the symbols and stop at the kernel's entry
+# The serial log is <build>/com1.log, Bochs' log <build>/bochs.log and the
+# debugger's <build>/debugger.log.
+# ============================================================================
+
+import argparse
+import os
+import subprocess
+import sys
+
+import rxlib
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mode', choices=['run', 'debugger'], required=True)
+    parser.add_argument('--build', default='build/debug')
+    args = parser.parse_args()
+    build = os.path.abspath(args.build)
+    bochsrc = os.path.join(build, args.mode + '.bochsrc')
+    rxlib.write_bochsrc(bochsrc,
+                        image=os.path.join(build, 'rx286.img'),
+                        serial=os.path.join(build, 'com1.log'),
+                        log=os.path.join(build, 'bochs.log'),
+                        display=rxlib.DISPLAY_WINDOW,
+                        debugger_log=os.path.join(build, 'debugger.log'),
+                        magic=(args.mode == 'debugger'))
+    rc = bochsrc + '.rc'
+    with open(rc, 'w', encoding='utf-8') as f:
+        if args.mode == 'run':
+            f.write('c\n')
+        else:
+            f.write('ldsym global "%s"\n' % os.path.join(build, 'rx286.sym'))
+            f.write('lb 0x%x\n' % rxlib.LAYOUT['KERNEL_PHYS'])
+            f.write('c\n')
+    return subprocess.call(['bochs', '-q', '-f', bochsrc, '-rc', rc])
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,0 +1,48 @@
+# ============================================================================
+# rx286 - bochs/rx286.bochsrc.in
+# The IBM PC/AT of docs/hardware.md, as Bochs 2.7 emulates it.
+#
+# A template: tools/bochs-run and tools/run-test fill in the placeholders for each
+# run (the image, the serial log, the display). Bochs has no 80286 and no EGA;
+# docs/emulators.md lists every difference from the AT.
+# ============================================================================
+
+# 640 KB of base memory and nothing above 1 MB (roadmap D6).
+megs: 1
+cpu: model=bx_generic, count=1, ips=4000000, reset_on_triple_fault=1
+romimage: file=/usr/share/bochs/BIOS-bochs-legacy
+vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest
+vga: extension=none
+pci: enabled=0
+
+# A fixed start time (1989-01-01 00:00:00) and emulated time, so runs repeat.
+clock: sync=none, time0=599616000
+
+# Drive A: 1.2 MB 5.25", the boot disk; drive B: 360 KB 5.25" (roadmap D2).
+floppya: 1_2=@IMAGE@, status=inserted
+floppyb: 360k=@FDB@, status=inserted
+boot: floppy
+floppy_bootsig_check: disabled=0
+
+# The fixed-disk controller with drive types 2 (20 MB) and 1 (10 MB).
+ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14
+ata0-master: type=disk, path=@HD0@, mode=flat, cylinders=615, heads=4, spt=17
+ata0-slave: type=disk, path=@HD1@, mode=flat, cylinders=306, heads=4, spt=17
+ata1: enabled=0
+ata2: enabled=0
+ata3: enabled=0
+
+keyboard: type=at
+com1: enabled=1, mode=file, dev=@SERIAL@
+com2: enabled=1, mode=null
+com3: enabled=1, mode=null
+com4: enabled=1, mode=null
+parport1: enabled=1, file=/dev/null
+parport2: enabled=1, file=/dev/null
+speaker: enabled=1, mode=gui
+
+# Debugging aids: magic breakpoints (xchg bx, bx), and the debugger's log.
+magic_break: enabled=@MAGIC@
+debugger_log: @DEBUGGER_LOG@
+log: @LOG@
+display_library: @DISPLAY@

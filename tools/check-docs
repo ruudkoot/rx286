@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/check-docs
+# Keeps the documents, the include files and the Bochs configuration in step.
+#
+#   tools/check-docs
+#
+# - every constant of an include file named in COVERED appears, by name, in
+#   its document;
+# - the bochsrc template describes the machine of ports.inc and layout.inc:
+#   1 MB, the fixed-disk controller's ports and IRQ, the drive geometries,
+#   the floppy formats of roadmap D2;
+# - every document that docs/README.md lists exists, and every docs/*.md is
+#   listed there.
+# ============================================================================
+
+import glob
+import os
+import re
+import sys
+
+import rxlib
+
+ROOT = rxlib.ROOT
+
+# include file -> the document that must name each of its constants
+COVERED = {
+    'ports.inc': 'docs/hardware.md',
+    'layout.inc': 'docs/memory-map.md',
+    'selectors.inc': 'docs/protected-mode.md',
+    'vectors.inc': 'docs/interrupts.md',
+    'syscalls.inc': 'docs/syscalls.md',
+}
+
+
+def constants(name):
+    path = os.path.join(ROOT, 'src', 'include', name)
+    return re.findall(r'^([A-Z_][A-Z0-9_]*)\s+equ\b', open(path, encoding='utf-8').read(), re.M)
+
+
+def main():
+    problems = []
+    for inc, doc in COVERED.items():
+        doc_path = os.path.join(ROOT, doc)
+        if not os.path.exists(doc_path):
+            problems.append('%s: missing (it documents %s)' % (doc, inc))
+            continue
+        text = open(doc_path, encoding='utf-8').read()
+        for name in constants(inc):
+            if not re.search(r'\b%s\b' % re.escape(name), text):
+                problems.append('%s: does not name %s (src/include/%s)' % (doc, name, inc))
+
+    ports = rxlib.include_constants('ports.inc')
+    rc = open(rxlib.BOCHSRC_TEMPLATE, encoding='utf-8').read()
+    wants = [
+        (r'^megs: 1$', 'megs: 1 (roadmap D6)'),
+        (r'^ata0: enabled=1, ioaddr1=0x%x, ioaddr2=0x3f0, irq=14$' % ports['HDC_DATA'],
+         'the fixed-disk controller at HDC_DATA, IRQ14'),
+        (r'cylinders=615, heads=4, spt=17', 'drive type 2'),
+        (r'cylinders=306, heads=4, spt=17', 'drive type 1'),
+        (r'^floppya: 1_2=', 'drive A 1.2 MB (D2)'),
+        (r'^floppyb: 360k=', 'drive B 360 KB (D2)'),
+        (r'^keyboard: type=at$', 'the AT keyboard'),
+        (r'^pci: enabled=0$', 'no PCI'),
+    ]
+    for pattern, what in wants:
+        if not re.search(pattern, rc, re.M):
+            problems.append('bochs/rx286.bochsrc.in: not %s' % what)
+
+    index = open(os.path.join(ROOT, 'docs', 'README.md'), encoding='utf-8').read()
+    listed = set(re.findall(r'\]\(([\w-]+\.md)\)', index))
+    present = {os.path.basename(p) for p in glob.glob(os.path.join(ROOT, 'docs', '*.md'))}
+    present.discard('README.md')
+    for name in sorted(listed - present):
+        problems.append('docs/README.md lists %s, which does not exist' % name)
+    for name in sorted(present - listed):
+        problems.append('docs/%s is not listed in docs/README.md' % name)
+
+    for p in problems:
+        print('check-docs: ' + p)
+    print('check-docs: %d problem(s)' % len(problems))
+    return 1 if problems else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

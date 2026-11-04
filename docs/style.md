@@ -1,0 +1,76 @@
+# Style
+
+The sources are NASM assembly for the 80286. `tools/lint` checks the rules
+marked (lint).
+
+## Files
+
+- **One module a file,** under `src/<part>/`. A part's top-level source
+  (`kernel.asm`, `boot-sector.asm`, ...) includes the others.
+- **The banner (lint).** Every file starts with:
+
+  ```nasm
+  ; ============================================================================
+  ; rx286 - src/kernel/console.asm
+  ; One line: what the module is.
+  ;
+  ; A paragraph: what it does, what it relies on, what it leaves to others.
+  ; ============================================================================
+  ```
+
+- **`cpu 286` (lint)** in every top-level source, so NASM refuses most 386
+  instructions. `tools/check-286` catches the rest.
+- **No tabs, no trailing spaces, at most 100 characters a line (lint).**
+
+## Routines
+
+Every routine, that is every label in code that is not local, has a header
+(lint):
+
+```nasm
+; ----------------------------------------------------------------------------
+; con_putc - write one character to the console
+;   In:       AL = the character; DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+con_putc:
+```
+
+- **In:** registers and segment registers it reads.
+- **Out:** what it returns, and in which flags.
+- **Destroys:** what it changes besides Out. "Nothing" means every register
+  and the flags but those named in Out.
+
+Labels inside a routine are local (`.loop`). A routine that does not return
+says so in Out.
+
+## Names
+
+- Constants are `UPPER_CASE` and live in `src/include/` when more than one
+  part uses them, else at the top of their module.
+- **Ports are named (lint):** `out PIC1_CMD, al` or `out dx, al`, never
+  `out 0x20, al`.
+- Routines and variables are `lower_case`, prefixed by their module:
+  `con_putc`, `kbd_ring`, `pic_eoi`.
+- Selectors are `SEL_*`, vectors `VEC_*`, system calls `SYS_*`.
+
+## Comments
+
+- Say why, and what the hardware wants; the instruction already says what.
+- Cite the source for a hardware fact: "(IBM 1-42)", "(Intel 9.6.2)".
+- Every number that is not a named constant gets a comment.
+
+## Builds
+
+`build.inc` turns `-dRELEASE`, `-dDEBUG` or `-dTEST` into `WITH_*` features.
+Code tests the features, never the flavour:
+
+```nasm
+%ifdef WITH_SERIAL
+        call com_putc
+%endif
+```
+
+The kernel's `TRACE`, `ASSERT` and `BREAK` assemble to nothing in a release
+build.

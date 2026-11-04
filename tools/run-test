@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/run-test
+# Builds a test image for every test, boots it in Bochs without a window and
+# compares what COM1 shows with what the test expects.
+#
+#   tools/run-test                    every tests/*/*.test
+#   tools/run-test tests/shell/echo.test ...
+#   tools/run-test --jobs 4 --verbose
+#
+# A test file is a header, a line `---`, and the expected transcript:
+#
+#   program: shell              shell (default), attack or fuzz
+#   keys: echo hi\n             a key script (tools/rxlib.py); may repeat
+#   define: TEST_PANIC_DIVIDE   a NASM define for the kernel; may repeat
+#   image: fragmented           change the floppy: fragmented, missing, oversized
+#   timeout: 30                 seconds of wall time (default 30)
+#   match: full                 full (default), prefix or contains
+#   break: syscall              a debugger breakpoint, by kernel symbol...
+#   debugger: info gdt 0 11     ...and commands to run there; may repeat
+#   ---
+#   expected lines; {name} is a program symbol's offset, {k:name} a kernel one
+#
+# full:     the transcript is exactly the expected lines, then `TEST END`.
+# prefix:   the transcript starts with the expected lines (the run stops then).
+# contains: the expected lines appear in this order, among the transcript's
+#           and the debugger's lines.
+# Lines the kernel marks `[trace]` or `[regs]` are ignored. docs/testing.md
+# explains the layers of tests.
+# ============================================================================
+
+import argparse
+import concurrent.futures
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+import rxlib
+
+ROOT = rxlib.ROOT
+IGNORED_PREFIXES = ('[trace]', '[regs]')
+
+
+class Test:
+    def __init__(self, path):
+        self.path = os.path.relpath(path, ROOT)
+        self.suite = os.path.basename(os.path.dirname(path))
+        self.name = os.path.splitext(os.path.basename(path))[0]
+        self.program = 'shell'
+        self.keys = ''
+        self.defines = []
+        self.image = None
+        self.timeout = 30.0
+        self.match = 'full'
+        self.breakpoint = None
+        self.debugger = []
+        self.expected = []
+        self.parse(open(path, encoding='utf-8').read())
+
+    def parse(self, text):
+        if '\n---\n' not in '\n' + text:
+            raise ValueError('%s: no line ---' % self.path)
+        header, _, body = ('\n' + text).partition('\n---\n')
+        for line in header.splitlines():
+            if not line.strip() or line.lstrip().startswith('#'):
+                continue
+            key, sep, value = line.partition(':')
+            if not sep:
+                raise ValueError('%s: bad header line %r' % (self.path, line))
+            key, value = key.strip(), value.strip()
+            if key == 'program':
+                self.program = value
+            elif key == 'keys':
+                self.keys += value
+            elif key == 'define':
+                self.defines.append(value)
+            elif key == 'image':
+                self.image = value
+            elif key == 'timeout':
+                self.timeout = float(value)
+            elif key == 'match':
+                self.match = value
+            elif key == 'break':
+                self.breakpoint = value
+            elif key == 'debugger':
+                self.debugger.append(value)
+            else:
+                raise ValueError('%s: unknown header %r' % (self.path, key))
+        self.expected = body.rstrip('\n').split('\n') if body.strip() else []
+        if self.debugger:
+            self.match = 'contains'
+
+    @property
+    def build_dir(self):
+        return os.path.join(ROOT, 'build', 'tests', '%s-%s' % (self.suite, self.name))
+
+
+def build(test):
+    """Build the test's image; returns an error message or None."""
+    b = test.build_dir
+    os.makedirs(b, exist_ok=True)
+    keys_inc = os.path.join(b, 'test-keys.inc')
+    with open(keys_inc, 'w', encoding='utf-8') as f:
+        f.write(rxlib.keys_include(test.keys))
+    defines = ["-dTEST_KEYS_INC='\"%s\"'" % keys_inc]
+    if test.program == 'fuzz':
+        defines.append('-dTEST_FUZZ')
+    if test.program == 'attack':
+        defines.append('-dTEST_ATTACK')
+    defines += ['-d' + d for d in test.defines]
+    cmd = ['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=test', 'B=' + b,
+           'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
+           'image', 'symbols']
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return 'build failed:\n' + result.stdout[-3000:] + result.stderr[-3000:]
+    if test.image:
+        return change_image(test, os.path.join(b, 'rx286.img'))
+    return None
+
+
+def mtools(*args):
+    env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
+    return subprocess.run(list(args), capture_output=True, text=True, env=env)
+
+
+def change_image(test, image):
+    """The boot tests' floppies: a fragmented, missing or oversized kernel."""
+    kernel = os.path.join(test.build_dir, 'kernel.bin')
+    filler = os.path.join(test.build_dir, 'filler.bin')
+    if test.image == 'missing':
+        r = mtools('mdel', '-i', image, '::KERNEL.BIN')
+    elif test.image == 'oversized':
+        big = os.path.join(test.build_dir, 'big.bin')
+        with open(big, 'wb') as f:
+            f.write(open(kernel, 'rb').read() + bytes(4096))
+        r = mtools('mdel', '-i', image, '::KERNEL.BIN')
+        if r.returncode == 0:
+            r = mtools('mcopy', '-i', image, big, '::KERNEL.BIN')
+    elif test.image == 'fragmented':
+        # Interleave small files with the kernel's clusters, then free them.
+        r = mtools('mdel', '-i', image, '::KERNEL.BIN')
+        with open(filler, 'wb') as f:
+            f.write(bytes(512))
+        for i in range(20):
+            mtools('mcopy', '-i', image, filler, '::F%02d.TMP' % i)
+        for i in range(0, 20, 2):
+            mtools('mdel', '-i', image, '::F%02d.TMP' % i)
+        r = mtools('mcopy', '-i', image, kernel, '::KERNEL.BIN')
+        fat = mtools('mshowfat', '-i', image, '::KERNEL.BIN').stdout
+        if fat.count('<') < 2:
+            return 'the fragmented image is not fragmented: ' + fat
+    else:
+        return 'unknown image change %r' % test.image
+    if r.returncode != 0:
+        return 'mtools failed: ' + r.stderr
+    return None
+
+
+def substitute(test, line):
+    """{name} and {k:name} to four hex digits."""
+    def lookup(m):
+        which, name = m.group(1), m.group(2)
+        mapfile = 'kernel.map' if which == 'k:' else 'user.map'
+        symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
+        if name not in symbols:
+            raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
+        return '%04X' % symbols[name]
+    return re.sub(r'\{(k:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+
+
+def relevant(lines):
+    return [l for l in lines if not l.startswith(IGNORED_PREFIXES)]
+
+
+def compare(test, transcript, debugger_lines):
+    """Returns None if the test passes, else a description of the failure."""
+    expected = [substitute(test, l) for l in test.expected]
+    got = relevant(transcript)
+    if any(l.startswith('PANIC') or 'rx286 PANIC' in l for l in got) and \
+            not any('PANIC' in l for l in expected):
+        return 'the kernel panicked'
+    if test.match == 'full':
+        if not got or got[-1] != 'TEST END':
+            return 'no TEST END'
+        got = got[:-1]
+        if got != expected:
+            return diff(expected, got)
+    elif test.match == 'prefix':
+        if got[:len(expected)] != expected:
+            return diff(expected, got[:len(expected) + 5])
+    elif test.match == 'contains':
+        pool = got + debugger_lines
+        i = 0
+        for line in pool:
+            if i < len(expected) and expected[i] in line:
+                i += 1
+        if i < len(expected):
+            return 'not found, in order: %r' % expected[i]
+    else:
+        return 'unknown match %r' % test.match
+    return None
+
+
+def diff(expected, got):
+    out = []
+    for k in range(max(len(expected), len(got))):
+        e = expected[k] if k < len(expected) else '<none>'
+        g = got[k] if k < len(got) else '<none>'
+        mark = '  ' if e == g else '!!'
+        out.append('%s %-50s | %s' % (mark, e[:50], g))
+    return 'transcript differs (expected | got):\n' + '\n'.join(out)
+
+
+def run(test):
+    started = time.monotonic()
+    error = build(test)
+    if error:
+        return test, error, time.monotonic() - started
+    b = test.build_dir
+    serial = os.path.join(b, 'com1.log')
+    dbglog = os.path.join(b, 'debugger.log')
+    for f in (serial, dbglog):
+        if os.path.exists(f):
+            os.remove(f)
+    bochsrc = os.path.join(b, 'test.bochsrc')
+    rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'rx286.img'), serial=serial,
+                        log=os.path.join(b, 'bochs.log'),
+                        display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog)
+    rc = []
+    if test.breakpoint:
+        rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))
+        rc.append('lb "%s"' % test.breakpoint)
+        rc.append('c')
+        rc += test.debugger
+        rc.append('quit')
+    else:
+        rc.append('c')
+
+    expected_len = len(test.expected)
+
+    def until(lines):
+        got = relevant(lines)
+        if test.match == 'prefix':
+            return len(got) >= expected_len and \
+                got[:expected_len] == [substitute(test, l) for l in test.expected]
+        return 'TEST END' in got
+    status, _ = rxlib.run_bochs(bochsrc, rc, test.timeout, until=until, serial=serial)
+    transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
+        if os.path.exists(serial) else []
+    debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
+        if os.path.exists(dbglog) else []
+    error = compare(test, transcript, debugger_lines)
+    if error and status == 'timeout':
+        error = 'timed out after %.0f s; %s' % (test.timeout, error)
+    return test, error, time.monotonic() - started
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Run rx286 tests in Bochs.')
+    parser.add_argument('tests', nargs='*')
+    parser.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
+    parser.add_argument('--verbose', action='store_true')
+    args = parser.parse_args()
+    paths = args.tests or sorted(glob.glob(os.path.join(ROOT, 'tests', '*', '*.test')))
+    if not paths:
+        print('run-test: no tests')
+        return 1
+    if not os.path.exists(os.path.join(rxlib.DISKS, 'fdb.img')):
+        subprocess.run(['make', '--no-print-directory', '-C', ROOT, 'disks'], check=True,
+                       capture_output=True)
+    tests = [Test(os.path.abspath(p)) for p in paths]
+    failures = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        for test, error, seconds in pool.map(run, tests):
+            status = 'PASS' if error is None else 'FAIL'
+            print('%s  %-40s %5.1f s' % (status, test.path, seconds))
+            if error:
+                failures += 1
+                print('      ' + error.replace('\n', '\n      '))
+                print('      (transcript: %s)' % os.path.relpath(
+                    os.path.join(test.build_dir, 'com1.log'), ROOT))
+    print('run-test: %d of %d passed' % (len(tests) - failures, len(tests)))
+    return 1 if failures else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

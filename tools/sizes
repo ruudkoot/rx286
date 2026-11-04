@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/sizes
+# Each segment of a build against its room in src/include/layout.inc, from
+# the NASM map files. Warns at 90% full.
+#
+#   tools/sizes build/release
+# ============================================================================
+
+import os
+import re
+import sys
+
+import rxlib
+
+L = rxlib.LAYOUT
+ROOMS = [
+    ('boot-sector', None, 'boot sector', 512),
+    ('boot-loader', None, 'boot loader', L['LOADER_SECTORS'] * 512),
+    ('kernel', 'entry', 'kernel: real-mode entry', L['ENTRY_ROOM']),
+    ('kernel', 'ktext', 'kernel: code', L['KTEXT_ROOM']),
+    ('kernel', 'kdata', 'kernel: data', L['KDATA_ROOM']),
+    ('user', 'utext', 'program: code', L['UTEXT_ROOM']),
+    ('user', 'udata', 'program: data', L['UDATA_ROOM']),
+]
+
+
+def section_lengths(path):
+    lengths = {}
+    total = 0
+    for line in open(path, encoding='utf-8', errors='replace'):
+        m = re.match(r'^\s*([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]{8})\s+'
+                     r'(progbits|nobits)\s+(\S+)', line)
+        if m:
+            lengths[m.group(6)] = int(m.group(4), 16)
+            total += int(m.group(4), 16)
+    return lengths, total
+
+
+def main(build):
+    print('%-26s %7s %7s %5s' % ('segment', 'used', 'room', 'full'))
+    warn = False
+    for binary, section, label, room in ROOMS:
+        path = os.path.join(build, binary + '.map')
+        if not os.path.exists(path):
+            continue
+        lengths, total = section_lengths(path)
+        used = total if section is None else lengths.get(section)
+        if used is None:
+            continue
+        full = 100.0 * used / room
+        flag = '  <- over 90%' if full > 90 and section not in ('udata',) and \
+            binary != 'boot-sector' else ''
+        warn = warn or bool(flag)
+        print('%-26s %7d %7d %4.0f%%%s' % (label, used, room, full, flag))
+    return 0
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        sys.exit('usage: sizes BUILD_DIR')
+    sys.exit(main(sys.argv[1]))
