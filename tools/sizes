@@ -14,9 +14,10 @@ import sys
 import rxlib
 
 L = rxlib.LAYOUT
+# (binary, section or the symbol that ends its code, label, room)
 ROOMS = [
-    ('boot-sector', None, 'boot sector', 512),
-    ('boot-loader', None, 'boot loader', L['LOADER_SECTORS'] * 512),
+    ('boot-sector', 'boot_sector_end', 'boot sector (BPB and code)', 510),
+    ('boot-loader', 'loader_end', 'boot loader', L['LOADER_SECTORS'] * L['SECTOR_SIZE']),
     ('kernel', 'entry', 'kernel: real-mode entry', L['ENTRY_ROOM']),
     ('kernel', 'ktext', 'kernel: code', L['KTEXT_ROOM']),
     ('kernel', 'kdata', 'kernel: data', L['KDATA_ROOM']),
@@ -45,12 +46,18 @@ def main(build):
         if not os.path.exists(path):
             continue
         lengths, total = section_lengths(path)
-        used = total if section is None else lengths.get(section)
+        if section.endswith('_end'):        # a symbol: its offset is the size used
+            used = rxlib.symbol_offsets(path).get(section)
+            if used is not None and binary == 'boot-sector':
+                used -= L['BOOT_SECTOR_PHYS']
+            elif used is not None:
+                used -= L['LOADER_PHYS']
+        else:
+            used = lengths.get(section)
         if used is None:
             continue
         full = 100.0 * used / room
-        flag = '  <- over 90%' if full > 90 and section not in ('udata',) and \
-            binary != 'boot-sector' else ''
+        flag = '  <- over 90%' if full > 90 else ''
         warn = warn or bool(flag)
         print('%-26s %7d %7d %4.0f%%%s' % (label, used, room, full, flag))
     return 0
