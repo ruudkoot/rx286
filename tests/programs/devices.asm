@@ -5,10 +5,11 @@
 ;
 ; Each check prints one line. Built with TEST_SOUND, the kernel adds probe
 ; lines for every sound: whether the speaker's output runs at the frequency
-; asked, and whether it is silent after. Built with DEVICES_SHARED_IRQ, it
-; runs only the modem's check against IRQ3's sharing: bytes from a modem
-; (tests/devices/shared-irq.test) must arrive while the kernel writes its
-; log on COM2. The program then waits for a key, which ends the test.
+; asked, and whether it is silent after. Built with DEVICES_MODEM (and the
+; kernel with MODEM_COM2, so COM2 is the modem's line), it runs only the
+; modem's checks (tests/devices/modem.test): the buffers the calls refuse,
+; and a modem's answer, which must arrive whole while the kernel is busy
+; writing to the console and its log. The program then waits for a key, which ends the test.
 ; ============================================================================
 
 cpu 286
@@ -46,8 +47,8 @@ end_udata
 ; ----------------------------------------------------------------------------
 entry:
         cld
-%ifdef DEVICES_SHARED_IRQ
-        call check_shared_irq
+%ifdef DEVICES_MODEM
+        call check_modem
         jmp .wait
 %endif
         call check_sound
@@ -186,7 +187,7 @@ check_mouse:
         jmp print_newline
 
 ; ----------------------------------------------------------------------------
-; check_serial - a byte to the modem, and none from it (no one is there)
+; check_serial - COM2 is the log in test builds: both calls refuse
 ;   In:       DS = ES = the program's data
 ;   Out:      nothing
 ;   Destroys: everything
@@ -277,15 +278,52 @@ check_wait:
         ret
 
 ; ----------------------------------------------------------------------------
-; check_shared_irq - ATI to the modem, its answer counted: once with the
-; shell idle, once while the kernel writes LOG_ROUNDS * LOG_CHUNK bytes to the
-; console and its log (COM2, which shares IRQ3 with the modem's COM4), and
-; once more after
+; check_modem - the buffers the modem's calls refuse; then ATI to the
+; modem, its answer counted: once with the program idle, once while the
+; kernel writes LOG_ROUNDS * LOG_CHUNK bytes to the console and its log (COM3
+; in this build), and once more after
 ;   In:       DS = ES = the program's data
 ;   Out:      nothing
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
-check_shared_irq:
+check_modem:
+        PRINT "serial: read into the code: "
+        push es
+        push cs
+        pop es
+        xor di, di
+        mov cx, 4
+        sys SYS_SERIAL_READ
+        pop es
+        call report_error
+        PRINT "serial: read across the data's limit: "
+        mov di, UDATA_ROOM - 2
+        mov cx, 4
+        sys SYS_SERIAL_READ
+        call report_error
+        PRINT "serial: read through a null ES: "
+        push es
+        xor ax, ax
+        mov es, ax
+        xor di, di
+        mov cx, 4
+        sys SYS_SERIAL_READ
+        pop es
+        call report_error
+        PRINT "serial: write from a null DS: "
+        push ds
+        xor ax, ax
+        mov ds, ax
+        xor si, si
+        mov cx, 1
+        sys SYS_SERIAL_WRITE
+        pop ds
+        call report_error
+        PRINT "serial: write too much: "
+        mov si, ati
+        mov cx, SERIAL_MAX + 1
+        sys SYS_SERIAL_WRITE
+        call report_error
         call ask_ati
         call collect
         PRINT "modem: idle: answer of "

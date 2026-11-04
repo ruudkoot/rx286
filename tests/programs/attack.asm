@@ -265,42 +265,6 @@ attacks:
         call report_refusal
         jmp entry
 
-.scode: push es                         ; the modem's bytes into the code
-        push cs
-        pop es
-        xor di, di
-        jmp serial_read_attack
-.slimit: push es                        ; across the data's limit
-        mov di, UDATA_ROOM - 2
-        jmp serial_read_attack
-.snull: push es                         ; through a null ES
-        xor ax, ax
-        mov es, ax
-        xor di, di
-        jmp serial_read_attack
-.swnull: push ds                        ; to the modem from a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov cx, 1
-        sys SYS_SERIAL_WRITE
-        pop ds
-        call report_refusal
-        jmp entry
-
-; ----------------------------------------------------------------------------
-; serial_read_attack - SYS_SERIAL_READ of 4 bytes into ES:DI, reported
-;   In:       ES:DI = the buffer; the program's ES pushed by the attack
-;   Out:      does not return: the next attack
-;   Destroys: everything
-; ----------------------------------------------------------------------------
-serial_read_attack:
-        mov cx, 4
-        sys SYS_SERIAL_READ
-        pop es
-        call report_refusal
-        jmp entry
-
 ; ----------------------------------------------------------------------------
 ; disk_read_attack - SYS_DISK_READ of A's sector 0 into ES:DI, reported
 ;   In:       ES:DI = the buffer; the program's ES pushed by the attack
@@ -397,10 +361,6 @@ attack_table:
         attack "print from a null selector", attacks.pnull
         attack "read drive 80h", attacks.drive
         attack "read sector FFFFh of A", attacks.sector
-        attack "read the modem into the code", attacks.scode
-        attack "read the modem across the limit", attacks.slimit
-        attack "read the modem through a null ES", attacks.snull
-        attack "write to the modem from a null selector", attacks.swnull
         dw 0
 end_udata
 

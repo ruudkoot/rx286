@@ -205,7 +205,7 @@ commands_start      equ $
         command "play", cmd_play, "a tune on the speaker"
         command "joy", cmd_joy, "the game port's buttons and axes"
         command "mouse", cmd_mouse, "follow the mouse on COM1, until Esc"
-        command "term", cmd_term, "a terminal on COM4 (a modem), until Esc"
+        command "term", cmd_term, "a terminal on COM2 (a modem), until Esc"
         command "uptime", cmd_uptime, "time since the kernel started"
         command "date", cmd_date, "the date and time of the real-time clock"
         command "keys", cmd_keys, "show each key's scancode and ASCII, until Esc"

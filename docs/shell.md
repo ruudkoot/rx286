@@ -36,7 +36,7 @@ any case too: `DIR`, `Dir` and `dir` are one.
 | `play` | a tune on the speaker |
 | `joy` | one reading of the game port: the buttons down, each axis's time or "absent" |
 | `mouse` | the mouse's position and buttons whenever they change, until Esc or both buttons |
-| `term` | a terminal on COM4, the modem's line: what comes is shown, what is typed sent; Esc ends |
+| `term` | a terminal on COM2, the modem's line in release builds: what comes is shown, what is typed sent; Esc ends |
 | `A:` to `D:` | makes the drive the current one |
 | `uptime` | the time since the kernel started |
 | `date` | the real-time clock |

@@ -65,7 +65,7 @@ Every way out is a reported fault, after which the program starts again
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 63 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 59 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -91,7 +91,7 @@ that faulted:
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
 | `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
-| `serial_read` into the code, across the data's limit, through a null ES; `serial_write` from a null selector | refused, `E_FAULT` |
+| `serial_read` into the code, across the data's limit, through a null ES; `serial_write` from a null selector | refused, `E_FAULT` (in `tests/devices/modem.test`, whose image has the modem; test builds' COM2 is the log, and refuses with `E_BUSY`) |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 
 The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core

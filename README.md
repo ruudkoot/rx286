@@ -22,7 +22,8 @@ work on drives A to D (`b:` changes drive), whose sample files `make disks`
 puts there (`disks/`); what `print` prints goes to `build/debug/lpt1.txt`.
 `beep`, `play`, `joy`, `mouse` and `term` try the speaker, the game port,
 the mouse on COM1 (capture it in Bochs' window with Ctrl+F10) and the
-modem's line on COM4. `crash KIND` tries what no program may, and the
+modem's line on COM2, which is the log in debug builds (`make run-release`
+runs the release image). `crash KIND` tries what no program may, and the
 kernel reports it and starts the shell again.
 
 - `roadmaps/rx286.md`: the plan, its decisions, and its milestones;

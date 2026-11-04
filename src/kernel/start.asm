@@ -68,7 +68,9 @@ pm_start:
         call dma_init
         call printer_init
         call mouse_init
+%ifdef WITH_MODEM
         call modem_init
+%endif
         call pic_unmask_all
         mov al, CMOS_REG_D              ; bit 7 clear: NMI on
         out CMOS_INDEX, al

@@ -1,6 +1,7 @@
-# term: a terminal on COM4, with a modem at the far end (the runner's
-# HayesPeer): what is typed goes out, the echo and the answers come back
-# through IRQ3 and SYS_WAIT. MAME's AT has no COM4.
+# term: a terminal on COM2, with a modem at the far end (the runner's
+# HayesPeer; the image built with COM2 the modem and the log on COM3): what
+# is typed goes out, the echo and the answers come back through IRQ3 and
+# SYS_WAIT. MAME's AT has no COM3 for the log.
 program: shell
 modem: hayes
 keys: term\n{wait 10}AT\n{wait 50}ati\n{wait 50}atz\n{wait 50}{esc}
@@ -10,7 +11,7 @@ emulators: bochs dosbox-x
 rx286, test build
 rx286 shell: type help for the commands
 A:\>term
-Terminal on COM4 at 9600 baud; Esc ends.
+Terminal on COM2 at 9600 baud; Esc ends.
 AT
 OK
 ati

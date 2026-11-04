@@ -71,7 +71,7 @@ with `incbin`: it can name nothing of the kernel's.
 | `speaker.asm` | `SYS_SOUND`: timer channel 2 through port B |
 | `gameport.asm` | `SYS_JOYSTICK`: the buttons, and the axes timed with channel 0 |
 | `mouse.asm` | `SYS_MOUSE`: a Microsoft serial mouse on COM1, IRQ4 |
-| `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM4, IRQ3, a ring of bytes |
+| `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM2 in release builds, IRQ3, a ring of bytes |
 | `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to the log |
 | `serial.asm` | the log, polled: COM2, or COM3 when COM2 is the modem (debug and test builds) |
 | `print.asm` | strings, numbers, the kernel's messages, trace lines, register dumps |

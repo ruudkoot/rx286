@@ -6,6 +6,7 @@
 #   make                 release and debug images
 #   make release|debug|test-build
 #   make run             Bochs with a window, on the debug image
+#   make run-release     the same on the release image (COM2 the modem)
 #   make debugger        Bochs stopped at the kernel's entry, with symbols
 #   make test            every suite (tests/)
 #   make test-286        the suites on DOSBox-X's 286 and MAME's IBM PC/AT
@@ -66,7 +67,7 @@ FLOPPY_SERIAL := 52583836
 IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/kernel.bin
 
-.PHONY: all release debug test-build image symbols run debugger test test-286 check \
+.PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
 
 all:
@@ -149,6 +150,11 @@ run: disks
 debugger: disks
 	$(MAKE) FLAVOUR=debug image symbols
 	$(PYTHON) tools/bochs-run --mode debugger --build build/debug
+
+# The release image, whose COM2 is the modem's line (term), not the log.
+run-release: disks
+	$(MAKE) FLAVOUR=release image symbols
+	$(PYTHON) tools/bochs-run --mode run --build build/release --release
 
 # ---------------------------------------------------------------- checks
 test: disks

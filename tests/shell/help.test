@@ -16,7 +16,7 @@ A:\>help
   play     a tune on the speaker
   joy      the game port's buttons and axes
   mouse    follow the mouse on COM1, until Esc
-  term     a terminal on COM4 (a modem), until Esc
+  term     a terminal on COM2 (a modem), until Esc
   uptime   time since the kernel started
   date     the date and time of the real-time clock
   keys     show each key's scancode and ASCII, until Esc

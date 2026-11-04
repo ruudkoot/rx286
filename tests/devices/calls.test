@@ -1,7 +1,7 @@
 # The device calls (tests/programs/devices.asm): tones measured by the
 # kernel's probe, a rest, the game port (DOSBox-X emulates a centred stick),
-# the mouse's reset answered through IRQ4, a byte to the modem on COM4 (to
-# no one: MAME's AT has no COM4, the others no peer here), and SYS_WAIT.
+# the mouse's reset answered through IRQ4, COM2 refused (it is the log in
+# test builds), and SYS_WAIT.
 program: devices
 define: TEST_SOUND
 timeout: 60
@@ -25,8 +25,8 @@ sound: 501 ticks: error 3
 @dosbox-x joystick: buttons 00, axes present present absent absent
 @mame joystick: buttons 00, axes absent absent absent absent
 mouse: present, at 320, 100, buttons 0
-serial: write: no error
-serial: read: no error
+serial: write: error 8
+serial: read: error 8
 wait: 5 ticks: slept, events 00
 wait: a key, 3 ticks at most: events 00
 wait: nothing for ever: error 3

@@ -1,0 +1,21 @@
+# The modem's calls, the image built with COM2 the modem's line and the log
+# on COM3: the buffers they refuse; then a modem's answer to ATI, which
+# comes whole (30 bytes: ATI and CR echoed, the name, OK) also while the
+# kernel is busy writing 1,920 bytes to the console and its log. The timer
+# fetches what an interrupt left, if one was lost (on Bochs a UART's
+# interrupt is lost when another UART on its line is touched).
+program: devices
+define: DEVICES_MODEM
+modem: hayes
+match: contains
+timeout: 60
+emulators: bochs dosbox-x
+---
+serial: read into the code: error 1
+serial: read across the data's limit: error 1
+serial: read through a null ES: error 1
+serial: write from a null DS: error 1
+serial: write too much: error 3
+modem: idle: answer of 30 bytes
+modem: while the log is written: answer of 30 bytes
+modem: after: answer of 30 bytes

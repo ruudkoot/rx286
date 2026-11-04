@@ -33,9 +33,9 @@ aux = false
 
 [serial]
 serial1 = serialmouse
-serial2 = file file:@SERIAL@
-serial3 = disabled
-serial4 = @COM4@
+serial2 = @COM2@
+serial3 = @COM3@
+serial4 = disabled
 
 [joystick]
 joysticktype = 2axis

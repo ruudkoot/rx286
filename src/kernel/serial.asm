@@ -1,27 +1,26 @@
 ; ============================================================================
 ; rx286 - src/kernel/serial.asm
 ; The log, polled: the debug and test builds' log and transcript, on
-; LOG_PORT (build.inc): COM2. COM2 shares IRQ3 with the modem's COM4, but
-; with OUT2 clear its UART never drives the line.
+; LOG_PORT (build.inc): COM2, or COM3 in a modem's test build.
 ;
 ; 115200 baud, 8N1, the UART's interrupt off (OUT2 clear), so its IRQ never
 ; fires for it. Transmit only. Release builds assemble none of this.
 ; ============================================================================
 
 ; ----------------------------------------------------------------------------
-; serial_quiet - COM2 and COM3, which no driver serves, with their interrupts
-; off and OUT2 clear, whatever ran before: they share IRQ3 and IRQ4 with the
-; modem and the mouse (in debug and test builds com_init then makes COM2
-; the log, its interrupt still off)
+; serial_quiet - COM3 and COM4, which nothing uses, with their interrupts
+; off and OUT2 clear, whatever ran before: they share IRQ4 and IRQ3 with the
+; mouse and COM2 (a modem's test build then makes COM3 its log, its
+; interrupt still off)
 ;   In:       interrupts off
 ;   Out:      nothing
 ;   Destroys: AL, DX
 ; ----------------------------------------------------------------------------
 serial_quiet:
         xor al, al
-        mov dx, COM2_BASE + UART_IER
+        mov dx, COM4_BASE + UART_IER
         out dx, al
-        mov dx, COM2_BASE + UART_MCR
+        mov dx, COM4_BASE + UART_MCR
         out dx, al
         mov dx, COM3_BASE + UART_IER
         out dx, al

@@ -42,6 +42,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=['run', 'debugger'], required=True)
     parser.add_argument('--build', default='build/debug')
+    parser.add_argument('--release', action='store_true',
+                        help='a release build: no log, COM2 the modem (attached to nothing)')
     args = parser.parse_args()
     build = os.path.abspath(args.build)
     clear_stale_locks()
@@ -49,6 +51,7 @@ def main():
     rxlib.write_bochsrc(bochsrc,
                         image=os.path.join(build, 'rx286.img'),
                         serial=os.path.join(build, 'com2.log'),
+                        log_port=None if args.release else 'com2',
                         log=os.path.join(build, 'bochs.log'),
                         display=rxlib.window_display(),
                         debugger_log=os.path.join(build, 'debugger.log'),

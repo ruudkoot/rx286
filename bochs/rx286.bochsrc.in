@@ -42,13 +42,14 @@ ata3: enabled=0
 
 keyboard: type=at
 # COM1: a Microsoft serial mouse, captured in a window with Ctrl+F10. COM2:
-# the log of debug and test builds. COM4: the modem, unattached or a test's
-# peer (devices roadmap D1, D2).
+# the log of debug and test builds, or the modem of a release build (a
+# test's peer, or nothing); COM3: the log when a test makes COM2 the modem.
+# COM4 is not used (devices roadmap D1, D2).
 mouse: type=serial, enabled=0, toggle=ctrl+f10
 com1: enabled=1, mode=mouse
-com2: enabled=1, mode=file, dev=@SERIAL@
-com3: enabled=1, mode=null
-com4: enabled=1, @COM4@
+com2: enabled=1, @COM2@
+com3: enabled=1, @COM3@
+com4: enabled=1, mode=null
 parport1: enabled=1, file=@LPT1@
 parport2: enabled=1, file=@LPT2@
 speaker: enabled=1, mode=gui

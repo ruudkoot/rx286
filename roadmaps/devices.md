@@ -10,7 +10,7 @@ port, a serial mouse and a modem's serial line; the shell gets `beep`,
 
 | | State |
 |---|---|
-| The serial ports: the log on COM2, the mouse on COM1, the modem on COM4 | done |
+| The serial ports: the mouse on COM1, COM2 the log or the modem | done |
 | The drivers and their calls; SYS_WAIT | done |
 | The shell's commands, the tests | done |
 | The documents | done |
@@ -46,26 +46,33 @@ kernel keeps a position as DOS's mouse driver does in text mode (0-639,
 0-199, eight to a character cell) and the buttons. It draws no cursor: the
 console is the program's to write.
 
-### D2: the log on COM2, the modem on COM4
+### D2: COM2 the log or the modem; COM3 and COM4 unused
 
-At first the log moved from COM1 to COM2, and COM2 was to be the modem in
-release builds; then the log was to go to COM3 always, and COM2 always the
-modem; but MAME's AT has two serial ports and no free slot, so its tests
-could not read a log on COM3. The owner's last proposal makes every
-emulator alike: the log on COM2 in every debug and test build (no image is
-built differently for MAME), the modem on COM4 in every build.
+The ports went round once while the work went on: the log moved from COM1
+to COM2, with COM2 the modem in release builds; then the log was to go to
+COM3 and COM2 always be the modem; then the log on COM2 and the modem on
+COM4, so that every emulator ran the same image. An independent review
+then showed IRQ sharing to be fragile (Bochs drops COM4's pending interrupt
+when COM2, on the same line, is touched), and the owner settled it:
 
-- COM4 shares IRQ3 with COM2, and COM1 IRQ4 with COM3; the log keeps its
-  UART's interrupt off (OUT2 clear), so it never drives IRQ3. On IBM's
-  cards an UART with OUT2 clear leaves the line alone.
-- MAME's AT has no COM4: its modem calls reach no UART, which reads as one
-  always ready that never receives. It runs no modem test.
-- On a real AT of 1984, COM3 and COM4 are a later convention: the modem
-  would need a card that offers COM4.
+- COM1, IRQ4: the mouse, in every build.
+- COM2, IRQ3: the log in debug and test builds; the modem's line in
+  release builds (`SYS_SERIAL_*` fail with `E_BUSY` where COM2 is the log).
+- COM3, COM4: not used; kept quiet, interrupts off and OUT2 clear.
 
-The modem's line: 9600 baud, 8N1, DTR and RTS up; received bytes through
-IRQ3 into a ring of 256 bytes; sending polled, as the printer is.
-`SYS_SERIAL_READ` never waits; `SYS_WAIT` does.
+No two ports in use share an interrupt. A test of the modem needs the log
+elsewhere, so a test build made with `MODEM_COM2` makes COM2 the modem and
+puts the log on COM3: test plumbing only, on Bochs and DOSBox-X, since
+MAME's AT has two serial ports. `make run-release` runs the image with the
+modem.
+
+The modem's line: 9600 baud, 8N1, DTR and RTS up, a 16550's FIFO where
+there is one; received bytes through IRQ3 into a ring of 256 bytes, and
+fetched on every tick too, in case an interrupt is lost; sending polled, as
+the printer is. `SYS_SERIAL_READ` never waits; `SYS_WAIT` does. A 16450
+loses bytes while interrupts stay off for more than a byte's time (1.04 ms
+at 9600 baud): the game port's timing, a scroll of the screen on a real AT;
+the kernel counts them.
 
 ### D3: the speaker, synchronous
 
@@ -110,12 +117,16 @@ terminal on COM4: what comes is shown, what is typed sent, Esc ends).
 | The game port | no joystick: every axis absent; DOSBox-X's emulated stick: two axes present | all three |
 | The mouse's reset | its "M" through the UART and IRQ4 | all three |
 | The mouse's packets | the key script's `{mouse DX DY B}`, handed to the driver as IRQ4 would | all three |
-| The modem | a Hayes-like peer in the runner on a local port (`modem: hayes`), Bochs on real time | Bochs, DOSBox-X |
-| Bad buffers | four more attacks, the fuzzer's random calls | Bochs, MAME |
+| The modem | a Hayes-like peer in the runner on a local port (`modem: hayes`), Bochs on real time; its answer while the kernel writes 1,920 bytes; the buffers it refuses | Bochs, DOSBox-X |
+| COM2 as the log | `term` and the calls refuse (`E_BUSY`) | all three |
+| A Plug and Play mouse's identity | passed over, not read as packets | all three |
+| Bad buffers | the modem test's refusals, the fuzzer's random calls | Bochs, DOSBox-X, MAME |
 
 ## Later
 
 - A mouse cursor on the console; a mouse driver in ring 3.
 - Sound while the program runs; the speaker's own interrupt-free tunes.
 - The modem's speed and line settings as a call; RTS/CTS flow control.
-- COM3, and serial ports for the program beyond the modem.
+- COM3 and COM4 for the program, beyond the modem.
+- A review's points not taken up: a mouse cursor; COM2 overruns at 9600
+  baud with a 16450 while interrupts are off.

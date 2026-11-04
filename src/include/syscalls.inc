@@ -24,8 +24,8 @@ SYS_PRINT           equ 7   ; AL printer, DS:SI buffer, CX length -> AX bytes pr
 SYS_SOUND           equ 8   ; BX hertz (0: silence), CX ticks: sounds, then returns
 SYS_JOYSTICK        equ 9   ; -> AL buttons; BX, CX, DX, SI the axes in microseconds
 SYS_MOUSE           equ 10  ; -> AX MOUSE_PRESENT or 0, BX buttons, CX x, DX y
-SYS_SERIAL_WRITE    equ 11  ; DS:SI buffer, CX length -> AX bytes sent on COM4
-SYS_SERIAL_READ     equ 12  ; ES:DI buffer, CX room -> AX bytes from COM4 (perhaps 0)
+SYS_SERIAL_WRITE    equ 11  ; DS:SI buffer, CX length -> AX bytes sent on COM2
+SYS_SERIAL_READ     equ 12  ; ES:DI buffer, CX room -> AX bytes from COM2 (perhaps 0)
 SYS_WAIT            equ 13  ; AL WAIT_* events, CX ticks at most (0: no limit)
                             ;    -> AL the events that are there (0: the time ran out)
 SYSCALL_COUNT       equ 14
@@ -49,7 +49,7 @@ MOUSE_X_MAX         equ 639 ; the position, as DOS's mouse driver keeps it in
 MOUSE_Y_MAX         equ 199 ; text mode: eight to a character cell
 WAIT_KEY            equ 1   ; SYS_WAIT's events
 WAIT_MOUSE          equ 2   ; the mouse moved or a button changed
-WAIT_SERIAL         equ 4   ; bytes from COM4
+WAIT_SERIAL         equ 4   ; bytes from COM2
 
 ; The drives (roadmap storage D1): a sector is 512 bytes (SECTOR_SIZE),
 ; numbered from 0 across the whole disk, partitions and all.
@@ -69,6 +69,7 @@ E_IO                equ 4   ; the device reported an error
 E_TIMEOUT           equ 5   ; the device did not answer: no diskette, no printer
 E_PROTECTED         equ 6   ; the diskette is write-protected
 E_PAPER             equ 7   ; the printer is out of paper (or not there)
+E_BUSY              equ 8   ; the device is the kernel's: COM2 carries the log
 
 ; Scancodes (set 1) the program may look for in AH when AL = 0.
 SC_ESC              equ 0x01

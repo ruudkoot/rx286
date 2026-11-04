@@ -60,8 +60,9 @@ debugger session at a kernel symbol), `media` (B without a diskette or
 write-protected, no fixed disk D, which the emulator is told; B's FAT
 damaged, D without a partition, B with paths of 64 characters, which the
 runner makes in the run's copy), `modem` (a Hayes-like peer at the far end
-of COM4: it echoes, and answers `AT` and `ATI`; Bochs then runs on real
-time, so its answers come in the ticks they would),
+of COM2, in an image built with COM2 the modem and the log on COM3: it
+echoes, and answers `AT` and `ATI`; Bochs then runs on real time, so its
+answers come in the ticks they would),
 `lpt1` and `lpt2` (what each printer must
 have printed, line by line), `sector` (what a sector of a drive's image must
 hold after the run, read on the host: a text, then each byte its offset). In expected lines, `{name}` is
@@ -100,7 +101,7 @@ The suites:
 | `tests/devices` | the speaker's tones measured by the kernel's probe (`TEST_SOUND`), the game port, the mouse's reset through IRQ4 and its packets, `SYS_WAIT`, and `term` talking to a modem |
 | `tests/drives` | the shell's drives: `dir` on every drive, `cd` in all its forms, `type` through a fragmented file and a file of four clusters, `print` checked byte for byte, every refusal, a drive without a diskette, a disk without a partition, a damaged FAT, paths of exactly 64 characters and of 66 |
 | `tests/shell` | every command of the shell, its editor, every `crash` |
-| `tests/attack` | 63 attacks (*docs/security.md*) |
+| `tests/attack` | 59 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3 |
 | `tests/unit` | the host tests (layer 3) |
 

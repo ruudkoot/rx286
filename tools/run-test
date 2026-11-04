@@ -28,9 +28,10 @@
 #                               characters: rxlib.DEEP_PATH); may repeat
 #   lpt1: text                  a line LPT1 must have printed; may repeat (the
 #                               whole of what it printed, in order); lpt2 too
-#   modem: hayes                a modem at the far end of COM4 (HayesPeer):
-#                               it echoes, and answers AT, ATI; Bochs and
-#                               DOSBox-X only
+#   modem: hayes                a modem at the far end of COM2 (HayesPeer):
+#                               it echoes, and answers AT, ATI. The image is
+#                               built with MODEM_COM2 (COM2 the modem, the
+#                               log on COM3): Bochs and DOSBox-X only
 #   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
 #                               or D) must hold text, then each byte its own
 #                               offset (storage.asm's fill); may repeat
@@ -139,8 +140,8 @@ class Test:
                 if value != 'hayes':
                     raise ValueError('%s: unknown modem %r' % (self.path, value))
                 if 'mame' in self.emulators and 'emulators:' not in text:
-                    raise ValueError('%s: a modem needs COM4, which MAME has not: '
-                                     'say emulators:' % self.path)
+                    raise ValueError('%s: a modem test moves the log to COM3, which '
+                                     'MAME has not: say emulators:' % self.path)
                 self.modem = value
             elif key == 'media':
                 if value not in rxlib.MEDIA:
@@ -167,7 +168,7 @@ class Test:
 
 
 class HayesPeer(threading.Thread):
-    """The far end of COM4 for a test, as much of a Hayes modem as it needs:
+    """The far end of COM2 for a test, as much of a Hayes modem as it needs:
     it echoes every byte, and answers each line (ended by CR): AT with OK,
     ATI with its name and OK, anything else with ERROR. The emulator
     connects to it on a local port."""
@@ -224,7 +225,7 @@ def build(test):
             f.write(text)
     # The defines are part of the build too: a change of them rebuilds.
     stamp = os.path.join(b, 'defines.txt')
-    wanted = repr((test.program, test.defines, EMULATOR == 'mame'))
+    wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
         for name in ('kernel.bin', 'user.bin'):
             if os.path.exists(os.path.join(b, name)):
@@ -237,6 +238,8 @@ def build(test):
     if test.program == 'attack':
         defines.append('-dTEST_ATTACK')
     defines += ['-d' + d for d in test.defines]
+    if test.modem:
+        defines.append('-dMODEM_COM2')          # COM2 the modem, the log on COM3
     if EMULATOR == 'mame':
         defines.append('-dTEST_TYPE_DIRECT')    # IBM's 8042 firmware has no D2h
     cmd = ['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=test', 'B=' + b,
@@ -446,7 +449,8 @@ def run(test):
     rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
-                        disks=disks, printers=printers, media=test.media, modem=modem)
+                        disks=disks, printers=printers, media=test.media,
+                        log_port='com3' if test.modem else 'com2', modem=modem)
     rc = []
     if test.breakpoint:
         rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))
@@ -470,7 +474,8 @@ def run(test):
                                     log=os.path.join(b, 'bochs.log'), disks=disks)
     elif EMULATOR == 'dosbox-x':
         status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, timeout, until,
-                                     printers=printers, modem=modem)
+                                     printers=printers, modem=modem,
+                                     log_port='com3' if test.modem else 'com2')
     else:
         status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, timeout, until,
                                    disks=disks, media=test.media)

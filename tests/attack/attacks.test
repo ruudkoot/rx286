@@ -128,12 +128,4 @@ attack: read drive 80h
 attack: refused, error 3
 attack: read sector FFFFh of A
 attack: refused, error 3
-attack: read the modem into the code
-attack: refused, error 1
-attack: read the modem across the limit
-attack: refused, error 1
-attack: read the modem through a null ES
-attack: refused, error 1
-attack: write to the modem from a null selector
-attack: refused, error 1
 attack: done

@@ -28,8 +28,8 @@ numbers and the macro `sys`:
 | 8 | `SYS_SOUND` | BX = hertz (`SOUND_MIN_HZ` to `SOUND_MAX_HZ`; 0 a rest), CX = ticks (`SOUND_MAX_TICKS` at most) | nothing, once the sound is over (Ctrl+Break ends it); CF with `E_INVAL` |
 | 9 | `SYS_JOYSTICK` | | AL = the buttons pressed (bit n, button n), AH = 0; BX, CX, DX, SI = axes 0-3 in microseconds, or `JOY_ABSENT` (timed for `JOY_AXIS_MAX_US` at most) |
 | 10 | `SYS_MOUSE` | | AX = `MOUSE_PRESENT` if the mouse answered its reset, else 0; BX = the buttons (`MOUSE_LEFT`, `MOUSE_RIGHT`); CX = x (0 to `MOUSE_X_MAX`), DX = y (0 to `MOUSE_Y_MAX`) |
-| 11 | `SYS_SERIAL_WRITE` | DS:SI buffer, CX length (at most `SERIAL_MAX`, 4,096) | AX = bytes sent on COM4, the modem's line; CF with `E_INVAL`, `E_FAULT`, or `E_TIMEOUT` with CX = the bytes sent before |
-| 12 | `SYS_SERIAL_READ` | ES:DI buffer, CX room (at most `SERIAL_MAX`) | AX = the bytes the modem's line has brought, up to CX, perhaps 0: it does not wait; CF with `E_INVAL`, `E_FAULT` |
+| 11 | `SYS_SERIAL_WRITE` | DS:SI buffer, CX length (at most `SERIAL_MAX`, 4,096) | AX = bytes sent on COM2, the modem's line; CF with `E_INVAL`, `E_FAULT`, `E_BUSY` (COM2 is the log), or `E_TIMEOUT` with CX = the bytes sent before |
+| 12 | `SYS_SERIAL_READ` | ES:DI buffer, CX room (at most `SERIAL_MAX`) | AX = the bytes the modem's line has brought, up to CX, perhaps 0: it does not wait; CF with `E_INVAL`, `E_FAULT`, `E_BUSY` |
 | 13 | `SYS_WAIT` | AL = events (`WAIT_KEY`, `WAIT_MOUSE`, `WAIT_SERIAL`), CX = ticks at most (0: no limit) | AL = the events there, 0 if the time ran out or the program is to restart; CF with `E_INVAL` (an unknown event, or none and no limit) |
 | other | | | CF, AX = `E_NOSYS` |
 
@@ -46,6 +46,7 @@ numbers and the macro `sys`:
 | 5 | `E_TIMEOUT` | the device did not answer in time: no diskette, no fixed disk, a printer that stays busy |
 | 6 | `E_PROTECTED` | the diskette is write-protected |
 | 7 | `E_PAPER` | the printer is out of paper, or not there |
+| 8 | `E_BUSY` | the device is the kernel's: in debug and test builds COM2 carries the log, not the modem |
 
 ### Drives and printers
 

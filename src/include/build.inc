@@ -9,8 +9,11 @@
 ;   WITH_REGISTERS    registers in fault reports
 ;   WITH_CHECKS       ASSERT, and magic breakpoints for Bochs
 ;   WITH_TEST_HOOKS   typed keys, device probes, the end through Bochs
-; LOG_PORT is the UART of the log: COM2, which every emulator has. COM1 is
-; the mouse's and COM4 the modem's (devices roadmap D1, D2), in every build.
+; COM1 is the mouse's in every build (devices roadmap D1). COM2 is the log's
+; in debug and test builds (LOG_PORT), and the modem's in release builds
+; (WITH_MODEM). A test build made with MODEM_COM2 makes COM2 the modem too,
+; for the modem's tests, and moves its log to COM3 (D2). COM3 and COM4 are
+; not used otherwise.
 ; ============================================================================
 
 %ifndef RX286_BUILD_INC
@@ -34,7 +37,15 @@
   %error "build.inc: pass -dRELEASE, -dDEBUG or -dTEST"
 %endif
 
-%define LOG_PORT COM2_BASE
+%ifdef RELEASE
+  %define WITH_MODEM
+%endif
+%ifdef MODEM_COM2
+  %define WITH_MODEM
+  %define LOG_PORT COM3_BASE
+%else
+  %define LOG_PORT COM2_BASE
+%endif
 
 ; The Makefile names the map file of every binary with -dMAPFILE=...
 %ifdef MAPFILE

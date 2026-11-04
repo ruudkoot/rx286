@@ -90,8 +90,9 @@ E5):
   or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
   goes to `build/debug/lpt1.txt` and `lpt2.txt`, the log to
   `build/debug/com2.log`. Bochs' window gives COM1 a serial mouse: Ctrl+F10
-  captures the host's mouse for it (and lets it go). COM4, the modem's
-  line, is attached to nothing.
+  captures the host's mouse for it (and lets it go). `make run-release`
+  runs the release image, whose COM2 is the modem's line (`term`), attached
+  to nothing.
 
 ## Checks
 

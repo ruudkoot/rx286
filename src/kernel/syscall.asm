@@ -209,7 +209,7 @@ sys_read_key:
 
 ; ----------------------------------------------------------------------------
 ; sys_wait - SYS_WAIT: sleep until one of the events asked for is there (a
-; key, the mouse's news, bytes from COM4), for CX ticks at most (0: no
+; key, the mouse's news, bytes from COM2), for CX ticks at most (0: no
 ; limit), or until the program is to restart
 ;   In:       BP = the frame (AL the WAIT_* events, CX the ticks); DS =
 ;             SEL_KDATA
@@ -282,12 +282,14 @@ wait_ready:
         je .serial
         or ah, WAIT_MOUSE
 .serial:
+%ifdef WITH_MODEM
         test byte [wait_events], WAIT_SERIAL
         jz .done
         call modem_ready
         jz .done
         or ah, WAIT_SERIAL
 .done:
+%endif
         mov al, ah
         ret
 

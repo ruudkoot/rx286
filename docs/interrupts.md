@@ -83,7 +83,7 @@ slave's; there are `IRQ_LINES` (16).
 | `IRQ_TIMER` (0) | the timer driver: 50 ticks a second |
 | `IRQ_KEYBOARD` (1) | the keyboard driver |
 | 2 | the cascade: never masked, never delivered |
-| 3 | the modem's driver: bytes from COM4 (COM2, the log, keeps its interrupt off) |
+| 3 | the modem's driver, in release builds: bytes from COM2 (in debug and test builds COM2 is the log, polled, and the line has no driver) |
 | 4 | the mouse's driver: bytes from COM1 |
 | 6 | the diskette driver: a command has ended |
 | `IRQ_FPU` (13) | the 287's error: a fault of the program |

@@ -15,7 +15,7 @@ on Bochs; `make test-286` runs them on DOSBox-X's 286 and MAME's IBM PC/AT;
 | Diskettes, fixed disks | both | neither (no IRQ6 from its controller, no fixed disk controller) | both: IBM's BIOS and a 765; the IDE card stands in for the fixed disk controller |
 | Printers | LPT1, LPT2, into files | LPT1, LPT2, into files | none: no slot for the card |
 | Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS, the disks |
-| Tests that run | all 48 | 28 | 41 |
+| Tests that run | all 51 | 31 | 43 |
 | A boot in a test | 0.3-0.5 s | about 1.5 s | about 6 s (IBM's power-on test) |
 
 ## Bochs and the AT
@@ -119,14 +119,15 @@ What MAME does not emulate:
 
 ## The serial ports, the speaker and the game port on each
 
-Every debug and test image is the same on all three: the mouse on COM1,
-the log on COM2, the modem on COM4 (*docs/devices.md*).
+Every debug and test image is the same on all three: the mouse on COM1, the
+log on COM2 (*docs/devices.md*). A test of the modem builds its image with
+COM2 the modem and the log on COM3, which MAME's AT does not have.
 
 | | Bochs | DOSBox-X | MAME's AT |
 |---|---|---|---|
 | COM1 | a serial mouse (`mouse: type=serial`): says "M"; moves only with a window, captured with Ctrl+F10 | `serialmouse`: says "M" | `microsoft_mouse`: says "M" |
-| COM2 | the log, into a file | the log, into a file | the log, through a null modem into a file (`-bitb`), at 115200 by `mame/rx286.lua` |
-| COM4 | a socket to a test's modem, or nothing | `nullmodem` to a test's modem, or `dummy` | none: its serial card has two ports, and no slot is free |
+| COM2 | the log, into a file; in a modem test, a socket to the runner's modem | the log, into a file; in a modem test, `nullmodem` to the runner's modem | the log, through a null modem into a file (`-bitb`), at 115200 by `mame/rx286.lua` |
+| COM3 | a modem test's log | a modem test's log | none: its serial card has two ports, and no slot is free |
 | The speaker's output at port B | yes | yes | yes |
 | The game port | no joystick: every axis absent | `joysticktype = 2axis`: a centred stick, axes 1 and 2 (684-687 us) | none: no slot; every axis absent |
 
@@ -134,4 +135,6 @@ The mouse's packets in the tests come from the key script, handed to the
 driver as IRQ4 would; no emulator here moves a mouse without a window.
 For a test with a modem, Bochs runs on real time (`clock: sync=realtime`),
 since otherwise its emulated seconds pass in milliseconds while the CPU
-idles, before the peer on the host has answered.
+idles, before the peer on the host has answered. Bochs loses a UART's
+pending interrupt when another UART on the same line is touched; the
+kernel's tick fetches what such a lost interrupt leaves.

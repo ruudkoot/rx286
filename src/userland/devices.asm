@@ -1,7 +1,7 @@
 ; ============================================================================
 ; rx286 - src/userland/devices.asm
 ; The shell's devices: beep and play (the speaker), joy (the game port),
-; mouse (COM1) and term (COM4), each through its system call (devices
+; mouse (COM1) and term (COM2), each through its system call (devices
 ; roadmap D6).
 ;
 ; mouse and term wait in SYS_WAIT for a key or their device's news, so the
@@ -12,7 +12,7 @@ BEEP_HZ             equ 880
 BEEP_TICKS          equ 10
 MOUSE_CELL          equ 8               ; the mouse's units in a character cell
 JOY_BUTTONS         equ 4
-TERM_CHUNK          equ 64              ; bytes taken from COM4 at a time
+TERM_CHUNK          equ 64              ; bytes taken from COM2 at a time
 
 begin_udata
 term_buffer         times TERM_CHUNK db 0
@@ -183,14 +183,22 @@ show_mouse:
 %endif
 
 ; ----------------------------------------------------------------------------
-; cmd_term - a terminal on COM4, the modem's line: what comes is shown, what
-; is typed is sent (Enter as CR); Esc ends it
+; cmd_term - a terminal on COM2, the modem's line: what comes is shown, what
+; is typed is sent (Enter as CR); Esc ends it. Where COM2 carries the
+; kernel's log (debug and test builds), it says so.
 ;   In:       DS = ES = the program's data
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 cmd_term:
-        PRINT "Terminal on COM4 at 9600 baud; Esc ends.", CHAR_LF
+        xor cx, cx
+        sys SYS_SERIAL_WRITE            ; nothing, to ask whether COM2 is the modem
+        jnc .ours
+        PRINT "COM2 carries the kernel's log in this build; a release build", CHAR_LF
+        PRINT "makes it the modem's line.", CHAR_LF
+        ret
+.ours:
+        PRINT "Terminal on COM2 at 9600 baud; Esc ends.", CHAR_LF
 .wait:
         mov al, WAIT_KEY | WAIT_SERIAL
         xor cx, cx

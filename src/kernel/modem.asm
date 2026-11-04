@@ -1,28 +1,26 @@
 ; ============================================================================
 ; rx286 - src/kernel/modem.asm
-; COM4 as the program's serial line, for a modem: SYS_SERIAL_WRITE and
+; COM2 as the program's serial line, for a modem: SYS_SERIAL_WRITE and
 ; SYS_SERIAL_READ (devices roadmap D2).
 ;
-; COM4 runs at 9600 baud, 8N1, DTR and RTS up, in every build. A byte that
-; comes raises IRQ3 (COM2's too, but the log there keeps its interrupt off),
-; and the kernel puts it in a ring of MODEM_RING bytes; a full ring drops
-; it, and counts it. The program takes what is in the ring with
-; SYS_SERIAL_READ, which never waits: SYS_WAIT waits for it.
-; SYS_SERIAL_WRITE sends as SYS_PRINT prints: each byte once the UART can
-; take it (2 s at most), interrupts let in after each, a restart ending it
-; early. A machine without COM4 (MAME's AT) reads all ones: always ready to
-; send, never receiving.
+; In release builds (and test builds made with MODEM_COM2), COM2 runs at
+; 9600 baud, 8N1, DTR and RTS up. A byte that comes raises IRQ3, and the
+; kernel puts it in a ring of MODEM_RING bytes; a full ring drops it, and
+; counts it. The program takes what is in the ring with SYS_SERIAL_READ,
+; which never waits: SYS_WAIT waits for it. SYS_SERIAL_WRITE sends as
+; SYS_PRINT prints: each byte once the UART can take it (2 s at most),
+; interrupts let in after each, a restart ending it early. In debug and
+; test builds COM2 is the kernel's log, and both calls fail with E_BUSY.
 ;
-; COM4 shares IRQ3 with COM2, whose UART the kernel keeps quiet (OUT2 clear);
-; but an edge can still be lost (Bochs drops COM4's when COM2, the log, is
-; touched), so every tick also fetches what COM4 holds (timer_irq). A 16450
-; holds one byte: at 9600 baud one comes every 1.04 ms, and the kernel's
-; longest stretches with interrupts off (the game port's timing, 4 ms; a
-; scroll of the screen, a few ms on a real AT) can lose some, which
-; modem_overruns counts. A 16550's FIFO, turned on where there is one,
-; holds 16.
+; Every tick also fetches what COM2 holds (timer_irq), in case an interrupt
+; was lost. A 16450 holds one byte: at 9600 baud one comes every 1.04 ms,
+; and the kernel's longest stretches with interrupts off (the game port's
+; timing, 4 ms; a scroll of the screen, a few ms on a real AT) can lose
+; some, which modem_overruns counts. A 16550's FIFO, turned on where there is
+; one, holds 16. A port that reads all ones has no UART.
 ; ============================================================================
 
+%ifdef WITH_MODEM
 
 MODEM_RING          equ 256             ; byte indices wrap by themselves
 MODEM_BYTE_TICKS    equ 100 + 1         ; 2 s for the UART to take a byte
@@ -37,40 +35,40 @@ modem_overruns      dw 0                ; bytes the UART lost before they were r
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; modem_init - COM4 at 9600 baud, 8N1, DTR, RTS and OUT2 up, an interrupt
+; modem_init - COM2 at 9600 baud, 8N1, DTR, RTS and OUT2 up, an interrupt
 ; for each byte that comes
 ;   In:       interrupts off
 ;   Out:      nothing
 ;   Destroys: AL, DX
 ; ----------------------------------------------------------------------------
 modem_init:
-        mov dx, COM4_BASE + UART_LCR
+        mov dx, COM2_BASE + UART_LCR
         mov al, UART_LCR_DLAB
         out dx, al
-        mov dx, COM4_BASE + UART_DLL
+        mov dx, COM2_BASE + UART_DLL
         mov al, UART_DIVISOR_9600
         out dx, al
-        mov dx, COM4_BASE + UART_DLM
+        mov dx, COM2_BASE + UART_DLM
         xor al, al
         out dx, al
-        mov dx, COM4_BASE + UART_LCR
+        mov dx, COM2_BASE + UART_LCR
         mov al, UART_LCR_8N1
         out dx, al
-        mov dx, COM4_BASE + UART_FCR
+        mov dx, COM2_BASE + UART_FCR
         mov al, UART_FCR_FIFO
         out dx, al
-        mov dx, COM4_BASE + UART_RBR
+        mov dx, COM2_BASE + UART_RBR
         in al, dx                       ; nothing stale
-        mov dx, COM4_BASE + UART_IER
+        mov dx, COM2_BASE + UART_IER
         mov al, UART_IER_RECEIVED
         out dx, al
-        mov dx, COM4_BASE + UART_MCR
+        mov dx, COM2_BASE + UART_MCR
         mov al, UART_MCR_RUN
         out dx, al
         ret
 
 ; ----------------------------------------------------------------------------
-; modem_irq - IRQ3, and every tick: the bytes COM4 has, into the ring
+; modem_irq - IRQ3, and every tick: the bytes COM2 has, into the ring
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing (the dispatcher sends EOI)
 ;   Destroys: AX, BX, CX, DX
@@ -78,7 +76,7 @@ modem_init:
 modem_irq:
         mov cx, MODEM_IRQ_BYTES
 .next:
-        mov dx, COM4_BASE + UART_LSR
+        mov dx, COM2_BASE + UART_LSR
         in al, dx
         cmp al, UART_LSR_ABSENT
         je .done                        ; no UART there
@@ -88,7 +86,7 @@ modem_irq:
 .no_overrun:
         test al, UART_LSR_DATA
         jz .done
-        mov dx, COM4_BASE + UART_RBR
+        mov dx, COM2_BASE + UART_RBR
         in al, dx
         mov bl, [modem_tail]
         mov bh, bl
@@ -118,7 +116,7 @@ modem_ready:
         ret
 
 ; ----------------------------------------------------------------------------
-; sys_serial_write - SYS_SERIAL_WRITE: the caller's DS:SI, CX bytes, on COM4
+; sys_serial_write - SYS_SERIAL_WRITE: the caller's DS:SI, CX bytes, on COM2
 ;   In:       BP = the frame; DS = SEL_KDATA
 ;   Out:      the frame's AX = bytes sent; or an error, and the frame's CX =
 ;             bytes sent before it (E_TIMEOUT)
@@ -137,7 +135,7 @@ sys_serial_write:
         xor bx, bx                      ; BX = bytes sent
 .next:
         push cx
-        mov dx, COM4_BASE + UART_LSR
+        mov dx, COM2_BASE + UART_LSR
         mov ah, UART_LSR_THRE
         mov al, UART_LSR_THRE
         mov cx, MODEM_BYTE_TICKS
@@ -145,7 +143,7 @@ sys_serial_write:
         pop cx
         jc .late
         mov al, [es:si]
-        mov dx, COM4_BASE + UART_THR
+        mov dx, COM2_BASE + UART_THR
         out dx, al
         inc si
         inc bx
@@ -209,3 +207,27 @@ sys_serial_read:
 .fault:
         mov ax, E_FAULT
         jmp sys_fail
+
+%else
+
+; ----------------------------------------------------------------------------
+; sys_serial_write - SYS_SERIAL_WRITE where COM2 is the log
+;   In:       BP = the frame
+;   Out:      the error E_BUSY
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+sys_serial_write:
+        mov ax, E_BUSY
+        jmp sys_fail
+
+; ----------------------------------------------------------------------------
+; sys_serial_read - SYS_SERIAL_READ where COM2 is the log
+;   In:       BP = the frame
+;   Out:      the error E_BUSY
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+sys_serial_read:
+        mov ax, E_BUSY
+        jmp sys_fail
+
+%endif
