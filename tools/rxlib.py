@@ -469,7 +469,9 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     four slots hold the EGA, the diskette controller, the serial card and
     the IDE card, which the diskettes need too (docs/emulators.md). MAME
     writes a diskette back to its file only when it stops, so it is asked
-    to stop (SIGTERM) before it is killed."""
+    to stop (SIGTERM) before it is killed. SDL's dummy drivers keep MAME
+    from opening any window: `-video none` alone still opens one under
+    WSLg."""
     nvram = os.path.join(directory, 'mame-nvram')
     os.makedirs(os.path.join(nvram, 'ibm5170'), exist_ok=True)
     with open(os.path.join(nvram, 'ibm5170', 'mb_rtc'), 'wb') as f:
@@ -499,7 +501,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
          '-nvram_directory', nvram, '-cfg_directory', os.path.join(directory, 'mame-cfg'),
          '-autoboot_script', MAME_SCRIPT, '-autoboot_delay', '0',
          '-seconds_to_run', str(int(timeout * 10))] + args,
-        stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory)
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory,
+        env=dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy'))
     status = 'exit'
     while proc.poll() is None:
         if time.monotonic() - started > timeout:
