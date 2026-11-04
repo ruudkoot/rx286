@@ -85,7 +85,7 @@ if [ -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_x_gui.so ]; then
 elif [ -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_sdl2_gui.so ]; then
     printf '%-12s %-12s %s\n' "bochs: window" OK "SDL2 (bochs-sdl), for make run"
 else
-    printf '%-12s %-12s %s\n' "bochs: window" "wx only" "(optional) install bochs-x for make run's window"
+    printf '%-12s %-12s %s\n' "bochs: window" "wx only" "install bochs-x: wx's window fails under WSLg"
 fi
 probe "bochs: 287 IRQ"  test -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_extfpuirq.so
 probe "bochs: BIOS"     test -f /usr/share/bochs/BIOS-bochs-legacy

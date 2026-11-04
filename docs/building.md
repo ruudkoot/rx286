@@ -8,7 +8,7 @@
 |---|---|---|---|
 | NASM | 2.16 or later | assembling everything | `nasm` |
 | mtools | 4.0.43 or later | the floppy image | `mtools` |
-| Bochs | 2.7.x | running and debugging; the tests | `bochs`, `bochsbios`, `vgabios`, `bochs-wx` |
+| Bochs | 2.7.x | running and debugging; the tests | `bochs`, `bochsbios`, `vgabios`, `bochs-x` |
 | GNU make | 4.0 or later | the build | `make` |
 | Python | 3.10 or later | the tools and the test runner | `python3` |
 | pytest | 7.4 or later | the host tests of pure routines | `python3-pytest` |
@@ -77,7 +77,9 @@ E5):
 - `make run` starts Bochs with a window on the debug image. The window is
   Bochs' X11 display if `bochs-x` is installed, else SDL2 (`bochs-sdl`), else
   wx (`bochs-wx`), which needs wx as Bochs' configuration interface too;
-  `make doctor` says which. The tests need no window: they use `rfb`.
+  `make doctor` says which. Under WSLg the wx window hangs or dies in GTK
+  (`gtk_text_attributes_ref`), so install `bochs-x`. The tests need no
+  window: they use `rfb`.
 - `make debugger` does the same, stopped at the kernel's entry with the
   symbols loaded (*docs/debugging.md*).
 - `make disks` makes drive B (an empty 360 KB floppy) and the two empty hard
