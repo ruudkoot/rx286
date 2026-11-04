@@ -1,0 +1,7 @@
+# A KERNEL.BIN larger than layout.inc's room: the loader refuses it.
+image: oversized
+match: prefix
+timeout: 15
+---
+rx286 loader: KERNEL.BIN is larger than its room
+Press a key to try again.

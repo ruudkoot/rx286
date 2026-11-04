@@ -1,0 +1,4 @@
+# The loader finds KERNEL.BIN, loads all of it and hands over with interrupts off.
+---
+rx286 kernel stub: all of KERNEL.BIN is here
+rx286 kernel stub: interrupts are off

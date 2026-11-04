@@ -1,0 +1,7 @@
+# No KERNEL.BIN: the loader says so and waits for a key.
+image: missing
+match: prefix
+timeout: 15
+---
+rx286 loader: no KERNEL.BIN on this disk
+Press a key to try again.

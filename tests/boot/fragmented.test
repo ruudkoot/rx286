@@ -1,0 +1,5 @@
+# KERNEL.BIN in eleven pieces: the loader follows the cluster chain.
+image: fragmented
+---
+rx286 kernel stub: all of KERNEL.BIN is here
+rx286 kernel stub: interrupts are off

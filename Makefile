@@ -89,7 +89,7 @@ $(B)/boot-sector.bin: src/boot-sector/boot-sector.asm
 	$(call assemble,$@,$<)
 
 $(B)/boot-loader.bin: src/boot-loader/boot-loader.asm
-	$(call assemble,$@,$<)
+	$(call assemble,$@,$<,-Isrc/boot-loader/)
 
 $(B)/user.bin: $(PROGRAM_MAIN)
 	$(call assemble,$@,$<,-Isrc/userland/)

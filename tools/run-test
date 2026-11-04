@@ -118,9 +118,13 @@ def build(test):
            'image', 'symbols']
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return 'build failed:\n' + result.stdout[-3000:] + result.stderr[-3000:]
+        errors = [l for l in (result.stdout + result.stderr).splitlines()
+                  if 'error' in l.lower() or 'warning' in l.lower()]
+        return 'build failed:\n' + '\n'.join(errors[-20:])
+    # The run boots a copy, so changing it leaves the build's image as make made it.
+    shutil.copyfile(os.path.join(b, 'rx286.img'), os.path.join(b, 'run.img'))
     if test.image:
-        return change_image(test, os.path.join(b, 'rx286.img'))
+        return change_image(test, os.path.join(b, 'run.img'))
     return None
 
 
@@ -234,7 +238,7 @@ def run(test):
         if os.path.exists(f):
             os.remove(f)
     bochsrc = os.path.join(b, 'test.bochsrc')
-    rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'rx286.img'), serial=serial,
+    rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
                         disks=rxlib.private_disks(os.path.join(b, 'disks')))

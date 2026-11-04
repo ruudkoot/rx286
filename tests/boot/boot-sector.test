@@ -1,3 +1,0 @@
-# The boot sector loads the loader from the reserved sectors and runs it.
----
-rx286 loader stub
