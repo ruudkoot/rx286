@@ -23,7 +23,10 @@ D7). This document explains each one.
 | 100000h and up | extended memory, if fitted | | nobody |
 
 The floppy's reserved sectors are the boot sector and the loader:
-`RESERVED_SECTORS` = 1 + `LOADER_SECTORS`.
+`RESERVED_SECTORS` = 1 + `LOADER_SECTORS`. The boot sector reads the loader
+with up to `BOOT_TRIES` attempts, and runs it only if the word at
+`LOADER_PHYS` + 2 is `LOADER_MAGIC` ("LD"), which the loader's first
+instruction jumps over.
 
 The console is `VIDEO_COLUMNS` by `VIDEO_ROWS` characters of two bytes each.
 

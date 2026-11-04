@@ -13,7 +13,8 @@
 #   program: shell              shell (default), attack or fuzz
 #   keys: echo hi\n             a key script (tools/rxlib.py); may repeat
 #   define: TEST_PANIC_DIVIDE   a NASM define for the kernel; may repeat
-#   image: fragmented           change the floppy: fragmented, missing, oversized
+#   image: fragmented           change the floppy: fragmented, missing, oversized,
+#                               noloader (sectors 1-3 zeroed)
 #   timeout: 30                 seconds of wall time (default 30)
 #   match: full                 full (default), prefix or contains
 #   break: syscall              a debugger breakpoint, by kernel symbol...
@@ -132,6 +133,11 @@ def change_image(test, image):
     """The boot tests' floppies: a fragmented, missing or oversized kernel."""
     kernel = os.path.join(test.build_dir, 'kernel.bin')
     filler = os.path.join(test.build_dir, 'filler.bin')
+    if test.image == 'noloader':
+        with open(image, 'r+b') as f:
+            f.seek(512)
+            f.write(bytes(512 * rxlib.LAYOUT['LOADER_SECTORS']))
+        return None
     if test.image == 'missing':
         r = mtools('mdel', '-i', image, '::KERNEL.BIN')
     elif test.image == 'oversized':
@@ -230,7 +236,8 @@ def run(test):
     bochsrc = os.path.join(b, 'test.bochsrc')
     rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'rx286.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
-                        display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog)
+                        display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
+                        disks=rxlib.private_disks(os.path.join(b, 'disks')))
     rc = []
     if test.breakpoint:
         rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))

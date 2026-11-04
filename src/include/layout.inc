@@ -15,6 +15,8 @@ BOOT_SECTOR_PHYS    equ 0x7C00      ; where the BIOS loads sector 0
 LOADER_PHYS         equ 0x7E00      ; where the boot sector loads the loader
 LOADER_SECTORS      equ 3           ; reserved sectors 1-3 of the floppy
 RESERVED_SECTORS    equ 1 + LOADER_SECTORS
+LOADER_MAGIC        equ 'LD'        ; the word at LOADER_PHYS + 2, checked by the boot sector
+BOOT_TRIES          equ 3           ; reads of the floppy before giving up
 LOADER_STACK_TOP    equ 0x7C00      ; both boot stages' stack grows down from here
 LOADER_FAT_BUF      equ 0x8400      ; the loader's buffer for one FAT (up to 9 sectors)
 LOADER_ROOT_BUF     equ 0x9800      ; the loader's buffer for the root directory (up to 14 sectors)

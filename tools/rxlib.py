@@ -95,14 +95,16 @@ BOCHSRC_TEMPLATE = os.path.join(ROOT, 'bochs', 'rx286.bochsrc.in')
 DISKS = os.path.join(ROOT, 'build', 'disks')
 
 
-def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False):
-    """Write a bochsrc for one run from bochs/rx286.bochsrc.in."""
+def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
+                  disks=DISKS):
+    """Write a bochsrc for one run from bochs/rx286.bochsrc.in. Bochs locks
+    the hard-disk images, so runs at the same time need their own `disks`."""
     text = open(BOCHSRC_TEMPLATE, encoding='utf-8').read()
     subs = {
         '@IMAGE@': image,
-        '@FDB@': os.path.join(DISKS, 'fdb.img'),
-        '@HD0@': os.path.join(DISKS, 'hd0.img'),
-        '@HD1@': os.path.join(DISKS, 'hd1.img'),
+        '@FDB@': os.path.join(disks, 'fdb.img'),
+        '@HD0@': os.path.join(disks, 'hd0.img'),
+        '@HD1@': os.path.join(disks, 'hd1.img'),
         '@SERIAL@': serial,
         '@LOG@': log,
         '@DISPLAY@': display,
@@ -119,6 +121,20 @@ def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=Fa
 
 
 DISPLAY_HEADLESS = 'rfb, options="timeout=0"'
+
+
+def private_disks(directory):
+    """Copies of drive B and the hard disks for one run (the hard disks are
+    sparse, so the copies cost nothing)."""
+    import shutil
+    shutil.rmtree(directory, ignore_errors=True)   # with any lock a killed Bochs left
+    os.makedirs(directory)
+    shutil.copyfile(os.path.join(DISKS, 'fdb.img'), os.path.join(directory, 'fdb.img'))
+    for name in ('hd0.img', 'hd1.img'):
+        size = os.path.getsize(os.path.join(DISKS, name))
+        with open(os.path.join(directory, name), 'wb') as f:
+            f.truncate(size)
+    return directory
 DISPLAY_WINDOW = 'wx'
 
 

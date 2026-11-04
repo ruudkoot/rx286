@@ -1,0 +1,7 @@
+# Sectors 1-3 zeroed: the boot sector refuses to run them.
+image: noloader
+match: prefix
+timeout: 15
+---
+rx286: no loader on this disk
+Press a key to try again.

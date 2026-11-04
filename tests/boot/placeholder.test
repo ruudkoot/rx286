@@ -1,4 +1,0 @@
-# M1: the placeholder boot sector prints a line and ends the test.
-# M2 replaces it with the real boot sector's tests.
----
-rx286 placeholder boot sector
