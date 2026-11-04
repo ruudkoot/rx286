@@ -1,0 +1,9 @@
+# Ctrl+Break (Ctrl+Scroll Lock) while something waits in the kernel: the
+# restart is asked for and the wait abandoned; keys go on working.
+define: TEST_KEYBOARD
+keys: {ctrl-break}a
+---
+rx286, test build
+rx286: Ctrl+Break: the program starts again
+key: waiting abandoned for a restart
+key 1E 61

@@ -6,7 +6,8 @@
 ; matters: the stacks are zeroed before one is used; the TSS is loaded before
 ; anything could interrupt from ring 3; LDTR is loaded with a null selector,
 ; since Bochs starts with a live LDT at address 0 (roadmap X8); the 8259As
-; are reprogrammed before interrupts are enabled (X1).
+; are reprogrammed before interrupts are enabled (X1); the devices are set
+; up before their lines are unmasked; NMI comes last.
 ; ============================================================================
 
 ; zero_segment selector, size - zero a segment with no stack in use
@@ -58,15 +59,22 @@ pm_start:
         mov al, ATTR_NORMAL
         call con_set_attr
         TRACE "kernel: protected mode; GDT, IDT, TSS and LDTR loaded"
+        call timer_init
+        call kbd_init
+        call rtc_init
+        call pic_unmask_all
+        mov al, CMOS_REG_D              ; bit 7 clear: NMI on
+        out CMOS_INDEX, al
+        TRACE "kernel: timer, keyboard and clock ready; every IRQ line unmasked"
 %ifdef TEST_IMAGE_SUM
         LOG_NUMBER "kernel image sum ", [test_image_sum]
 %endif
 .ready:
 %ifdef WITH_TEST_HOOKS
         call test_start
-        call test_end
+        jmp test_after_start
 %endif
-.idle:
-        cli
+.idle:                                  ; no program yet (M6): keys are buffered,
+        sti                             ; Ctrl+Alt+Del works
         hlt
         jmp .idle

@@ -1,0 +1,6 @@
+# The timer runs at 50 Hz: 150 ticks (within 2) while the RTC counts three
+# seconds.
+define: TEST_TICKS
+---
+rx286, test build
+timer: 50 ticks a second, by the clock

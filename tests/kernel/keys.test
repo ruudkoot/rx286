@@ -1,0 +1,23 @@
+# Keys typed through the 8042 under every modifier: what the driver puts in
+# its ring (scancode, ASCII). Before there is a program, the test build's
+# kernel reads and prints them itself.
+define: TEST_KEYBOARD
+keys: aA1!{caps}aA{caps}a{ctrl-c}{alt-x}\b\t\n\e{up}{f1}{del}
+---
+rx286, test build
+key 1E 61
+key 1E 41
+key 02 31
+key 02 21
+key 1E 41
+key 1E 61
+key 1E 61
+key 2E 03
+key 2D 00
+key 0E 08
+key 0F 09
+key 1C 0D
+key 01 1B
+key 48 00
+key 3B 00
+key 53 00

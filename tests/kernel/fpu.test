@@ -1,0 +1,7 @@
+# A 287 error with zero-divide unmasked arrives on IRQ13; the busy latch is
+# cleared and the error reported.
+define: TEST_FPU_KERNEL
+---
+rx286, test build
+rx286: the 287 reported an error (IRQ13)
+fpu: the kernel's test raised its error

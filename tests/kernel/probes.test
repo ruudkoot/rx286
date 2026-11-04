@@ -1,0 +1,13 @@
+# Three devices without a driver interrupt: each line is reported once and
+# masked. The RTC is re-armed again and again afterwards, and stays quiet;
+# the keyboard still works.
+define: TEST_PROBES
+define: TEST_KEYBOARD
+keys: a
+---
+rx286, test build
+rx286: unhandled IRQ 6, now masked
+rx286: unhandled IRQ 14, now masked
+rx286: unhandled IRQ 8, now masked
+probe: the RTC kept interrupting; IRQ8 stayed masked
+key 1E 61

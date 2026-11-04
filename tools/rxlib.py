@@ -166,7 +166,8 @@ for start, plain, shifted in _ROWS:
 SC_LSHIFT, SC_CTRL, SC_ALT = 0x2A, 0x1D, 0x38
 SC_SCROLL_LOCK, SC_DELETE = 0x46, 0x53
 NAMED = {'up': 0x48, 'down': 0x50, 'left': 0x4B, 'right': 0x4D,
-         'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'f1': 0x3B}
+         'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'f1': 0x3B, 'caps': 0x3A,
+         'scroll-lock': 0x46, 'del': 0x53}
 
 
 def compile_keys(script):
@@ -174,7 +175,8 @@ def compile_keys(script):
 
     Plain characters are typed as the US keyboard types them; escapes are
     \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc). Braces name others:
-    {up}, {down}, {left}, {right}, {esc}, {f1}, {ctrl-X} for a letter X,
+    {up}, {down}, {left}, {right}, {esc}, {f1}, {caps}, {scroll-lock}, {del},
+    {ctrl-X} and {alt-X} for a key X,
     {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
     not wait), and {wait N} (N ticks)."""
     out = []
@@ -209,10 +211,12 @@ def compile_keys(script):
                 out.extend([OP_NOW, SC_CTRL, OP_NOW, SC_ALT, OP_NOW, SC_DELETE,
                             OP_NOW, SC_DELETE | 0x80, OP_NOW, SC_ALT | 0x80,
                             OP_NOW, SC_CTRL | 0x80])
-            elif name.startswith('ctrl-') and len(name) == 6 and name[5] in KEYS:
-                out.extend([OP_WHEN_WAITING, SC_CTRL])
-                press(KEYS[name[5]][0])
-                out.extend([OP_WHEN_WAITING, SC_CTRL | 0x80])
+            elif (name.startswith('ctrl-') and len(name) == 6 or
+                  name.startswith('alt-') and len(name) == 5) and name[-1] in KEYS:
+                modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
+                out.extend([OP_WHEN_WAITING, modifier])
+                press(KEYS[name[-1]][0])
+                out.extend([OP_WHEN_WAITING, modifier | 0x80])
             else:
                 raise ValueError('key script: unknown key {%s}' % name)
             continue
