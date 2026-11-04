@@ -313,10 +313,11 @@ def run(test):
         if os.path.exists(f):
             os.remove(f)
     bochsrc = os.path.join(b, 'test.bochsrc')
+    disks = rxlib.private_disks(os.path.join(b, 'disks'))
     rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
-                        disks=rxlib.private_disks(os.path.join(b, 'disks')))
+                        disks=disks)
     rc = []
     if test.breakpoint:
         rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))
@@ -336,7 +337,8 @@ def run(test):
             return got[:len(wanted)] == wanted
         return 'TEST END' in got
     if EMULATOR == 'bochs':
-        status, _ = rxlib.run_bochs(bochsrc, rc, timeout, until=until, serial=serial)
+        status, _ = rxlib.run_bochs(bochsrc, rc, timeout, until=until, serial=serial,
+                                    log=os.path.join(b, 'bochs.log'), disks=disks)
     elif EMULATOR == 'dosbox-x':
         status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, timeout, until)
     else:

@@ -6,7 +6,8 @@
 #   --mode run        start at once
 #   --mode debugger   load the symbols and stop at the kernel's entry
 # The serial log is <build>/com1.log, Bochs' log <build>/bochs.log and the
-# debugger's <build>/debugger.log.
+# debugger's <build>/debugger.log. The window is Bochs' X11 display if the
+# package bochs-x is installed, else SDL2 (bochs-sdl), else wx (bochs-wx).
 # ============================================================================
 
 import argparse
@@ -28,7 +29,7 @@ def main():
                         image=os.path.join(build, 'rx286.img'),
                         serial=os.path.join(build, 'com1.log'),
                         log=os.path.join(build, 'bochs.log'),
-                        display=rxlib.DISPLAY_WINDOW,
+                        display=rxlib.window_display(),
                         debugger_log=os.path.join(build, 'debugger.log'),
                         magic=(args.mode == 'debugger'))
     rc = bochsrc + '.rc'

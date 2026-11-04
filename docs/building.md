@@ -74,7 +74,10 @@ E5):
 
 ## Running
 
-- `make run` starts Bochs with a window on the debug image.
+- `make run` starts Bochs with a window on the debug image. The window is
+  Bochs' X11 display if `bochs-x` is installed, else SDL2 (`bochs-sdl`), else
+  wx (`bochs-wx`), which needs wx as Bochs' configuration interface too;
+  `make doctor` says which. The tests need no window: they use `rfb`.
 - `make debugger` does the same, stopped at the kernel's entry with the
   symbols loaded (*docs/debugging.md*).
 - `make disks` makes drive B (an empty 360 KB floppy) and the two empty hard

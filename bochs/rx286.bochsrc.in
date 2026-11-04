@@ -7,6 +7,10 @@
 # docs/emulators.md lists every difference from the AT.
 # ============================================================================
 
+# wx as the display needs wx as the configuration interface too (make run,
+# make debugger); the tests run without a window, on textconfig and rfb.
+config_interface: @CONFIG_INTERFACE@
+
 # 640 KB of base memory and nothing above 1 MB (roadmap D6).
 megs: 1
 cpu: model=bx_generic, count=1, ips=4000000, reset_on_triple_fault=1

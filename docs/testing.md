@@ -35,7 +35,9 @@ unit`). Unicorn is not a 286, so only pure code is tested this way.
 `tools/run-test` builds a test image for every `tests/*/*.test`, boots it in
 Bochs without a window (`rfb`, the clock fixed) and compares what COM1 shows
 with the test's expected transcript. A boot costs about half a second, and
-tests run in parallel.
+tests run in parallel. Bochs instances that start at the same moment can race
+for an `rfb` port, and the loser stops before its machine starts ("RFB could
+not bind any port"); the runner starts such a run again.
 
 A test file is a header, a line `---`, and the expected lines:
 

@@ -80,6 +80,13 @@ bochs_debugger() {
 }
 probe "bochs: debugger" bochs_debugger
 probe "bochs: rfb"      test -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_rfb_gui.so
+if [ -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_x_gui.so ]; then
+    printf '%-12s %-12s %s\n' "bochs: window" OK "X11 (bochs-x), for make run"
+elif [ -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_sdl2_gui.so ]; then
+    printf '%-12s %-12s %s\n' "bochs: window" OK "SDL2 (bochs-sdl), for make run"
+else
+    printf '%-12s %-12s %s\n' "bochs: window" "wx only" "(optional) install bochs-x for make run's window"
+fi
 probe "bochs: 287 IRQ"  test -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_extfpuirq.so
 probe "bochs: BIOS"     test -f /usr/share/bochs/BIOS-bochs-legacy
 probe "bochs: VGABIOS"  test -f /usr/share/bochs/VGABIOS-lgpl-latest

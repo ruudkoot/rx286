@@ -108,6 +108,7 @@ def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=Fa
         '@SERIAL@': serial,
         '@LOG@': log,
         '@DISPLAY@': display,
+        '@CONFIG_INTERFACE@': 'wx' if display == 'wx' else 'textconfig',
         '@DEBUGGER_LOG@': debugger_log or '/dev/null',
         '@MAGIC@': '1' if magic else '0',
     }
@@ -135,7 +136,19 @@ def private_disks(directory):
         with open(os.path.join(directory, name), 'wb') as f:
             f.truncate(size)
     return directory
-DISPLAY_WINDOW = 'wx'
+
+
+BOCHS_PLUGINS = '/usr/lib/x86_64-linux-gnu/bochs/plugins'
+
+
+def window_display():
+    """The display for a Bochs window (make run, make debugger): X11
+    (package bochs-x) or SDL2 (bochs-sdl) if installed, else wx (bochs-wx),
+    which needs wx as the configuration interface too."""
+    for name, plugin in (('x', 'libbx_x_gui.so'), ('sdl2', 'libbx_sdl2_gui.so')):
+        if os.path.exists(os.path.join(BOCHS_PLUGINS, plugin)):
+            return name
+    return 'wx'
 
 
 # ---------------------------------------------------------------- key scripts
@@ -371,13 +384,43 @@ def run_mame(directory, image, serial, timeout, until):
     return status, time.monotonic() - started
 
 
-def run_bochs(bochsrc, rc_commands, timeout, until=None, serial=None, cwd=None):
+# Bochs' rfb display takes the first free port from 5900 up, but two Bochs
+# started at once can both bind one port: the second's listen fails, and so
+# does every later bind of the same socket, and Bochs stops with this message
+# before the machine starts. Such a run is started again, a moment later, once
+# the locks the stopped Bochs left on its disk images are gone.
+RFB_BIND_FAILED = b'RFB could not bind any port'
+RFB_ATTEMPTS = 5
+
+
+def run_bochs(bochsrc, rc_commands, timeout, until=None, serial=None, log=None,
+              disks=None, cwd=None):
     """Run Bochs on a bochsrc with a debugger script. Stops when Bochs exits,
     when `until(lines)` is true of the serial transcript, or at `timeout`
-    seconds. Returns (status, seconds), status 'exit', 'until' or 'timeout'."""
+    seconds. Returns (status, seconds), status 'exit', 'until' or 'timeout'.
+    `log` is Bochs' log: a run whose rfb display found no port is repeated.
+    `disks` is the run's own directory of disk images (private_disks)."""
     rc = bochsrc + '.rc'
     with open(rc, 'w', encoding='utf-8') as f:
         f.write('\n'.join(rc_commands) + '\n')
+    for attempt in range(RFB_ATTEMPTS):
+        if log and os.path.exists(log):
+            os.remove(log)
+        status, seconds = run_bochs_once(bochsrc, rc, timeout, until, serial, cwd)
+        if status != 'exit' or not log or not os.path.exists(log) or \
+                RFB_BIND_FAILED not in open(log, 'rb').read():
+            break
+        if serial and os.path.exists(serial):
+            os.remove(serial)
+        for name in os.listdir(disks) if disks else ():
+            if name.endswith('.lock'):
+                os.remove(os.path.join(disks, name))
+        time.sleep(0.1 + 0.2 * attempt)
+    return status, seconds
+
+
+def run_bochs_once(bochsrc, rc, timeout, until, serial, cwd):
+    """One run of Bochs, as run_bochs describes."""
     started = time.monotonic()
     proc = subprocess.Popen(['bochs', '-q', '-f', bochsrc, '-rc', rc],
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
