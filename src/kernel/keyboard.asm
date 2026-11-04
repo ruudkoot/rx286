@@ -25,6 +25,7 @@ SC_ALT              equ 0x38
 SC_CAPS_LOCK        equ 0x3A
 SC_SCROLL_LOCK      equ 0x46            ; Break, with Ctrl, on the AT keyboard
 SC_DELETE           equ 0x53            ; keypad . and Del
+SC_SYSRQ            equ 0x54            ; the AT keyboard's Sys Req
 KBC_FLUSH_LIMIT     equ 32              ; bytes read at most when emptying the 8042
 KBD_WAIT_FOREVER    equ 1               ; kbd_waiting: a key, however long it takes
 KBD_WAIT_TIMED      equ 2               ; a key, or the time runs out (SYS_WAIT)
@@ -182,6 +183,10 @@ kbd_scancode:
         je .scroll_lock
         cmp ah, SC_DELETE
         je .delete
+%ifdef WITH_CHECKS
+        cmp ah, SC_SYSRQ                ; debug and test builds: the threads
+        je thread_dump
+%endif
 .translate:
         mov bl, [kbd_mods]
         call kbd_translate              ; AL = ASCII, AH = scancode
@@ -272,9 +277,7 @@ kbd_wait_key:
         cmp byte [restart_pending], 0
         jne .abandon
         mov byte [kbd_waiting], KBD_WAIT_FOREVER
-        sti
-        hlt                             ; until an interrupt
-        cli
+        call kwait_unlocked             ; until an interrupt; other threads run
         mov byte [kbd_waiting], 0
         jmp kbd_wait_key
 .abandon:
@@ -306,10 +309,15 @@ kbd_ctrl_break:
         mov si, msg_ctrl_break
         call klog
         pop si
+        mov bx, [fg_thread]             ; the program the keys are for
+        cmp bx, [cur_thread]
+        jne .other
         mov byte [restart_pending], 1
         test byte [bp + FRAME_CS], CPL_MASK
         jz .later                       ; in the kernel: on the way back to ring 3
         jmp restart_program
+.other:
+        mov byte [bx + T_RESTART], 1    ; when it next runs (it wakes now if it waits)
 .later:
         ret
 

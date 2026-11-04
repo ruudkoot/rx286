@@ -52,9 +52,14 @@ program_main_attack := tests/programs/attack.asm
 program_main_fuzz := tests/programs/fuzz.asm
 program_main_storage := tests/programs/storage.asm
 program_main_devices := tests/programs/devices.asm
+program_main_fputhreads := tests/programs/fputhreads.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
+# The counter runs beside the shell; beside a test program only if the test
+# asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
+# timings stay their own.
+COUNTER_DEFINE := $(if $(or $(filter shell,$(PROGRAM)),$(findstring TEST_COUNTER,$(TEST_DEFINES))),,-dNO_COUNTER)
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage or devices, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices or fputhreads, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
@@ -65,7 +70,8 @@ FLOPPY_SECTORS := 2400
 FLOPPY_SERIAL := 52583836
 
 IMAGE := $(B)/rx286.img
-BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/kernel.bin
+BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/counter.bin \
+    $(B)/kernel.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
@@ -108,9 +114,14 @@ $(B)/boot-loader.bin: src/boot-loader/boot-loader.asm $(LOADER_SRC)
 $(B)/user.bin: $(PROGRAM_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
 
+# The counter, the second program the kernel starts (roadmap l4.md L2).
+$(B)/counter.bin: src/userland/counter.asm $(COMMON_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/)
+
 # On the floppy the kernel is KERNEL.BIN, upper case as FAT12 keeps names.
-$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin $(KERNEL_SRC)
-	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/ -dUSER_BIN='"$(B)/user.bin"')
+$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin $(B)/counter.bin $(KERNEL_SRC)
+	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/ -dUSER_BIN='"$(B)/user.bin"' \
+	    -dCOUNTER_BIN='"$(B)/counter.bin"' $(COUNTER_DEFINE))
 
 $(IMAGE): $(BINARIES)
 	rm -f $@.tmp

@@ -1,0 +1,11 @@
+# The counter above the shell (roadmap l4.md L2): a program that never waits
+# starves every thread below it, and only those. The shell never runs, while
+# the kernel goes on: its ticks end the test.
+program: shell
+define: TEST_COUNTER_ABOVE
+define: TEST_THREAD_REPORT
+define: TEST_END_TICKS=100
+---
+rx286, test build
+rx286: thread program did not run
+rx286: thread counter ran

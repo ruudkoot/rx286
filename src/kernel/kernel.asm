@@ -27,6 +27,7 @@ section entry start=ENTRY_OFF vstart=0
 section ktext start=KTEXT_OFF vstart=0
 section kdata start=KDATA_OFF vstart=0
 section user start=UTEXT_OFF vstart=0
+section counter start=CTEXT_OFF vstart=0
 
 section entry
 %include "entry.asm"
@@ -67,6 +68,7 @@ section ktext
 %include "print.asm"
 %include "syscall.asm"
 %include "program.asm"
+%include "thread.asm"
 %include "test.asm"
 %include "format.asm"
 ktext_end:
@@ -74,12 +76,17 @@ ktext_end:
 section kdata
 kdata_end:
 
-; The program: USER_FILE_SIZE bytes, its data padded with zeros to the room,
-; and KERNEL_END_MARK as the file's last word (the last word of the program's
-; data room), which the loader checks. "TIMES value is negative" here means
-; the program's data outgrew UDATA_ROOM.
+; The program: USER_FILE_SIZE bytes, its data padded with zeros to the room.
+; "TIMES value is negative" here means the program's data outgrew UDATA_ROOM.
 section user
 user_start:
         incbin USER_BIN
-        times USER_FILE_SIZE - 2 - ($ - user_start) db 0
+        times USER_FILE_SIZE - ($ - user_start) db 0
+
+; The counter (roadmap l4.md L2): COUNTER_FILE_SIZE bytes, and
+; KERNEL_END_MARK as the file's last word (the last word of the counter's
+; data room), which the loader checks.
+section counter
+counter_start:
+        incbin COUNTER_BIN, 0, COUNTER_FILE_SIZE - 2
         dw KERNEL_END_MARK

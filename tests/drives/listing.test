@@ -11,9 +11,9 @@ rx286 shell: type help for the commands
 A:\>dir
  Volume in drive A is RX286
  Directory of A:\
-KERNEL   BIN     28928  1989-01-01  00:00
-        1 file(s)      28928 bytes
-                     1183232 bytes free
+KERNEL   BIN     43264  1989-01-01  00:00
+        1 file(s)      43264 bytes
+                     1168896 bytes free
 A:\>b:
 B:\>dir
  Volume in drive B is RX286B

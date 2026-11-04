@@ -122,25 +122,38 @@ All gates but the double fault's are interrupt gates, so the kernel runs with
 IF clear and nothing interleaves with a half-done change. It sets IF only
 where it waits, and only where its state is whole:
 
-- **`read_key` waiting for a key**: `sti; hlt; cli` until a key arrives.
+- **`read_key` waiting for a key**: until a key arrives, in `kwait`: the
+  thread waits until the next interrupt while other threads run, or the
+  kernel halts on its own stack (`sti; hlt; cli`) if none is ready
+  (*docs/architecture.md*, *Threads*).
 - **`write` and `print`, after each byte**: `sti; nop; cli`. `STI` takes
   effect after the next instruction, so `sti; cli` would open nothing. A
   byte's work is at most one scroll or one clear of the screen; without the
   window, a `write` of 4,096 newlines, spaces or form feeds would keep IF
   clear for seconds.
 - **A driver waiting for its device** (*docs/storage.md*): `ksleep_until`
-  sleeps (`sti; hlt; cli`) until the device's interrupt handler sets a byte,
+  sleeps (`kwait`) until the device's interrupt handler sets a byte,
   `kpoll` reads a port with a window (`sti; nop; cli`) after every 64 reads,
   and `ksleep` sleeps for a number of ticks (a motor coming up, a sound).
   Every wait has a limit in ticks.
-- **`SYS_WAIT`**: `sti; hlt; cli` until a key, the mouse's news or the
-  modem's bytes, or its limit (*docs/devices.md*).
+- **`SYS_WAIT`**: `kwait` until a key, the mouse's news or the modem's
+  bytes, or its limit (*docs/devices.md*).
+
+After a window of `write`, `print`, `serial_write` or `kpoll`, a thread more
+urgent than the running one may run (`kpreempt`): the running thread's
+kernel context waits on its own kernel stack.
 
 The game port's timing is the one stretch the kernel spends with
 interrupts off by design: 4 ms at most, a fifth of a tick, so no tick is
 lost.
 
-An IRQ at any of these points nests once on the kernel stack: handlers run
-with IF clear and never wait. A Ctrl+Break or a 287 error that arrives
-during a system call sets a flag, and the call's return to ring 3 restarts
-the program instead; a disk call finishes its sector first.
+An IRQ at any of these points nests once on the running thread's kernel
+stack (or the kernel's own, when it idles): handlers run with IF clear and
+never wait. After every IRQ, every thread waiting inside the kernel is made
+ready to look again at what it waits for (`wake_waiters`).
+
+A Ctrl+Break or a 287 error that arrives during a system call sets a flag
+of the thread it is for (the program the keys are for; the 287's owner),
+and that thread's return to ring 3 restarts its program instead; a disk
+call finishes its sector first. The flag is `restart_pending` while the
+thread runs, and kept in its control block while another does.

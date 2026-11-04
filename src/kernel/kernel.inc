@@ -33,6 +33,42 @@ FRAME_USER_SS       equ 32
 FRAME_SIZE_KERNEL   equ 30      ; a frame from ring 0
 FRAME_SIZE_USER     equ 34      ; a frame from ring 3
 
+; ---------------------------------------------------------------- threads
+; A thread control block (thread.asm; roadmap l4.md L2). Its kernel stack is
+; a segment of its own (SEL_TSTACK + 8n), at whose top the CPU puts the frame
+; of every interrupt from ring 3 (SP0); while it does not run, its kernel
+; SS:SP rest here, at what switch_to pushed.
+T_SS                equ 0       ; its kernel stack's SS:SP while another runs
+T_SP                equ 2
+T_STATE             equ 4       ; byte: TS_*
+T_PRIO              equ 5       ; byte: 0, the lowest, to PRIORITIES - 1
+T_NEXT              equ 6       ; the next of its ready queue
+T_LDT               equ 8       ; its LDT's selector
+T_STACK             equ 10      ; its kernel stack's selector
+T_USTACK_TOP        equ 12      ; its program's SP at a start
+T_RESTART           equ 14      ; byte: restart_pending, kept while another runs
+T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state
+T_NAME              equ 16      ; its name (kdata)
+T_SLICE             equ 18      ; byte: ticks left of its time slice
+T_FLAGS             equ 19      ; byte: TF_*
+T_RUN_TICKS         equ 20      ; ticks during which it was running
+T_LDT_LIVE          equ 22      ; its LDT (kdata)
+T_LDT_PRISTINE      equ 24      ; the LDT as built (kdata)
+T_RUNS              equ 26      ; times it was switched to
+T_FPU               equ 28      ; its 287's state (FNSAVE: 94 bytes) while not the owner
+TCB_SIZE            equ 122
+
+TS_FREE             equ 0       ; T_STATE: no thread
+TS_READY            equ 1       ; in its ready queue
+TS_RUNNING          equ 2
+TS_WAITING          equ 3       ; inside the kernel, until the next interrupt
+
+TF_FOREGROUND       equ 0x01    ; T_FLAGS: the keys and Ctrl+Break are its
+
+PRIORITIES          equ 8
+SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
+STACK_FILL          equ 0xA5A5  ; debug builds: an unused word of a kernel stack
+
 ; ---------------------------------------------------------------- the CPU
 MSW_PE              equ 0x0001  ; protection enable
 MSW_MP              equ 0x0002  ; monitor processor extension: WAIT honours TS

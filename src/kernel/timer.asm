@@ -45,6 +45,7 @@ timer_init:
 timer_irq:
         add word [ticks], 1
         adc word [ticks + 2], 0
+        call thread_tick                ; the running thread's time slice
         call fd_tick
         call mouse_tick
         call mouse_irq                  ; bytes whose interrupt was lost (an edge
@@ -74,9 +75,7 @@ ksleep_until:
         sub ax, bx
         cmp ax, cx
         jae .late
-        sti                             ; STI acts after HLT has begun: an interrupt
-        hlt                             ; already pending still wakes it
-        cli
+        call kwait                      ; until an interrupt; other threads run
         jmp .check
 .set:
         pop bx
@@ -129,6 +128,7 @@ kpoll:
         sti
         nop
         cli
+        call kpreempt                   ; a more urgent thread may run here
         push ax
         mov ax, [ticks]
         sub ax, si

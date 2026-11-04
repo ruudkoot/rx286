@@ -152,6 +152,7 @@ sys_serial_write:
         sti                             ; interrupts in after every byte
         nop
         cli
+        call kpreempt                   ; a more urgent thread may run here
         cmp byte [restart_pending], 0
         jne .sent
         loop .next

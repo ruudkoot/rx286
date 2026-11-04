@@ -34,6 +34,12 @@ gdt:
         segment_descriptor DFSTACK_PHYS, DFSTACK_SIZE - 1, ACC_KDATA    ; SEL_DFSTACK
         segment_descriptor VIDEO_PHYS, VIDEO_SIZE - 1, ACC_KDATA    ; SEL_VIDEO
         kdata_descriptor program_ldt, LDT_LIMIT, ACC_LDT            ; SEL_LDT
+        kdata_descriptor counter_ldt, LDT_LIMIT, ACC_LDT            ; SEL_LDT_COUNTER
+%assign t 0
+%rep THREADS
+        segment_descriptor TSTACK_PHYS + t * TSTACK_SIZE, TSTACK_SIZE - 1, ACC_KDATA ; SEL_TSTACK
+  %assign t t + 1
+%endrep
 gdt_end:
 
 %if GDT_ENTRIES * 8 - 1 != GDT_LIMIT

@@ -1,13 +1,15 @@
 ; ============================================================================
 ; rx286 - src/kernel/program.asm
-; The program in ring 3: started, faulted, started again (roadmap D11).
+; A program in ring 3: started, faulted, started again (roadmap D11).
 ;
-; The program's code is UCODE:0000, its data UDATA, its stack USTACK; it
-; starts with its registers zero, IF on and IOPL 0. A fault of the program
-; is reported (and its registers, in debug and test builds), and the
-; program starts again at its entry with a fresh stack, a reset 287 and an
-; empty keyboard ring. The kernel does not reset the program's data: its
-; entry code initialises what it needs.
+; Each thread runs a program (thread.asm): the program, and the counter
+; beside it (roadmap l4.md L2). A program's code is UCODE:0000, its data
+; UDATA, its stack USTACK, in its own LDT; it starts with its registers
+; zero, IF on and IOPL 0. A fault of a program is reported (and its
+; registers, in debug and test builds), and the program starts again at its
+; entry with a fresh stack and a fresh 287; the program the keys are for
+; also with an empty keyboard ring. The kernel does not reset a program's
+; data: its entry code initialises what it needs.
 ; ============================================================================
 
 begin_kdata
@@ -15,34 +17,8 @@ msg_program_fault   db "program fault ", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; enter_program - start the program for the first time
-;   In:       CPL 0, on the kernel stack, interrupts off; DS = SEL_KDATA
-;   Out:      does not return: IRET to ring 3
-;   Destroys: everything
-; ----------------------------------------------------------------------------
-enter_program:
-        TRACE "kernel: entering the program"
-        call program_reset
-        push word SEL_USTACK
-        push word USTACK_SIZE
-        push word FLAGS_USER_START
-        push word SEL_UCODE
-        push word 0                     ; the program's entry
-        xor ax, ax
-        xor bx, bx
-        xor cx, cx
-        xor dx, dx
-        xor si, si
-        xor di, di
-        xor bp, bp
-        mov ax, SEL_UDATA
-        mov ds, ax
-        mov es, ax
-        xor ax, ax
-        iret
-
-; ----------------------------------------------------------------------------
-; restart_program - make the frame return to the program's entry, afresh
+; restart_program - make the frame return to the running thread's
+; program's entry, afresh
 ;   In:       BP = a frame from ring 3; DS = SEL_KDATA
 ;   Out:      the frame changed; restart_pending clear
 ;   Destroys: nothing
@@ -52,10 +28,13 @@ restart_program:
         call test_restart_check
 %endif
         push ax
+        push bx
         mov word [bp + FRAME_IP], 0
         mov word [bp + FRAME_CS], SEL_UCODE
         mov word [bp + FRAME_FLAGS], FLAGS_USER_START
-        mov word [bp + FRAME_USER_SP], USTACK_SIZE
+        mov bx, [cur_thread]
+        mov ax, [bx + T_USTACK_TOP]
+        mov [bp + FRAME_USER_SP], ax
         mov word [bp + FRAME_USER_SS], SEL_USTACK
         mov word [bp + FRAME_DS], SEL_UDATA
         mov word [bp + FRAME_ES], SEL_UDATA
@@ -68,23 +47,31 @@ restart_program:
         mov [bp + FRAME_DI], ax
         mov [bp + FRAME_BP], ax
         call program_reset
+        pop bx
         pop ax
         ret
 
 ; ----------------------------------------------------------------------------
-; program_reset - what a fresh start of the program needs from the kernel
+; program_reset - what a fresh start of the running thread's program needs
+; from the kernel
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 program_reset:
+        push bx
         mov byte [restart_pending], 0
         call ldt_restore                ; undo any test probe's change
-        fninit                          ; a clean 287, whatever the last run left
+        call fpu_reset_thread           ; a clean 287, whatever the last run left
+        mov bx, [cur_thread]
+        test byte [bx + T_FLAGS], TF_FOREGROUND
+        jz .done
         call kbd_clear
 %ifdef WITH_TEST_HOOKS
         call test_program_started
 %endif
+.done:
+        pop bx
         ret
 
 ; ----------------------------------------------------------------------------

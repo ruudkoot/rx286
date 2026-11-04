@@ -32,6 +32,12 @@
 ;   TEST_FUZZ           the fuzzer runs: the same checks, faults counted
 ;                       instead of reported, a watchdog, and the end after
 ;                       FUZZ_ITERATIONS starts (M8)
+;   TEST_COUNTER_SAME   the counter at the program's priority (thread.asm;
+;   TEST_COUNTER_ABOVE  roadmap l4.md L2), or above it; either also starts
+;                       the counter beside a test program (Makefile)
+;   TEST_COUNTER_FPU    the counter checks its 287 state (counter.asm)
+;   TEST_THREAD_REPORT  at the end: which threads ran
+;   TEST_END_TICKS=n    end the test after n ticks, keys or not
 ; Release and debug builds assemble none of this.
 ; ============================================================================
 
@@ -190,13 +196,20 @@ test_recurse:
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 test_tick:
+%ifdef TEST_END_TICKS
+        cmp word [ticks], TEST_END_TICKS ; a test with nothing to type: it ends
+        jae test_end                    ; after so many ticks
+%endif
 %ifdef TEST_FUZZ
         inc word [fuzz_ticks]
         cmp word [fuzz_ticks], FUZZ_WATCHDOG
         jb .keys
         mov word [fuzz_ticks], 0
         inc word [fuzz_watchdogs]
-        mov byte [restart_pending], 1   ; in the kernel: on the way back
+        mov bx, [fg_thread]             ; the fuzz program's thread, whichever runs:
+        call thread_restart             ; in the kernel, on the way back
+        cmp bx, [cur_thread]
+        jne .keys
         test byte [bp + FRAME_CS], CPL_MASK
         jz .keys
         call restart_program            ; in ring 3: now
@@ -553,7 +566,7 @@ test_program_started:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_restart_check:
-        cmp bp, KSTACK_SIZE - FRAME_SIZE_USER
+        cmp bp, TSTACK_SIZE - FRAME_SIZE_USER   ; the running thread's kernel stack
         je .ok
         mov si, msg_stack_leak
         xor bp, bp
@@ -748,6 +761,44 @@ test_probe:
         jmp sys_fail
 %endif
 
+%ifdef TEST_THREAD_REPORT
+begin_kdata
+msg_report_thread   db "thread ", 0
+msg_report_ran      db " ran", CHAR_LF, 0
+msg_report_idle     db " did not run", CHAR_LF, 0
+end_kdata
+
+; ----------------------------------------------------------------------------
+; test_thread_report - at the end of a test of threads: which of them ran
+; (roadmap l4.md L2)
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, BX, SI
+; ----------------------------------------------------------------------------
+test_thread_report:
+        mov bx, threads
+.thread:
+        cmp byte [bx + T_STATE], TS_FREE
+        je .next                        ; never started
+        mov si, msg_log_prefix
+        call kputs
+        mov si, msg_report_thread
+        call kputs
+        mov si, [bx + T_NAME]
+        call kputs
+        mov si, msg_report_ran
+        cmp word [bx + T_RUNS], 0
+        jne .say
+        mov si, msg_report_idle
+.say:
+        call kputs
+.next:
+        add bx, TCB_SIZE
+        cmp bx, threads_end
+        jb .thread
+        ret
+%endif
+
 ; ----------------------------------------------------------------------------
 ; test_end - "TEST END" on the log on a line of its own, then end Bochs
 ;   In:       DS = SEL_KDATA
@@ -764,6 +815,9 @@ test_end:
         mov al, CHAR_LF
         call com_putc
 .line_start:
+%ifdef TEST_THREAD_REPORT
+        call test_thread_report         ; (on the console too: it starts a line on
+%endif                                  ; the log, where the tests read it)
         mov si, msg_test_end
         call com_puts
         call com_drain

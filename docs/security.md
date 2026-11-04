@@ -49,7 +49,13 @@ Every way out is a reported fault, after which the program starts again
 - **No starvation.** The kernel runs with interrupts off only for short
   stretches: `write` and `print` open a window after every byte, and
   `read_key` and the drivers wait with interrupts on. A program that spins
-  is stopped by Ctrl+Break.
+  is preempted at the end of its time slice by any thread of its priority
+  or above, and stopped by Ctrl+Break if it is the program the keys are
+  for; it starves only threads below it (roadmap l4.md L2,
+  `tests/threads/above.test`).
+- **Each program in its own LDT.** The program and the counter have LDTs
+  of their own; the same selectors name different memory in each, and no
+  selector of one reaches the other's (*docs/protected-mode.md*).
 - **No device can hang the kernel.** Every wait for a disk, printer or
   modem has a limit in ticks (*docs/storage.md*, *docs/devices.md*); a
   diskette that is not there, a fixed disk that does not answer and a

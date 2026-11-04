@@ -100,11 +100,13 @@ irq:
         jz .unhandled
         call ax
         pop bx
-        jmp pic_eoi
+        call pic_eoi
+        jmp wake_waiters                ; threads waiting inside the kernel look again
 .unhandled:
         pop bx
         call irq_unhandled
-        jmp pic_eoi
+        call pic_eoi
+        jmp wake_waiters
 .check_master:
         mov al, PIC_READ_ISR
         out PIC1_CMD, al

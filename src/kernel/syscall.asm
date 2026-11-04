@@ -30,7 +30,6 @@ syscall_table:
         dw sys_serial_read              ; SYS_SERIAL_READ
         dw sys_wait                     ; SYS_WAIT
 syscall_table_end:
-wait_events         db 0                ; what SYS_WAIT waits for
 end_kdata
 
 %if SYSCALL_COUNT != 14
@@ -44,20 +43,26 @@ end_kdata
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 syscall:
+        call call_enter                 ; one thread at a time (l4.md X15)
         and word [bp + FRAME_FLAGS], ~FLAGS_CF
         mov bl, [bp + FRAME_AX + 1]     ; the caller's AH
         cmp bl, SYSCALL_COUNT
         jae .nosys
         xor bh, bh
         shl bx, 1
-        jmp [syscall_table + bx]
+        call [syscall_table + bx]
+        jmp call_leave
 .nosys:
 %ifdef TEST_ATTACK
         cmp byte [bp + FRAME_AX + 1], SYS_TEST_PROBE
-        je test_probe
+        jne .none
+        call test_probe
+        jmp call_leave
+.none:
 %endif
         mov ax, E_NOSYS
-        ; falls through
+        call sys_fail
+        jmp call_leave
 
 ; ----------------------------------------------------------------------------
 ; sys_fail - return an error: the frame's CF set, its AX the code
@@ -110,6 +115,7 @@ sys_write:
         sti
         nop
         cli
+        call kpreempt                   ; a more urgent thread may run here
         cmp byte [restart_pending], 0
         jne .written
         loop .next
@@ -257,9 +263,9 @@ sys_wait:
         jnz .events
         jcxz .invalid                   ; nothing, for ever
 .events:
-        mov [wait_events], al
         mov bx, [ticks]
 .check:
+        mov al, [bp + FRAME_AX]         ; the events asked for
         call wait_ready
         test al, al
         jnz .done
@@ -272,15 +278,13 @@ sys_wait:
         mov al, 0
         jae .done
 .sleep:
-        test byte [wait_events], WAIT_KEY
+        test byte [bp + FRAME_AX], WAIT_KEY
         jz .halt
         mov byte [kbd_waiting], KBD_WAIT_FOREVER    ; what a test build types into
         jcxz .halt
         mov byte [kbd_waiting], KBD_WAIT_TIMED
 .halt:
-        sti
-        hlt
-        cli
+        call kwait_unlocked             ; until an interrupt; other threads run
         mov byte [kbd_waiting], 0
         jmp .check
 .done:
@@ -293,27 +297,29 @@ sys_wait:
 
 ; ----------------------------------------------------------------------------
 ; wait_ready - which of the events SYS_WAIT waits for are there
-;   In:       wait_events; DS = SEL_KDATA
+;   In:       AL = the events; DS = SEL_KDATA
 ;   Out:      AL = those there
 ;   Destroys: AH
 ; ----------------------------------------------------------------------------
 wait_ready:
+        push dx
+        mov dl, al
         xor ah, ah
-        test byte [wait_events], WAIT_KEY
+        test dl, WAIT_KEY
         jz .mouse
         mov al, [kbd_head]
         cmp al, [kbd_tail]
         je .mouse
         or ah, WAIT_KEY
 .mouse:
-        test byte [wait_events], WAIT_MOUSE
+        test dl, WAIT_MOUSE
         jz .serial
         cmp byte [mouse_changed], 0
         je .serial
         or ah, WAIT_MOUSE
 .serial:
 %ifdef WITH_MODEM
-        test byte [wait_events], WAIT_SERIAL
+        test dl, WAIT_SERIAL
         jz .done
         call modem_ready
         jz .done
@@ -321,6 +327,7 @@ wait_ready:
 .done:
 %endif
         mov al, ah
+        pop dx
         ret
 
 ; ----------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+# Two threads keep their own 287 states (roadmap l4.md L2, D17): the program
+# keeps pi, the counter at the same priority keeps 1, and the time slices
+# switch the 287 between them, lazily, many times. MAME has no 287, and
+# DOSBox-X ignores TS (docs/emulators.md).
+program: fputhreads
+emulators: bochs
+define: TEST_COUNTER_SAME
+define: TEST_COUNTER_FPU
+define: TEST_THREAD_REPORT
+---
+rx286, test build
+program: its 287 state kept
+rx286: thread program ran
+rx286: thread counter ran

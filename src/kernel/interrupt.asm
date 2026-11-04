@@ -48,10 +48,26 @@ isr_common:
         mov bx, [bp + FRAME_VECTOR]
         shl bx, 1
         call [isr_handlers + bx]
-        ; Back to ring 3 with a restart pending (Ctrl+Break or a 287 error
-        ; during a system call): restart the program instead.
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; isr_exit - the way back: to the kernel, or to ring 3 through a switch to a
+; more urgent thread, a pending restart and the checks of the frame
+;   In:       BP = the frame; DS = SEL_KDATA; interrupts off
+;   Out:      IRET to the frame
+;   Destroys: everything but what the frame restores
+; ----------------------------------------------------------------------------
+isr_exit:
         test byte [bp + FRAME_CS], CPL_MASK
         jz .restore
+        ; A thread more urgent is ready, or the time slice is over: give way
+        ; here, at the edge of ring 3, where nothing of the kernel's is half done.
+        cmp byte [resched], 0
+        je .restart
+        call preempt
+.restart:
+        ; Back to ring 3 with a restart pending (Ctrl+Break or a 287 error
+        ; during a system call): restart the program instead.
         cmp byte [restart_pending], 0
         je .check_segments
         call restart_program

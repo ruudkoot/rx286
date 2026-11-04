@@ -1,0 +1,13 @@
+# The shell and the counter, the counter below it (roadmap l4.md L2): the
+# shell answers as ever, and the counter runs whenever the shell waits.
+program: shell
+define: TEST_THREAD_REPORT
+keys: echo hello\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>echo hello
+hello
+A:\>
+rx286: thread program ran
+rx286: thread counter ran

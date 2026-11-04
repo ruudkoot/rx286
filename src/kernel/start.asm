@@ -87,4 +87,4 @@ pm_start:
 %ifdef TEST_KEYBOARD
         jmp test_after_start
 %endif
-        jmp enter_program
+        jmp threads_start

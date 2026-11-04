@@ -253,7 +253,7 @@ SC_LSHIFT, SC_CTRL, SC_ALT = 0x2A, 0x1D, 0x38
 SC_SCROLL_LOCK, SC_DELETE = 0x46, 0x53
 NAMED = {'up': 0x48, 'down': 0x50, 'left': 0x4B, 'right': 0x4D,
          'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'f1': 0x3B, 'caps': 0x3A,
-         'scroll-lock': 0x46, 'del': 0x53}
+         'scroll-lock': 0x46, 'del': 0x53, 'sysrq': 0x54}
 
 
 def compile_keys(script):
@@ -262,6 +262,7 @@ def compile_keys(script):
     Plain characters are typed as the US keyboard types them; escapes are
     \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc). Braces name others:
     {up}, {down}, {left}, {right}, {esc}, {f1}, {caps}, {scroll-lock}, {del},
+    {sysrq} (the kernel's thread dump, in debug and test builds),
     {ctrl-X} and {alt-X} for a key X,
     {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
     not wait), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's

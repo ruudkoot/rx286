@@ -11,6 +11,8 @@
 %ifndef RX286_SELECTORS_INC
 %define RX286_SELECTORS_INC
 
+%include "layout.inc"                  ; THREADS
+
 RPL_KERNEL          equ 0
 RPL_USER            equ 3
 SEL_TI_LDT          equ 0x04        ; the table indicator: an LDT selector
@@ -24,12 +26,15 @@ SEL_DFTSS           equ 0x28        ; the double-fault task
 SEL_DFSTACK         equ 0x30        ; the double-fault task's stack
 SEL_VIDEO           equ 0x38        ; colour text, page 0
 SEL_LDT             equ 0x40        ; the program's LDT
+SEL_LDT_COUNTER     equ 0x48        ; the counter's LDT (roadmap l4.md L2)
+SEL_TSTACK          equ 0x50        ; the first thread's kernel stack; the next at +8
 
-GDT_ENTRIES         equ 9
+GDT_ENTRIES         equ 10 + THREADS
 GDT_LIMIT           equ GDT_ENTRIES * 8 - 1
 
-; The program's LDT: its three segments, the fuzzer's alias in test builds
-; with the fuzzer, and empty slots (all zeros: invisible to ring 3).
+; A program's LDT: its three segments, the fuzzer's alias in test builds
+; with the fuzzer, and empty slots (all zeros: invisible to ring 3). The
+; counter's LDT has the same slots, so the same selectors name its own.
 SEL_UCODE           equ 0x00 | SEL_TI_LDT | RPL_USER    ; the program's code
 SEL_UDATA           equ 0x08 | SEL_TI_LDT | RPL_USER    ; its data
 SEL_USTACK          equ 0x10 | SEL_TI_LDT | RPL_USER    ; its stack
