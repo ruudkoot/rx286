@@ -33,8 +33,12 @@ aux = false
 
 [serial]
 serial1 = serialmouse
-serial2 = @COM2@
-serial3 = @COM3@
+serial2 = file file:@SERIAL@
+serial3 = disabled
+serial4 = @COM4@
+
+[joystick]
+joysticktype = 2axis
 
 [parallel]
 parallel1 = file append:@LPT1@ timeout:20

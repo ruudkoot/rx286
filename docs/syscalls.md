@@ -25,6 +25,12 @@ numbers and the macro `sys`:
 | 5 | `SYS_DISK_READ` | AL = the drive, CX = the sector, ES:DI = `SECTOR_SIZE` bytes to fill | nothing: every register kept; CF with `E_INVAL` (no such drive, or the sector past its end), `E_FAULT` (a buffer the program may not write), `E_IO`, `E_TIMEOUT` |
 | 6 | `SYS_DISK_WRITE` | AL = the drive, CX = the sector, DS:SI = `SECTOR_SIZE` bytes | nothing; CF with `E_INVAL`, `E_FAULT` (a buffer it may not read), `E_IO`, `E_TIMEOUT`, `E_PROTECTED` |
 | 7 | `SYS_PRINT` | AL = the printer, DS:SI buffer, CX length (at most `PRINT_MAX`, 4,096) | AX = bytes printed; CF with `E_INVAL`, `E_FAULT`, or `E_PAPER` or `E_TIMEOUT` with CX = the bytes printed before |
+| 8 | `SYS_SOUND` | BX = hertz (`SOUND_MIN_HZ` to `SOUND_MAX_HZ`; 0 a rest), CX = ticks (`SOUND_MAX_TICKS` at most) | nothing, once the sound is over (Ctrl+Break ends it); CF with `E_INVAL` |
+| 9 | `SYS_JOYSTICK` | | AL = the buttons pressed (bit n, button n), AH = 0; BX, CX, DX, SI = axes 0-3 in microseconds, or `JOY_ABSENT` (timed for `JOY_AXIS_MAX_US` at most) |
+| 10 | `SYS_MOUSE` | | AX = `MOUSE_PRESENT` if the mouse answered its reset, else 0; BX = the buttons (`MOUSE_LEFT`, `MOUSE_RIGHT`); CX = x (0 to `MOUSE_X_MAX`), DX = y (0 to `MOUSE_Y_MAX`) |
+| 11 | `SYS_SERIAL_WRITE` | DS:SI buffer, CX length (at most `SERIAL_MAX`, 4,096) | AX = bytes sent on COM4, the modem's line; CF with `E_INVAL`, `E_FAULT`, or `E_TIMEOUT` with CX = the bytes sent before |
+| 12 | `SYS_SERIAL_READ` | ES:DI buffer, CX room (at most `SERIAL_MAX`) | AX = the bytes the modem's line has brought, up to CX, perhaps 0: it does not wait; CF with `E_INVAL`, `E_FAULT` |
+| 13 | `SYS_WAIT` | AL = events (`WAIT_KEY`, `WAIT_MOUSE`, `WAIT_SERIAL`), CX = ticks at most (0: no limit) | AL = the events there, 0 if the time ran out or the program is to restart; CF with `E_INVAL` (an unknown event, or none and no limit) |
 | other | | | CF, AX = `E_NOSYS` |
 
 `SYSCALL_COUNT` is the number of calls.
@@ -60,7 +66,8 @@ is read or written, which may take a second (a diskette's motor) or more
 (retries).
 
 `SYS_PRINT` takes `PRINTER_LPT1` (0) or `PRINTER_LPT2` (1); `PRINTERS` is
-their number. It returns when the last byte is out; it stops early, with the
+their number. The speaker, game port, mouse and modem are described in
+*docs/devices.md*. It returns when the last byte is out; it stops early, with the
 count so far, if the program is to restart (Ctrl+Break).
 
 ### Keys

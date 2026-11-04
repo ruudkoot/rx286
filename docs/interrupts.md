@@ -83,6 +83,8 @@ slave's; there are `IRQ_LINES` (16).
 | `IRQ_TIMER` (0) | the timer driver: 50 ticks a second |
 | `IRQ_KEYBOARD` (1) | the keyboard driver |
 | 2 | the cascade: never masked, never delivered |
+| 3 | the modem's driver: bytes from COM4 (COM2, the log, keeps its interrupt off) |
+| 4 | the mouse's driver: bytes from COM1 |
 | 6 | the diskette driver: a command has ended |
 | `IRQ_FPU` (13) | the 287's error: a fault of the program |
 | 14 | the fixed disk driver: a sector is ready, or written |
@@ -114,8 +116,14 @@ where it waits, and only where its state is whole:
 - **A driver waiting for its device** (*docs/storage.md*): `ksleep_until`
   sleeps (`sti; hlt; cli`) until the device's interrupt handler sets a byte,
   `kpoll` reads a port with a window (`sti; nop; cli`) after every 64 reads,
-  and `ksleep` sleeps for a number of ticks (a motor coming up). Every wait
-  has a limit in ticks.
+  and `ksleep` sleeps for a number of ticks (a motor coming up, a sound).
+  Every wait has a limit in ticks.
+- **`SYS_WAIT`**: `sti; hlt; cli` until a key, the mouse's news or the
+  modem's bytes, or its limit (*docs/devices.md*).
+
+The game port's timing is the one stretch the kernel spends with
+interrupts off by design: 4 ms at most, a fifth of a tick, so no tick is
+lost.
 
 An IRQ at any of these points nests once on the kernel stack: handlers run
 with IF clear and never wait. A Ctrl+Break or a 287 error that arrives

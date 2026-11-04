@@ -106,13 +106,11 @@ DEEP_TOO_LONG = 'ABCDEFGH.XY'    # 66
 
 
 def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
-                  disks=DISKS, printers=('/dev/null', '/dev/null'), media=(),
-                  log_port='com2', modem=None):
+                  disks=DISKS, printers=('/dev/null', '/dev/null'), media=(), modem=None):
     """Write a bochsrc for one run from bochs/rx286.bochsrc.in. Bochs locks
     the hard-disk images, so runs at the same time need their own `disks`.
-    `serial` is the file the log goes to, from `log_port` ('com2', or 'com3'
-    when COM2 is the modem); `modem` the host:port COM2 connects to, if it
-    is the modem. `printers` are the files LPT1 and LPT2 print into; `media`
+    `serial` is the file the log (COM2) goes to; `modem` the host:port the
+    modem on COM4 connects to, if any. `printers` are the files LPT1 and LPT2 print into; `media`
     a list of MEDIA."""
     for m in media:
         if m not in MEDIA:
@@ -128,9 +126,9 @@ def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=Fa
         '@HD1_TYPE@': 'none' if 'D absent' in media else 'disk',
         '@LPT1@': printers[0],
         '@LPT2@': printers[1],
-        '@COM2@': ('mode=file, dev=' + serial if log_port == 'com2' else
-                   'mode=socket-client, dev=' + modem if modem else 'mode=null'),
-        '@COM3@': 'mode=file, dev=' + serial if log_port == 'com3' else 'mode=null',
+        '@SERIAL@': serial,
+        '@COM4@': 'mode=socket-client, dev=' + modem if modem else 'mode=null',
+        '@CLOCK_SYNC@': 'realtime' if modem else 'none',
         '@LOG@': log,
         '@DISPLAY@': display,
         '@CONFIG_INTERFACE@': 'wx' if display == 'wx' else 'textconfig',
@@ -228,9 +226,10 @@ def window_display():
 #   01 s   type scancode s once the program waits for a key, its ring empty
 #   02 s   type scancode s at the next tick, whatever the program does
 #   03 n   wait n ticks
+#   04 a b c   a mouse packet, to the mouse driver at the next tick
 #   00     the end: once the program waits for a key, the test ends
 
-OP_END, OP_WHEN_WAITING, OP_NOW, OP_WAIT = 0, 1, 2, 3
+OP_END, OP_WHEN_WAITING, OP_NOW, OP_WAIT, OP_MOUSE = 0, 1, 2, 3, 4
 
 # Scancode set 1 of the US keyboard: character -> (scancode, shift).
 _ROWS = [
@@ -261,7 +260,9 @@ def compile_keys(script):
     {up}, {down}, {left}, {right}, {esc}, {f1}, {caps}, {scroll-lock}, {del},
     {ctrl-X} and {alt-X} for a key X,
     {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
-    not wait), and {wait N} (N ticks)."""
+    not wait), {wait N} (N ticks), and {mouse DX DY B}: a Microsoft mouse's
+    packet, DX right and DY down (-128 to 127), B the buttons down (L, R, LR
+    or -)."""
     out = []
 
     def press(code, op=OP_WHEN_WAITING):
@@ -284,6 +285,9 @@ def compile_keys(script):
             i = end + 1
             if name in NAMED:
                 press(NAMED[name])
+            elif name.startswith('mouse '):
+                out.append(OP_MOUSE)
+                out.extend(mouse_packet(name))
             elif name.startswith('wait '):
                 n = int(name[5:])
                 while n > 0:
@@ -317,6 +321,19 @@ def compile_keys(script):
             out.extend([OP_NOW, SC_LSHIFT | 0x80])
     out.append(OP_END)
     return out
+
+
+def mouse_packet(spec):
+    """A key script's {mouse DX DY B} as the three bytes a Microsoft mouse
+    sends: 1 L R Y7 Y6 X7 X6, 0 X5-X0, 0 Y5-Y0."""
+    _, dx, dy, buttons = spec.split()
+    dx, dy = int(dx), int(dy)
+    if not (-128 <= dx <= 127 and -128 <= dy <= 127) or buttons not in ('-', 'L', 'R', 'LR'):
+        raise ValueError('key script: bad mouse packet {%s}' % spec)
+    x, y = dx & 0xFF, dy & 0xFF
+    first = 0x40 | (0x20 if 'L' in buttons else 0) | (0x10 if 'R' in buttons else 0)
+    first |= ((y >> 6) << 2) | (x >> 6)
+    return [first, x & 0x3F, y & 0x3F]
 
 
 def keys_include(script):
@@ -361,19 +378,17 @@ DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
 
 
 def run_dosbox(directory, image, serial, timeout, until,
-               printers=('/dev/null', '/dev/null'), log_port='com2', modem=None):
+               printers=('/dev/null', '/dev/null'), modem=None):
     """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
-    `until(lines)` holds of the transcript, the log in `serial` (from
-    `log_port`, as write_bochsrc), or `timeout` seconds; LPT1 and LPT2 print
-    into `printers`; COM2 connects to `modem` (host:port) if it is the
-    modem. DOSBox-X has no shutdown port and ignores SIGTERM: it is killed."""
+    `until(lines)` holds of the transcript, the log (COM2) in `serial`, or
+    `timeout` seconds; LPT1 and LPT2 print into `printers`; the modem on COM4
+    connects to `modem` (host:port), if any. DOSBox-X has no shutdown port
+    and ignores SIGTERM: it is killed."""
     text = open(DOSBOX_TEMPLATE, encoding='utf-8').read()
-    log = 'file file:' + serial
     host, _, port = (modem or '').partition(':')
-    text = text.replace('@IMAGE@', image)
-    text = text.replace('@COM2@', log if log_port == 'com2' else
-                        'nullmodem server:%s port:%s' % (host, port) if modem else 'disabled')
-    text = text.replace('@COM3@', log if log_port == 'com3' else 'disabled')
+    text = text.replace('@IMAGE@', image).replace('@SERIAL@', serial)
+    text = text.replace('@COM4@', 'nullmodem server:%s port:%s transparent:1' % (host, port)
+                        if modem else 'dummy')
     text = text.replace('@LPT1@', printers[0]).replace('@LPT2@', printers[1])
     conf = os.path.join(directory, 'dosbox-x.conf')
     with open(conf, 'w', encoding='utf-8') as f:

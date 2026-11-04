@@ -26,6 +26,8 @@ SC_CAPS_LOCK        equ 0x3A
 SC_SCROLL_LOCK      equ 0x46            ; Break, with Ctrl, on the AT keyboard
 SC_DELETE           equ 0x53            ; keypad . and Del
 KBC_FLUSH_LIMIT     equ 32              ; bytes read at most when emptying the 8042
+KBD_WAIT_FOREVER    equ 1               ; kbd_waiting: a key, however long it takes
+KBD_WAIT_TIMED      equ 2               ; a key, or the time runs out (SYS_WAIT)
 
 begin_kdata
 kbd_ring            times KBD_RING_SIZE dw 0
@@ -34,7 +36,7 @@ kbd_tail            db 0                ; where the next key goes
 kbd_mods            db 0                ; KBD_* of keymap.asm
 kbd_e0              db 0                ; 1 after an E0h prefix
 kbd_e1_skip         db 0                ; bytes of Pause's sequence still to skip
-kbd_waiting         db 0                ; 1 while kbd_wait_key sleeps
+kbd_waiting         db 0                ; KBD_WAIT_*: what a test build may type into
 kbd_dropped         dw 0                ; keys lost to a full ring
 msg_ctrl_break      db "Ctrl+Break: the program starts again", 0
 msg_reset           db "Ctrl+Alt+Del: resetting", 0
@@ -269,7 +271,7 @@ kbd_wait_key:
         jnz .done
         cmp byte [restart_pending], 0
         jne .abandon
-        mov byte [kbd_waiting], 1
+        mov byte [kbd_waiting], KBD_WAIT_FOREVER
         sti
         hlt                             ; until an interrupt
         cli

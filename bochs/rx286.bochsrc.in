@@ -19,8 +19,10 @@ vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest
 vga: extension=none
 pci: enabled=0
 
-# A fixed start time (1989-01-01 00:00:00) and emulated time, so runs repeat.
-clock: sync=none, time0=599616000
+# A fixed start time (1989-01-01 00:00:00) and emulated time, so runs repeat;
+# real time when a test talks to a modem on the host, so that its answers
+# come in the ticks they would.
+clock: sync=@CLOCK_SYNC@, time0=599616000
 
 # Drive A: 1.2 MB 5.25", the boot disk; drive B: 360 KB 5.25" (roadmap D2).
 # A test may take B's diskette out or write-protect it.
@@ -40,13 +42,13 @@ ata3: enabled=0
 
 keyboard: type=at
 # COM1: a Microsoft serial mouse, captured in a window with Ctrl+F10. COM2:
-# the log in debug and test builds, the modem in release builds; COM3: the
-# log when COM2 is the modem (devices roadmap D1, D2).
+# the log of debug and test builds. COM4: the modem, unattached or a test's
+# peer (devices roadmap D1, D2).
 mouse: type=serial, enabled=0, toggle=ctrl+f10
 com1: enabled=1, mode=mouse
-com2: enabled=1, @COM2@
-com3: enabled=1, @COM3@
-com4: enabled=1, mode=null
+com2: enabled=1, mode=file, dev=@SERIAL@
+com3: enabled=1, mode=null
+com4: enabled=1, @COM4@
 parport1: enabled=1, file=@LPT1@
 parport2: enabled=1, file=@LPT2@
 speaker: enabled=1, mode=gui

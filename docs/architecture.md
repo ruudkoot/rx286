@@ -57,9 +57,9 @@ with `incbin`: it can name nothing of the kernel's.
 | `fault.asm` | the CPU's exceptions: the program's fault, a kernel panic, NMI, a carried single-step trap |
 | `panic.asm` | the red screen and halt; the double-fault task |
 | `program.asm` | the program: its first start, its restart, its fault report |
-| `syscall.asm` | `INT 30h`: dispatch, buffer checks, the five calls |
+| `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
 | `pic.asm` | the 8259As; the driver of each line or the rule for none; spurious IRQ7 and IRQ15 |
-| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`) |
+| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
 | `keyboard.asm`, `keymap.asm` | the 8042, set-1 scancodes to US ASCII, the ring of keys, Ctrl+Break, Ctrl+Alt+Del |
 | `rtc.asm` | the MC146818: 24-hour BCD, read by polling |
 | `fpu.asm` | the 287: FNINIT, FSETPM; IRQ13 |
@@ -68,6 +68,10 @@ with `incbin`: it can name nothing of the kernel's.
 | `diskette.asm` | the NEC 765: drives A and B, IRQ6 |
 | `fixeddisk.asm` | the fixed disk controller: drives C and D, IRQ14 |
 | `printer.asm` | `SYS_PRINT`: LPT1 and LPT2, polled |
+| `speaker.asm` | `SYS_SOUND`: timer channel 2 through port B |
+| `gameport.asm` | `SYS_JOYSTICK`: the buttons, and the axes timed with channel 0 |
+| `mouse.asm` | `SYS_MOUSE`: a Microsoft serial mouse on COM1, IRQ4 |
+| `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM4, IRQ3, a ring of bytes |
 | `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to the log |
 | `serial.asm` | the log, polled: COM2, or COM3 when COM2 is the modem (debug and test builds) |
 | `print.asm` | strings, numbers, the kernel's messages, trace lines, register dumps |

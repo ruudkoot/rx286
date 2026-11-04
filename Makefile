@@ -50,9 +50,10 @@ program_main_syscalls := tests/programs/syscalls.asm
 program_main_attack := tests/programs/attack.asm
 program_main_fuzz := tests/programs/fuzz.asm
 program_main_storage := tests/programs/storage.asm
+program_main_devices := tests/programs/devices.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz or storage, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage or devices, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed

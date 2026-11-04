@@ -22,7 +22,10 @@ begin_kdata
 irq_drivers:
         dw timer_irq                    ; IRQ0
         dw kbd_irq                      ; IRQ1
-        dw 0, 0, 0, 0                   ; IRQ2-5
+        dw 0                            ; IRQ2
+        dw modem_irq                    ; IRQ3: COM4, the modem (COM2 is the log, polled)
+        dw mouse_irq                    ; IRQ4: COM1, the mouse
+        dw 0                            ; IRQ5
         dw fd_irq                       ; IRQ6
         dw 0                            ; IRQ7
         dw 0, 0, 0, 0, 0                ; IRQ8-12

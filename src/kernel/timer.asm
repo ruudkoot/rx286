@@ -46,6 +46,7 @@ timer_irq:
         add word [ticks], 1
         adc word [ticks + 2], 0
         call fd_tick
+        call mouse_tick
 %ifdef WITH_TEST_HOOKS
         call test_tick
 %endif
@@ -138,4 +139,41 @@ kpoll:
         pop di
         pop si
         pop bx
+        ret
+
+; ----------------------------------------------------------------------------
+; pit_count - timer channel 0's count, latched
+;   In:       nothing
+;   Out:      AX = the count
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+pit_count:
+        mov al, PIT_LATCH_CH0
+        out PIT_MODE, al
+        in al, PIT_CH0
+        mov ah, al
+        in al, PIT_CH0
+        xchg al, ah
+        ret
+
+; ----------------------------------------------------------------------------
+; pit_elapsed - the 8254's clocks since a count of channel 0. In mode 3 the
+; count falls by two a clock from PIT_DIVISOR, twice a period; so for a span
+; under half a period (10 ms), the clocks are half the counts between, with
+; PIT_DIVISOR added if the count reloaded meanwhile
+;   In:       SI = the count then (pit_count)
+;   Out:      AX = the clocks since
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+pit_elapsed:
+        push dx
+        call pit_count
+        mov dx, si
+        sub dx, ax
+        jae .halve
+        add dx, PIT_DIVISOR             ; it reloaded between
+.halve:
+        shr dx, 1
+        mov ax, dx
+        pop dx
         ret

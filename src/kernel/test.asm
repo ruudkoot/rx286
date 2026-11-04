@@ -6,10 +6,12 @@
 ; Typing: tools/run-test compiles a test's key script into test_keys (see
 ; tools/rxlib.py for the operations). On every tick, test_tick types the
 ; next byte through the 8042's command D2h, which puts it where the keyboard
-; would and raises IRQ1 (roadmap E7). It types only while something waits in
-; kbd_wait_key with nothing buffered, unless the script says "now". When the
-; script is done and something waits again, the test ends: "TEST END" on
-; the log, then the shutdown port.
+; would and raises IRQ1 (roadmap E7). It types only while something waits
+; for a key (kbd_wait_key, SYS_WAIT) with nothing buffered, unless the
+; script says "now"; a mouse packet in the script goes to the mouse driver
+; at the next tick, as IRQ4 would hand it over. When the script is done and
+; something waits again for a key, with no time limit, the test ends: "TEST
+; END" on the log, then the shutdown port.
 ;
 ; A test image asks for more with -d (tools/run-test):
 ;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK
@@ -18,6 +20,7 @@
 ;                       though rx286 has no driver for them
 ;   TEST_FPU_KERNEL     a 287 error raised by the kernel itself
 ;   TEST_TICKS          compare the timer with the RTC
+;   TEST_SOUND          measure every tone SYS_SOUND starts, by its output
 ;   TEST_KEYBOARD       print every key read (the program never starts)
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
 ;   TEST_TYPE_DIRECT    type keys by handing each byte to the driver instead
@@ -37,6 +40,8 @@ TEST_OP_END         equ 0
 TEST_OP_WHEN_WAITING equ 1
 TEST_OP_NOW         equ 2
 TEST_OP_WAIT        equ 3
+TEST_OP_MOUSE       equ 4               ; three bytes of a mouse packet follow
+TEST_SOUND_SLACK    equ 2               ; changes of channel 2's output either way
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
 TEST_LPT_LIMIT      equ 10000           ; polls of the printer's BUSY
@@ -64,6 +69,8 @@ msg_shutdown        db "Shutdown", 0
 msg_key             db "key ", 0
 msg_key_abandoned   db "key: waiting abandoned for a restart", CHAR_LF, 0
 msg_probe_rtc       db "probe: the RTC kept interrupting; IRQ8 stayed masked", CHAR_LF, 0
+msg_sound_ok        db "probe: the speaker sounds at the frequency asked", CHAR_LF, 0
+msg_sound_bad       db "probe: the speaker's output changed this often in a tick: ", 0
 msg_ticks_ok        db "timer: 50 ticks a second, by the clock", CHAR_LF, 0
 msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
@@ -195,6 +202,8 @@ test_tick:
         mov al, [si]
         cmp al, TEST_OP_WAIT
         je .wait
+        cmp al, TEST_OP_MOUSE
+        je .mouse
         cmp al, TEST_OP_NOW
         je .now
         ; TEST_OP_WHEN_WAITING and TEST_OP_END: only while a reader waits
@@ -208,7 +217,10 @@ test_tick:
 %ifdef TEST_FUZZ
         je .done                        ; the fuzzer ends by its count, not by keys
 %else
+        jne .now
+        cmp byte [kbd_waiting], KBD_WAIT_FOREVER
         je test_end
+        ret                             ; a wait with a limit: not the end
 %endif
 .now:
 %ifndef TEST_TYPE_DIRECT
@@ -219,6 +231,14 @@ test_tick:
         add word [test_key_ptr], 2
         mov al, [si + 1]
         jmp test_type
+.mouse:
+        add word [test_key_ptr], 1 + MOUSE_PACKET
+        mov al, [si + 1]
+        call mouse_byte
+        mov al, [si + 2]
+        call mouse_byte
+        mov al, [si + 3]
+        jmp mouse_byte
 .wait:
         cmp byte [test_wait_left], 0
         jne .count
@@ -308,6 +328,69 @@ test_probes:
         call rtc_init                   ; the periodic interrupt off again
         mov si, msg_probe_rtc
         jmp kputs
+%endif
+
+%ifdef TEST_SOUND
+; ----------------------------------------------------------------------------
+; test_sound - count the changes of channel 2's output (port B's OUT2) over a
+; whole tick, letting interrupts in: twice the frequency a second, so BX / 25
+; a tick, within TEST_SOUND_SLACK
+;   In:       BX = the frequency asked, the speaker on; DS = SEL_KDATA
+;   Out:      a probe line
+;   Destroys: AX, DX, SI, DI
+; ----------------------------------------------------------------------------
+test_sound:
+        push cx
+        mov si, [ticks]
+.edge:
+        sti
+        nop
+        cli
+        cmp si, [ticks]
+        je .edge
+        mov si, [ticks]
+        xor cx, cx                      ; CX = changes
+        in al, SYS_PORT_B
+        and al, SYS_PORT_B_OUT2
+        mov ah, al
+.count:
+        in al, SYS_PORT_B
+        and al, SYS_PORT_B_OUT2
+        cmp al, ah
+        je .same
+        inc cx
+        mov ah, al
+.same:
+        sti
+        nop
+        cli
+        cmp si, [ticks]
+        je .count
+        mov ax, bx
+        shl ax, 1
+        xor dx, dx
+        mov di, PIT_HZ
+        div di                          ; AX = the changes a tick should have
+        sub ax, cx
+        jns .slack
+        neg ax
+.slack:
+        cmp ax, TEST_SOUND_SLACK
+        ja .bad
+        mov si, msg_sound_ok
+        call kputs
+        pop cx
+        ret
+.bad:
+        mov si, msg_sound_bad
+        call kputs
+        mov ax, cx
+        xor dx, dx
+        call kput_dec32
+        mov al, CHAR_LF
+        call kputc
+        pop cx
+        ret
 %endif
 
 %ifdef TEST_FPU_KERNEL

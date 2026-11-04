@@ -10,6 +10,7 @@
 | [interrupts.md](interrupts.md) | every vector and IRQ line, and what handles it |
 | [syscalls.md](syscalls.md) | the system calls |
 | [storage.md](storage.md) | the drives, their drivers, the printers, the sample disks |
+| [devices.md](devices.md) | the speaker, the game port, the serial mouse, the modem, SYS_WAIT |
 | [shell.md](shell.md) | the shell: its commands, drives and paths, its FAT12 library |
 | [security.md](security.md) | what no program can do, and how the tests show it |
 | [building.md](building.md) | the tools, the Makefile, the builds |
@@ -18,4 +19,5 @@
 | [emulators.md](emulators.md) | Bochs, DOSBox-X and MAME, and how they differ from the AT |
 | [style.md](style.md) | how the sources are written |
 
-The plans behind all of it are `roadmaps/rx286.md` and `roadmaps/storage.md`.
+The plans behind all of it are `roadmaps/rx286.md`, `roadmaps/storage.md` and
+`roadmaps/devices.md`.

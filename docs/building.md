@@ -88,7 +88,10 @@ E5):
   (*docs/storage.md*). `run`, `debugger` and the tests make them when
   needed; `make run` lets the shell write to them, and a change of `disks/`
   or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
-  goes to `build/debug/lpt1.txt` and `lpt2.txt`.
+  goes to `build/debug/lpt1.txt` and `lpt2.txt`, the log to
+  `build/debug/com2.log`. Bochs' window gives COM1 a serial mouse: Ctrl+F10
+  captures the host's mouse for it (and lets it go). COM4, the modem's
+  line, is attached to nothing.
 
 ## Checks
 

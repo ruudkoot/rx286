@@ -66,6 +66,8 @@ pm_start:
         call rtc_init
         call dma_init
         call printer_init
+        call mouse_init
+        call modem_init
         call pic_unmask_all
         mov al, CMOS_REG_D              ; bit 7 clear: NMI on
         out CMOS_INDEX, al

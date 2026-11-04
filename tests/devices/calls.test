@@ -1,0 +1,30 @@
+# The device calls (tests/programs/devices.asm): tones measured by the
+# kernel's probe, a rest, the game port (DOSBox-X emulates a centred stick),
+# the mouse's reset answered through IRQ4, a byte to the modem on COM4 (to
+# no one: MAME's AT has no COM4, the others no peer here), and SYS_WAIT.
+program: devices
+define: TEST_SOUND
+timeout: 60
+---
+rx286, test build
+probe: the speaker sounds at the frequency asked
+sound: 440 Hz: no error
+probe: the speaker sounds at the frequency asked
+sound: 1000 Hz: no error
+probe: the speaker sounds at the frequency asked
+sound: 2000 Hz: no error
+sound: a rest of 5 ticks: 5 ticks
+sound: 18 Hz: error 3
+sound: 20001 Hz: error 3
+sound: 501 ticks: error 3
+@bochs joystick: buttons 00, axes absent absent absent absent
+@dosbox-x joystick: buttons 00, axes present present absent absent
+@mame joystick: buttons 00, axes absent absent absent absent
+mouse: present, at 320, 100, buttons 0
+serial: write: no error
+serial: read: no error
+wait: 5 ticks: slept, events 00
+wait: a key, 3 ticks at most: events 00
+wait: nothing for ever: error 3
+wait: an unknown event: error 3
+wait: registers kept

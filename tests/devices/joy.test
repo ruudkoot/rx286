@@ -1,0 +1,12 @@
+# joy: one reading of the game port, where no joystick is: on Bochs and
+# MAME. DOSBox-X's centred stick reads 684 to 687 us, as its polling falls;
+# devices/calls.test checks it there.
+program: shell
+emulators: bochs mame
+keys: joy\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>joy
+buttons: none; axes: absent absent absent absent
+A:\>

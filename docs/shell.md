@@ -32,6 +32,11 @@ any case too: `DIR`, `Dir` and `dir` are one.
 | `cd [PATH]` | without a path: the current directory; `cd X:`: drive X's; with a path: makes it the drive's current directory |
 | `type FILE` | a file's bytes on the screen |
 | `print FILE` | a file's bytes to the printer on LPT1 |
+| `beep` | a short tone on the speaker |
+| `play` | a tune on the speaker |
+| `joy` | one reading of the game port: the buttons down, each axis's time or "absent" |
+| `mouse` | the mouse's position and buttons whenever they change, until Esc or both buttons |
+| `term` | a terminal on COM4, the modem's line: what comes is shown, what is typed sent; Esc ends |
 | `A:` to `D:` | makes the drive the current one |
 | `uptime` | the time since the kernel started |
 | `date` | the real-time clock |

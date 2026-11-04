@@ -28,6 +28,9 @@
 #                               characters: rxlib.DEEP_PATH); may repeat
 #   lpt1: text                  a line LPT1 must have printed; may repeat (the
 #                               whole of what it printed, in order); lpt2 too
+#   modem: hayes                a modem at the far end of COM4 (HayesPeer):
+#                               it echoes, and answers AT, ATI; Bochs and
+#                               DOSBox-X only
 #   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
 #                               or D) must hold text, then each byte its own
 #                               offset (storage.asm's fill); may repeat
@@ -57,8 +60,10 @@ import glob
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
 
 import rxlib
@@ -92,6 +97,7 @@ class Test:
         self.debugger = []
         self.emulators = list(EMULATORS)
         self.media = []
+        self.modem = None
         self.printed = {}                   # 'lpt1' -> the lines it must print
         self.sectors = []                   # (drive, sector, text)
         self.expected = []
@@ -129,6 +135,10 @@ class Test:
                 for e in self.emulators:
                     if e not in EMULATORS:
                         raise ValueError('%s: unknown emulator %r' % (self.path, e))
+            elif key == 'modem':
+                if value != 'hayes':
+                    raise ValueError('%s: unknown modem %r' % (self.path, value))
+                self.modem = value
             elif key == 'media':
                 if value not in rxlib.MEDIA:
                     raise ValueError('%s: unknown media change %r' % (self.path, value))
@@ -151,6 +161,49 @@ class Test:
         # MAME's images differ (TEST_TYPE_DIRECT), so they are built apart.
         tests = 'tests-mame' if EMULATOR == 'mame' else 'tests'
         return os.path.join(ROOT, 'build', tests, '%s-%s' % (self.suite, self.name))
+
+
+class HayesPeer(threading.Thread):
+    """The far end of COM4 for a test, as much of a Hayes modem as it needs:
+    it echoes every byte, and answers each line (ended by CR): AT with OK,
+    ATI with its name and OK, anything else with ERROR. The emulator
+    connects to it on a local port."""
+    ANSWERS = {b'AT': b'\r\nOK\r\n', b'ATI': b'\r\nrx286 test modem\r\n\r\nOK\r\n'}
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.server = socket.socket()
+        self.server.bind(('127.0.0.1', 0))
+        self.server.listen(1)
+        self.address = '127.0.0.1:%d' % self.server.getsockname()[1]
+        self.received = bytearray()
+
+    def run(self):
+        try:
+            conn, _ = self.server.accept()
+        except OSError:
+            return
+        line = b''
+        with conn:
+            while True:
+                try:
+                    data = conn.recv(256)
+                except OSError:
+                    return
+                if not data:
+                    return
+                self.received += data
+                for b in data:
+                    conn.sendall(bytes([b]))
+                    if b == 13:
+                        if line:
+                            conn.sendall(self.ANSWERS.get(line.upper(), b'\r\nERROR\r\n'))
+                        line = b''
+                    else:
+                        line += bytes([b])
+
+    def close(self):
+        self.server.close()
 
 
 def build(test):
@@ -378,10 +431,15 @@ def run(test):
     bochsrc = os.path.join(b, 'test.bochsrc')
     disks = rxlib.private_disks(os.path.join(b, 'disks'))
     rxlib.damage_disks(disks, test.media)
+    peer = None
+    if test.modem:
+        peer = HayesPeer()
+        peer.start()
+    modem = peer.address if peer else None
     rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
                         log=os.path.join(b, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
-                        disks=disks, printers=printers, media=test.media)
+                        disks=disks, printers=printers, media=test.media, modem=modem)
     rc = []
     if test.breakpoint:
         rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))
@@ -405,10 +463,12 @@ def run(test):
                                     log=os.path.join(b, 'bochs.log'), disks=disks)
     elif EMULATOR == 'dosbox-x':
         status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, timeout, until,
-                                     printers=printers)
+                                     printers=printers, modem=modem)
     else:
         status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, timeout, until,
                                    disks=disks, media=test.media)
+    if peer:
+        peer.close()
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
         if os.path.exists(serial) else []
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \

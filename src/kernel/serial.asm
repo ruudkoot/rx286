@@ -1,7 +1,8 @@
 ; ============================================================================
 ; rx286 - src/kernel/serial.asm
 ; The log, polled: the debug and test builds' log and transcript, on
-; LOG_PORT (build.inc): COM2, or COM3 when COM2 is the modem.
+; LOG_PORT (build.inc): COM2. COM2 shares IRQ3 with the modem's COM4, but
+; with OUT2 clear its UART never drives the line.
 ;
 ; 115200 baud, 8N1, the UART's interrupt off (OUT2 clear), so its IRQ never
 ; fires for it. Transmit only. Release builds assemble none of this.

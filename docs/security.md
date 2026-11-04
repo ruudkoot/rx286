@@ -44,9 +44,11 @@ Every way out is a reported fault, after which the program starts again
   stretches: `write` and `print` open a window after every byte, and
   `read_key` and the drivers wait with interrupts on. A program that spins
   is stopped by Ctrl+Break.
-- **No device can hang the kernel.** Every wait for a disk or printer has a
-  limit in ticks (*docs/storage.md*); a diskette that is not there, a fixed
-  disk that does not answer and a printer that stays busy are errors.
+- **No device can hang the kernel.** Every wait for a disk, printer or
+  modem has a limit in ticks (*docs/storage.md*, *docs/devices.md*); a
+  diskette that is not there, a fixed disk that does not answer and a
+  printer that stays busy are errors. A sound or a `SYS_WAIT` ends when the
+  program is to restart, so the fuzzer's watchdog ends them too.
 - **Disk buffers** are checked like any other, before a device is touched;
   a buffer the kernel fills must also pass `VERW`, so no read can land in
   the program's code. The disks themselves are the program's: it may read
@@ -63,7 +65,7 @@ Every way out is a reported fault, after which the program starts again
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 59 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 63 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -89,6 +91,7 @@ that faulted:
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
 | `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
+| `serial_read` into the code, across the data's limit, through a null ES; `serial_write` from a null selector | refused, `E_FAULT` |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 
 The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core

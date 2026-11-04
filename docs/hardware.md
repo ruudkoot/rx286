@@ -17,14 +17,16 @@ numbers below are the Technical Reference's.
 | Coprocessor | Intel 80287 | available to the program; errors on IRQ13 |
 | Memory | 640 KB base; extended memory unused | the base only |
 | Interrupt controllers | two 8259A, the slave on the master's IR2 | vectors 20h-2Fh |
-| Timer | 8254: channel 0 the system timer, 1 DRAM refresh, 2 the speaker | channel 0 only, at 50 Hz |
+| Timer | 8254: channel 0 the system timer, 1 DRAM refresh, 2 the speaker | channel 0 at 50 Hz, also the game port's clock; channel 2 the speaker's tone |
 | Keyboard controller | 8042, AT 84-key keyboard, scan codes translated to set 1 | the keyboard driver |
 | Real-time clock | MC146818 with CMOS RAM; port 70h bit 7 masks NMI | the clock (`date`), the NMI mask, the shutdown byte before a reset |
 | DMA | two 8237A: channels 0-3 8-bit, 4 cascade, 5-7 16-bit | channel 2, for the diskettes |
 | Diskette | controller at 3F0h-3F7h, IRQ6, DMA 2; A: 1.2 MB 5.25", B: 360 KB 5.25" | the diskette driver (and the BIOS, in the boot code) |
 | Fixed disk | controller at 1F0h-1F7h, IRQ14; drive 0 type 2 (615/4/17, 20 MB), drive 1 type 1 (306/4/17, 10 MB) | the fixed disk driver |
-| Serial | COM1 3F8h IRQ4, COM2 2F8h IRQ3, COM3 3E8h IRQ4, COM4 2E8h IRQ3 | COM2: the log in debug and test builds |
+| Serial | COM1 3F8h IRQ4, COM2 2F8h IRQ3, COM3 3E8h IRQ4, COM4 2E8h IRQ3 | COM1 the mouse, COM2 the log (debug and test builds), COM4 the modem (*docs/devices.md*) |
 | Parallel | LPT1 378h IRQ7, LPT2 278h IRQ5 | the printer driver, polled |
+| Speaker | timer channel 2, gated through port B | `SYS_SOUND` |
+| Game port | 201h: two joysticks, four buttons, four axes | `SYS_JOYSTICK` |
 | Video | IBM EGA, colour display, 80x25 text at B8000h | the console |
 
 ## I/O ports
@@ -33,9 +35,9 @@ numbers below are the Technical Reference's.
 |---|---|---|---|
 | 000h-01Fh | DMA controller 1 | `DMA1_BASE`, `DMA1_CH2_ADDRESS`, `DMA1_CH2_COUNT`, `DMA1_MASK`, `DMA1_MODE`, `DMA1_CLEAR_FLIPFLOP`, `DMA1_MASTER_CLEAR` | reset at start; channel 2 for each diskette sector |
 | 020h-021h | PIC 1 (master) | `PIC1_CMD`, `PIC1_DATA` | ICW1-4, mask, EOI, ISR |
-| 040h-043h | 8254 timer | `PIT_CH0`, `PIT_CH1`, `PIT_CH2`, `PIT_MODE` | channel 0 only |
+| 040h-043h | 8254 timer | `PIT_CH0`, `PIT_CH1`, `PIT_CH2`, `PIT_MODE` | channels 0 and 2 |
 | 060h, 064h | 8042: data, status/command | `KBC_DATA`, `KBC_STATUS`, `KBC_COMMAND` | the keyboard driver; FEh to reset |
-| 061h | system port B | `SYS_PORT_B` | read by the NMI handler |
+| 061h | system port B | `SYS_PORT_B` | read by the NMI handler; the speaker's bits |
 | 070h-071h | RTC/CMOS index and data | `CMOS_INDEX`, `CMOS_DATA` | the clock; NMI mask; shutdown byte |
 | 080h-08Fh | DMA page registers | `DMA_PAGE_BASE`, `DMA_PAGE_CH2` | channel 2's |
 | 0A0h-0A1h | PIC 2 (slave) | `PIC2_CMD`, `PIC2_DATA` | as PIC 1 |
@@ -43,9 +45,9 @@ numbers below are the Technical Reference's.
 | 0F0h | clear the 287's busy latch | `FPU_CLEAR_BUSY` | the IRQ13 handler |
 | 0F1h | reset the 287 | `FPU_RESET` | never |
 | 1F0h-1F7h, 3F6h | fixed disk controller | `HDC_DATA`, `HDC_ERROR`, `HDC_PRECOMP`, `HDC_SECTOR_COUNT`, `HDC_SECTOR`, `HDC_CYLINDER_LOW`, `HDC_CYLINDER_HIGH`, `HDC_DRIVE_HEAD`, `HDC_STATUS`, `HDC_COMMAND`, `HDC_CONTROL` | the fixed disk driver |
-| 201h | game port | `GAME_PORT` | never |
+| 201h | game port | `GAME_PORT` | `SYS_JOYSTICK` |
 | 278h-27Ah | LPT2 | `LPT2_BASE` | the printer driver |
-| 2E8h-2EFh | COM4 | `COM4_BASE` | never |
+| 2E8h-2EFh | COM4 | `COM4_BASE` | the modem |
 | 2F8h-2FFh | COM2 | `COM2_BASE` | the log in debug and test builds |
 | 378h-37Ah | LPT1 | `LPT1_BASE` | the printer driver |
 | 3C0h-3CFh | EGA attribute, sequencer, graphics, misc | `EGA_ATTR` | never (the loader's INT 10h sets the mode) |
@@ -53,7 +55,7 @@ numbers below are the Technical Reference's.
 | 3DAh | EGA input status 1 | `EGA_STATUS1` | never |
 | 3E8h-3EFh | COM3 | `COM3_BASE` | never |
 | 3F0h-3F7h | diskette controller | `FDC_DOR`, `FDC_MSR`, `FDC_DATA`, `FDC_DIR`, `FDC_CCR` | the diskette driver; DOR: the loader stops the motor |
-| 3F8h-3FFh | COM1 | `COM1_BASE` | never yet: the mouse's (devices roadmap) |
+| 3F8h-3FFh | COM1 | `COM1_BASE` | the mouse |
 | 8900h | Bochs' shutdown port, not AT hardware | `BOCHS_SHUTDOWN_PORT` | test builds only |
 
 ### Bits and commands
@@ -68,7 +70,9 @@ numbers below are the Technical Reference's.
 - **8254** (`PIT_*`): `PIT_CH0_LOHI_MODE3` programs channel 0 as a square wave,
   low byte then high byte. `PIT_INPUT_HZ` is the input clock, `PIT_HZ` the
   rate rx286 wants and `PIT_DIVISOR` the divisor that gives it (23864).
-  Channel 1 refreshes the DRAM and is never touched (1-8).
+  `PIT_LATCH_CH0` latches channel 0's count for the game port's timing;
+  `PIT_CH2_LOHI_MODE3` makes channel 2 the speaker's square wave. Channel 1
+  refreshes the DRAM and is never touched (1-8).
 - **8042** (`KBC_*`): `KBC_STATUS_OBF` (a byte waits at 60h) and
   `KBC_STATUS_IBF` (wait before writing). `KBC_CMD_WRITE_CB` writes the
   command byte, `KBC_COMMAND_BYTE` = 45h: translation to set 1 (bit 6), the
@@ -78,7 +82,13 @@ numbers below are the Technical Reference's.
   controller's "write keyboard output buffer", which Bochs has; test builds
   use it to type keys.
 - **System port B** (`SYS_PORT_B`): `SYS_PORT_B_PARITY` and
-  `SYS_PORT_B_IOCHK` say which of the AT's two causes raised an NMI.
+  `SYS_PORT_B_IOCHK` say which of the AT's two causes raised an NMI;
+  `SYS_PORT_B_OUT2` is timer channel 2's output. `SYS_PORT_B_GATE2` lets
+  channel 2 count and `SYS_PORT_B_SPEAKER` sends it to the speaker; the
+  other bits are written back as read.
+- **Game port** (`GAME_PORT`): a write starts the axes' one-shots; in a
+  read, `GAME_PORT_AXES` are the axes still timing and `GAME_PORT_BUTTONS`
+  the buttons, 0 when pressed (shifted down by `GAME_PORT_BUTTON_SHIFT`).
 - **MC146818** (`CMOS_*`): the clock's registers `CMOS_SECONDS`,
   `CMOS_MINUTES`, `CMOS_HOURS`, `CMOS_DAY`, `CMOS_MONTH`, `CMOS_YEAR`,
   `CMOS_CENTURY`; the control registers `CMOS_REG_A` (with
@@ -135,9 +145,14 @@ numbers below are the Technical Reference's.
   `UART_THR`, `UART_RBR`, `UART_DLL`, `UART_DLM`, `UART_IER`, `UART_LCR`,
   `UART_MCR`, `UART_LSR`; `UART_LCR_DLAB` opens the divisor latch,
   `UART_LCR_8N1` sets 8 data bits, no parity, 1 stop bit;
-  `UART_MCR_DTR_RTS` raises DTR and RTS but not OUT2, so the UART's
-  interrupt never reaches the bus; `UART_LSR_THRE` (room for a byte) and
-  `UART_LSR_TEMT` (the last byte has gone); `UART_DIVISOR_115200`.
+  `UART_LCR_7N1` the mouse's 7 data bits; `UART_MCR_DTR_RTS` raises DTR
+  and RTS but not OUT2, so the UART's interrupt never reaches the bus (the
+  log), `UART_MCR_RUN` raises OUT2 too (the mouse, the modem), and
+  `UART_MCR_OFF` drops them all (a mouse's reset); `UART_IER_RECEIVED`
+  interrupts when a byte comes; `UART_LSR_DATA` (a byte waits),
+  `UART_LSR_THRE` (room for a byte) and `UART_LSR_TEMT` (the last byte has
+  gone); `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the modem),
+  `UART_DIVISOR_1200` (the mouse).
 - **EGA**: `CRTC_CURSOR_HIGH` and `CRTC_CURSOR_LOW` hold the cursor's
   position.
 
@@ -151,8 +166,8 @@ gives the rule for each line.
 | 0 | 20h | timer channel 0 | timer driver |
 | 1 | 21h | keyboard (8042) | keyboard driver |
 | 2 | 22h | cascade from PIC 2 | never delivered; never masked |
-| 3 | 23h | COM2, COM4 | unhandled: reported once, then masked (the log is polled, its interrupt off) |
-| 4 | 24h | COM1, COM3 | unhandled |
+| 3 | 23h | COM2, COM4 | the modem's driver (COM4; COM2, the log, is polled with its interrupt off) |
+| 4 | 24h | COM1, COM3 | the mouse's driver (COM1) |
 | 5 | 25h | LPT2 | unhandled: the printer driver keeps the port's interrupt off |
 | 6 | 26h | diskette | diskette driver |
 | 7 | 27h | LPT1; PIC 1's spurious interrupt | unhandled, after the spurious check (the printer driver keeps it off) |

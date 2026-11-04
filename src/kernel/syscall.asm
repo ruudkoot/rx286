@@ -21,10 +21,17 @@ syscall_table:
         dw sys_disk_read                ; SYS_DISK_READ
         dw sys_disk_write               ; SYS_DISK_WRITE
         dw sys_print                    ; SYS_PRINT
+        dw sys_sound                    ; SYS_SOUND
+        dw sys_joystick                 ; SYS_JOYSTICK
+        dw sys_mouse                    ; SYS_MOUSE
+        dw sys_serial_write             ; SYS_SERIAL_WRITE
+        dw sys_serial_read              ; SYS_SERIAL_READ
+        dw sys_wait                     ; SYS_WAIT
 syscall_table_end:
+wait_events         db 0                ; what SYS_WAIT waits for
 end_kdata
 
-%if SYSCALL_COUNT != 8
+%if SYSCALL_COUNT != 14
   %error "syscall.asm: syscall_table does not match SYSCALL_COUNT"
 %endif
 
@@ -199,6 +206,90 @@ sys_read_key:
 .invalid:
         mov ax, E_INVAL
         jmp sys_fail
+
+; ----------------------------------------------------------------------------
+; sys_wait - SYS_WAIT: sleep until one of the events asked for is there (a
+; key, the mouse's news, bytes from COM4), for CX ticks at most (0: no
+; limit), or until the program is to restart
+;   In:       BP = the frame (AL the WAIT_* events, CX the ticks); DS =
+;             SEL_KDATA
+;   Out:      the frame's AX = the events there (0: the time ran out, or a
+;             restart); or an error (E_INVAL: no event and no limit, or an
+;             unknown one)
+;   Destroys: AX, BX, CX
+; ----------------------------------------------------------------------------
+sys_wait:
+        mov al, [bp + FRAME_AX]
+        mov cx, [bp + FRAME_CX]
+        test al, ~(WAIT_KEY | WAIT_MOUSE | WAIT_SERIAL) & 0xFF
+        jnz .invalid
+        test al, al
+        jnz .events
+        jcxz .invalid                   ; nothing, for ever
+.events:
+        mov [wait_events], al
+        mov bx, [ticks]
+.check:
+        call wait_ready
+        test al, al
+        jnz .done
+        cmp byte [restart_pending], 0
+        jne .done
+        jcxz .sleep
+        mov ax, [ticks]
+        sub ax, bx
+        cmp ax, cx
+        mov al, 0
+        jae .done
+.sleep:
+        test byte [wait_events], WAIT_KEY
+        jz .halt
+        mov byte [kbd_waiting], KBD_WAIT_FOREVER    ; what a test build types into
+        jcxz .halt
+        mov byte [kbd_waiting], KBD_WAIT_TIMED
+.halt:
+        sti
+        hlt
+        cli
+        mov byte [kbd_waiting], 0
+        jmp .check
+.done:
+        xor ah, ah
+        mov [bp + FRAME_AX], ax
+        ret
+.invalid:
+        mov ax, E_INVAL
+        jmp sys_fail
+
+; ----------------------------------------------------------------------------
+; wait_ready - which of the events SYS_WAIT waits for are there
+;   In:       wait_events; DS = SEL_KDATA
+;   Out:      AL = those there
+;   Destroys: AH
+; ----------------------------------------------------------------------------
+wait_ready:
+        xor ah, ah
+        test byte [wait_events], WAIT_KEY
+        jz .mouse
+        mov al, [kbd_head]
+        cmp al, [kbd_tail]
+        je .mouse
+        or ah, WAIT_KEY
+.mouse:
+        test byte [wait_events], WAIT_MOUSE
+        jz .serial
+        cmp byte [mouse_changed], 0
+        je .serial
+        or ah, WAIT_MOUSE
+.serial:
+        test byte [wait_events], WAIT_SERIAL
+        jz .done
+        call modem_ready
+        jz .done
+        or ah, WAIT_SERIAL
+.done:
+        mov al, ah
+        ret
 
 ; ----------------------------------------------------------------------------
 ; sys_ticks - SYS_TICKS: ticks since the kernel started

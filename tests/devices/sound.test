@@ -1,0 +1,25 @@
+# beep and play: every note measured by the kernel's probe (TEST_SOUND),
+# the tune's two rests silent.
+program: shell
+define: TEST_SOUND
+keys: beep\nplay\n
+timeout: 60
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>beep
+probe: the speaker sounds at the frequency asked
+A:\>play
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+probe: the speaker sounds at the frequency asked
+A:\>

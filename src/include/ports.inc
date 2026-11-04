@@ -55,6 +55,8 @@ PIT_CH1             equ 0x041       ; DRAM refresh: never touched
 PIT_CH2             equ 0x042       ; the speaker
 PIT_MODE            equ 0x043
 PIT_CH0_LOHI_MODE3  equ 0x36        ; channel 0, low then high byte, square wave, binary
+PIT_CH2_LOHI_MODE3  equ 0xB6        ; channel 2, the same
+PIT_LATCH_CH0       equ 0x00        ; latch channel 0's count: the next two reads give it
 PIT_INPUT_HZ        equ 1193182
 PIT_HZ              equ 50          ; roadmap D14
 PIT_DIVISOR         equ (PIT_INPUT_HZ + PIT_HZ / 2) / PIT_HZ    ; 23864
@@ -74,6 +76,9 @@ KBC_COMMAND_BYTE    equ 0x45        ; translate to set 1 (bit 6), system flag (2
 SYS_PORT_B          equ 0x061
 SYS_PORT_B_PARITY   equ 0x80        ; read: parity check (NMI source)
 SYS_PORT_B_IOCHK    equ 0x40        ; read: I/O channel check (NMI source)
+SYS_PORT_B_OUT2     equ 0x20        ; read: timer channel 2's output
+SYS_PORT_B_GATE2    equ 0x01        ; write: let timer channel 2 count
+SYS_PORT_B_SPEAKER  equ 0x02        ; write: channel 2's output to the speaker
 
 ; ---------------------------------------------------------------- MC146818 RTC and CMOS
 CMOS_INDEX          equ 0x070       ; bit 7 set disables NMI
@@ -127,7 +132,10 @@ HDC_CMD_SET_PARAMETERS equ 0x91     ; heads (drive/head register) and sectors a 
 HDC_PRECOMP_SHIFT   equ 2           ; the precompensation register holds the cylinder / 4
 
 ; ---------------------------------------------------------------- game port, printers, serial
-GAME_PORT           equ 0x201
+GAME_PORT           equ 0x201       ; write: start the axes' one-shots; read: as below
+GAME_PORT_AXES      equ 0x0F        ; an axis's bit is 1 while its one-shot runs
+GAME_PORT_BUTTONS   equ 0xF0        ; a button's bit is 0 while it is pressed
+GAME_PORT_BUTTON_SHIFT equ 4
 LPT1_BASE           equ 0x378
 LPT2_BASE           equ 0x278
 LPT_DATA            equ 0           ; offsets from an LPT*_BASE: the data latch
@@ -148,15 +156,22 @@ UART_RBR            equ 0           ; read: receive buffer
 UART_DLL            equ 0           ; divisor latch, low (DLAB = 1)
 UART_DLM            equ 1           ; divisor latch, high (DLAB = 1)
 UART_IER            equ 1           ; interrupt enable
+UART_IER_RECEIVED   equ 0x01        ; an interrupt when a byte has come
 UART_LCR            equ 3           ; line control
 UART_MCR            equ 4           ; modem control
 UART_LSR            equ 5           ; line status
 UART_LCR_DLAB       equ 0x80
 UART_LCR_8N1        equ 0x03
+UART_LCR_7N1        equ 0x02        ; 7 data bits, no parity, 1 stop bit: a serial mouse's
 UART_MCR_DTR_RTS    equ 0x03        ; OUT2 clear: the UART's interrupt stays off the bus
+UART_MCR_RUN        equ 0x0B        ; DTR, RTS and OUT2: interrupts reach the bus
+UART_MCR_OFF        equ 0x00        ; DTR and RTS low: a serial mouse's reset
+UART_LSR_DATA       equ 0x01        ; a byte waits in the receive buffer
 UART_LSR_THRE       equ 0x20        ; transmit holding register empty
 UART_LSR_TEMT       equ 0x40        ; transmitter empty: the last byte has gone
 UART_DIVISOR_115200 equ 1           ; 1.8432 MHz / 16 / 1
+UART_DIVISOR_9600   equ 12          ; the modem
+UART_DIVISOR_1200   equ 96          ; a serial mouse
 
 ; ---------------------------------------------------------------- EGA
 EGA_ATTR            equ 0x3C0       ; 3C0h-3CFh: attribute, sequencer, graphics, misc
