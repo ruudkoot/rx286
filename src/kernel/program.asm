@@ -29,15 +29,22 @@ restart_program:
 %endif
         push ax
         push bx
-        mov word [bp + FRAME_IP], 0
-        mov word [bp + FRAME_CS], SEL_UCODE
-        mov word [bp + FRAME_FLAGS], FLAGS_USER_START
         mov bx, [cur_thread]
+        mov ax, [bx + T_ENTRY]
+        mov [bp + FRAME_IP], ax
+        call thread_flags
+        mov [bp + FRAME_FLAGS], ax
         mov ax, [bx + T_USTACK_TOP]
         mov [bp + FRAME_USER_SP], ax
-        mov word [bp + FRAME_USER_SS], SEL_USTACK
-        mov word [bp + FRAME_DS], SEL_UDATA
-        mov word [bp + FRAME_ES], SEL_UDATA
+        mov al, [bx + T_RING]           ; slots 0, 1, 2 of its space, at its ring
+        xor ah, ah
+        or ax, SEL_UDATA & ~CPL_MASK
+        mov [bp + FRAME_DS], ax
+        mov [bp + FRAME_ES], ax
+        add ax, SEL_USTACK - SEL_UDATA
+        mov [bp + FRAME_USER_SS], ax
+        sub ax, SEL_USTACK - SEL_UCODE
+        mov [bp + FRAME_CS], ax
         xor ax, ax
         mov [bp + FRAME_AX], ax
         mov [bp + FRAME_BX], ax

@@ -42,8 +42,8 @@ crash: halt the CPU
 rx286: program fault #GP(0000) at 0007:{crash_kinds.hlt}
 rx286 shell, started again
 A:\>crash int
-crash: INT 31h, beyond the IDT
-rx286: program fault #GP(018A) at 0007:{crash_kinds.int}
+crash: INT 32h, beyond the IDT
+rx286: program fault #GP(0192) at 0007:{crash_kinds.int}
 rx286 shell, started again
 A:\>crash kernel
 crash: load the kernel's data selector

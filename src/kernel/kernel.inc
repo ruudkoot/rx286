@@ -55,8 +55,36 @@ T_RUN_TICKS         equ 20      ; ticks during which it was running
 T_LDT_LIVE          equ 22      ; its LDT (kdata)
 T_LDT_PRISTINE      equ 24      ; the LDT as built (kdata)
 T_RUNS              equ 26      ; times it was switched to
-T_FPU               equ 28      ; its 287's state (FNSAVE: 94 bytes) while not the owner
-TCB_SIZE            equ 122
+T_SPACE             equ 28      ; its space (kdata)
+T_ENTRY             equ 30      ; its program's entry: the IP of a start
+T_RING              equ 32      ; byte: its ring, its space's slot 0's DPL
+T_FPU               equ 34      ; its 287's state (FNSAVE: 94 bytes) while not the owner
+TCB_SIZE            equ 128
+
+; A thread as an object of the arena (roadmap l4.md L3): its control block,
+; then its kernel stack, a segment of its own from the GDT's pool.
+TCB_OBJECT_SIZE     equ 1024
+TCB_STACK_OFF       equ TCB_SIZE
+TCB_STACK_SIZE      equ TCB_OBJECT_SIZE - TCB_SIZE
+
+; ---------------------------------------------------------------- spaces and capabilities
+; A space (l4.md L3): a header, its LDT (a descriptor a slot), then a shadow
+; entry a slot, which says what the slot holds. kcalls.inc names the types.
+SP_SLOTS            equ 0       ; the header: how many slots
+SP_GDT_SELECTOR     equ 2       ; its LDT's descriptor, from the GDT's pool
+SP_HEADER_SIZE      equ 16
+SP_LDT              equ SP_HEADER_SIZE
+SH_TYPE             equ 0       ; byte: CAP_*
+SH_RIGHTS           equ 1       ; byte
+SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's base in
+                                ; paragraphs (a segment, untyped); an IRQ line
+SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
+SH_BADGE            equ 4       ; an endpoint's or notification's badge
+SH_WATERMARK        equ 6       ; untyped: paragraphs retyped so far
+SH_PARENT           equ 8       ; the space it was copied from (0: made, not copied)
+SH_PARENT_SLOT      equ 10      ; and the slot there
+SHADOW_SIZE         equ 16
+SMALL_OBJECT_SIZE   equ 16      ; an endpoint, a notification
 
 TS_FREE             equ 0       ; T_STATE: no thread
 TS_READY            equ 1       ; in its ready queue
@@ -64,6 +92,8 @@ TS_RUNNING          equ 2
 TS_WAITING          equ 3       ; inside the kernel, until the next interrupt
 
 TF_FOREGROUND       equ 0x01    ; T_FLAGS: the keys and Ctrl+Break are its
+TF_CONFIGURED       equ 0x02    ; its space, entry and stack are set
+TF_IOPL             equ 0x04    ; it runs with IOPL 1 (a ring-1 thread that asked)
 
 PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
@@ -79,6 +109,7 @@ FLAGS_TF            equ 0x0100
 FLAGS_IF            equ 0x0200
 FLAGS_NT            equ 0x4000
 FLAGS_USER_START    equ 0x0202  ; IF set, IOPL 0, everything else clear
+FLAGS_IOPL1         equ 0x1000  ; IOPL 1: a driver's (roadmap l4.md D11)
 FLAGS_DF_TASK       equ 0x0002  ; the double-fault task: interrupts off (bit 1 reads as 1)
 CPL_MASK            equ 3
 

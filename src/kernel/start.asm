@@ -45,11 +45,8 @@ pm_start:
         mov es, ax
         mov ax, SEL_TSS
         ltr ax
-        mov ax, SEL_LDT                 ; the program's LDT: never Bochs' live one
-        lldt ax                         ; at address 0 (roadmap X8)
-        zero_segment SEL_USTACK, USTACK_SIZE    ; an LDT selector: after LLDT
-        mov ax, SEL_KDATA
-        mov es, ax
+        xor ax, ax                      ; no LDT until a thread runs: never Bochs'
+        lldt ax                         ; live one at address 0 (roadmap X8)
         call pic_init
         call fpu_init
         call serial_quiet

@@ -56,6 +56,14 @@ Every way out is a reported fault, after which the program starts again
 - **Each program in its own LDT.** The program and the counter have LDTs
   of their own; the same selectors name different memory in each, and no
   selector of one reaches the other's (*docs/protected-mode.md*).
+- **Capabilities** (*docs/kernel-calls.md*; roadmap l4.md L3). A thread can
+  name only the slots of its own space; a GDT selector, a slot past the
+  space, an empty slot or one of the wrong type is refused (`KE_CAP`). A
+  capability that is not a segment is invisible to ring 3. The kernel's
+  objects live in the arena, which no program can load; retype zeroes what
+  it makes, and makes only data segments, never code. A segment moved or
+  given away is gone at once: the way back nulls a DS or ES that still held
+  it.
 - **No device can hang the kernel.** Every wait for a disk, printer or
   modem has a limit in ticks (*docs/storage.md*, *docs/devices.md*); a
   diskette that is not there, a fixed disk that does not answer and a
@@ -77,7 +85,7 @@ Every way out is a reported fault, after which the program starts again
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 67 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 74 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -91,7 +99,7 @@ that faulted:
 | the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |
 | the probe: the code's descriptor not present; refilled with data | #NP(0004); #GP(0004), at the return address |
 | a far call to the kernel's code; a jump to the TSS; a call to the double-fault TSS; a jump through the null selector | #GP(0008), #GP(0020), #GP(0028), #GP(0000) |
-| `INT 31h`; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(018A), #GP(010A), #GP(001A), #GP(0022) |
+| `INT 32h`; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(0192), #GP(010A), #GP(001A), #GP(0022) |
 | writing through CS; reading past the data's limit; a word across it; executing data | #GP(0000), #GP(0000), #GP(0000), #GP(000C) |
 | pushing past the stack's bottom; popping past its top | #SS(0000) |
 | divide by zero; an invalid opcode; `BOUND` | #DE, #UD, #BR |
@@ -109,6 +117,8 @@ that faulted:
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
 | `serial_read` into the code, across the data's limit, through a null ES; `serial_write` from a null selector | refused, `E_FAULT` (in `tests/devices/modem.test`, whose image has the modem; test builds' COM2 is the log, and refuses with `E_BUSY`) |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
+| the kernel's calls with a GDT selector, its own data, an empty slot or a selector past its LDT as the untyped; its code as a space to copy into; its data as a thread to start | refused, `KE_CAP` (1) |
+| a kernel call that does not exist | refused, `KE_NOSYS` (7) |
 
 The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core
 (*docs/emulators.md*). Before every restart in attack and fuzz builds, the kernel checks that a

@@ -23,28 +23,32 @@ writes the GDT except for the TSS's busy bit.
 |---|---|---|---|---|---|
 | 00h | `SEL_NULL` | | | | |
 | 08h | `SEL_KCODE` | 10100h | size | 9Bh: present, DPL 0, code, readable | the kernel |
-| 10h | `SEL_KDATA` | 14100h | size | 93h: present, DPL 0, data, writable | its tables and variables |
+| 10h | `SEL_KDATA` | 14100h | FFFFh | 93h: present, DPL 0, data, writable | its tables and variables, and the arena (*docs/memory-map.md*) |
 | 18h | `SEL_KSTACK` | 1A900h | 3FFh | 93h | its own stack: the start's, then the idle loop's |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
 | 30h | `SEL_DFSTACK` | 1AD00h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
-| 40h | `SEL_LDT` | in KDATA | `LDT_LIMIT` | 82h: present, DPL 0, an LDT | the program's LDT |
-| 48h | `SEL_LDT_COUNTER` | in KDATA | `LDT_LIMIT` | 82h | the counter's LDT |
-| 50h, 58h | `SEL_TSTACK`, + 8 | 1BB00h, 1BF00h | 3FFh | 93h | each thread's kernel stack (SS0 while it runs) |
+| 40h-78h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`) |
+| 80h-B8h | `SEL_STACK_POOL` | in the arena | 37Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`): SS0 while it runs |
+| C0h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory, to zero a retyped segment |
 
 Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
 be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
 levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
-`GDT_LIMIT`, 5Fh. Any selector beyond the limit is a general protection
+`GDT_LIMIT`, C7h. A free descriptor of a pool is all zeros, which no one
+can load. The kernel takes one when it makes a space or a thread
+(*docs/kernel-calls.md*). Any selector beyond the limit is a general protection
 fault.
 
 ## The programs' LDTs
 
-Each program's segments live in an LDT of its own (`src/kernel/ldt.asm`):
-the program's, and the counter's (roadmap l4.md L2). The kernel loads the
-program's at start, so LDTR is never left as Bochs' live LDT at address 0
-(roadmap X8), and loads each thread's at every switch (*docs/architecture.md*). A selector of the LDT has its table indicator set
+Each program runs in a space of its own: an LDT and its slots, in the arena
+(roadmap l4.md L3; *docs/kernel-calls.md*). The kernel makes the program's
+space and the counter's at start, copying their segments' descriptors from
+the image (`src/kernel/ldt.asm`), and loads each thread's LDT at every
+switch (*docs/architecture.md*). Until the first switch LDTR is null: never
+Bochs' live LDT at address 0 (roadmap X8). A selector of the LDT has its table indicator set
 (`SEL_TI_LDT`). The LDT has `LDT_ENTRIES` slots and its limit is
 `LDT_LIMIT`, 3Fh:
 

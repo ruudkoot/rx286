@@ -53,13 +53,14 @@ program_main_fuzz := tests/programs/fuzz.asm
 program_main_storage := tests/programs/storage.asm
 program_main_devices := tests/programs/devices.asm
 program_main_fputhreads := tests/programs/fputhreads.asm
+program_main_caps := tests/programs/caps.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
 # timings stay their own.
 COUNTER_DEFINE := $(if $(or $(filter shell,$(PROGRAM)),$(findstring TEST_COUNTER,$(TEST_DEFINES))),,-dNO_COUNTER)
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices or fputhreads, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads or caps, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed

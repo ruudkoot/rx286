@@ -20,6 +20,7 @@ bits 16
 %include "vectors.inc"
 %include "descriptors.inc"
 %include "syscalls.inc"
+%include "kcalls.inc"
 %include "disks.inc"
 %include "kernel.inc"
 
@@ -69,6 +70,8 @@ section ktext
 %include "syscall.asm"
 %include "program.asm"
 %include "thread.asm"
+%include "cap.asm"
+%include "caps.asm"
 %include "test.asm"
 %include "format.asm"
 ktext_end:

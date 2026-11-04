@@ -27,7 +27,7 @@ relies on, and NASM refuses segments that overlap.
 
 Routines that take registers and memory and touch no hardware (the scancode
 table, number formatting, the shell's parser, FAT12 decoding, FAT names and
-time stamps) are assembled
+time stamps, retype's placement and a selector's slot) are assembled
 alone and run in Unicorn's 16-bit mode by pytest (`tests/unit/`, `make
 unit`). Unicorn is not a 286, so only pure code is tested this way.
 
@@ -102,7 +102,8 @@ The suites:
 | `tests/drives` | the shell's drives: `dir` on every drive, `cd` in all its forms, `type` through a fragmented file and a file of four clusters, `print` checked byte for byte, every refusal, a drive without a diskette, a disk without a partition, a damaged FAT, paths of exactly 64 characters and of 66 |
 | `tests/shell` | every command of the shell, its editor, every `crash` |
 | `tests/threads` | the shell with the counter below it, at its priority and above it (which starves the shell, and only it); two threads keeping their own 287 states (Bochs); the thread dump on Sys Req |
-| `tests/attack` | 67 attacks (*docs/security.md*) |
+| `tests/caps` | the kernel's calls on capabilities: every kind of object retyped, every refusal, a space built for a new thread by copy, move and mint, the thread started (*docs/kernel-calls.md*) |
+| `tests/attack` | 74 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3 |
 | `tests/unit` | the host tests (layer 3) |
 

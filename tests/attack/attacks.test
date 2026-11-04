@@ -44,8 +44,8 @@ attack: jump to the TSS
 rx286: program fault #GP(0020) at 0007:{attacks.tss}
 attack: call the double-fault TSS
 rx286: program fault #GP(0028) at 0007:{attacks.dftss}
-attack: int 31h
-rx286: program fault #GP(018A) at 0007:{attacks.int31}
+attack: int 32h
+rx286: program fault #GP(0192) at 0007:{attacks.int32}
 attack: int 21h
 rx286: program fault #GP(010A) at 0007:{attacks.int21}
 attack: int 3
@@ -151,4 +151,18 @@ attack: probe: code not present
 rx286: program fault #NP(0004) at 0007:{attacks.pcs_r}
 attack: probe: data for code
 rx286: program fault #GP(0004) at 0007:{attacks.pcsd_r}
+attack: retype from a GDT selector
+attack: refused, error 1
+attack: retype from its own data
+attack: refused, error 1
+attack: retype from an empty slot
+attack: refused, error 1
+attack: retype from past its LDT
+attack: refused, error 1
+attack: copy into its code, as a space
+attack: refused, error 1
+attack: start its data, as a thread
+attack: refused, error 1
+attack: a kernel call that does not exist
+attack: refused, error 7
 attack: done

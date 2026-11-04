@@ -11,7 +11,7 @@
 %ifndef RX286_SELECTORS_INC
 %define RX286_SELECTORS_INC
 
-%include "layout.inc"                  ; THREADS
+%include "layout.inc"                  ; SPACE_MAX, THREAD_MAX
 
 RPL_KERNEL          equ 0
 RPL_USER            equ 3
@@ -25,11 +25,14 @@ SEL_TSS             equ 0x20        ; the one task
 SEL_DFTSS           equ 0x28        ; the double-fault task
 SEL_DFSTACK         equ 0x30        ; the double-fault task's stack
 SEL_VIDEO           equ 0x38        ; colour text, page 0
-SEL_LDT             equ 0x40        ; the program's LDT
-SEL_LDT_COUNTER     equ 0x48        ; the counter's LDT (roadmap l4.md L2)
-SEL_TSTACK          equ 0x50        ; the first thread's kernel stack; the next at +8
+; Pools the kernel takes descriptors from (roadmap l4.md L3): one LDT
+; descriptor for each space, one kernel stack for each thread; a free one
+; is all zeros. Then the kernel's window on any memory, for zeroing it.
+SEL_LDT_POOL        equ 0x40                                ; SPACE_MAX of them
+SEL_STACK_POOL      equ SEL_LDT_POOL + SPACE_MAX * 8        ; THREAD_MAX of them
+SEL_SCRATCH         equ SEL_STACK_POOL + THREAD_MAX * 8
 
-GDT_ENTRIES         equ 10 + THREADS
+GDT_ENTRIES         equ SEL_SCRATCH / 8 + 1
 GDT_LIMIT           equ GDT_ENTRIES * 8 - 1
 
 ; A program's LDT: its three segments, the fuzzer's alias in test builds

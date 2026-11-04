@@ -17,6 +17,7 @@ bits 16
 %include "ports.inc"
 %include "selectors.inc"
 %include "program.inc"
+%include "kcalls.inc"
 
 FLAGS_TF            equ 0x0100
 FLAGS_IOPL3         equ 0x3000
@@ -103,7 +104,7 @@ attacks:
 .kcall: call SEL_KCODE:0
 .tss:   jmp SEL_TSS:0
 .dftss: call SEL_DFTSS:0
-.int31: int 0x31                        ; beyond the IDT's limit
+.int32: int 0x32                        ; beyond the IDT's limit
 .int21: int 0x21                        ; IRQ1's gate: DPL 0
 .int3:  int3
 .into:  mov al, 127
@@ -295,6 +296,46 @@ attacks:
         sys SYS_TEST_PROBE
 .pcsd_r: PRINT "attack: back, with data for code", CHAR_LF
         jmp entry
+; The kernel's calls (roadmap l4.md L3), from a program that holds no
+; capability but its three segments: each refused, nothing changed.
+.kgdt:  mov dx, SEL_KDATA               ; a GDT selector: no one's slot
+        jmp retype_attack
+.kown:  mov dx, SEL_UDATA               ; its own data: not untyped
+        jmp retype_attack
+.kempty: mov dx, SEL_EMPTY_SLOT         ; an empty slot
+        jmp retype_attack
+.kpast: mov dx, SEL_PAST_LDT            ; past its LDT
+        jmp retype_attack
+.kcopy: mov dx, SEL_UCODE               ; its code, as a space to copy into
+        mov si, SEL_UDATA
+        mov di, SEL_EMPTY_SLOT
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        call report_refusal
+        jmp entry
+.kthread: mov dx, SEL_UDATA             ; its data, as a thread to start
+        mov al, THREAD_START
+        mov cx, 7
+        kcall KCALL_THREAD
+        call report_refusal
+        jmp entry
+.knone: mov ah, 0x80                    ; no such call
+        int KCALL_VECTOR
+        call report_refusal
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; retype_attack - KCALL_RETYPE from DX into the empty slot, reported
+;   In:       DX = the selector given as the untyped
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+retype_attack:
+        mov al, CAP_ENDPOINT
+        mov si, SEL_EMPTY_SLOT
+        kcall KCALL_RETYPE
+        call report_refusal
+        jmp entry
 
 ; ----------------------------------------------------------------------------
 ; ldt_slots - every slot of the program's LDT as ring 3 sees it: LAR's
@@ -390,7 +431,7 @@ attack_table:
         attack "call the kernel", attacks.kcall
         attack "jump to the TSS", attacks.tss
         attack "call the double-fault TSS", attacks.dftss
-        attack "int 31h", attacks.int31
+        attack "int 32h", attacks.int32
         attack "int 21h", attacks.int21
         attack "int 3", attacks.int3
         attack "into", attacks.into
@@ -438,6 +479,13 @@ attack_table:
         attack "probe: read-only stack", attacks.pssr
         attack "probe: code not present", attacks.pcs
         attack "probe: data for code", attacks.pcsd
+        attack "retype from a GDT selector", attacks.kgdt
+        attack "retype from its own data", attacks.kown
+        attack "retype from an empty slot", attacks.kempty
+        attack "retype from past its LDT", attacks.kpast
+        attack "copy into its code, as a space", attacks.kcopy
+        attack "start its data, as a thread", attacks.kthread
+        attack "a kernel call that does not exist", attacks.knone
         dw 0
 end_udata
 

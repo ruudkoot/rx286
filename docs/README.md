@@ -9,6 +9,7 @@
 | [protected-mode.md](protected-mode.md) | the GDT, the TSSs, the way into protected mode |
 | [interrupts.md](interrupts.md) | every vector and IRQ line, and what handles it |
 | [syscalls.md](syscalls.md) | the system calls |
+| [kernel-calls.md](kernel-calls.md) | the kernel's calls on capabilities: retype, copy, threads |
 | [storage.md](storage.md) | the drives, their drivers, the printers, the sample disks |
 | [devices.md](devices.md) | the speaker, the game port, the serial mouse, the modem, SYS_WAIT |
 | [shell.md](shell.md) | the shell: its commands, drives and paths, its FAT12 library |
@@ -19,5 +20,5 @@
 | [emulators.md](emulators.md) | Bochs, DOSBox-X and MAME, and how they differ from the AT |
 | [style.md](style.md) | how the sources are written |
 
-The plans behind all of it are `roadmaps/rx286.md`, `roadmaps/storage.md` and
-`roadmaps/devices.md`.
+The plans behind all of it are `roadmaps/rx286.md`, `roadmaps/storage.md`,
+`roadmaps/devices.md` and `roadmaps/l4.md`.

@@ -56,10 +56,19 @@ USTACK_OFF          equ 0xAF00      ; the program's stack
 USTACK_SIZE         equ 0x0800
 CSTACK_OFF          equ 0xB700      ; the counter's stack
 CSTACK_SIZE         equ 0x0400
-TSTACK_OFF          equ 0xBB00      ; each thread's kernel stack, one after another
-TSTACK_SIZE         equ 0x0400
-THREADS             equ 2           ; the program and the counter
-KERNEL_END          equ TSTACK_OFF + THREADS * TSTACK_SIZE
+KERNEL_END          equ CSTACK_OFF + CSTACK_SIZE
+
+; The arena (roadmap l4.md D7, L3): the kernel's objects - spaces, threads,
+; endpoints, notifications - in the upper half of its data segment's 64 KB,
+; so the kernel reaches each with DS = SEL_KDATA. Only the kernel maps it:
+; it is given out as untyped memory, never as a segment.
+ARENA_OFF           equ 0x8000      ; an offset of the kernel's data segment
+ARENA_SIZE          equ 0x8000
+; Memory for programs' segments, given out as untyped (l4.md L3)
+UMEM_PHYS           equ 0x30000
+UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h
+SPACE_MAX           equ 8           ; LDT descriptors in the GDT's pool
+THREAD_MAX          equ 8           ; kernel stack descriptors in the GDT's pool
 
 ; Physical addresses of the segments.
 KTEXT_PHYS          equ KERNEL_PHYS + KTEXT_OFF
@@ -72,7 +81,14 @@ KSTACK_PHYS         equ KERNEL_PHYS + KSTACK_OFF
 DFSTACK_PHYS        equ KERNEL_PHYS + DFSTACK_OFF
 USTACK_PHYS         equ KERNEL_PHYS + USTACK_OFF
 CSTACK_PHYS         equ KERNEL_PHYS + CSTACK_OFF
-TSTACK_PHYS         equ KERNEL_PHYS + TSTACK_OFF
+ARENA_PHYS          equ KDATA_PHYS + ARENA_OFF
+
+%if ARENA_PHYS < KERNEL_PHYS + KERNEL_END
+  %error "layout.inc: the arena overlaps the kernel's image"
+%endif
+%if ARENA_OFF + ARENA_SIZE > 0x10000
+  %error "layout.inc: the arena must lie within the kernel data segment's 64 KB"
+%endif
 
 ; The program's two file sections, as offsets of its own binary.
 USER_TEXT_START     equ 0

@@ -75,7 +75,7 @@ crash_kinds:
 .io:    in al, KEYBOARD_PORT            ; #GP (IOPL 0)
 .cli:   cli                             ; #GP (IOPL 0)
 .hlt:   hlt                             ; #GP (CPL 3)
-.int:   int 0x31                        ; past the IDT's limit: #GP
+.int:   int 0x32                        ; past the IDT's limit: #GP
 .kernel: mov ax, GUESS_KERNEL_DATA
 .kernel_f: mov ds, ax                   ; DPL 0: #GP
 .call:  call GUESS_KERNEL_CODE:0        ; DPL 0: #GP
@@ -121,7 +121,7 @@ crashes_start       equ $
         crash "io", crash_kinds.io, "read the keyboard's port myself"
         crash "cli", crash_kinds.cli, "turn interrupts off"
         crash "hlt", crash_kinds.hlt, "halt the CPU"
-        crash "int", crash_kinds.int, "INT 31h, beyond the IDT"
+        crash "int", crash_kinds.int, "INT 32h, beyond the IDT"
         crash "kernel", crash_kinds.kernel, "load the kernel's data selector"
         crash "call", crash_kinds.call, "call into the kernel's code"
         crash "write", crash_kinds.write, "write over my own code"

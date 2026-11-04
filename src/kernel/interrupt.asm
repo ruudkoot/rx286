@@ -207,8 +207,10 @@ isr_handlers:
         dw exception
   %elif vector <= VEC_IRQ_LAST
         dw irq
-  %else
+  %elif vector == VEC_SYSCALL
         dw syscall
+  %else
+        dw kcall_handler
   %endif
   %assign vector vector + 1
 %endrep

@@ -11,14 +11,15 @@ has a rule (roadmap D10-D15). `src/include/vectors.inc` names the vectors;
 | 00h-07h, 09h-1Fh | interrupt | 0 | the exception path: a fault of the program, or a kernel panic |
 | 08h | task, to `SEL_DFTSS` | 0 | the double-fault task |
 | 20h-2Fh | interrupt | 0 | IRQ0-15: a driver, or the rule for lines without one |
-| 30h | interrupt | 3 | the system call |
+| 30h | interrupt | 3 | the system call (`VEC_SYSCALL`; *docs/syscalls.md*) |
+| 31h | interrupt | 3 | the kernel's calls on capabilities (`VEC_KCALL`; *docs/kernel-calls.md*) |
 
-The IDT has `IDT_ENTRIES` gates (49) and its limit is `IDT_LIMIT` (187h). Any
-vector above `VEC_SYSCALL` is beyond the limit: a general protection fault
+The IDT has `IDT_ENTRIES` gates (50) and its limit is `IDT_LIMIT` (18Fh). Any
+vector above `VEC_KCALL` is beyond the limit: a general protection fault
 whose error code is the vector × 8 + 2, so a program's `INT 41h` is reported
 as a fault naming the vector. A program's `INT 3`, `INTO` or `INT n` for any
 other n goes through a gate of DPL 0 and faults the same way. Only `INT 30h`
-reaches the kernel by the program's choice. No external interrupt can come
+and `INT 31h` reach the kernel by the program's choice. No external interrupt can come
 above `VEC_IRQ_LAST`, since both 8259As are programmed below it.
 
 Every gate but 08h's is an interrupt gate, so the kernel runs with IF clear;

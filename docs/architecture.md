@@ -60,8 +60,9 @@ with `incbin`: it can name nothing of the kernel's.
 | `fault.asm` | the CPU's exceptions: the program's fault, a kernel panic, NMI, a carried single-step trap |
 | `panic.asm` | the red screen and halt; the double-fault task |
 | `program.asm` | a program: its restart, its fault report |
-| `thread.asm` | the threads: their control blocks, the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump |
-| `ldt.asm` | the programs' LDTs, and their pristine copies |
+| `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump; the start of the first two |
+| `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*) |
+| `ldt.asm` | the descriptors of the programs the image carries, copied into their spaces at start |
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
 | `pic.asm` | the 8259As; the driver of each line or the rule for none; spurious IRQ7 and IRQ15 |
 | `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
@@ -102,9 +103,14 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
 the program the kernel carries (the shell, or a test program), and the
-counter beside the shell. A thread has a control block in the kernel's
-data, an LDT, and a kernel stack of its own (`SEL_TSTACK` + 8n), at whose
-top the CPU puts the frame of every interrupt from ring 3.
+counter beside the shell. A thread is an object of the arena
+(*docs/memory-map.md*): a control block and a kernel stack of its own (a
+segment from the GDT's pool), at whose top the CPU puts the frame of every
+interrupt from ring 3. It runs in a space: an LDT and its slots, which hold
+its capabilities (`cap.asm`, *docs/kernel-calls.md*; roadmap l4.md L3). The
+kernel makes the first two spaces and threads at its start from its own
+untyped memory; a program that holds untyped memory and a space can make
+more with the kernel's calls.
 
 - **The switch** is in software, through the one TSS (l4.md D2): the
   running thread's registers are pushed on its kernel stack and its SS:SP

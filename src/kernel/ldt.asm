@@ -2,9 +2,11 @@
 ; rx286 - src/kernel/ldt.asm
 ; The programs' local descriptor tables, and their pristine copies.
 ;
-; The program's segments live here, not in the GDT (roadmap l4.md L1): its
-; code, data and stack, the fuzzer's alias of its data as code in fuzz
-; builds, and empty slots. An empty slot is all zeros: not present, DPL 0,
+; The descriptors of the programs the kernel's image carries (roadmap l4.md
+; L1, L3): the program's code, data and stack, the fuzzer's alias of its
+; data as code in fuzz builds, and empty slots; the counter's likewise. At
+; start the kernel copies them into each program's space in the arena
+; (cap.asm), whose LDT the program then runs with. An empty slot is all zeros: not present, DPL 0,
 ; no valid type, so ring 3 can neither load it nor learn anything of it
 ; with LAR, LSL, VERR or VERW (l4.md E2). The counter (l4.md L2) has an
 ; LDT of the same shape over its own memory, so the same selectors name its
@@ -38,23 +40,19 @@
   %endrep
 %endmacro
 
-program_ldt:
-        program_ldt_entries
-program_ldt_end:
 program_ldt_pristine:
         program_ldt_entries
-counter_ldt:
-        counter_ldt_entries
+program_ldt_end:
 counter_ldt_pristine:
         counter_ldt_entries
 
-%if program_ldt_end - program_ldt != LDT_LIMIT + 1
+%if program_ldt_end - program_ldt_pristine != LDT_LIMIT + 1
   %error "ldt.asm: the program's LDT does not match LDT_ENTRIES"
 %endif
 
 [section ktext]
 ; ----------------------------------------------------------------------------
-; ldt_restore - the running thread's LDT as it was built
+; ldt_restore - the running thread's segments as its image describes them
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -69,10 +67,25 @@ ldt_restore:
         pop es
         mov bx, [cur_thread]
         mov si, [bx + T_LDT_PRISTINE]
+        test si, si
+        jz .done                        ; a thread made by the kernel's calls: none
         mov di, [bx + T_LDT_LIVE]
-        mov cx, (LDT_LIMIT + 1) / 2
+        mov cx, LDT_ENTRIES
         cld
-        rep movsw
+.slot:
+        test byte [si + 5], ACC_PRESENT ; only the image's segments: a slot it
+        jz .skip                        ; leaves empty may hold a capability now
+        movsw
+        movsw
+        movsw
+        movsw
+        loop .slot
+        jmp .done
+.skip:
+        add si, 8
+        add di, 8
+        loop .slot
+.done:
         pop es
         pop di
         pop si

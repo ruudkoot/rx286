@@ -30,6 +30,7 @@ COVERED = {
     'selectors.inc': 'docs/protected-mode.md',
     'vectors.inc': 'docs/interrupts.md',
     'syscalls.inc': 'docs/syscalls.md',
+    'kcalls.inc': 'docs/kernel-calls.md',
     'disks.inc': 'docs/storage.md',
 }
 

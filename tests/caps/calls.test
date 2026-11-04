@@ -1,0 +1,51 @@
+# The kernel's calls on capabilities (roadmap l4.md L3): every kind of
+# object retyped, every refusal, a space built for a new thread from copies,
+# moves and a mint, the thread started; a capability that is not a segment,
+# loaded into ES, is the program's fault. tests/programs/caps.asm.
+program: caps
+define: TEST_CAPS
+---
+rx286, test build
+caps: retype a segment: 0
+caps: the segment, zeroed, reads back (4660): 4660
+caps: its base, high byte (3): 3
+caps: its base, low word (0): 0
+caps: its limit (255): 255
+caps: retype a space: 0
+caps: retype a thread: 0
+caps: retype an endpoint: 0
+caps: retype a notification: 0
+caps: retype from a segment (1): 1
+caps: retype into a full slot (4): 4
+caps: a segment from the arena (1): 1
+caps: a thread from the memory for segments (1): 1
+caps: a code segment (2): 2
+caps: a segment of DPL 0 (2): 2
+caps: a space of 12 slots (2): 2
+caps: a GDT selector as the untyped (1): 1
+caps: a selector past the space (1): 1
+caps: an empty slot as the untyped (1): 1
+caps: the base of an endpoint (1): 1
+caps: a call that does not exist (7): 7
+caps: copy its code into the new space: 0
+caps: move the segment in, as its data: 0
+caps: ES after the move: nulled on the way back (0): 0
+caps: retype its stack: 0
+caps: move the stack in: 0
+caps: mint the endpoint into it, badged: 0
+caps: mint a segment (2): 2
+caps: mint with no badge (2): 2
+caps: copy untyped (2): 2
+caps: copy into a full slot (4): 4
+caps: copy from an empty slot (1): 1
+caps: copy into an endpoint, as a space (1): 1
+caps: configure the new thread: 0
+caps: start a space, as a thread (1): 1
+caps: start at priority 9 (2): 2
+caps: start it: 0
+caps: start it again (6): 6
+caps: configure a running thread: itself (6): 6
+caps: load the endpoint into ES
+rx286: program fault #GP(0034) at 0007:{entry.load_f}
+caps: done
+new thread: runs

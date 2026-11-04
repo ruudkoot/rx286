@@ -14,8 +14,9 @@ D7). This document explains each one.
 | 07E00h-083FFh | the loader: 3 sectors | `LOADER_PHYS`, `LOADER_SECTORS` | the boot sector loads it |
 | 08400h-097FFh | the loader's FAT buffer | `LOADER_FAT_BUF` | the loader |
 | 09800h-0FFFFh | the loader's root-directory buffer | `LOADER_ROOT_BUF`, `LOADER_BUF_END` | the loader |
-| 10000h-1C2FFh | the kernel's image and its zeroed areas | `KERNEL_PHYS`, `KERNEL_END` | the loader loads, the kernel runs |
-| 1C300h-9FFFFh | free | | nobody |
+| 10000h-1BAFFh | the kernel's image and its zeroed areas | `KERNEL_PHYS`, `KERNEL_END` | the loader loads, the kernel runs |
+| 1C100h-240FFh | the arena: the kernel's objects | `ARENA_PHYS`, `ARENA_SIZE` | the kernel, through `SEL_KDATA` |
+| 30000h-9FFFFh | memory for programs' segments, as untyped | `UMEM_PHYS`, `UMEM_SIZE` | retyped by programs that hold it |
 | A0000h-AFFFFh | EGA graphics memory | | nobody |
 | B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the console |
 | C0000h-C3FFFh | EGA BIOS ROM | | the BIOS |
@@ -52,13 +53,29 @@ segment.
 | double-fault stack | `DFSTACK_OFF` AD00h | `DFSTACK_SIZE` 512 B | `DFSTACK_PHYS` 1AD00h | no: zeroed at start | `SEL_DFSTACK` |
 | program stack | `USTACK_OFF` AF00h | `USTACK_SIZE` 2 KB | `USTACK_PHYS` 1AF00h | no: zeroed at start | `SEL_USTACK` in the program's LDT |
 | counter stack | `CSTACK_OFF` B700h | `CSTACK_SIZE` 1 KB | `CSTACK_PHYS` 1B700h | no | `SEL_USTACK` in the counter's LDT |
-| the threads' kernel stacks | `TSTACK_OFF` BB00h | `THREADS` × `TSTACK_SIZE` 1 KB | `TSTACK_PHYS` 1BB00h | no: written when each thread starts | `SEL_TSTACK`, + 8 for each next thread |
 
 The code room is 16 KB and the data room 8 KB while today's system calls and
-the new kernel live side by side (roadmap l4.md, *Constraints*). Each thread
-(*docs/architecture.md*) has a kernel stack of its own, at whose top the CPU
-puts the frame of every interrupt from ring 3; `THREADS` is how many there
-are: the program and the counter.
+the new kernel live side by side (roadmap l4.md, *Constraints*).
+
+## The arena, and memory for programs
+
+The kernel allocates nothing after its start (roadmap l4.md D7, L3). Its
+objects - spaces, threads, endpoints, notifications - live in the arena:
+`ARENA_SIZE` bytes from offset `ARENA_OFF` of the kernel's data segment,
+whose descriptor reaches the whole 64 KB, so the kernel uses every object
+with DS = `SEL_KDATA`. No program can load a segment over it: it is given
+out only as untyped memory (*docs/kernel-calls.md*), from which the kernel
+made the first spaces and threads at its start. The memory for programs'
+segments is untyped too, from `UMEM_PHYS`, `UMEM_SIZE` bytes.
+
+| Object | Bytes | What |
+|---|---|---|
+| a thread | 1,024 | its control block (128), then its kernel stack (896): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from ring 3 |
+| a space | 16 + 24 a slot, rounded up to a power of two | its header, its LDT (8 a slot), a shadow entry a slot (16) |
+| an endpoint, a notification | 16 | |
+
+An object lies at an address of the arena aligned to its size. The GDT's
+pools hold `SPACE_MAX` LDT descriptors and `THREAD_MAX` kernel stacks.
 
 `KERNEL.BIN`'s last word, which is the last word of the counter's data room,
 is `KERNEL_END_MARK`: the loader refuses a kernel whose end did not arrive.

@@ -1,40 +1,38 @@
-# The prefilled tables, the program's LDT among them, as the CPU sees them
-# once loaded (Bochs' debugger at the end of pm_start). Code and data limits change with the code, so they
-# are left out; everything else is checked.
+# The prefilled tables as the CPU sees them once loaded (Bochs' debugger at
+# the end of pm_start). Every descriptor of the GDT has DPL 0; its pools of
+# LDT and kernel stack descriptors, and its scratch window, are still empty,
+# and no LDT is loaded: the threads' spaces are made after this point
+# (roadmap l4.md L3). Code and data limits change with the code, so they are
+# left out; everything else is checked.
 emulators: bochs
 break: pm_start.ready
-debugger: info gdt 0 11
-debugger: info ldt 0 7
-debugger: info idt 0 0x30
+debugger: info gdt 0 24
+debugger: info idt 0 0x31
 debugger: sreg
 ---
-Global Descriptor Table (base=0x0000000000014100, limit=95):
+Global Descriptor Table (base=0x0000000000014100, limit=199):
 GDT[0x0000]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x0008]=Code segment, base=0x00010100, limit=0x
-GDT[0x0010]=Data segment, base=0x00014100, limit=0x
+GDT[0x0010]=Data segment, base=0x00014100, limit=0x0000ffff, Read/Write, Accessed
 GDT[0x0018]=Data segment, base=0x0001a900, limit=0x000003ff, Read/Write, Accessed
 GDT[0x0020]=16-Bit TSS (Busy) at 0x
 GDT[0x0028]=16-Bit TSS (available) at 0x
 GDT[0x0030]=Data segment, base=0x0001ad00, limit=0x000001ff, Read/Write, Accessed
 GDT[0x0038]=Data segment, base=0x000b8000, limit=0x00000f9f, Read/Write, Accessed
-GDT[0x0040]=LDT
-GDT[0x0048]=LDT
-GDT[0x0050]=Data segment, base=0x0001bb00, limit=0x000003ff, Read/Write, Accessed
-GDT[0x0058]=Data segment, base=0x0001bf00, limit=0x000003ff, Read/Write, Accessed
-Local Descriptor Table (base=0x00000000000
-LDT[0x00]=Code segment, base=0x00016100, limit=0x00001fff, Execute/Read, Non-Conforming, Accessed, 16-bit
-LDT[0x01]=Data segment, base=0x00018100, limit=0x00001fff, Read/Write, Accessed
-LDT[0x02]=Data segment, base=0x0001af00, limit=0x000007ff, Read/Write, Accessed
-LDT[0x03]=??? descriptor hi=0x00000000, lo=0x00000000
-LDT[0x07]=??? descriptor hi=0x00000000, lo=0x00000000
-limit=391):
+GDT[0x0040]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x0078]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x0080]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x00b8]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x00c0]=??? descriptor hi=0x00000000, lo=0x00000000
+limit=399):
 IDT[0x00]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_0}, DPL=0
 IDT[0x07]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_7}, DPL=0
 IDT[0x08]=Task Gate target=0x0028:0x00000000, DPL=0
 IDT[0x0d]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_13}, DPL=0
 IDT[0x2f]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_47}, DPL=0
 IDT[0x30]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_48}, DPL=3
-ldtr:0x0040, dh=0x00008201, dl=
+IDT[0x31]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_49}, DPL=3
+ldtr:0x0000, dh=0x00008200, dl=0x0000ffff, valid=0
 tr:0x0020
-gdtr:base=0x0000000000014100, limit=0x5f
-, limit=0x187
+gdtr:base=0x0000000000014100, limit=0xc7
+, limit=0x18f

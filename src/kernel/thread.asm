@@ -4,7 +4,7 @@
 ; waiting, and the lock around the system calls (roadmap l4.md L2).
 ;
 ; Each thread runs a program in ring 3 with an LDT of its own, and has a
-; kernel stack of its own (SEL_TSTACK + 8n): SP0 points at its top while the
+; kernel stack of its own (from SEL_STACK_POOL): SP0 points at its top while the
 ; thread runs, so every interrupt from ring 3 builds its frame there, and a
 ; thread that waits inside the kernel keeps its place on it (D3). switch_to
 ; saves the running thread's registers on its kernel stack, keeps SS:SP in
@@ -33,31 +33,16 @@ COUNTER_PRIORITY    equ PROGRAM_PRIORITY + 1
 COUNTER_PRIORITY    equ 1
 %endif
 
-; tcb ldt, stack, ustack_top, priority, name, live_ldt, pristine_ldt, flags
-%macro tcb 8
-        dw 0, 0                         ; T_SS, T_SP
-        db TS_FREE, (%4)                ; T_STATE, T_PRIO
-        dw 0                            ; T_NEXT
-        dw (%1), (%2), (%3)             ; T_LDT, T_STACK, T_USTACK_TOP
-        db 0, 0                         ; T_RESTART, T_FPU_VALID
-        dw (%5)                         ; T_NAME
-        db SLICE_TICKS, (%8)            ; T_SLICE, T_FLAGS
-        dw 0                            ; T_RUN_TICKS
-        dw (%6), (%7)                   ; T_LDT_LIVE, T_LDT_PRISTINE
-        dw 0                            ; T_RUNS
-        times TCB_SIZE - T_FPU db 0     ; T_FPU
-%endmacro
-
 begin_kdata
-threads:
-        tcb SEL_LDT, SEL_TSTACK, USTACK_SIZE, PROGRAM_PRIORITY, msg_thread_program, \
-            program_ldt, program_ldt_pristine, TF_FOREGROUND
-        tcb SEL_LDT_COUNTER, SEL_TSTACK + 8, CSTACK_SIZE, COUNTER_PRIORITY, msg_thread_counter, \
-            counter_ldt, counter_ldt_pristine, 0
-threads_end:
 ; The kernel's own context: the start, then the idle loop, on SEL_KSTACK.
+; (Threads are objects of the arena: cap.asm makes them.)
 idle_tcb:
-        tcb SEL_LDT, SEL_KSTACK, 0, 0, msg_thread_idle, program_ldt, program_ldt_pristine, 0
+        dw 0, 0                         ; T_SS, T_SP
+        db TS_RUNNING, 0                ; T_STATE, T_PRIO
+        dw 0, SEL_NULL, SEL_KSTACK, 0   ; T_NEXT, T_LDT (none), T_STACK, T_USTACK_TOP
+        db 0, 0                         ; T_RESTART, T_FPU_VALID
+        dw msg_thread_idle              ; T_NAME
+        times TCB_SIZE - T_SLICE db 0
 cur_thread          dw idle_tcb         ; the thread running
 fg_thread           dw idle_tcb         ; the thread the keys and Ctrl+Break are for
 call_owner          dw 0                ; the thread inside a system call, or 0
@@ -85,9 +70,6 @@ prio_table:
 %endrep
 end_kdata
 
-%if (threads_end - threads) / TCB_SIZE != THREADS
-  %error "thread.asm: the control blocks do not match THREADS"
-%endif
 
 ; ----------------------------------------------------------------------------
 ; threads_start - start the program's thread and the counter's, and become
@@ -97,12 +79,35 @@ end_kdata
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 threads_start:
-        mov bx, threads
+        mov si, program_ldt_pristine    ; the program, from the image
+        mov cx, USTACK_SIZE
+        mov ax, msg_thread_program
+        call boot_program               ; BX = its thread
+        mov byte [bx + T_PRIO], PROGRAM_PRIORITY
+        or byte [bx + T_FLAGS], TF_FOREGROUND
         mov [fg_thread], bx
+        mov ax, USTACK_PHYS & 0xFFFF    ; its stack, zeroed
+        mov dl, USTACK_PHYS >> 16
+        mov cx, USTACK_SIZE
+        call phys_zero
+        mov bx, [fg_thread]
         call thread_init
 %ifndef NO_COUNTER
-        add bx, TCB_SIZE
+        mov si, counter_ldt_pristine    ; the counter, from the image
+        mov cx, CSTACK_SIZE
+        mov ax, msg_thread_counter
+        call boot_program
+        mov byte [bx + T_PRIO], COUNTER_PRIORITY
+        push bx
+        mov ax, CSTACK_PHYS & 0xFFFF
+        mov dl, CSTACK_PHYS >> 16
+        mov cx, CSTACK_SIZE
+        call phys_zero
+        pop bx
         call thread_init
+%endif
+%ifdef TEST_CAPS
+        call test_caps_give             ; capabilities to try (test.asm)
 %endif
         TRACE "kernel: threads ready"
         ; falls through
@@ -128,7 +133,7 @@ idle_loop:
         jmp idle_loop
 
 ; Where a new thread's frame and its first switch_to's pushes lie
-THREAD_FRAME        equ TSTACK_SIZE - FRAME_SIZE_USER
+THREAD_FRAME        equ TCB_STACK_SIZE - FRAME_SIZE_USER
 THREAD_START_SP     equ THREAD_FRAME - 2 - 16 - 4      ; a return address, PUSHA, DS, ES
 
 ; ----------------------------------------------------------------------------
@@ -147,31 +152,54 @@ thread_init:
 %else
         xor ax, ax
 %endif
-        mov cx, TSTACK_SIZE / 2
+        mov cx, TCB_STACK_SIZE / 2
         cld
         rep stosw
         xor ax, ax
         mov di, THREAD_START_SP
-        mov cx, (TSTACK_SIZE - THREAD_START_SP) / 2
+        mov cx, (TCB_STACK_SIZE - THREAD_START_SP) / 2
         rep stosw
         ; switch_to's: ES, DS, PUSHA's registers (zero), the return address
         mov word [es:THREAD_START_SP], SEL_KDATA
         mov word [es:THREAD_START_SP + 2], SEL_KDATA
         mov word [es:THREAD_START_SP + 20], thread_first
         ; the frame of an interrupt from ring 3, at the program's entry
-        mov word [es:THREAD_FRAME + FRAME_ES], SEL_UDATA
-        mov word [es:THREAD_FRAME + FRAME_DS], SEL_UDATA
-        mov word [es:THREAD_FRAME + FRAME_IP], 0
-        mov word [es:THREAD_FRAME + FRAME_CS], SEL_UCODE
-        mov word [es:THREAD_FRAME + FRAME_FLAGS], FLAGS_USER_START
+        ; slots 0, 1, 2 of its space: code, data, stack, at its ring
+        mov al, [bx + T_RING]
+        xor ah, ah
+        or ax, SEL_UDATA & ~CPL_MASK
+        mov [es:THREAD_FRAME + FRAME_ES], ax
+        mov [es:THREAD_FRAME + FRAME_DS], ax
+        add ax, SEL_USTACK - SEL_UDATA
+        mov [es:THREAD_FRAME + FRAME_USER_SS], ax
+        sub ax, SEL_USTACK - SEL_UCODE
+        mov [es:THREAD_FRAME + FRAME_CS], ax
+        mov ax, [bx + T_ENTRY]
+        mov [es:THREAD_FRAME + FRAME_IP], ax
+        call thread_flags
+        mov [es:THREAD_FRAME + FRAME_FLAGS], ax
         mov ax, [bx + T_USTACK_TOP]
         mov [es:THREAD_FRAME + FRAME_USER_SP], ax
-        mov word [es:THREAD_FRAME + FRAME_USER_SS], SEL_USTACK
         mov [bx + T_SS], es
         mov word [bx + T_SP], THREAD_START_SP
         push ds
         pop es
         jmp ready_push
+
+; ----------------------------------------------------------------------------
+; thread_flags - the FLAGS a thread's program starts with: IF on, IOPL 1 if
+; it is a ring-1 thread that asked for it (roadmap l4.md D11), else 0
+;   In:       BX = the thread
+;   Out:      AX = the FLAGS
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+thread_flags:
+        mov ax, FLAGS_USER_START
+        test byte [bx + T_FLAGS], TF_IOPL
+        jz .done
+        or ax, FLAGS_IOPL1
+.done:
+        ret
 
 ; ----------------------------------------------------------------------------
 ; thread_first - where a new thread's first switch_to returns: start its
@@ -211,7 +239,7 @@ switch_to:
         inc word [bx + T_RUNS]
         mov ax, [bx + T_STACK]          ; SS0:SP0: the top of its kernel stack
         mov [tss + TSS286_SS0], ax
-        mov word [tss + TSS286_SP0], TSTACK_SIZE
+        mov word [tss + TSS286_SP0], TCB_STACK_SIZE
         lldt [bx + T_LDT]
         call fpu_switch                 ; TS set unless it owns the 287
         mov ss, [bx + T_SS]
@@ -363,15 +391,20 @@ call_leave:
 wake_waiters:
         push bx
         push cx
-        mov bx, threads
-        mov cx, THREADS
+        push si
+        mov si, thread_list
+        mov cx, [thread_count]
+        jcxz .done
 .thread:
+        mov bx, [si]
         cmp byte [bx + T_STATE], TS_WAITING
         jne .next
         call ready_push
 .next:
-        add bx, TCB_SIZE
+        add si, 2
         loop .thread
+.done:
+        pop si
         pop cx
         pop bx
         ret
@@ -519,8 +552,13 @@ end_kdata
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 thread_dump:
-        mov bx, threads
+        xor di, di
 .thread:
+        cmp di, [thread_count]
+        jae .done
+        push di
+        shl di, 1
+        mov bx, [thread_list + di]
         mov al, ATTR_KERNEL
         call con_set_attr
         mov si, msg_log_prefix
@@ -550,16 +588,19 @@ thread_dump:
         call kput_dec32
         mov si, msg_dump_stack
         call kputs
+        push di
         call thread_stack_used          ; AX = bytes
+        pop di
         xor dx, dx
         call kput_dec32
         mov al, CHAR_LF
         call kputc
         mov al, ATTR_NORMAL
         call con_set_attr
-        add bx, TCB_SIZE
-        cmp bx, threads_end
-        jb .thread
+        pop di
+        inc di
+        jmp .thread
+.done:
         ret
 
 ; ----------------------------------------------------------------------------
@@ -572,10 +613,10 @@ thread_stack_used:
         mov es, [bx + T_STACK]
         xor di, di
         mov ax, STACK_FILL
-        mov cx, TSTACK_SIZE / 2
+        mov cx, TCB_STACK_SIZE / 2
         cld
         repe scasw                      ; past the untouched words
-        mov ax, TSTACK_SIZE
+        mov ax, TCB_STACK_SIZE
         sub ax, di
         add ax, 2                       ; DI is past the first word written
         ret

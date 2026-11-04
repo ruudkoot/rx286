@@ -37,6 +37,7 @@
 ;                       the counter beside a test program (Makefile)
 ;   TEST_COUNTER_FPU    the counter checks its 287 state (counter.asm)
 ;   TEST_THREAD_REPORT  at the end: which threads ran
+;   TEST_CAPS           the program gets capabilities to try (roadmap l4.md L3)
 ;   TEST_END_TICKS=n    end the test after n ticks, keys or not
 ; Release and debug builds assemble none of this.
 ; ============================================================================
@@ -566,7 +567,7 @@ test_program_started:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_restart_check:
-        cmp bp, TSTACK_SIZE - FRAME_SIZE_USER   ; the running thread's kernel stack
+        cmp bp, TCB_STACK_SIZE - FRAME_SIZE_USER    ; the running thread's kernel stack
         je .ok
         mov si, msg_stack_leak
         xor bp, bp
@@ -737,7 +738,7 @@ end_kdata
 ; start of the program.
 ;   In:       BP = the frame (AL the probe); DS = SEL_KDATA
 ;   Out:      the program's LDT changed; or E_INVAL
-;   Destroys: AX, BX
+;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 test_probe:
         mov bl, [bp + FRAME_AX]
@@ -749,16 +750,51 @@ test_probe:
         shl bx, 2
         mov ax, [test_probes + bx + 2]
         mov bx, [test_probes + bx]
+        mov si, [cur_thread]
+        add bx, [si + T_LDT_LIVE]       ; the program's live LDT, in its space
         test al, al
         jz .absent
-        mov [program_ldt + bx + 5], al  ; the access byte
+        mov [bx + 5], al                ; the access byte
         ret
 .absent:
-        and byte [program_ldt + bx + 5], ~ACC_PRESENT
+        and byte [bx + 5], ~ACC_PRESENT
         ret
 .invalid:
         mov ax, E_INVAL
         jmp sys_fail
+%endif
+
+%ifdef TEST_CAPS
+TEST_CAPS_SLOT      equ 8               ; the first slot of the capabilities given
+
+; ----------------------------------------------------------------------------
+; test_caps_give - TEST_CAPS: give the program capabilities to try (roadmap
+; l4.md L3), in its slots 8-11: the memory for segments and the rest of the
+; arena as untyped, its own space and its own thread. After every object of
+; the start is made: the kernel uses its untyped no more.
+;   In:       DS = ES = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+test_caps_give:
+        mov dx, [fg_thread]
+        mov bx, dx
+        mov bx, [bx + T_SPACE]
+        mov ax, TEST_CAPS_SLOT
+        call slot_at
+        mov di, si
+        mov si, memory_untyped
+        mov cx, SHADOW_SIZE / 2
+        cld
+        rep movsw
+        mov si, boot_untyped            ; the arena: its next shadow entry follows
+        mov cx, SHADOW_SIZE / 2
+        rep movsw
+        mov byte [di + SH_TYPE], CAP_SPACE
+        mov [di + SH_OBJECT], bx
+        mov byte [di + SHADOW_SIZE + SH_TYPE], CAP_THREAD
+        mov [di + SHADOW_SIZE + SH_OBJECT], dx
+        ret
 %endif
 
 %ifdef TEST_THREAD_REPORT
@@ -776,8 +812,14 @@ end_kdata
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 test_thread_report:
-        mov bx, threads
+        xor di, di
 .thread:
+        cmp di, [thread_count]
+        jae .done
+        push di
+        shl di, 1
+        mov bx, [thread_list + di]
+        pop di
         cmp byte [bx + T_STATE], TS_FREE
         je .next                        ; never started
         mov si, msg_log_prefix
@@ -793,9 +835,9 @@ test_thread_report:
 .say:
         call kputs
 .next:
-        add bx, TCB_SIZE
-        cmp bx, threads_end
-        jb .thread
+        inc di
+        jmp .thread
+.done:
         ret
 %endif
 

@@ -27,19 +27,16 @@
 gdt:
         segment_descriptor 0, 0, 0                                  ; SEL_NULL
         segment_descriptor KTEXT_PHYS, ktext_end - 1, ACC_KCODE     ; SEL_KCODE
-        segment_descriptor KDATA_PHYS, kdata_end - 1, ACC_KDATA     ; SEL_KDATA
+        segment_descriptor KDATA_PHYS, 0xFFFF, ACC_KDATA            ; SEL_KDATA: and the arena
         segment_descriptor KSTACK_PHYS, KSTACK_SIZE - 1, ACC_KDATA  ; SEL_KSTACK
         kdata_descriptor tss, TSS286_LIMIT, ACC_TSS                 ; SEL_TSS
         kdata_descriptor df_tss, TSS286_LIMIT, ACC_TSS              ; SEL_DFTSS
         segment_descriptor DFSTACK_PHYS, DFSTACK_SIZE - 1, ACC_KDATA    ; SEL_DFSTACK
         segment_descriptor VIDEO_PHYS, VIDEO_SIZE - 1, ACC_KDATA    ; SEL_VIDEO
-        kdata_descriptor program_ldt, LDT_LIMIT, ACC_LDT            ; SEL_LDT
-        kdata_descriptor counter_ldt, LDT_LIMIT, ACC_LDT            ; SEL_LDT_COUNTER
-%assign t 0
-%rep THREADS
-        segment_descriptor TSTACK_PHYS + t * TSTACK_SIZE, TSTACK_SIZE - 1, ACC_KDATA ; SEL_TSTACK
-  %assign t t + 1
+%rep SPACE_MAX + THREAD_MAX                                 ; the pools (cap.asm)
+        segment_descriptor 0, 0, 0
 %endrep
+        segment_descriptor 0, 0, 0                                  ; SEL_SCRATCH
 gdt_end:
 
 %if GDT_ENTRIES * 8 - 1 != GDT_LIMIT

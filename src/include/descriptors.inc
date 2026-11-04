@@ -23,6 +23,7 @@ ACC_LDT             equ 0x82        ; present, DPL 0, an LDT
 ACC_TSS_BUSY_BIT    equ 0x02        ; set by LTR and task switches
 ACC_EXPAND_DOWN     equ 0x04        ; data: expand-down (code: conforming)
 ACC_SEGMENT         equ 0x10        ; a code or data segment, not a system descriptor
+ACC_ACCESSED        equ 0x01        ; set by the CPU on a load; rx286 presets it
 ACC_CODE            equ 0x08        ; of a segment: code, not data
 ACC_RW              equ 0x02        ; data: writable; code: readable
 ACC_DPL_MASK        equ 0x60
