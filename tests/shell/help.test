@@ -1,0 +1,21 @@
+# help lists every command.
+program: shell
+keys: help\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+rx286> help
+  help     these lines
+  echo     echo TEXT: write TEXT
+  clear    clear the screen
+  uptime   time since the kernel started
+  date     the date and time of the real-time clock
+  keys     show each key's scancode and ASCII, until Esc
+  fpu      the square root of 2 and pi, by the 80287
+  mem      the shell's own segments, as the CPU sees them
+  crash    crash KIND: try what no program may (crash help)
+  spin     loop forever; Ctrl+Break gets the shell back
+  exit     end the shell; the kernel starts it again
+Keys: Backspace, Esc (clear the line), Up (the last line);
+Ctrl+Break restarts the shell, Ctrl+Alt+Del the machine.
+rx286>

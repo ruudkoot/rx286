@@ -1,0 +1,14 @@
+# exit ends the shell; the kernel starts it again with its data kept: Up
+# still recalls the last line, which was exit.
+program: shell
+keys: echo kept\nexit\n{up}\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+rx286> echo kept
+kept
+rx286> exit
+rx286 shell, started again
+rx286> exit
+rx286 shell, started again
+rx286>

@@ -182,7 +182,9 @@ def compile_keys(script):
     out = []
 
     def press(code, op=OP_WHEN_WAITING):
-        out.extend([op, code, op, code | 0x80])
+        # A release gives no ASCII, so it is typed at once: the program may
+        # not wait again (a key that starts a loop).
+        out.extend([op, code, OP_NOW, code | 0x80])
 
     i = 0
     while i < len(script):
@@ -216,7 +218,7 @@ def compile_keys(script):
                 modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
                 out.extend([OP_WHEN_WAITING, modifier])
                 press(KEYS[name[-1]][0])
-                out.extend([OP_WHEN_WAITING, modifier | 0x80])
+                out.extend([OP_NOW, modifier | 0x80])
             else:
                 raise ValueError('key script: unknown key {%s}' % name)
             continue
@@ -229,7 +231,7 @@ def compile_keys(script):
             out.extend([OP_WHEN_WAITING, SC_LSHIFT])
         press(code)
         if shift:
-            out.extend([OP_WHEN_WAITING, SC_LSHIFT | 0x80])
+            out.extend([OP_NOW, SC_LSHIFT | 0x80])
     out.append(OP_END)
     return out
 

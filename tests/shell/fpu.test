@@ -1,0 +1,10 @@
+# The 287 computes the square root of 2 and pi; FBSTP stores 18 digits.
+program: shell
+keys: fpu\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+rx286> fpu
+sqrt(2) = 1.41421356237309505
+pi      = 3.14159265358979324
+rx286>

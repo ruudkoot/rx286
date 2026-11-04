@@ -1,0 +1,11 @@
+# A program that spins cannot hold the machine: Ctrl+Break restarts it.
+program: shell
+keys: spin\n{wait 5}{ctrl-break}
+---
+rx286, test build
+rx286 shell: type help for the commands
+rx286> spin
+Spinning; Ctrl+Break gets the shell back.
+rx286: Ctrl+Break: the program starts again
+rx286 shell, started again
+rx286>
