@@ -89,6 +89,7 @@ TCB_STACK_SIZE      equ TCB_OBJECT_SIZE - TCB_SIZE
 ; entry a slot, which says what the slot holds. kcalls.inc names the types.
 SP_SLOTS            equ 0       ; the header: how many slots
 SP_GDT_SELECTOR     equ 2       ; its LDT's descriptor, from the GDT's pool
+SP_DEAD             equ 4       ; byte: 1 once its last capability went (revoke.asm)
 SP_HEADER_SIZE      equ 16
 SP_LDT              equ SP_HEADER_SIZE
 SH_TYPE             equ 0       ; byte: CAP_*
@@ -137,6 +138,8 @@ TF_FOREGROUND       equ 0x01    ; T_FLAGS: the keys and Ctrl+Break are its
 TF_CONFIGURED       equ 0x02    ; its space, entry and stack are set
 TF_IOPL             equ 0x04    ; it runs with IOPL 1 (a ring-1 thread that asked)
 TF_SESSION          equ 0x08    ; it serves one client, and starts again with it
+TF_DEAD             equ 0x10    ; its last capability went while it ran: it dies at its
+                                ; way back (revoke.asm)
 
 PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second

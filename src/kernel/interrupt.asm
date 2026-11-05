@@ -69,6 +69,11 @@ isr_common:
 isr_exit:
         test byte [bp + FRAME_CS], CPL_MASK
         jz .restore
+        mov bx, [cur_thread]            ; its last capability gone (l4.md L12):
+        test byte [bx + T_FLAGS], TF_DEAD   ; it never goes back
+        jz .alive
+        call thread_die
+.alive:
         ; A thread more urgent is ready, or the time slice is over: give way
         ; here, at the edge of ring 3, where nothing of the kernel's is half done.
         cmp byte [resched], 0

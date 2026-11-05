@@ -47,8 +47,8 @@ any case too: `DIR`, `Dir` and `dir` are one.
 | `crash KIND` | tries what no program may (`crash help` lists the kinds) |
 | `spin` | loops until Ctrl+Break |
 | `ps` | every module the root built: its number, name, kind, priority, main thread's state and runs |
-| `kill NAME` | stops a background program (the clock, the counter) |
-| `start NAME` | starts a stopped background program again, at its entry |
+| `kill NAME` | kills a background program (the clock, the counter): its memory is free again |
+| `start NAME` | builds a killed background program again, and starts it |
 | `exit` | ends the shell; the kernel starts it again |
 
 ## Beside the shell
@@ -79,8 +79,8 @@ A:\>ps
  13 counter  background 1        ready, 257
 ```
 
-`kill clock` stops the clock, and the time stays as it was; `start clock`
-starts it again. A background program that faults is reported, as the
+`kill clock` kills the clock, and the time stays as it was; `start clock`
+builds it again, from the memory the kill gave back. A background program that faults is reported, as the
 shell is, and starts again while the shell works on.
 
 `dir` looks like DOS 5's:

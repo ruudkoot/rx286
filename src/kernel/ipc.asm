@@ -837,7 +837,8 @@ kc_delete:
         jc kc_done.cap
         cmp byte [si + SH_TYPE], CAP_EMPTY
         je kc_done.cap
-        call slot_clear
+        call cap_delete_at              ; BX, AX: the space and slot (revoke.asm)
+        call dead_flush
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -877,8 +878,24 @@ kc_save_reply:
 ; ----------------------------------------------------------------------------
 ipc_cancel:
         push ax
+        mov al, KE_STATE
+        call ipc_fail
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; ipc_fail - as ipc_cancel, with a status of the caller's choice: KE_CAP
+; when the endpoint or notification it waits on, or the thread whose reply
+; it awaits, has died (revoke.asm)
+;   In:       BX = the thread; AL = the status; DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ipc_fail:
+        push ax
         push si
         push di
+        mov ah, al                      ; AH = the status
         mov al, [bx + T_STATE]
         mov si, [bx + T_WAIT_OBJ]
         cmp al, TS_SEND
@@ -891,7 +908,9 @@ ipc_cancel:
         je .wake
         jmp .done                       ; not waiting in IPC
 .queued:
-        call ep_remove
+        push ax
+        call ep_remove                  ; (AX: AH the status)
+        pop ax
         jmp .wake
 .notify:
         cmp [si + N_WAITER], bx
@@ -899,7 +918,7 @@ ipc_cancel:
         mov word [si + N_WAITER], 0
 .wake:
         call thread_frame
-        mov al, KE_STATE
+        mov al, ah
         call frame_status
         call ready_push
 .done:

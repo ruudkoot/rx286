@@ -68,7 +68,7 @@ milestone.
 | 4 | `KCALL_SEND` | as `KCALL_CALL`; or DX a saved reply and BX CX SI DI the reply | AL the status |
 | 5 | `KCALL_SIGNAL` | DX a notification | |
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
-| 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots | the object made, zeroed, its capability in the slot |
+| 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots; untyped: CX paragraphs | the object made, zeroed, its capability in the slot |
 | 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; BX a badge (mint) | the capability there |
 | 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint), `THREAD_RESTART`, `THREAD_STOP` or `THREAD_INFO` | `THREAD_INFO`: BL its state (`STATE_*`), BH its priority, CX how often it ran |
 | 10 | `KCALL_IRQ` | DX an interrupt line; AL `IRQ_BIND` (SI a notification) or `IRQ_ACK` | the line unmasked |
@@ -76,6 +76,7 @@ milestone.
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
 | 14 | `KCALL_SAVE_REPLY` | SI an empty slot of the caller's | the reply owed, as a `CAP_REPLY` there |
+| 15 | `KCALL_REVOKE` | DX a slot of the caller's, not empty | every capability derived from it deleted, in every space; an untyped's memory free again |
 | 16 | `KCALL_TEST` | debug and test builds: AL `TEST_*` (*In test builds*, below) | |
 | 17 | `KCALL_LOG` | DS:SI bytes, CX how many (`LOG_MAX` at most) | AX the bytes written to the kernel's log (fewer if the thread is to restart); or `KE_ARG`, `KE_CAP` (a buffer the caller may not read) |
 | 18 | `KCALL_TICKS` | | DX:AX the ticks since the start, `TICKS_HZ` (50) a second |
@@ -93,6 +94,11 @@ shadow entry: a later object that fits goes there first (roadmap l4.md L10):
 - **Segments** only from untyped outside the arena, and only data: present,
   of DPL 1-3. No program can make code; code comes only from the boot image
   (roadmap l4.md X14).
+- **Untyped** from untyped, of so many paragraphs: memory of its own, which
+  a revoke of it gives back whole (roadmap l4.md L12). The root makes each
+  background program's of it, so that killing the program frees its memory.
+- **The new capability's parent** is the untyped it came from, so revoking
+  the untyped deletes it.
 - **A space** has `SPACE_SLOTS_MIN` to `SPACE_SLOTS_MAX` slots, a power of
   two.
 
@@ -103,7 +109,8 @@ shadow entry: a later object that fits goes there first (roadmap l4.md L10):
   no badge yet with a badge, which can never be changed. Untyped memory is
   moved, never copied.
 - **A copy records its parent:** the space and slot it came from, for
-  revocation (roadmap l4.md L12).
+  revocation (roadmap l4.md L12). A move takes the capability's children
+  with it.
 - **A segment moved away is gone at once** for the caller: a DS or ES still
   holding it is made null on the way back to ring 3 (*docs/interrupts.md*).
 
@@ -247,11 +254,36 @@ the driver has served the device, unmasks the line; an interrupt that came
 meanwhile waits in the 8259A. *docs/drivers.md* shows how the drivers use
 them.
 
-### Delete
+### Delete and revoke
 
-`KCALL_DELETE` empties a slot of the caller's. What it named lives on:
-taking it back from every holder is revocation, roadmap l4.md L12. A
-segment deleted while DS or ES holds it is gone at once, as for a move.
+The capabilities form a tree: each records its parent, the slot it was
+copied, minted or granted from, or the untyped it was retyped from
+(`src/kernel/revoke.asm`; roadmap l4.md L12, D8).
+
+- **`KCALL_DELETE`** empties a slot of the caller's. Its children become its
+  parent's, so the tree holds. A segment deleted while DS or ES holds it is
+  gone at once, as for a move: the way back makes the register null.
+- **The last capability to an object** takes the object with it:
+  - an endpoint: every thread queued on it, to send or to receive, fails
+    with `KE_CAP`, and no thread's faults go to it any more;
+  - a notification: the thread waiting on it fails with `KE_CAP`; its
+    thread and its interrupt lines are unbound (the lines masked), and its
+    timer stops;
+  - a thread: it stops for good, every link naming it - a reply owed to it,
+    a reply it owes, a saved reply - is cleared, a thread awaiting its
+    reply fails with `KE_CAP`, and its kernel stack's descriptor goes back
+    to the pool; the running thread dies at its way back;
+  - a space: its threads stop and lose it (they may be configured again),
+    its slots are emptied in turn - which may take more objects with them -
+    and its LDT's descriptor goes back to the pool once no thread names it;
+  - an interrupt line: unbound.
+  Segments and untyped are memory: nothing dies with them.
+- **`KCALL_REVOKE`** deletes every capability below a slot, in every space,
+  a leaf at a time, and keeps the slot's own. Revoking untyped deletes
+  everything made from it, so none of its memory is used any more: its
+  watermark and hole go back to 0, and the next retype uses it again,
+  zeroed. The tree is searched slot by slot over every space, with
+  interrupts off: a revoke is slow, and kept for rare work such as `kill`.
 
 ## Errors
 

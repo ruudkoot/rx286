@@ -60,6 +60,7 @@ section ktext
 %include "thread.asm"
 %include "cap.asm"
 %include "ipc.asm"
+%include "revoke.asm"
 %include "caps.asm"
 %include "test.asm"
 %include "format.asm"

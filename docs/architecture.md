@@ -76,6 +76,7 @@ name nothing of the kernel's, and reaches it only through `INT 31h`.
 | `program.asm` | a program: its restart; its fault, to its fault endpoint or reported |
 | `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump; the start of the first two |
 | `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*); the root, built at start from the image |
+| `revoke.asm` | delete and revoke: the tree of capabilities, objects that die with their last capability, untyped memory given back |
 | `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
 | `log.asm` | `KCALL_LOG`, the kernel's log, with its buffer checks; `KCALL_TICKS` |
 | `pic.asm` | the 8259As; the driver of each line, its binding to a driver outside the kernel, or the rule for none; spurious IRQ7 and IRQ15 |
@@ -164,8 +165,9 @@ priorities the module table gives. Then it serves the OS server's faults:
 it reports each with the kernel's old line, puts back any of the server's
 segments that is gone from its slot, and restarts it at its entry
 (*docs/kernel-calls.md*). On the same endpoint it answers the OS server's
-questions about the modules, and stops and starts the background programs
-(`ps`, `kill`, `start`; roadmap l4.md L11).
+questions about the modules, and kills and starts the background programs
+(`ps`, `kill`, `start`; roadmap l4.md L11, L12): each is made of untyped
+memory of its own, which `kill` revokes and `start` builds it again from.
 
 ## The OS server
 

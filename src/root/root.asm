@@ -48,6 +48,10 @@ MODULES             equ SLOT(ROOT_SLOT_MODULES)
 FAULT_SLOT          equ ROOT_SLOT_MODULE + 2 * (MODULE_MAX - 1)  ; past every module's two
 FAULT_EP            equ SLOT(FAULT_SLOT)        ; the fault endpoint
 SCRATCH             equ SLOT(FAULT_SLOT + 1)    ; a badged copy on its way
+CHILD_SLOT          equ FAULT_SLOT + 2      ; a background program's own untyped: two a
+                                                ; module, the arena's and the memory's
+CHILD_ARENA_PARAS   equ 2560 >> 4               ; its space, thread, endpoint, OS thread,
+                                                ; notification, each aligned to its size
 PROGRAM_SLOT        equ ROOT_SLOT_IRQ + 16      ; past the kernel's gifts (the 16 lines), eight
                                                 ; slots a module it builds:
 P_SPACE             equ 0                       ; its space
@@ -62,6 +66,9 @@ CONTROL             equ SLOT(ROOT_SLOT_VIDEO - 1)  ; the OS server's control not
 PROGRAMS_MAX        equ MODULE_MAX - 1          ; every module but the root
 %if PROGRAM_SLOT + 8 * PROGRAMS_MAX > ROOT_SLOTS
   %error "root.asm: its space has no room for every module's slots"
+%endif
+%if CHILD_SLOT + 2 * PROGRAMS_MAX > ROOT_SLOT_VIDEO - 1
+  %error "root.asm: its space has no room for every module's untyped"
 %endif
 
 ; A module's slots in its own space, as selectors (any RPL names a slot)
@@ -120,6 +127,10 @@ s_ep                dw 0
 s_xfer              dw 0
 s_server            dw 0
 s_files             dw 0
+ut_arena            dw ARENA            ; the untyped a module's objects come from: the
+ut_memory           dw UNTYPED          ; root's, or a background program's own
+info_state          dw 0                ; request's: THREAD_INFO's BX and CX
+info_runs           dw 0
 line                times 64 db 0       ; a fault's report
 end_udata
 
@@ -175,6 +186,8 @@ entry:
 .ends:
         cmp bx, [programs]
         ja .ended
+        call children_make              ; a background program's own untyped
+        call use_untyped
         call program_ends
         inc bx
         jmp .ends
@@ -184,12 +197,17 @@ entry:
         cmp bx, [programs]
         ja .built
         push bx
+        call use_untyped
         call build
         pop bx
         inc bx
         jmp .build
 .built:
+        mov word [ut_arena], ARENA
+        mov word [ut_memory], UNTYPED
         call build_server
+        mov word [ut_arena], ARENA
+        mov word [ut_memory], UNTYPED
 %ifdef TEST_ROOT_REPORT
         call module_report
 %endif
@@ -246,6 +264,22 @@ request:
         mov cl, al
         pop ax
         jc .invalid
+        push ax
+        push bx
+        push cx
+        push dx
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD              ; BL the state, BH the priority, CX the runs
+        mov [info_state], bx
+        mov [info_runs], cx
+        pop dx
+        pop cx
+        pop bx
+        pop ax                          ; CF: no thread (a program killed)
+        mov ch, 1
+        jnc .alive
+        xor ch, ch
+.alive:
         cmp al, ROOT_INFO
         je .info
         cmp cl, PS_BACKGROUND
@@ -254,37 +288,201 @@ request:
         je .kill
         cmp al, ROOT_START
         jne .invalid
-        call module_entry               ; at its priority
-        mov cl, [es:di + M_PRIORITY]
-        push ds
-        pop es
-        xor ch, ch
-        mov al, THREAD_START
-        kcall KCALL_THREAD
-        jmp .done
-.kill:
-        mov al, THREAD_STOP
-        kcall KCALL_THREAD
-.done:
-        mov bx, E_BUSY                  ; KE_STATE: stopped, or running, already
-        jc .out
+        test ch, ch
+        jnz .busy                       ; running already
+        call program_build              ; built again, from its own untyped
         xor bx, bx
-.out:
+        ret
+.kill:
+        test ch, ch
+        jz .busy                        ; killed already
+        call program_kill
+        xor bx, bx
+        ret
+.busy:
+        mov bx, E_BUSY
         ret
 .info:
-        push cx
-        mov al, THREAD_INFO
-        kcall KCALL_THREAD              ; BL the state, BH the priority, CX the runs
-        pop ax
-        mov di, cx
-        mov cl, al                      ; the kind
-        mov ch, bl                      ; the state
-        mov si, bx
-        shr si, 8                       ; the priority
+        test ch, ch
+        jnz .thread
+        call module_entry               ; killed: stopped, at its priority
+        mov al, [es:di + M_PRIORITY]
+        push ds
+        pop es
+        mov ah, al
+        mov al, STATE_STOPPED
+        mov [info_state], ax
+        mov word [info_runs], 0
+.thread:
+        mov ax, [info_state]
+        mov di, [info_runs]
+        mov ch, al                      ; the state (CL the kind)
+        mov al, ah
+        xor ah, ah
+        mov si, ax                      ; the priority
         xor bx, bx
         ret
 .invalid:
         mov bx, E_INVAL
+        ret
+
+; ----------------------------------------------------------------------------
+; program_kill - a background program killed (roadmap l4.md L12): its own
+; untyped revoked, so that everything made for it dies - its space, thread,
+; endpoint, segments, the OS server's thread for it and every copy of them -
+; and its memory is free again; and every copy of its code
+;   In:       BX = the module; its s_* (program_slots)
+;   Out:      nothing
+;   Destroys: AX, DX, SI, DI
+; ----------------------------------------------------------------------------
+program_kill:
+        call children_slots             ; SI, DI = its untyped
+        mov dx, si
+        kcall KCALL_REVOKE
+        mov dx, di
+        kcall KCALL_REVOKE
+        mov dx, [s_code]
+        kcall KCALL_REVOKE
+        ret
+
+; ----------------------------------------------------------------------------
+; program_build - a background program killed, built again from its own
+; untyped as at the start: its endpoint, transfer and files segments, space,
+; data, stack and thread, and the OS server's thread for it
+;   In:       BX = the module
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+program_build:
+        push bx
+        call use_untyped
+        call program_ends
+        pop bx
+        push bx
+        call build
+        pop bx
+        push bx
+        call server_params
+        call serve_program
+        pop bx
+        mov word [ut_arena], ARENA
+        mov word [ut_memory], UNTYPED
+        ret
+
+; ----------------------------------------------------------------------------
+; server_params - the OS server's entry, stack and priority, for its threads
+;   In:       [server]
+;   Out:      m_entry, m_stack, m_priority
+;   Destroys: AX, DI, ES
+; ----------------------------------------------------------------------------
+server_params:
+        push bx
+        mov bx, [server]
+        call module_entry
+        mov ax, [es:di + M_ENTRY]
+        mov [m_entry], ax
+        mov ax, [es:di + M_STACK]
+        mov [m_stack], ax
+        mov al, [es:di + M_PRIORITY]
+        mov [m_priority], al
+        push ds
+        pop es
+        pop bx
+        ret
+
+; ----------------------------------------------------------------------------
+; children_slots - a background program's own untyped, in the root's slots
+;   In:       BX = the module
+;   Out:      SI = the arena's untyped, DI = the memory's (selectors)
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+children_slots:
+        mov si, bx
+        dec si
+        shl si, 4                       ; two slots of eight bytes a module
+        add si, SLOT(CHILD_SLOT)
+        lea di, [si + 8]
+        ret
+
+; ----------------------------------------------------------------------------
+; children_make - a background program's own untyped, at the start: from
+; the arena's, room for its kernel objects; from the memory's, for its data,
+; stack, transfer and files segments; so that killing it gives them back
+;   In:       BX = the module
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+children_make:
+        call module_kind
+        jc .done
+        cmp al, PS_BACKGROUND
+        jne .done
+        call children_slots
+        push di
+        mov dx, ARENA
+        mov al, CAP_UNTYPED
+        mov cx, CHILD_ARENA_PARAS
+        kcall KCALL_RETYPE
+        must
+        call module_entry
+        mov ax, [es:di + M_DATA_ROOM]
+        call paragraphs
+        mov cx, ax
+        mov ax, [es:di + M_STACK]
+        call paragraphs
+        add cx, ax
+        add cx, (XFER_SIZE + 15) >> 4
+        add cx, (FILES_SIZE + 15) >> 4
+        push ds
+        pop es
+        pop si
+        mov dx, UNTYPED
+        mov al, CAP_UNTYPED
+        kcall KCALL_RETYPE
+        must
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; paragraphs - bytes as paragraphs, rounded up (0 bytes: 64 KB)
+;   In:       AX = bytes
+;   Out:      AX = paragraphs
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+paragraphs:
+        add ax, 15
+        rcr ax, 1                       ; (a carry is bit 16)
+        shr ax, 3
+        ret
+
+; ----------------------------------------------------------------------------
+; use_untyped - where a module's objects come from: a background program's
+; own untyped, else the root's
+;   In:       BX = the module
+;   Out:      ut_arena, ut_memory
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+use_untyped:
+        push ax
+        push dx
+        push si
+        push di
+        push es
+        mov word [ut_arena], ARENA
+        mov word [ut_memory], UNTYPED
+        call module_kind
+        jc .done
+        cmp al, PS_BACKGROUND
+        jne .done
+        call children_slots
+        mov [ut_arena], si
+        mov [ut_memory], di
+.done:
+        pop es
+        pop di
+        pop si
+        pop dx
+        pop ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -370,19 +568,19 @@ program_ends:
         jnz .done                       ; a driver: its endpoint comes with build
         push bx
         call program_slots
-        mov dx, ARENA
+        mov dx, [ut_arena]
         mov al, CAP_ENDPOINT
         mov si, [s_ep]
         kcall KCALL_RETYPE
         must
-        mov dx, UNTYPED
+        mov dx, [ut_memory]
         mov al, CAP_SEGMENT
         mov si, [s_xfer]
         mov cx, XFER_SIZE
         mov bl, ACC_XFER
         kcall KCALL_RETYPE
         must
-        mov dx, UNTYPED
+        mov dx, [ut_memory]
         mov al, CAP_SEGMENT
         mov si, [s_files]
         mov cx, FILES_SIZE
@@ -439,14 +637,14 @@ build:
         mov cx, CAPS_SLOTS
 %endif
 .slots:
-        mov dx, ARENA
+        mov dx, [ut_arena]
         mov al, CAP_SPACE
         mov si, [s_space]
         kcall KCALL_RETYPE
         must
         cmp bx, [server]
         je .space_made
-        mov dx, ARENA
+        mov dx, [ut_arena]
         mov al, CAP_THREAD
         mov si, [s_thread]
         kcall KCALL_RETYPE
@@ -714,7 +912,10 @@ build_server:
         call give_service
         jmp .served
 .serve:
+        push bx
+        call use_untyped
         call serve_program
+        pop bx
 .served:
         pop bx
 .next:
@@ -846,7 +1047,7 @@ serve_program:
         call give_server
         mov si, [s_files]
         call give_server
-        mov dx, ARENA                   ; its thread's notification, to sleep on:
+        mov dx, [ut_arena]              ; its thread's notification, to sleep on:
         mov al, CAP_NOTIFY              ; made in the scratch slot, moved to the
         mov si, SCRATCH                 ; server's OS_SLOT_SLEEP + n
         kcall KCALL_RETYPE
@@ -860,7 +1061,7 @@ serve_program:
         mov al, COPY_MOVE
         kcall KCALL_COPY
         must
-        mov dx, ARENA                   ; its thread
+        mov dx, [ut_arena]              ; its thread
         mov al, CAP_THREAD
         mov si, [s_server]
         kcall KCALL_RETYPE
@@ -937,7 +1138,7 @@ fault_to:
 ;   Destroys: AX, BX, DX
 ; ----------------------------------------------------------------------------
 new_segment:
-        mov dx, UNTYPED
+        mov dx, [ut_memory]
         mov bl, al
         shl bl, 5
         or bl, ACC_DATA

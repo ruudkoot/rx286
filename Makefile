@@ -59,6 +59,7 @@ program_main_caps := tests/programs/caps.asm
 program_main_ipc := tests/programs/ipc.asm
 program_main_rings := tests/programs/rings.asm
 program_main_keys := tests/programs/keys.asm
+program_main_revoke := tests/programs/revoke.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
@@ -90,7 +91,7 @@ MODULES := root=$(B)/root.bin:2:7 os=$(B)/os.bin:2:5:stack=8192 \
     $(if $(WITH_CLOCK),clock=$(B)/clock.bin:3:4) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.bin:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings or keys, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys or revoke, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed

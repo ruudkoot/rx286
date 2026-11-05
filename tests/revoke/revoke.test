@@ -1,0 +1,20 @@
+# Delete and revoke (roadmap l4.md L12; tests/programs/revoke.asm): a copy
+# of a segment loaded in DS, its parent revoked, is null on the way back;
+# untyped revoked gives its memory back, made again at the same base; an
+# endpoint revoked and deleted fails the call queued on it with KE_CAP
+# (1); a worker's space and thread, made of untyped of their own, go with
+# it; and E3's ABA case: across a call to a worker whose space has another
+# segment in the same slot, each reads its own. The demonstration's kill
+# gives a program's memory back too (tests/demo).
+program: revoke
+define: TEST_CAPS
+---
+rx286, test build
+revoke: a copy in DS, its parent revoked: DS (0): 0
+revoke: the untyped revoked, its segment still there (0): 0
+revoke: memory given back, made again at the same base (1): 1
+revoke: the worker's queued call, its endpoint deleted: status (1): 1
+revoke: a worker's untyped revoked: its thread gone (1): 1
+revoke: the worker read, in its own slot (66): 66
+revoke: and the program, in its own, after the call (65): 65
+revoke: done

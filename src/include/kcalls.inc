@@ -27,7 +27,8 @@ KCALL_SEND          equ 4   ; as KCALL_CALL, without waiting for a reply; on a r
 KCALL_SIGNAL        equ 5   ; DX notification: its badge ORed into its bits
 KCALL_POLL          equ 6   ; as KCALL_RECV, but KE_EMPTY at once if nothing is there
 KCALL_RETYPE        equ 7   ; DX untyped; AL type; SI destination slot; a segment: CX bytes,
-                            ;    BL its access byte; a space: CX slots
+                            ;    BL its access byte; a space: CX slots; untyped: CX
+                            ;    paragraphs (l4.md L12)
 KCALL_COPY          equ 8   ; DX the destination's space; SI the caller's slot; DI the
                             ;    destination slot; AL COPY_*; BX a badge (mint)
 KCALL_THREAD        equ 9   ; DX thread; AL THREAD_*; configure: SI space, BX IP, CX SP;
@@ -37,6 +38,8 @@ KCALL_TIMER         equ 11  ; DX notification; CX ticks: signalled once, CX tick
 KCALL_SEGMENT       equ 12  ; DX segment -> DL:AX its physical base, CX its limit
 KCALL_DELETE        equ 13  ; DX a slot of the caller's: emptied
 KCALL_SAVE_REPLY    equ 14  ; SI an empty slot: the reply owed, as a capability to send on
+KCALL_REVOKE        equ 15  ; DX a slot: every capability derived from it deleted, in every
+                            ;    space (an untyped's memory free again: l4.md L12)
 KCALL_TEST          equ 16  ; debug and test builds: AL TEST_*, the hooks of debugging and
                             ;    tests (KE_NOSYS in release builds)
 KCALL_LOG           equ 17  ; DS:SI bytes, CX how many (LOG_MAX at most): to the kernel's

@@ -8,12 +8,14 @@
 # seconds: the OS server reports it and starts it again while the shell
 # works on.
 # ps lists every module the root built; kill stops the clock, which shows
-# no more, and start starts it again; neither touches anything but a
-# background program. The clock, above the shell, ticks on while the shell
+# no more: everything made for it is revoked and its memory given back
+# (roadmap l4.md L12); start builds it again from that memory, its data
+# afresh from the module, so it faults once more; neither touches anything
+# but a background program. The clock, above the shell, ticks on while the shell
 # spins, until Ctrl+Break; the counter, below it, does not count then.
 program: shell
 define: TEST_DEMO
-keys: {wait 250}ps\nkill clock\n{wait 100}ps\nstart clock\n{wait 100}kill program\nkill nothing\nstart counter\nkill\nspin\n{wait 150}{ctrl-break}\n
+keys: {wait 250}ps\nkill clock\n{wait 100}ps\nstart clock\n{wait 250}kill program\nkill nothing\nstart counter\nkill\nspin\n{wait 150}{ctrl-break}\n
 timeout: 120
 match: contains
 ---
@@ -36,8 +38,9 @@ A:\>kill clock
 A:\>ps
  12 clock    background 4        stopped,
 A:\>start clock
-A:\>kill program
+rx286: clock fault #UD at 0007:{l:entry.fault}
 status, clock:
+kill program
 Not a background program
 A:\>kill nothing
 No such program

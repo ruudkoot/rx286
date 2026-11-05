@@ -56,7 +56,7 @@ kcall_table:
         dw kc_segment                               ; KCALL_SEGMENT
         dw kc_delete                                ; KCALL_DELETE
         dw kc_save_reply                            ; KCALL_SAVE_REPLY
-        dw kc_done.nosys                            ; 15: revoke (L12)
+        dw kc_revoke                                ; KCALL_REVOKE (revoke.asm)
         dw kc_test                                  ; KCALL_TEST
         dw kc_log                                   ; KCALL_LOG (log.asm)
         dw kc_ticks                                 ; KCALL_TICKS
@@ -70,6 +70,9 @@ retype_paragraphs   dw 0
 retype_base         dw 0
 retype_base_low     dw 0
 retype_base_high    db 0
+retype_parent_slot  dw 0                ; the untyped's slot: the new capability's parent
+copy_dest_space     dw 0                ; a move's destination: its children go there
+copy_dest_slot      dw 0
 boot_space          dw 0
 boot_thread         dw 0
 boot_base           times 3 db 0        ; boot_root's: a segment's base
@@ -260,8 +263,8 @@ untyped_carve:
 ; ----------------------------------------------------------------------------
 arena_object:
         mov al, KE_CAP
-        cmp word [si + SH_OBJECT], ARENA_PARA
-        jne .refuse
+        call untyped_in_arena
+        jc .refuse
         push cx                         ; its bytes
         shr cx, 4
         mov dx, cx                      ; aligned to its size
@@ -430,6 +433,7 @@ space_make:
         mov [di + 4], al
         mov byte [di + 5], ACC_LDT
         mov word [di + 6], 0
+        call space_list_add
         clc
 .done:
         ret
@@ -833,8 +837,9 @@ boot_slot_shadow:
 kc_retype:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_UNTYPED
-        call cap_get                    ; SI = the untyped
+        call cap_get                    ; SI = the untyped, AX its slot
         jc kc_done.cap
+        mov [retype_parent_slot], ax
         push si
         mov ax, [bp + FRAME_SI]
         mov bx, [cur_thread]
@@ -850,6 +855,8 @@ kc_retype:
         mov al, [bp + FRAME_AX]
         cmp al, CAP_SEGMENT
         je .segment
+        cmp al, CAP_UNTYPED
+        je .untyped
         cmp al, CAP_SPACE
         je .space
         mov cx, TCB_OBJECT_SIZE
@@ -890,7 +897,23 @@ kc_retype:
         mov [si + SH_TYPE], al
         mov [si + SH_OBJECT], bx
         mov byte [si + SH_RIGHTS], RIGHTS_ALL
-        jmp kc_done.ok
+        jmp retype_parent
+.untyped:
+        ; Untyped from untyped (l4.md L12): CX paragraphs, which a revoke of
+        ; the new one gives back to it whole
+        mov cx, [bp + FRAME_CX]
+        test cx, cx
+        jz .arg
+        mov dx, 1
+        call untyped_carve              ; AX = its base in paragraphs
+        jc .mem
+        pop di
+        pop si
+        mov byte [si + SH_TYPE], CAP_UNTYPED
+        mov [si + SH_OBJECT], ax
+        mov ax, [bp + FRAME_CX]
+        mov [si + SH_SIZE], ax
+        jmp retype_parent
 .segment:
         ; Only data, present, of DPL 1-3, and never from the arena (l4.md X14)
         mov al, [bp + FRAME_BX]
@@ -899,8 +922,8 @@ kc_retype:
         jne .arg
         test byte [bp + FRAME_BX], ACC_DPL_MASK
         jz .arg
-        cmp word [si + SH_OBJECT], ARENA_PARA
-        je .cap
+        call untyped_in_arena
+        jnc .cap
         mov cx, [bp + FRAME_CX]
         jcxz .arg
         add cx, 15
@@ -938,7 +961,7 @@ kc_retype:
         mov [si + SH_OBJECT], ax
         mov ax, [retype_paragraphs]
         mov [si + SH_SIZE], ax
-        jmp kc_done.ok
+        jmp retype_parent
 .cap:
         mov al, KE_CAP
         jmp .error
@@ -951,6 +974,39 @@ kc_retype:
         pop di
         pop si
         jmp kc_done
+
+; ----------------------------------------------------------------------------
+; retype_parent - the end of a retype: the new capability's parent is the
+; untyped it came from, so a revoke of the untyped deletes it (l4.md L12)
+;   In:       SI = the new capability's shadow entry; BP = the frame
+;   Out:      the frame's status, KE_OK
+;   Destroys: AX, BX
+; ----------------------------------------------------------------------------
+retype_parent:
+        mov bx, [cur_thread]
+        mov ax, [bx + T_SPACE]
+        mov [si + SH_PARENT], ax
+        mov ax, [retype_parent_slot]
+        mov [si + SH_PARENT_SLOT], ax
+        jmp kc_done.ok
+
+; ----------------------------------------------------------------------------
+; untyped_in_arena - does untyped memory lie in the arena? (kernel objects
+; come from there only, segments never: l4.md X14)
+;   In:       SI = the untyped's shadow entry
+;   Out:      CF clear if so
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+untyped_in_arena:
+        cmp word [si + SH_OBJECT], ARENA_PARA
+        jb .no
+        cmp word [si + SH_OBJECT], ARENA_PARA + (ARENA_SIZE >> 4)
+        jae .no
+        clc
+        ret
+.no:
+        stc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; kc_copy - KCALL_COPY: a capability of the caller's into an empty slot of a
@@ -975,6 +1031,8 @@ kc_copy:
         jne kc_done.slot
         mov [copy_shadow], si
         mov [copy_descriptor], di
+        mov [copy_dest_space], bx
+        mov [copy_dest_slot], ax
         ; the source: a slot of the caller's that holds something
         mov ax, [bp + FRAME_SI]
         mov bx, [cur_thread]
@@ -1049,6 +1107,12 @@ kc_copy:
         mov di, si
         mov cx, SHADOW_SIZE / 2
         rep stosw
+        mov bx, [cur_thread]            ; its children go with it (l4.md L12)
+        mov bx, [bx + T_SPACE]
+        mov ax, [copy_slot]
+        mov dx, [copy_dest_space]
+        mov cx, [copy_dest_slot]
+        call cap_reparent
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------

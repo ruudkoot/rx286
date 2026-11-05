@@ -167,8 +167,8 @@ selector it may not load). One iteration in four starts with a call, so
 calls run with random arguments: a system call, through the stub to the OS
 server and its drivers (`INT 30h` until roadmap l4.md L10), or the kernel's
 `INT 31h` with selectors of the program's slots and others in DX, SI, DI
-and BP (deleting its own code or data, say, which the way back and the
-restart survive). A watchdog restarts an iteration
+and BP (deleting or revoking its own code or data, say, which the way back
+and the restart survive: roadmap l4.md L12). A watchdog restarts an iteration
 that runs for 5 ticks. The kernel counts the faults by vector instead of
 reporting each, checks its code and tables at every start, and ends the
 test after 10,000 starts. It runs on Bochs and MAME. A typical run: three quarters of the iterations

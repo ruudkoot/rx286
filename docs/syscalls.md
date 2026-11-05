@@ -42,8 +42,8 @@ and `program.inc` the macro `sys`, a call of the stub to the OS server:
 | 19 | `SYS_FILE_NEXT` | ES:DI = `SECTOR_SIZE` bytes to fill | CX = the bytes of the next sector of the file `SYS_FIND` found, which fill the buffer's start; CX = 0 at its end; CF with `E_INVAL` (nothing found, or a directory), `E_FAULT`, `E_BROKEN`, the disk's errors |
 | 20 | `SYS_FREE` | AL = the drive | DX:AX = the bytes free on its volume; CF with `E_INVAL`, `E_NOT_FAT12`, `E_BROKEN`, the disk's errors |
 | 21 | `SYS_PS` | AL = a module's number, ES:DI = `PS_SIZE` bytes to fill | what runs it, as the root keeps it (*Programs*, below); CF with `E_INVAL` past the last module the root built, `E_FAULT` |
-| 22 | `SYS_KILL` | AL = a module's number | nothing: the background program stopped; CF with `E_INVAL` (not a background program), `E_BUSY` (stopped already) |
-| 23 | `SYS_START` | AL = a module's number | nothing: the stopped background program started again, at its entry; CF with `E_INVAL`, `E_BUSY` (running already) |
+| 22 | `SYS_KILL` | AL = a module's number | nothing: the background program killed, its memory free again; CF with `E_INVAL` (not a background program), `E_BUSY` (killed already) |
+| 23 | `SYS_START` | AL = a module's number | nothing: the killed background program built again and started, as at the start; CF with `E_INVAL`, `E_BUSY` (running already) |
 | other | | | CF, AX = `E_NOSYS` |
 
 `SYSCALL_COUNT` is the number of calls.
@@ -133,9 +133,12 @@ server asks it for a program's calls about them. `SYS_PS`'s record
 | 10 | `PS_PRIORITY` | its priority |
 | 11 | `PS_RUNS` | a word: how often it was switched to (it wraps) |
 
-`SYS_KILL` and `SYS_START` stop a background program and start it again,
-at its entry; the shell, the OS server, a driver and the root are none of
-theirs. A background program's writes (`SYS_WRITE`) go to its own field of
+`SYS_KILL` kills a background program: the root revokes the untyped it
+made the program of, so everything made for it dies - its space, thread,
+segments, endpoint, the OS server's thread for it - and its memory is free
+again (roadmap l4.md L12). `SYS_START` builds it again from that memory, as
+the root did at the start, its data afresh from its module. The shell, the
+OS server, a driver and the root are none of theirs. A background program's writes (`SYS_WRITE`) go to its own field of
 the status line, not to the log: the first background program's at the
 line's right end, the next's left of it (*docs/drivers.md*).
 
