@@ -213,6 +213,9 @@ commands_start      equ $
         command "mem", cmd_mem, "the shell's own segments, as the CPU sees them"
         command "crash", cmd_crash, "crash KIND: try what no program may (crash help)"
         command "spin", cmd_spin, "loop forever; Ctrl+Break gets the shell back"
+        command "ps", cmd_ps, "the programs, the drivers and the servers, as the root keeps them"
+        command "kill", cmd_kill, "kill NAME: stop a background program"
+        command "start", cmd_start, "start NAME: start a stopped background program again"
         command "exit", cmd_exit, "end the shell; the kernel starts it again"
         dw 0
 
@@ -220,6 +223,7 @@ commands_start      equ $
 %include "fat12.asm"
 %include "fatname.asm"
 %include "drives.asm"
+%include "programs.asm"
 %include "devices.asm"
 %include "crash.asm"
 %include "parse.asm"

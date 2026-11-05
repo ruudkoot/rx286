@@ -119,7 +119,8 @@ MODULE_BINARIES = {'root': ('root', 'r.'), 'os': ('os', 'o.'), 'program': ('user
                    'mouse': ('mouse', 'm.'), 'console': ('console', 'v.'),
                    'kbd': ('keyboard', 'k.'), 'fd': ('diskette', 'f.'),
                    'hd': ('fixeddisk', 'h.'), 'serial': ('serial', 's.'),
-                   'sound': ('sound', 'a.'), 'clock': ('clock', 't.')}
+                   'sound': ('sound', 'a.'), 'rtc': ('rtc', 't.'),
+                   'clock': ('clock', 'l.')}
 
 
 def binary_bases(build_dir):
@@ -425,10 +426,16 @@ def keys_include(script):
 FORM_FEED = '[form feed]'
 
 
+STATUS_START, STATUS_END = '\x01', '\x02'
+
+
 def normalise_transcript(raw):
     """COM1's bytes as the lines a person would read: CR dropped, a form
     feed (or a run of them) as a line of its own, FORM_FEED, backspaces
-    applied, trailing spaces trimmed."""
+    applied, trailing spaces trimmed. A background program's status, which
+    a TEST_DEMO build puts between STATUS_START and STATUS_END wherever the
+    log is (roadmap l4.md L11), comes out as a line of its own, "status,
+    NAME: TEXT", after the line it fell in."""
     text = raw.decode('latin-1')
     # Test builds write trace lines straight to COM1, even in the middle of
     # a line of the console's: cut them out, so the console's line joins up.
@@ -436,6 +443,8 @@ def normalise_transcript(raw):
     text = re.sub(r'\f+', '\n' + FORM_FEED + '\n', text.replace('\r', ''))
     lines = []
     for line in text.split('\n'):
+        statuses = re.findall(STATUS_START + '([^' + STATUS_END + ']*)' + STATUS_END, line)
+        line = re.sub(STATUS_START + '[^' + STATUS_END + ']*' + STATUS_END, '', line)
         chars = []
         for c in line:
             if c == '\b':
@@ -444,6 +453,7 @@ def normalise_transcript(raw):
             else:
                 chars.append(c)
         lines.append(''.join(chars).rstrip())
+        lines.extend('status, ' + s.rstrip() for s in statuses)
     while lines and lines[-1] == '':
         lines.pop()
     return lines

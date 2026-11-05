@@ -187,6 +187,9 @@ stub_room:
         mov cx, FIND_ENTRY_SIZE
         cmp al, SYS_DIR_NEXT
         je .yes
+        mov cx, PS_SIZE
+        cmp al, SYS_PS
+        je .yes
         mov cx, [bp + STUB_CX]
         cmp al, SYS_SERIAL_READ
         je .yes

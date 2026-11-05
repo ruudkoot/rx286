@@ -5,13 +5,13 @@
 ;
 ; It writes the text page through the segment the root gave it, and moves
 ; the hardware cursor through the CRTC. The top line is the status line:
-; a background program's writes go to its right end (CON_STATUS); the
+; a background program's writes go to its field there (CON_STATUS); the
 ; foreground program's to the 24 lines below it (CON_MAIN), where CR, LF,
 ; BS, TAB and FF are control characters and every other byte is shown as
 ; its glyph, and a full screen scrolls those lines up. It starts where the
 ; kernel's cursor left off, below the kernel's banner. The log is not its
-; business: the OS server's call of the kernel's write keeps the
-; transcript the tests read. The OS server asks it with DRV_CON_WRITE
+; business: the OS server writes the transcript the tests read to the
+; kernel's log (KCALL_LOG). The OS server asks it with DRV_CON_WRITE
 ; (drivers.inc), passing the segment the bytes are in, which the driver
 ; deletes once it has written them.
 ; ============================================================================
@@ -130,25 +130,41 @@ write_main:
         ret
 
 ; ----------------------------------------------------------------------------
-; write_status - a background program's bytes, at the status line's right
-; end (control characters as spaces; the last VIDEO_COLUMNS at most)
-;   In:       BP:SI = the bytes; CX = how many; DS = its data
+; write_status - a background program's bytes, in its field of the status
+; line: right-aligned, spaces before them (control characters as spaces;
+; the field's last CON_FIELD at most)
+;   In:       BP:SI = the bytes; CX = how many; DI = the column past the
+;             field's end (CON_FIELD to VIDEO_COLUMNS); DS = its data
 ;   Out:      CX kept
-;   Destroys: AX, DX, SI, DI, ES
+;   Destroys: AX, BX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 write_status:
         push cx
-        cmp cx, VIDEO_COLUMNS
+        cmp di, CON_FIELD
+        jb .done_early
+        cmp di, VIDEO_COLUMNS
+        ja .done_early
+        cmp cx, CON_FIELD
         jbe .fits
         add si, cx
-        sub si, VIDEO_COLUMNS
-        mov cx, VIDEO_COLUMNS
+        sub si, CON_FIELD
+        mov cx, CON_FIELD
 .fits:
-        mov di, VIDEO_COLUMNS
-        sub di, cx
-        shl di, 1                       ; the first cell: right-aligned on row 0
+        mov dx, di
+        sub dx, cx                      ; DX = the text's first column
+        sub di, CON_FIELD
+        shl di, 1                       ; DI = the field's first cell, on row 0
         mov ax, VIDEO
         mov es, ax
+        mov ax, ATTR_STATUS << 8 | ' '
+.blank:
+        mov bx, di
+        shr bx, 1
+        cmp bx, dx
+        jae .text
+        stosw
+        jmp .blank
+.text:
         push ds
         mov ds, bp
         jcxz .done
@@ -163,6 +179,7 @@ write_status:
         loop .next
 .done:
         pop ds
+.done_early:
         pop cx
         ret
 

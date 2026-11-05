@@ -328,7 +328,13 @@ call_enter:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 call_leave:
+        push ax
+        mov ax, [cur_thread]
+        cmp [call_owner], ax            ; (a stop may have given its turn up)
+        jne .done
         mov word [call_owner], 0
+.done:
+        pop ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -418,6 +424,80 @@ thread_restart:
         pop bx
 .cancel:
         jmp ipc_cancel                  ; waiting in IPC: it wakes, to restart
+
+; ----------------------------------------------------------------------------
+; thread_stop - a thread stopped (KCALL_THREAD's THREAD_STOP; roadmap l4.md
+; L11): as a restart, its IPC wait given up and its session's server
+; started again; then off its ready queue, and its turn at the log given up.
+; Started again (THREAD_START), it goes on from where it stopped inside the
+; kernel, and its way back starts its program at its entry
+;   In:       BX = the thread, started, not the running one; DS = SEL_KDATA;
+;             interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+thread_stop:
+        call thread_restart
+        cmp [call_owner], bx
+        jne .queue
+        mov word [call_owner], 0
+.queue:
+        cmp byte [bx + T_STATE], TS_READY
+        jne .stopped
+        call ready_remove
+.stopped:
+        mov byte [bx + T_STATE], TS_STOPPED
+        ret
+
+; ----------------------------------------------------------------------------
+; ready_remove - a thread out of its ready queue, wherever it is in it
+;   In:       BX = the thread, ready; DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ready_remove:
+        push ax
+        push cx
+        push si
+        push di
+        mov cl, [bx + T_PRIO]
+        xor ch, ch
+        mov si, cx
+        shl si, 1
+        xor di, di                      ; DI = the one before it, 0 at the head
+        mov ax, [rq_head + si]
+.find:
+        test ax, ax
+        jz .done                        ; not there
+        cmp ax, bx
+        je .found
+        mov di, ax
+        mov ax, [di + T_NEXT]
+        jmp .find
+.found:
+        mov ax, [bx + T_NEXT]
+        test di, di
+        jz .head
+        mov [di + T_NEXT], ax
+        jmp .tail
+.head:
+        mov [rq_head + si], ax
+.tail:
+        cmp [rq_tail + si], bx
+        jne .done
+        mov [rq_tail + si], di
+        test di, di
+        jnz .done
+        mov al, 1                       ; the queue is empty
+        shl al, cl
+        not al
+        and [ready_mask], al
+.done:
+        pop di
+        pop si
+        pop cx
+        pop ax
+        ret
 
 ; ----------------------------------------------------------------------------
 ; ready_push - a thread to the tail of its priority's queue; a reschedule if
@@ -532,7 +612,7 @@ msg_dump_priority   db " priority ", 0
 msg_dump_stack      db ", kernel stack used ", 0
 msg_dump_states     db " free", 0, " ready", 0, " running", 0, " waiting", 0
                     db " sending", 0, " receiving", 0, " awaiting its reply", 0
-                    db " awaiting a notification", 0
+                    db " awaiting a notification", 0, " stopped", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------

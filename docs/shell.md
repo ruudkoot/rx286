@@ -46,7 +46,42 @@ any case too: `DIR`, `Dir` and `dir` are one.
 | `mem` | the shell's segments, as the CPU sees them |
 | `crash KIND` | tries what no program may (`crash help` lists the kinds) |
 | `spin` | loops until Ctrl+Break |
+| `ps` | every module the root built: its number, name, kind, priority, main thread's state and runs |
+| `kill NAME` | stops a background program (the clock, the counter) |
+| `start NAME` | starts a stopped background program again, at its entry |
 | `exit` | ends the shell; the kernel starts it again |
+
+## Beside the shell
+
+The shell is the program the keys are for. Two more programs run beside
+it in `make run` (roadmap l4.md L11, D19), each in its field of the status
+line, the screen's top line:
+
+- **the clock** (`src/userland/clock.asm`), above the shell's priority,
+  writes the time from the real-time clock every second, so it ticks on
+  even while the shell computes (`spin`);
+- **the counter** (`src/userland/counter.asm`), at the lowest priority,
+  counts whenever nothing else runs, and says how fast once a second:
+  `idle 1900k/s` while the shell waits for a key, little or nothing while
+  it works.
+
+`ps` shows them with everything else that runs:
+
+```
+A:\>ps
+  # name     kind       priority state, runs
+  0 root     root       7        running, 2
+  1 os       OS server  5        awaiting a notification, 1
+  2 printer  driver     6        receiving, 1
+ ...
+ 11 program  foreground 3        awaiting its reply, 358
+ 12 clock    background 4        awaiting its reply, 60
+ 13 counter  background 1        ready, 257
+```
+
+`kill clock` stops the clock, and the time stays as it was; `start clock`
+starts it again. A background program that faults is reported, as the
+shell is, and starts again while the shell works on.
 
 `dir` looks like DOS 5's:
 

@@ -70,7 +70,7 @@ milestone.
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots | the object made, zeroed, its capability in the slot |
 | 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; BX a badge (mint) | the capability there |
-| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint) or `THREAD_RESTART` | |
+| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint), `THREAD_RESTART`, `THREAD_STOP` or `THREAD_INFO` | `THREAD_INFO`: BL its state (`STATE_*`), BH its priority, CX how often it ran |
 | 10 | `KCALL_IRQ` | DX an interrupt line; AL `IRQ_BIND` (SI a notification) or `IRQ_ACK` | the line unmasked |
 | 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 or more | |
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
@@ -188,6 +188,28 @@ timer at most: arming it again replaces the one armed, so a wait's timer
 left behind cannot use the kernel's up (roadmap l4.md L9). Eight
 notifications can have a timer armed at once across the system: `KE_POOL`
 after that.
+
+### Stopping a thread
+
+`THREAD_STOP` (roadmap l4.md L11) takes a thread, not the caller, off every
+queue: a wait in IPC is given up as a restart gives it up, the server of
+its session starts again, and its turn at the log is given up. Its state is
+`STATE_STOPPED` until `THREAD_START` starts it again, at the priority given:
+it goes on from where it stopped inside the kernel, and its way back starts
+its program at its entry. A thread stopped already, or not started, is
+`KE_STATE`. `THREAD_INFO` says a thread's state:
+
+| State | Constant | |
+|---|---|---|
+| 0 | `STATE_FREE` | not started |
+| 1 | `STATE_READY` | in its ready queue |
+| 2 | `STATE_RUNNING` | the caller, when it asks of itself |
+| 3 | `STATE_WAITING` | inside the kernel, for its turn at the log |
+| 4 | `STATE_SENDING` | queued on an endpoint, to send or call |
+| 5 | `STATE_RECEIVING` | queued on an endpoint, to receive |
+| 6 | `STATE_REPLY` | awaiting its call's reply |
+| 7 | `STATE_NOTIFY` | awaiting a notification |
+| 8 | `STATE_STOPPED` | stopped |
 
 ### The log and the ticks
 

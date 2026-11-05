@@ -11,9 +11,10 @@ L5):
 | kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 9 KB of code and data |
 | the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
 | the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 3.5 KB of code |
-| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the clock's | a few hundred bytes each, the diskettes' about 1 KB |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | a few hundred bytes each, the diskettes' about 1 KB |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
-| the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
+| the clock | `src/userland/clock.asm` | a module of the image, ring 3, beside the shell, above it | a few hundred bytes |
+| the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell, below everything | a few hundred bytes |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
@@ -44,10 +45,10 @@ server.
    every other capability there is; `thread.asm` starts it, and becomes the
    idle loop. The first switch starts the root in ring 2 with `IRET`.
 6. The root (`src/root/`) builds a space for every other module: the
-   drivers; the OS server, with a thread for each program; the shell and
-   the counter beside it, each with a thread, an endpoint to the OS server
-   and a transfer segment. It starts them, the shell in the foreground; then
-   it waits for the OS server's faults.
+   drivers; the OS server, with a thread for each program; the shell, and
+   the clock and the counter beside it, each with a thread, an endpoint to
+   the OS server and a transfer segment. It starts them, the shell in the
+   foreground; then it waits for the OS server's faults and questions.
 
 ## The boot image
 
@@ -86,7 +87,7 @@ name nothing of the kernel's, and reaches it only through `INT 31h`.
 | `test.asm` | test builds only: typed keys, probes, faults on purpose, the stretches with interrupts off (`TEST_STRETCH`), the end of a test |
 
 From `src/lib/` the kernel takes `format.asm`, `caps.asm` (retype's
-placement, a selector's slot) and `rtc.asm`, with which it sets the clock
+placement, a selector's slot) and `cmos.asm`, with which it sets the clock
 quiet at its start.
 
 ## Interrupts
@@ -108,8 +109,8 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 ## Threads
 
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
-the root, the program in the foreground (the shell, or a test program), and
-the counter beside the shell. A thread is an object of the arena
+the root, the drivers, the OS server's, the program in the foreground (the
+shell, or a test program), and the clock and the counter beside the shell. A thread is an object of the arena
 (*docs/memory-map.md*): a control block and a kernel stack of its own (a
 segment from the GDT's pool), at whose top the CPU puts the frame of every
 interrupt from rings 1-3. It runs in a space: an LDT and its slots, which
@@ -125,7 +126,7 @@ untyped memory and a space can make more with the kernel's calls.
 - **The scheduler:** eight priorities (`PRIORITIES`), round robin within
   each on time slices of `SLICE_TICKS` ticks; a 256-byte table gives the
   highest non-empty queue, since the 286 has no `BSF`. The program runs at
-  priority 3 and the counter at 1, so the counter runs only when the
+  priority 3, the clock at 4 and the counter at 1, so the counter runs only when the
   program waits. Preemption happens on the way back to ring 3 and at the
   kernel's interrupt windows (`kpreempt`), never in the middle of a handler.
 - **Waiting:** a thread waits in IPC (*docs/kernel-calls.md*): for a
@@ -162,7 +163,9 @@ faults go to the OS server (l4.md D18). The root starts them at the
 priorities the module table gives. Then it serves the OS server's faults:
 it reports each with the kernel's old line, puts back any of the server's
 segments that is gone from its slot, and restarts it at its entry
-(*docs/kernel-calls.md*).
+(*docs/kernel-calls.md*). On the same endpoint it answers the OS server's
+questions about the modules, and stops and starts the background programs
+(`ps`, `kill`, `start`; roadmap l4.md L11).
 
 ## The OS server
 

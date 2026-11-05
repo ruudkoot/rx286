@@ -1,0 +1,51 @@
+# The demonstration (roadmap l4.md L11, D19), as `make run` shows it: the
+# clock writes the time on the status line every second and the counter
+# says how fast it counts, which is how much of the CPU nothing else wants,
+# while the shell runs commands. In TEST_DEMO builds the OS server puts
+# their status lines on the log too, where the runner sets them apart
+# ("status, NAME: TEXT", after the line each fell in: the clock's report of
+# its fault ends the first), and the clock faults once, after three
+# seconds: the OS server reports it and starts it again while the shell
+# works on.
+# ps lists every module the root built; kill stops the clock, which shows
+# no more, and start starts it again; neither touches anything but a
+# background program. The clock, above the shell, ticks on while the shell
+# spins, until Ctrl+Break; the counter, below it, does not count then.
+program: shell
+define: TEST_DEMO
+keys: {wait 250}ps\nkill clock\n{wait 100}ps\nstart clock\n{wait 100}kill program\nkill nothing\nstart counter\nkill\nspin\n{wait 150}{ctrl-break}\n
+timeout: 120
+match: contains
+---
+rx286 shell: type help for the commands
+rx286: clock fault #UD at 0007:{l:entry.fault}
+status, clock:
+status, counter: idle
+status, clock:
+  # name     kind       priority state, runs
+  0 root     root       7        running,
+  1 os       OS server  5        awaiting a notification,
+  2 printer  driver     6        receiving,
+  6 fd       driver     6        receiving,
+  9 sound    driver     6        receiving,
+ 10 rtc      driver     6        receiving,
+ 11 program  foreground 3        awaiting its reply,
+ 12 clock    background 4
+ 13 counter  background 1
+A:\>kill clock
+A:\>ps
+ 12 clock    background 4        stopped,
+A:\>start clock
+A:\>kill program
+status, clock:
+Not a background program
+A:\>kill nothing
+No such program
+A:\>start counter
+It is running already
+A:\>kill
+Required parameter missing
+A:\>spin
+rx286: Ctrl+Break: the program starts again
+status, clock:
+rx286 shell, started again

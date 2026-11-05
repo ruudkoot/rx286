@@ -104,6 +104,19 @@ THREAD_BIND         equ 2   ;    SI a notification: bound to it, so a receive on
                             ;    endpoint also returns its bits
 THREAD_FAULT        equ 3   ;    SI an endpoint: its faults go there, as calls (l4.md D18)
 THREAD_RESTART      equ 4   ;    its program starts again at its entry (l4.md L6)
+THREAD_STOP         equ 5   ;    it stops: off every queue, its wait given up; THREAD_START
+                            ;    starts it again, at its entry (l4.md L11)
+THREAD_INFO         equ 6   ;    -> BL its state (STATE_*), BH its priority, CX the times it
+                            ;    was switched to
+STATE_FREE          equ 0   ; THREAD_INFO's states: not started
+STATE_READY         equ 1
+STATE_RUNNING       equ 2
+STATE_WAITING       equ 3   ;    inside the kernel, for its turn at the log
+STATE_SENDING       equ 4
+STATE_RECEIVING     equ 5
+STATE_REPLY         equ 6   ;    awaiting its call's reply
+STATE_NOTIFY        equ 7   ;    awaiting a notification
+STATE_STOPPED       equ 8
 START_IOPL          equ 1   ; THREAD_START's CH: IOPL 1, for a ring-1 thread
 START_FOREGROUND    equ 2   ;    the program the keys are for; from rings 1-2 only, until
                             ;    the keyboard leaves the kernel (l4.md L8)

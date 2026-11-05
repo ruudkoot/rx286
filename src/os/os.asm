@@ -53,6 +53,7 @@ OS_SERIAL           equ (OS_SLOT_SERVICE + SERVICE_SERIAL) * 8 + 4 + RING
 OS_SOUND            equ (OS_SLOT_SERVICE + SERVICE_SOUND) * 8 + 4 + RING
 OS_CLOCK            equ (OS_SLOT_SERVICE + SERVICE_CLOCK) * 8 + 4 + RING
 OS_SOUND_STOP       equ 13 * 8 + 4 + RING   ; slot 13: the sound driver's notification
+OS_ROOT             equ OS_SLOT_ROOT * 8 + 4 + RING ; the root's endpoint, for requests
 OS_CONTROL          equ 14 * 8 + 4 + RING   ; slot 14: the control notification
 OS_FOREGROUND       equ 15 * 8 + 4 + RING   ; slot 15: the foreground program's thread
 OS_CONTROL_N        equ 16              ; the control thread's part of the stack
@@ -307,6 +308,12 @@ forward:
         je .serial
         cmp al, SYS_SERIAL_READ
         je .serial
+        cmp al, SYS_PS
+        je .ps
+        cmp al, SYS_KILL
+        je .kill
+        cmp al, SYS_START
+        je .start
         cmp al, SYS_FIND
         jb .nosys
         cmp al, SYS_FREE
@@ -369,8 +376,58 @@ forward:
         mov [XFER_DX], dx
         mov word [XFER_FLAGS], 0
         jmp .done
+.ps:
+        ; SYS_PS: the root's answer about a module, and its name from the
+        ; module table, as a record in the transfer segment
+        mov bl, [XFER_AX]
+        xor bh, bh
+        mov al, ROOT_INFO
+        mov dx, OS_ROOT
+        call driver
+        jc .nosys
+        mov ax, bx
+        test ax, ax
+        jnz .error                      ; no such module
+        mov ax, E_FAULT
+        cmp word [XFER_DI], XFER_DATA
+        jne .error                      ; the stub's XFER_BAD
+        mov [XFER_DATA + PS_KIND], cl
+        mov [XFER_DATA + PS_STATE], ch
+        mov ax, si
+        mov [XFER_DATA + PS_PRIORITY], al
+        mov [XFER_DATA + PS_RUNS], di
+        push ds
+        mov si, [XFER_AX]
+        and si, 0xFF
+        shl si, 5                       ; MODULE_ENTRY_SIZE
+        add si, MODULE_HEADER_SIZE + M_NAME
+        mov di, XFER_DATA + PS_NAME
+        mov ax, OS_MODULES
+        mov ds, ax
+        mov cx, PS_NAME_SIZE
+        rep movsb
+        pop ds
+        mov word [XFER_FLAGS], 0
+        jmp .done
+.kill:
+        ; SYS_KILL, SYS_START: the root's
+        mov al, ROOT_KILL
+        jmp .root
+.start:
+        mov al, ROOT_START
+.root:
+        mov bl, [XFER_AX]
+        xor bh, bh
+        mov dx, OS_ROOT
+        call driver
+        jc .nosys
+        mov ax, bx
+        test ax, ax
+        jnz .error
+        mov word [XFER_FLAGS], 0
+        jmp .done
 .time:
-        ; SYS_TIME: the clock driver's
+        ; SYS_TIME: the RTC driver's
         mov dx, OS_CLOCK
         mov al, DRV_CLOCK_TIME
         call driver
@@ -469,9 +526,11 @@ forward:
         mov word [XFER_FLAGS], 0
         jmp .done
 .write:
-        ; SYS_WRITE: the kernel's checks, in its order; the kernel's log;
-        ; then the console driver writes the screen: the foreground
-        ; program's, or the status line for a program in the background
+        ; SYS_WRITE: the kernel's checks, in its order; then the foreground
+        ; program's bytes to the kernel's log and the console driver's
+        ; screen; a background program's to its field of the status line
+        ; (l4.md L11), and only there: on the log, a test build's TEST_DEMO
+        ; sees them, as a line of their own
         mov cx, [XFER_CX]
         mov ax, E_INVAL
         cmp cx, WRITE_MAX
@@ -486,18 +545,28 @@ forward:
         jc .fault
         cmp ax, XFER_SIZE
         ja .fault                       ; the stub's XFER_BAD
+        push es
+        call module_entry
+        mov bl, [es:di + M_FLAGS]
+        pop es
+        test bl, MF_FOREGROUND
+        jz .background
         kcall KCALL_LOG                 ; AX = bytes written (fewer: a restart)
         jc .fault
         mov [XFER_AX], ax
         mov cx, ax
         test cx, cx
         jz .done
-        push es
-        call module_entry
-        mov bl, [es:di + M_FLAGS]
-        pop es
-        and bx, MF_FOREGROUND
-        xor bx, MF_FOREGROUND           ; CON_MAIN (0) for the foreground
+        mov bx, CON_MAIN
+        jmp .screen
+.background:
+        mov [XFER_AX], cx               ; all of it
+%ifdef TEST_DEMO
+        call status_log
+%endif
+        call status_end                 ; DI = the column past its field
+        mov bx, CON_STATUS
+.screen:
         push bp
         mov bp, ds                      ; the transfer segment, passed
         call console
@@ -937,6 +1006,117 @@ report:
         ret
 
 ; ----------------------------------------------------------------------------
+; status_end - the column past a background program's field of the status
+; line: the first background program's field ends at the line's right end,
+; the next's CON_FIELD columns left of it, and so on
+;   In:       nothing (the thread's program)
+;   Out:      DI = the column
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+status_end:
+        push bx
+        push cx
+        push es
+        mov ax, OS_MODULES
+        mov es, ax
+        call program_number
+        mov cx, ax                      ; CX = the program's number
+        mov di, VIDEO_COLUMNS
+        mov bx, 1
+.module:
+        cmp bx, cx
+        jae .done
+        push bx
+        shl bx, 5                       ; MODULE_ENTRY_SIZE
+        add bx, MODULE_HEADER_SIZE
+        test byte [es:bx + M_FLAGS], MF_DRIVER | MF_FOREGROUND
+        jnz .other
+        cmp word [es:bx + M_NAME], 'os' ; (the server itself)
+        jne .background
+        cmp byte [es:bx + M_NAME + 2], 0
+        je .other
+.background:
+        cmp di, 2 * CON_FIELD
+        jb .other                       ; no room left: they share the leftmost
+        sub di, CON_FIELD
+.other:
+        pop bx
+        inc bx
+        jmp .module
+.done:
+        pop es
+        pop cx
+        pop bx
+        ret
+
+%ifdef TEST_DEMO
+STATUS_START        equ 0x01            ; around a status on the log
+STATUS_END          equ 0x02
+
+; ----------------------------------------------------------------------------
+; status_log - TEST_DEMO builds: a background program's status on the log,
+; which the tests read, between the bytes 01h and 02h, wherever the log's
+; line is: "clock: 12:00:01"; the runner makes it a line of its own, after
+; the line it fell in (tools/rxlib.py)
+;   In:       DS:SI = the bytes; CX = how many (CON_FIELD at most are shown)
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+status_log:
+        pusha
+        push es
+        push ds
+        mov bp, sp
+        sub sp, LINE_SIZE
+        push ss
+        pop es
+        lea di, [bp - LINE_SIZE]
+        push si
+        mov si, text_status
+        call add_text
+        push ds
+        push di
+        call module_entry               ; ES:DI = its entry
+        mov si, di
+        pop di
+        push es
+        pop ds                          ; DS:SI = its name
+        push ss
+        pop es
+        mov dx, M_NAME_SIZE - 1
+.name:
+        lodsb
+        test al, al
+        jz .named
+        stosb
+        dec dx
+        jnz .name
+.named:
+        pop ds
+        mov si, text_colon
+        call add_text
+        pop si
+        cmp cx, CON_FIELD
+        jbe .copy
+        mov cx, CON_FIELD
+.copy:
+        rep movsb
+        mov al, STATUS_END
+        stosb
+        lea si, [bp - LINE_SIZE]
+        mov cx, di
+        sub cx, si
+        push ss
+        pop ds
+        kcall KCALL_LOG
+        mov sp, bp
+        pop ds
+        pop es
+        popa
+        ret
+%endif
+
+; ----------------------------------------------------------------------------
 ; add_text - a zero-terminated text of the server's code to the line
 ;   In:       CS:SI = the text; ES:DI = where in the line
 ;   Out:      DI past it
@@ -957,6 +1137,10 @@ drive_sectors       dw DISK_A_CYLINDERS * DISK_A_HEADS * DISK_A_SECTORS     ; ea
                     dw DISK_C_CYLINDERS * DISK_C_HEADS * DISK_C_SECTORS
                     dw DISK_D_CYLINDERS * DISK_D_HEADS * DISK_D_SECTORS
 text_prefix         db "rx286: ", 0
+%ifdef TEST_DEMO
+text_status         db STATUS_START, 0
+text_colon          db ": ", 0
+%endif
 text_fault          db " fault ", 0
 text_at             db " at ", 0
 vector_names        db "#DE #DB NMI #BP #OF #BR #UD #NM #DF #MP #TS #NP #SS #GP #14 #15 "

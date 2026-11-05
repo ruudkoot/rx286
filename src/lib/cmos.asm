@@ -1,7 +1,7 @@
 ; ============================================================================
-; rx286 - src/lib/rtc.asm
+; rx286 - src/lib/cmos.asm
 ; The MC146818 real-time clock, read for the `time` call (roadmap D20 B):
-; the kernel sets it up at its start, and the clock driver reads it (l4.md
+; the kernel sets it up at its start, and the RTC driver reads it (l4.md
 ; L10); the kernel's test hooks read it too.
 ;
 ; rtc_init sets register B to 24-hour BCD with every interrupt off, so the

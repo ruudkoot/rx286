@@ -50,7 +50,7 @@ section ktext
 %include "panic.asm"
 %include "pic.asm"
 %include "timer.asm"
-%include "rtc.asm"
+%include "cmos.asm"
 %include "fpu.asm"
 %include "console.asm"
 %include "serial.asm"

@@ -128,6 +128,10 @@ TS_SEND             equ 4       ; queued on an endpoint, to send
 TS_RECV             equ 5       ; queued on an endpoint, to receive
 TS_REPLY            equ 6       ; waiting for its call's reply
 TS_NOTIFY           equ 7       ; waiting on a notification
+TS_STOPPED          equ 8       ; stopped (THREAD_STOP), until started again
+%if TS_READY != STATE_READY || TS_NOTIFY != STATE_NOTIFY || TS_STOPPED != STATE_STOPPED
+  %error "kernel.inc: the thread states must be THREAD_INFO's (kcalls.inc)"
+%endif
 
 TF_FOREGROUND       equ 0x01    ; T_FLAGS: the keys and Ctrl+Break are its
 TF_CONFIGURED       equ 0x02    ; its space, entry and stack are set

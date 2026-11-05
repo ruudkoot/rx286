@@ -44,7 +44,12 @@ SYS_DIR_NEXT        equ 18  ; -> AX 1 and ES:DI the next entry (FIND_ENTRY_SIZE 
 SYS_FILE_NEXT       equ 19  ; -> ES:DI the next sector of the file found last (SECTOR_SIZE
                             ;    bytes of room), CX its bytes; CX 0 at the end
 SYS_FREE            equ 20  ; AL drive -> DX:AX the bytes free on its volume
-SYSCALL_COUNT       equ 21
+; The programs, as the root keeps them (roadmap l4.md L11, D19)
+SYS_PS              equ 21  ; AL a module's number -> ES:DI what runs it (PS_SIZE bytes);
+                            ;    E_INVAL past the last module
+SYS_KILL            equ 22  ; AL a module: a background program, stopped
+SYS_START           equ 23  ; AL a module: a stopped background program, started again
+SYSCALL_COUNT       equ 24
 
 PATH_MAX            equ 64  ; DOS's longest path, the drive's letter not counted
 FIND_PATH           equ 0   ; SYS_FIND's record: the path found, from the root
@@ -54,6 +59,19 @@ FIND_ENTRY_SIZE     equ 32                          ;    (FAT's: DIR_* of fat12.
 FIND_LABEL          equ FIND_ENTRY + FIND_ENTRY_SIZE    ; the volume's label, space padded
 FIND_LABEL_SIZE     equ 11
 FIND_SIZE           equ FIND_LABEL + FIND_LABEL_SIZE
+
+PS_NAME             equ 0   ; SYS_PS's record: the module's name, zero-padded
+PS_NAME_SIZE        equ 8
+PS_KIND             equ 8   ; PS_*, below
+PS_STATE            equ 9   ; its main thread's state (kcalls.inc's STATE_*)
+PS_PRIORITY         equ 10
+PS_RUNS             equ 11  ; word: the times it was switched to (they wrap)
+PS_SIZE             equ 13
+PS_ROOT             equ 0   ; the kinds: the root
+PS_OS               equ 1   ;    the OS server (its control thread)
+PS_DRIVER           equ 2
+PS_FOREGROUND       equ 3   ;    the program the keys are for
+PS_BACKGROUND       equ 4   ;    a background program: SYS_KILL and SYS_START's
 
 SYS_TICKS_HZ        equ 50
 WRITE_MAX           equ 4096

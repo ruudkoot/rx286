@@ -43,4 +43,16 @@ FILES_SIZE          equ 2560    ; a program's files segment: the OS server's alo
 
 FAULT_BADGE         equ 0x8000  ; a program's fault endpoint: its endpoint, badged so
 
+; The OS server's requests to the root (l4.md L11): calls on the root's
+; fault endpoint, badged ROOT_BADGE_OS, from slot OS_SLOT_ROOT of the server's
+ROOT_BADGE_OS       equ 0x4000
+OS_SLOT_ROOT        equ 160
+ROOT_INFO           equ 1       ; BX a module's number -> BX 0 or E_INVAL (no such module);
+                                ;    CL its kind (PS_*), CH its main thread's state
+                                ;    (STATE_*), SI its priority, DI the times it ran
+ROOT_KILL           equ 2       ; BX a module: stopped, if a background program -> BX 0,
+                                ;    or E_INVAL (not one), E_BUSY (stopped already)
+ROOT_START          equ 3       ; BX a module: started again, at its entry, if a stopped
+                                ;    background program -> BX 0, E_INVAL or E_BUSY (running)
+
 %endif

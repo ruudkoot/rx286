@@ -1079,6 +1079,12 @@ kc_thread:
         je .fault
         cmp al, THREAD_RESTART
         je .restart
+        cmp al, THREAD_STOP
+        je .stop
+        cmp al, THREAD_INFO
+        je .info
+        cmp byte [bx + T_STATE], TS_STOPPED
+        je .stopped
         cmp byte [bx + T_STATE], TS_FREE
         jne kc_done.state                   ; started already
         cmp al, THREAD_CONFIGURE
@@ -1127,6 +1133,31 @@ kc_thread:
         cmp byte [bx + T_STATE], TS_FREE
         je kc_done.state                ; not started
         call thread_restart
+        jmp kc_done.ok
+.stop:
+        cmp byte [bx + T_STATE], TS_FREE
+        je kc_done.state                ; not started
+        cmp byte [bx + T_STATE], TS_STOPPED
+        je kc_done.state
+        cmp bx, [cur_thread]
+        je kc_done.arg                  ; a thread does not stop itself
+        call thread_stop
+        jmp kc_done.ok
+.info:
+        mov al, [bx + T_STATE]
+        mov ah, [bx + T_PRIO]
+        mov [bp + FRAME_BX], ax
+        mov ax, [bx + T_RUNS]
+        mov [bp + FRAME_CX], ax
+        jmp kc_done.ok
+.stopped:
+        cmp al, THREAD_START            ; a stopped thread: started again, at
+        jne kc_done.state               ; its entry, at the priority given
+        mov cx, [bp + FRAME_CX]
+        cmp cl, PRIORITY_MAX
+        ja kc_done.arg
+        mov [bx + T_PRIO], cl
+        call ready_push
         jmp kc_done.ok
 .configure:
         push bx

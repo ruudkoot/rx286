@@ -128,7 +128,7 @@ every other line.
 - **EOI**: an IRQ of the slave sends EOI to the slave, then the master.
 - **The RTC** raises IRQ8 only if its periodic, alarm or update interrupt is
   on, and then only once until register C is read. rx286 turns all three off
-  at the start, and the clock driver reads the clock by polling.
+  at the start, and the RTC driver reads the clock by polling.
 
 ## Interrupts inside the kernel
 

@@ -200,7 +200,8 @@ entry:
 
 ; ----------------------------------------------------------------------------
 ; serve - the fault handler: report a fault, put back what the program
-; lost, restart it at its entry; for ever
+; lost, restart it at its entry; and the OS server's requests for its
+; programs (l4.md L11), on the same endpoint; for ever
 ;   In:       nothing
 ;   Out:      does not return
 ;   Destroys: everything
@@ -211,6 +212,14 @@ serve:
         kcall KCALL_RECV
 .message:
         jc serve
+        cmp dx, ROOT_BADGE_OS
+        jne .fault
+        call request                    ; BX CX SI DI the reply
+        mov dx, FAULT_EP
+        xor bp, bp
+        kcall KCALL_REPLY_RECV
+        jmp .message
+.fault:
         push dx                         ; the badge: the module's number
         test di, FAULT_COUNTED
         jnz .quiet
@@ -222,6 +231,103 @@ serve:
         xor bp, bp
         kcall KCALL_REPLY_RECV
         jmp .message
+
+; ----------------------------------------------------------------------------
+; request - the OS server's request about a module (os.inc): what runs it,
+; or a background program stopped or started again
+;   In:       AL = ROOT_INFO, ROOT_KILL or ROOT_START; BX = the module
+;   Out:      BX = 0 or the error; ROOT_INFO: CL the kind, CH the state, SI
+;             the priority, DI the times it ran
+;   Destroys: AX, DX, ES
+; ----------------------------------------------------------------------------
+request:
+        push ax
+        call module_kind                ; AL = the kind; DX = its thread
+        mov cl, al
+        pop ax
+        jc .invalid
+        cmp al, ROOT_INFO
+        je .info
+        cmp cl, PS_BACKGROUND
+        jne .invalid                    ; only a background program
+        cmp al, ROOT_KILL
+        je .kill
+        cmp al, ROOT_START
+        jne .invalid
+        call module_entry               ; at its priority
+        mov cl, [es:di + M_PRIORITY]
+        push ds
+        pop es
+        xor ch, ch
+        mov al, THREAD_START
+        kcall KCALL_THREAD
+        jmp .done
+.kill:
+        mov al, THREAD_STOP
+        kcall KCALL_THREAD
+.done:
+        mov bx, E_BUSY                  ; KE_STATE: stopped, or running, already
+        jc .out
+        xor bx, bx
+.out:
+        ret
+.info:
+        push cx
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD              ; BL the state, BH the priority, CX the runs
+        pop ax
+        mov di, cx
+        mov cl, al                      ; the kind
+        mov ch, bl                      ; the state
+        mov si, bx
+        shr si, 8                       ; the priority
+        xor bx, bx
+        ret
+.invalid:
+        mov bx, E_INVAL
+        ret
+
+; ----------------------------------------------------------------------------
+; module_kind - what a module is, and its main thread
+;   In:       BX = the module's number
+;   Out:      CF clear, AL = PS_*, DX = its thread's slot of the root's; or
+;             CF set: no such module (or not built)
+;   Destroys: AH, ES
+; ----------------------------------------------------------------------------
+module_kind:
+        test bx, bx
+        jnz .other
+        mov al, PS_ROOT
+        mov dx, SLOT(ROOT_SLOT_THREAD)
+        clc
+        ret
+.other:
+        cmp bx, [programs]
+        ja .none
+        push di
+        call program_slots
+        mov dx, [s_thread]
+        call module_entry
+        mov ah, [es:di + M_FLAGS]
+        push ds
+        pop es
+        pop di
+        mov al, PS_OS
+        cmp bx, [server]
+        je .kind
+        mov al, PS_DRIVER
+        test ah, MF_DRIVER
+        jnz .kind
+        mov al, PS_FOREGROUND
+        test ah, MF_FOREGROUND
+        jnz .kind
+        mov al, PS_BACKGROUND
+.kind:
+        clc
+        ret
+.none:
+        stc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; failed - a kernel call the root needs failed: say so, and stop
@@ -583,6 +689,14 @@ build_server:
         kcall KCALL_COPY
         must
         call server_control
+        mov dx, [server_space]          ; its requests about the programs, on the
+        mov si, FAULT_EP                ; fault endpoint, badged so
+        mov di, OS_SLOT_ROOT * 8 + 4
+        mov al, COPY_MINT
+        mov bx, ROOT_BADGE_OS
+        mov cl, RIGHT_SEND
+        kcall KCALL_COPY
+        must
         mov bx, 1
 .program:
         cmp bx, [programs]

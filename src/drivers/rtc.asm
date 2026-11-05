@@ -1,10 +1,10 @@
 ; ============================================================================
-; rx286 - src/drivers/clock.asm
-; The clock driver (roadmap l4.md L10, D20 B): the MC146818 real-time
+; rx286 - src/drivers/rtc.asm
+; The RTC driver, "rtc" (roadmap l4.md L10, D20 B): the MC146818 real-time
 ; clock, read for SYS_TIME, in ring 1 with IOPL 1.
 ;
 ; The kernel sets the clock to 24-hour BCD with its interrupts off at its
-; start; the driver only reads it (src/lib/rtc.asm), and is its one reader.
+; start; the driver only reads it (src/lib/cmos.asm), and is its one reader.
 ; The OS server asks it with DRV_CLOCK_TIME; the seven BCD bytes come back
 ; in the reply's four words.
 ; ============================================================================
@@ -47,4 +47,4 @@ entry:
         kcall KCALL_REPLY_RECV
         jmp .message
 
-%include "rtc.asm"
+%include "cmos.asm"

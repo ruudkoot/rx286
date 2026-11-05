@@ -49,7 +49,9 @@ DRV_MOUSE_NEWS      equ 2       ; -> BX 1 if the mouse moved or a button changed
 DRV_CON_WRITE       equ 1       ; BX CON_*, CX bytes, SI their offset in the segment
                                 ;    passed -> CX the bytes written
 CON_MAIN            equ 0       ;    the foreground program's screen, below the status line
-CON_STATUS          equ 1       ;    the status line's right end: a background program's
+CON_STATUS          equ 1       ;    a background program's field of the status line, DI
+                                ;    the column past its end (l4.md L11)
+CON_FIELD           equ 20      ; a field's columns
 ; The keyboard driver
 DRV_KBD_GET         equ 1       ; -> BX 1 and CX the key (CL ASCII, CH scancode), or BX 0
 DRV_KBD_PEEK        equ 2       ; -> BX 1 if a key waits, not taken
@@ -69,7 +71,7 @@ DRV_SOUND           equ 1       ; BX hertz (0: a rest), CX ticks -> BX 0 or E_IN
                                 ;    the sound is over or stopped (DRV_STOP_BIT)
 DRV_JOYSTICK        equ 2       ;    the segment passed, a transfer segment: its block's AX
                                 ;    the buttons, BX CX DX SI the axes (as SYS_JOYSTICK)
-; The clock driver: the RTC
+; The RTC driver
 DRV_CLOCK_TIME      equ 1       ; -> BX hours and minutes, CX century and year, SI month
                                 ;    and day, DI seconds: BCD, as SYS_TIME's BX, CX, DX, AL
 

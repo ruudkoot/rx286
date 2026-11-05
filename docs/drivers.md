@@ -16,7 +16,7 @@ descriptor it was not given, nor run the CPU's privileged instructions
 | the fixed disk driver ("hd") | `src/drivers/fixeddisk.asm` | the AT's fixed disk controller, IRQ14: drives C and D | `SERVICE_FIXED_DISK` |
 | the serial driver | `src/drivers/serial.asm` | COM2, the modem's line, IRQ3 | `SERVICE_SERIAL` |
 | the sound driver | `src/drivers/sound.asm` | the speaker (timer channel 2, port B) and the game port | `SERVICE_SOUND` |
-| the clock driver | `src/drivers/clock.asm` | the MC146818 real-time clock | `SERVICE_CLOCK` |
+| the RTC driver ("rtc") | `src/drivers/rtc.asm` | the MC146818 real-time clock | `SERVICE_CLOCK` |
 
 Every device has left the kernel (roadmap l4.md L10): it keeps the timer's
 channel 0, the interrupt controllers, the 287, NMI and, in debug and test
@@ -92,7 +92,9 @@ tick, while the kernel waits a tick at a time for the other events.
 
 It writes the text page and moves the cursor (roadmap l4.md L8, D19). The
 top line is the status line: a background program's writes go to its
-right end (`CON_STATUS`); the foreground program's to the 24 lines below
+field there (`CON_STATUS`, DI the column past the field's end, which the
+OS server gives each background program: `CON_FIELD` columns, right
+aligned, spaces before; roadmap l4.md L11); the foreground program's to the 24 lines below
 (`CON_MAIN`), with CR, LF, BS, TAB and FF as the kernel's console took
 them, scrolling those lines. It starts where the kernel's cursor stopped,
 below the banner. The OS server asks it with `DRV_CON_WRITE` for
@@ -155,10 +157,10 @@ game port's four axes with timer channel 0's latched count, interrupts off
 for 4 ms at most, and puts the buttons and the axes in the block of the
 transfer segment passed: five results, more than a reply's four words.
 
-## The clock driver
+## The RTC driver
 
 `DRV_CLOCK_TIME`: the RTC's date and time in BCD, read by polling
-(`src/lib/rtc.asm`), in the reply's four words: BX hours and minutes, CX
+(`src/lib/cmos.asm`), in the reply's four words: BX hours and minutes, CX
 century and year, SI month and day, DI seconds. The kernel sets the clock
 to 24-hour BCD with its interrupts off at its start; the driver is its one
 reader.

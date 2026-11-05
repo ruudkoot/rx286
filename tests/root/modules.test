@@ -16,7 +16,7 @@ root: module fd: code at {m:fd.base}h, sum ----, data sum {m:fd.datasum}
 root: module hd: code at {m:hd.base}h, sum ----, data sum {m:hd.datasum}
 root: module serial: code at {m:serial.base}h, sum ----, data sum {m:serial.datasum}
 root: module sound: code at {m:sound.base}h, sum ----, data sum {m:sound.datasum}
-root: module clock: code at {m:clock.base}h, sum ----, data sum {m:clock.datasum}
+root: module rtc: code at {m:rtc.base}h, sum ----, data sum {m:rtc.datasum}
 root: module program: code at {m:program.base}h, sum {m:program.codesum}, data sum {m:program.datasum}
 root: module counter: code at {m:counter.base}h, sum {m:counter.codesum}, data sum {m:counter.datasum}
 rx286 shell: type help for the commands
