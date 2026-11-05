@@ -16,7 +16,9 @@
 #   define: TEST_PANIC_DIVIDE   a NASM define for the kernel; may repeat
 #   image: fragmented           change the floppy: fragmented, missing, oversized,
 #                               truncated (a sector short), noloader (sectors
-#                               1-3 zeroed)
+#                               1-3 zeroed); change KERNEL.BIN: noroot (its
+#                               first module renamed), outside (a module past
+#                               its end), large (padded past 64 KB)
 #   timeout: 30                 seconds of wall time (default 30)
 #   match: full                 full (default), prefix or contains
 #   break: syscall              a debugger breakpoint, by kernel symbol...
@@ -36,9 +38,13 @@
 #                               or D) must hold text, then each byte its own
 #                               offset (storage.asm's fill); may repeat
 #   ---
-#   expected lines; {name} is a program symbol's offset, {k:name} a kernel one
-#   (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
-#   {image_sum} entry.asm's Fletcher sum of kernel.bin's words. A line that starts with
+#   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
+#   {c:name} the counter's, {r:name} the root's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
+#   {m:module.codesum}, {m:module.datasum} sums of its code and data;
+#   {image_sum} entry.asm's Fletcher sum of the image's words; {image_size}
+#   KERNEL.BIN's bytes, {image_free} the boot floppy's free bytes. A line that
+#   starts with
 #   @bochs, @dosbox-x or @mame counts on that emulator only: where they
 #   differ (docs/emulators.md).
 #
@@ -62,6 +68,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -79,6 +86,9 @@ EMULATORS = ('bochs', 'dosbox-x', 'mame')
 # A test's timeout is written for Bochs; the others boot slower (MAME runs
 # IBM's power-on test, about 6 s alone) and are heavier to run side by side.
 TIMEOUT_SCALE = {'bochs': 1, 'dosbox-x': 2, 'mame': 4}
+# The boot floppy's data area (the Makefile's 1.2 MB disk: 2,400 sectors, 4
+# reserved, two FATs of 7, a root directory of 14), in bytes
+FLOPPY_DATA_BYTES = (2400 - 4 - 2 * 7 - 14) * 512
 JOBS_DIVISOR = {'bochs': 1, 'dosbox-x': 2, 'mame': 3}
 EMULATOR = 'bochs'                  # set from --emulator
 
@@ -227,7 +237,10 @@ def build(test):
     stamp = os.path.join(b, 'defines.txt')
     wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
-        for name in ('kernel.bin', 'user.bin'):
+        for name in ('kernel.bin', 'user.bin', 'root.bin', 'os.bin', 'counter.bin',
+                     'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
+                     'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
+                     'rtc.bin', 'clock.bin'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         with open(stamp, 'w', encoding='utf-8') as f:
@@ -263,9 +276,35 @@ def mtools(*args):
     return subprocess.run(list(args), capture_output=True, text=True, env=env)
 
 
+def changed_image(test, kind):
+    """KERNEL.BIN changed for a boot test, written to run-image.bin."""
+    L = rxlib.LAYOUT
+    data = bytearray(open(os.path.join(test.build_dir, 'image.bin'), 'rb').read())
+    table = L['MODULE_TABLE_OFF']
+    first = table + L['MODULE_HEADER_SIZE']
+    if kind == 'truncated':
+        data = data[:-512]
+    elif kind == 'oversized':
+        data += bytes(L['IMAGE_MAX'] + 512 - len(data))
+    elif kind == 'noroot':                  # the root's module, renamed
+        data[first:first + 4] = b'toor'
+    elif kind == 'outside':                 # the last module's code past the end
+        last = first + (data[table + L['MH_COUNT']] - 1) * L['MODULE_ENTRY_SIZE']
+        struct.pack_into('<H', data, last + L['M_CODE'], len(data) // 16)
+    elif kind == 'large':                   # past 64 KB: zeros before the end mark
+        end = data[-16:]
+        data = data[:-16] + bytes(0x11000 - len(data)) + end
+        struct.pack_into('<H', data, table + L['MH_PARAGRAPHS'], len(data) // 16)
+    path = os.path.join(test.build_dir, 'run-image.bin')
+    with open(path, 'wb') as f:
+        f.write(data)
+    return path
+
+
 def change_image(test, image):
-    """The boot tests' floppies: a fragmented, missing or oversized kernel."""
-    kernel = os.path.join(test.build_dir, 'kernel.bin')
+    """The boot tests' floppies: KERNEL.BIN fragmented, missing or changed,
+    or no loader."""
+    kernel = os.path.join(test.build_dir, 'image.bin')
     filler = os.path.join(test.build_dir, 'filler.bin')
     if test.image == 'noloader':
         with open(image, 'r+b') as f:
@@ -274,20 +313,11 @@ def change_image(test, image):
         return None
     if test.image == 'missing':
         r = mtools('mdel', '-i', image, '::KERNEL.BIN')
-    elif test.image == 'truncated':
-        short = os.path.join(test.build_dir, 'short.bin')
-        with open(short, 'wb') as f:
-            f.write(open(kernel, 'rb').read()[:-512])
+    elif test.image in ('truncated', 'oversized', 'noroot', 'outside', 'large'):
+        changed = changed_image(test, test.image)
         r = mtools('mdel', '-i', image, '::KERNEL.BIN')
         if r.returncode == 0:
-            r = mtools('mcopy', '-i', image, short, '::KERNEL.BIN')
-    elif test.image == 'oversized':
-        big = os.path.join(test.build_dir, 'big.bin')
-        with open(big, 'wb') as f:
-            f.write(open(kernel, 'rb').read() + bytes(4096))
-        r = mtools('mdel', '-i', image, '::KERNEL.BIN')
-        if r.returncode == 0:
-            r = mtools('mcopy', '-i', image, big, '::KERNEL.BIN')
+            r = mtools('mcopy', '-i', image, changed, '::KERNEL.BIN')
     elif test.image == 'fragmented':
         # Interleave small files with the kernel's clusters, then free them.
         r = mtools('mdel', '-i', image, '::KERNEL.BIN')
@@ -308,25 +338,54 @@ def change_image(test, image):
     return None
 
 
+def booted_image(test):
+    """The KERNEL.BIN the run boots: the build's, or change_image's."""
+    changed = os.path.join(test.build_dir, 'run-image.bin')
+    if test.image and os.path.exists(changed):
+        return changed
+    return os.path.join(test.build_dir, 'image.bin')
+
+
 def substitute(test, line):
-    """{name} (the program's) and {k:name} (the kernel's) to four upper-case
-    hex digits; {x:name} and {kx:name} to eight lower-case ones, as Bochs'
-    debugger prints them."""
+    """{name} (the program's), {k:name} (the kernel's), {c:name} (the
+    counter's), {r:name} (the root's), {o:name} (the OS server's) and
+    {l:name} (the clock's) to four upper-case hex digits;
+    {x:name} and {kx:name} to eight lower-case ones, as Bochs'
+    debugger prints them; {m:module.base} to where a module's code is (five
+    upper-case hex digits), {m:module.limit} to its code's limit,
+    {m:module.codesum} and {m:module.datasum} to Fletcher sums of its code
+    and its data as assembled (four)."""
     def lookup(m):
         which, name = m.group(1) or '', m.group(2)
-        if name == 'image_sum':     # entry.asm's Fletcher sum of kernel.bin's words
-            data = open(os.path.join(test.build_dir, 'kernel.bin'), 'rb').read()
-            plain = weighted = 0
-            for i in range(0, len(data) - 1, 2):
-                plain = (plain + (data[i] | data[i + 1] << 8)) & 0xFFFF
-                weighted = (weighted + plain) & 0xFFFF
-            return '%04X' % weighted
-        mapfile = 'kernel.map' if which.startswith('k') else 'user.map'
+        if name == 'image_sum':     # entry.asm's Fletcher sum of the image's words
+            return '%04X' % rxlib.fletcher(open(booted_image(test), 'rb').read())
+        if name == 'image_size':    # KERNEL.BIN's bytes, as dir lists them
+            return '%d' % os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
+        if name == 'image_free':    # the boot floppy's free bytes, beside KERNEL.BIN
+            size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
+            return '%d' % (FLOPPY_DATA_BYTES - (size + 511) // 512 * 512)
+        if which == 'm:':
+            module, _, field = name.partition('.')
+            image = open(os.path.join(test.build_dir, 'image.bin'), 'rb').read()
+            found = [x for x in rxlib.image_modules(image) if x['name'] == module]
+            if not found or field not in ('base', 'limit', 'codesum', 'datasum'):
+                raise KeyError('%s: no {m:%s}' % (test.path, name))
+            m = found[0]
+            if field == 'base':
+                return '%05X' % (rxlib.LAYOUT['KERNEL_PHYS'] + m['code'])
+            if field == 'codesum':
+                return '%04X' % rxlib.fletcher(image[m['code']:m['code'] + m['code_size']])
+            if field == 'datasum':
+                return '%04X' % rxlib.fletcher(image[m['data']:m['data'] + m['data_size']])
+            return '%04X' % (m['code_size'] - 1)
+        mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map', 'o': 'os.map',
+                   'l': 'clock.map'}.get(
+            which[:1], 'user.map')
         symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
-    return re.sub(r'\{(k:|kx:|x:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
 
 
 def relevant(lines):

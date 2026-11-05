@@ -1,7 +1,9 @@
 # ============================================================================
 # rx286 - Makefile
-# Builds the boot sector, the loader, the program and the kernel, and puts
-# them on a 1.2 MB FAT12 floppy image; runs Bochs; runs the tests.
+# Builds the boot sector, the loader, the kernel and the modules (the root,
+# the OS server, the program, the counter), the boot image of them all, and
+# puts them on a
+# 1.2 MB FAT12 floppy image; runs Bochs; runs the tests.
 #
 #   make                 release and debug images
 #   make release|debug|test-build
@@ -52,9 +54,44 @@ program_main_attack := tests/programs/attack.asm
 program_main_fuzz := tests/programs/fuzz.asm
 program_main_storage := tests/programs/storage.asm
 program_main_devices := tests/programs/devices.asm
+program_main_fputhreads := tests/programs/fputhreads.asm
+program_main_caps := tests/programs/caps.asm
+program_main_ipc := tests/programs/ipc.asm
+program_main_rings := tests/programs/rings.asm
+program_main_keys := tests/programs/keys.asm
+program_main_revoke := tests/programs/revoke.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
+# The counter runs beside the shell; beside a test program only if the test
+# asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
+# timings stay their own. Its priority is below the program's (3), or as a
+# test says.
+WITH_COUNTER := $(or $(filter shell,$(PROGRAM)),$(findstring TEST_COUNTER,$(TEST_DEFINES)))
+# The clock runs beside the shell too (roadmap l4.md L11, D19), above it, so
+# that it ticks while the shell computes (it sleeps but for a moment a
+# second); in a test build only if the test asks (TEST_DEMO), since it would
+# put the time in every transcript's timing.
+WITH_CLOCK := $(if $(filter test,$(FLAVOUR)),$(findstring TEST_DEMO,$(TEST_DEFINES)),$(filter \
+    shell,$(PROGRAM)))
+COUNTER_PRIORITY := $(if $(findstring TEST_COUNTER_SAME,$(TEST_DEFINES)),3,$(if \
+    $(findstring TEST_COUNTER_ABOVE,$(TEST_DEFINES)),4,1))
+# The program's ring: 3, or 1 or 2 for the tests of those rings, which ask
+# for IOPL as a driver would (tests/rings).
+PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
+    $(findstring TEST_RING2,$(TEST_DEFINES)),2:3:fg:iopl,3:3:fg))
+# The modules of the boot image (tools/mkimage): NAME=BINARY:RING:PRIORITY[:FLAG...].
+# Servers run above their clients (roadmap l4.md D9): the root, the drivers,
+# the OS server, the programs.
+MODULES := root=$(B)/root.bin:2:7 os=$(B)/os.bin:2:5:stack=8192 \
+    printer=$(B)/printer.bin:1:6:driver:service=1 mouse=$(B)/mouse.bin:1:6:driver:irq=4:service=2 \
+    console=$(B)/console.bin:1:6:driver:service=3 kbd=$(B)/keyboard.bin:1:6:driver:irq=1:service=4 \
+    fd=$(B)/diskette.bin:1:6:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:6:driver:irq=14:service=6 \
+    serial=$(B)/serial.bin:1:6:driver:irq=3:service=7 sound=$(B)/sound.bin:1:6:driver:service=8 \
+    rtc=$(B)/rtc.bin:1:6:driver:service=9 \
+    program=$(B)/user.bin:$(PROGRAM_RING) \
+    $(if $(WITH_CLOCK),clock=$(B)/clock.bin:3:4) \
+    $(if $(WITH_COUNTER),counter=$(B)/counter.bin:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage or devices, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys or revoke, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
@@ -65,7 +102,10 @@ FLOPPY_SECTORS := 2400
 FLOPPY_SERIAL := 52583836
 
 IMAGE := $(B)/rx286.img
-BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/user.bin $(B)/kernel.bin
+BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.bin $(B)/os.bin \
+    $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
+    $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin \
+    $(B)/clock.bin $(B)/counter.bin $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
@@ -108,9 +148,36 @@ $(B)/boot-loader.bin: src/boot-loader/boot-loader.asm $(LOADER_SRC)
 $(B)/user.bin: $(PROGRAM_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
 
-# On the floppy the kernel is KERNEL.BIN, upper case as FAT12 keeps names.
-$(B)/kernel.bin: src/kernel/kernel.asm $(B)/user.bin $(KERNEL_SRC)
-	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/ -dUSER_BIN='"$(B)/user.bin"')
+# The clock, a background program beside the shell (roadmap l4.md L11).
+$(B)/clock.bin: src/userland/clock.asm $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
+
+# The counter, which runs beside the shell (roadmap l4.md L2).
+$(B)/counter.bin: src/userland/counter.asm $(COMMON_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
+
+# The root task, the first module (roadmap l4.md L5).
+$(B)/root.bin: src/root/root.asm $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
+
+# The OS server, which serves the programs' system calls (roadmap l4.md L6).
+$(B)/os.bin: $(wildcard src/os/*.asm) $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
+	$(call assemble,$@,src/os/os.asm,-Isrc/userland/ -Isrc/lib/ -Isrc/os/)
+
+# The drivers outside the kernel (roadmap l4.md L7).
+$(B)/%.bin: src/drivers/%.asm src/drivers/dwait.asm $(wildcard src/userland/*.inc) $(COMMON_SRC)
+	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/ -Isrc/drivers/)
+
+$(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
+	$(call assemble,$@,$<,-Isrc/kernel/ -Isrc/lib/)
+
+# The boot image: the kernel, the module table and the modules. On the
+# floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
+$(B)/image.bin: $(B)/kernel.bin $(B)/root.bin $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
+    $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
+    $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin $(B)/clock.bin $(B)/counter.bin tools/mkimage \
+    tools/rxlib.py
+	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 
 $(IMAGE): $(BINARIES)
 	rm -f $@.tmp
@@ -118,7 +185,7 @@ $(IMAGE): $(BINARIES)
 	mformat -i $@.tmp -f 1200 -R 4 -m 0xF9 -N $(FLOPPY_SERIAL) -v RX286 \
 	    -B $(B)/boot-sector.bin ::
 	dd if=$(B)/boot-loader.bin of=$@.tmp bs=512 seek=1 conv=notrunc status=none
-	mcopy -i $@.tmp $(B)/kernel.bin ::KERNEL.BIN
+	mcopy -i $@.tmp $(B)/image.bin ::KERNEL.BIN
 	mv $@.tmp $@
 
 $(B)/rx286.sym: $(BINARIES) tools/map2sym

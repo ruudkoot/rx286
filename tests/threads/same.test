@@ -1,0 +1,29 @@
+# The counter at the shell's priority (roadmap l4.md L2): it never waits, so
+# only the time slices let the shell in; the shell still answers.
+program: shell
+define: TEST_COUNTER_SAME
+define: TEST_THREAD_REPORT
+keys: echo one\necho two\n
+---
+rx286, test build
+rx286 shell: type help for the commands
+A:\>echo one
+one
+A:\>echo two
+two
+A:\>
+rx286: thread root ran
+rx286: thread printer ran
+rx286: thread mouse ran
+rx286: thread console ran
+rx286: thread kbd ran
+rx286: thread fd ran
+rx286: thread hd ran
+rx286: thread serial ran
+rx286: thread sound ran
+rx286: thread rtc ran
+rx286: thread program ran
+rx286: thread counter ran
+rx286: thread os ran
+rx286: thread os ran
+rx286: thread os ran

@@ -7,98 +7,100 @@ timeout: 60
 ---
 rx286, test build
 attack: cli
-rx286: program fault #GP(0000) at 0043:{attacks.cli}
+rx286: program fault #GP(0000) at 0007:{attacks.cli}
 attack: sti
-rx286: program fault #GP(0000) at 0043:{attacks.sti}
+rx286: program fault #GP(0000) at 0007:{attacks.sti}
 attack: in
-rx286: program fault #GP(0000) at 0043:{attacks.in}
+rx286: program fault #GP(0000) at 0007:{attacks.in}
 attack: out
-rx286: program fault #GP(0000) at 0043:{attacks.out}
+rx286: program fault #GP(0000) at 0007:{attacks.out}
 attack: hlt
-rx286: program fault #GP(0000) at 0043:{attacks.hlt}
+rx286: program fault #GP(0000) at 0007:{attacks.hlt}
 attack: lgdt
-rx286: program fault #GP(0000) at 0043:{attacks.lgdt}
+rx286: program fault #GP(0000) at 0007:{attacks.lgdt}
 attack: lidt
-rx286: program fault #GP(0000) at 0043:{attacks.lidt}
+rx286: program fault #GP(0000) at 0007:{attacks.lidt}
 attack: lmsw
-rx286: program fault #GP(0000) at 0043:{attacks.lmsw}
+rx286: program fault #GP(0000) at 0007:{attacks.lmsw}
 attack: clts
-rx286: program fault #GP(0000) at 0043:{attacks.clts}
+rx286: program fault #GP(0000) at 0007:{attacks.clts}
 attack: ltr
-rx286: program fault #GP(0000) at 0043:{attacks.ltr_f}
+rx286: program fault #GP(0000) at 0007:{attacks.ltr_f}
 attack: lldt
-rx286: program fault #GP(0000) at 0043:{attacks.lldt_f}
+rx286: program fault #GP(0000) at 0007:{attacks.lldt_f}
 attack: kernel data
-rx286: program fault #GP(0010) at 0043:{attacks.kdata_f}
+rx286: program fault #GP(0010) at 0007:{attacks.kdata_f}
 attack: kernel stack
-rx286: program fault #GP(0018) at 0043:{attacks.kstack_f}
+rx286: program fault #GP(0018) at 0007:{attacks.kstack_f}
 attack: video
-rx286: program fault #GP(0038) at 0043:{attacks.video_f}
+rx286: program fault #GP(0038) at 0007:{attacks.video_f}
 attack: beyond the GDT
-rx286: program fault #GP(0060) at 0043:{attacks.beyond_f}
-attack: an LDT selector
-rx286: program fault #GP(000C) at 0043:{attacks.ldt_f}
+rx286: program fault #GP(01D0) at 0007:{attacks.beyond_f}
+attack: a selector past the LDT
+rx286: program fault #GP(0084) at 0007:{attacks.ldt_f}
 attack: call the kernel
-rx286: program fault #GP(0008) at 0043:{attacks.kcall}
+rx286: program fault #GP(0008) at 0007:{attacks.kcall}
 attack: jump to the TSS
-rx286: program fault #GP(0020) at 0043:{attacks.tss}
+rx286: program fault #GP(0020) at 0007:{attacks.tss}
 attack: call the double-fault TSS
-rx286: program fault #GP(0028) at 0043:{attacks.dftss}
-attack: int 31h
-rx286: program fault #GP(018A) at 0043:{attacks.int31}
+rx286: program fault #GP(0028) at 0007:{attacks.dftss}
+attack: int 32h
+rx286: program fault #GP(0192) at 0007:{attacks.int32}
+attack: int 30h, the system call that was
+rx286: program fault #GP(0182) at 0007:{attacks.int30}
 attack: int 21h
-rx286: program fault #GP(010A) at 0043:{attacks.int21}
+rx286: program fault #GP(010A) at 0007:{attacks.int21}
 attack: int 3
-rx286: program fault #GP(001A) at 0043:{attacks.int3}
+rx286: program fault #GP(001A) at 0007:{attacks.int3}
 attack: into
-rx286: program fault #GP(0022) at 0043:{attacks.into_f}
+rx286: program fault #GP(0022) at 0007:{attacks.into_f}
 attack: write code
-rx286: program fault #GP(0000) at 0043:{attacks.wcode}
+rx286: program fault #GP(0000) at 0007:{attacks.wcode}
 attack: past the limit
-rx286: program fault #GP(0000) at 0043:{attacks.limit}
+rx286: program fault #GP(0000) at 0007:{attacks.limit}
 attack: a word across the limit
-rx286: program fault #GP(0000) at 0043:{attacks.word}
+rx286: program fault #GP(0000) at 0007:{attacks.word}
 attack: stack overflow
-rx286: program fault #SS(0000) at 0043:{attacks.stack_f}
+rx286: program fault #SS(0000) at 0007:{attacks.stack_f}
 attack: execute data
-rx286: program fault #GP(0048) at 0043:{attacks.exec}
+rx286: program fault #GP(000C) at 0007:{attacks.exec}
 attack: divide by zero
-rx286: program fault #DE at 0043:{attacks.div_f}
+rx286: program fault #DE at 0007:{attacks.div_f}
 attack: invalid opcode
-rx286: program fault #UD at 0043:{attacks.ud}
+rx286: program fault #UD at 0007:{attacks.ud}
 attack: bound
-rx286: program fault #BR at 0043:{attacks.bound_f}
+rx286: program fault #BR at 0007:{attacks.bound_f}
 attack: trap flag
-rx286: program fault #DB at 0043:{attacks.tf_after}
+rx286: program fault #DB at 0007:{attacks.tf_after}
 attack: the trap flag and a fault
-rx286: program fault #GP(0000) at 0043:{attacks.tfgp_f}
+rx286: program fault #GP(0000) at 0007:{attacks.tfgp_f}
 attack: NT and iret
-rx286: program fault #TS(0000) at 0043:{attacks.nt_f}
+rx286: program fault #TS(0000) at 0007:{attacks.nt_f}
 attack: IOPL through popf
-rx286: program fault #GP(0000) at 0043:{attacks.iopl_f}
+rx286: program fault #GP(0000) at 0007:{attacks.iopl_f}
 attack: lock
 @bochs attack: lock ran without a fault (not a 286)
-@mame rx286: program fault #GP(0000) at 0043:{attacks.lock}
+@mame rx286: program fault #GP(0000) at 0007:{attacks.lock}
 attack: loadall
-@bochs rx286: program fault #UD at 0043:{attacks.loadall}
-@mame rx286: program fault #GP(0000) at 0043:{attacks.loadall}
+@bochs rx286: program fault #UD at 0007:{attacks.loadall}
+@mame rx286: program fault #GP(0000) at 0007:{attacks.loadall}
 attack: 287 error
 @bochs rx286: the 287 reported an error (IRQ13)
 @mame attack: no 287 error arrived (no 287 emulated?)
 attack: write past the limit
 attack: refused, error 1
 attack: insb
-rx286: program fault #GP(0000) at 0043:{attacks.ins_f}
+rx286: program fault #GP(0000) at 0007:{attacks.ins_f}
 attack: outsb
-rx286: program fault #GP(0000) at 0043:{attacks.outs_f}
+rx286: program fault #GP(0000) at 0007:{attacks.outs_f}
 attack: a null SS
-rx286: program fault #GP(0000) at 0043:{attacks.nullss_f}
+rx286: program fault #GP(0000) at 0007:{attacks.nullss_f}
 attack: jump through the null selector
-rx286: program fault #GP(0000) at 0043:{attacks.nulljmp}
+rx286: program fault #GP(0000) at 0007:{attacks.nulljmp}
 attack: pop past the stack's top
-rx286: program fault #SS(0000) at 0043:{attacks.pop_f}
+rx286: program fault #SS(0000) at 0007:{attacks.pop_f}
 attack: a 287 operand across the limit
-@bochs rx286: program fault #GP(0000) at 0043:{attacks.fpuop}
+@bochs rx286: program fault #GP(0000) at 0007:{attacks.fpuop}
 @mame attack: the 287 read across the limit (no 287 emulated?)
 attack: write from a null selector
 attack: refused, error 1
@@ -106,8 +108,8 @@ attack: write past FFFFh
 attack: refused, error 1
 attack: unprivileged reads
 attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed
-attack: int 30h at the end of the code
-rx286: program fault #GP(0000) at 0043:2000
+attack: int 31h at the end of the code
+rx286: program fault #GP(0000) at 0007:2000
 attack: sgdt
 attack: sgdt allowed
 attack: smsw
@@ -128,4 +130,63 @@ attack: read drive 80h
 attack: refused, error 3
 attack: read sector FFFFh of A
 attack: refused, error 3
+attack: find a path through a null DS
+attack: refused, error 1
+attack: find into the code
+attack: refused, error 1
+attack: a directory's path across the limit
+attack: refused, error 1
+attack: find on drive 80h
+attack: refused, error 3
+attack: a path with no end
+attack: refused, error 19
+attack: a file's sector, nothing found
+attack: refused, error 3
+attack: a file's sector into the code
+attack: refused, error 1
+attack: an empty slot of the LDT
+rx286: program fault #GP(007C) at 0007:{attacks.empty_f}
+attack: every slot of the LDT
+attack: slot 0007 lar FB00 lsl 1FFF r-
+attack: slot 000F lar F300 lsl 1FFF rw
+attack: slot 0017 lar F300 lsl 07FF rw
+attack: slot 001F lar FFFF lsl FFFF --
+attack: slot 0027 lar FFFF lsl FFFF --
+attack: slot 002F lar FFFF lsl FFFF --
+attack: slot 0037 lar FFFF lsl FFFF --
+attack: slot 003F lar FFFF lsl FFFF --
+attack: slot 0047 lar FFFF lsl FFFF --
+attack: slot 004F lar F300 lsl 100F rw
+attack: slot 0057 lar FFFF lsl FFFF --
+attack: slot 005F lar FFFF lsl FFFF --
+attack: slot 0067 lar FFFF lsl FFFF --
+attack: slot 006F lar FFFF lsl FFFF --
+attack: slot 0077 lar FFFF lsl FFFF --
+attack: slot 007F lar FFFF lsl FFFF --
+attack: probe: data not present
+rx286: program fault #GP(0000) at 0007:{attacks.pds_f}
+attack: probe: execute-only code for data
+rx286: program fault #GP(0000) at 0007:{attacks.pdsx_f}
+attack: probe: stack not present
+rx286: program fault #SS(0014) at 0007:{attacks.pss_r}
+attack: probe: read-only stack
+rx286: program fault #GP(0014) at 0007:{attacks.pssr_r}
+attack: probe: code not present
+rx286: program fault #NP(0004) at 0007:{attacks.pcs_r}
+attack: probe: data for code
+rx286: program fault #GP(0004) at 0007:{attacks.pcsd_r}
+attack: retype from a GDT selector
+attack: refused, error 1
+attack: retype from its own data
+attack: refused, error 1
+attack: retype from an empty slot
+attack: refused, error 1
+attack: retype from past its LDT
+attack: refused, error 1
+attack: copy into its code, as a space
+attack: refused, error 1
+attack: start its data, as a thread
+attack: refused, error 1
+attack: a kernel call that does not exist
+attack: refused, error 7
 attack: done

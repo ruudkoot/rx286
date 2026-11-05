@@ -4,8 +4,8 @@
 ;
 ; It reads a line with a small editor (Backspace, Esc to clear, Up to
 ; recall the last line), finds the command's word in its table and runs it.
-; Its prompt and its drive commands are DOS's (drives.asm, on the FAT12
-; library fat.asm: storage roadmap D8).
+; Its prompt and its drive commands are DOS's (drives.asm, on the OS
+; server's file calls: storage roadmap D8, l4.md L9).
 ; Every command reaches the kernel only through the system calls; `crash`
 ; does what no program may, and the kernel's report and the shell's restart
 ; show the sandbox at work. The kernel keeps the shell's data across a
@@ -17,6 +17,7 @@ cpu 286
 bits 16
 %include "build.inc"
 %include "program.inc"
+%include "kcalls.inc"
 
 LINE_MAX            equ 70              ; characters a line may hold
 CHAR_DEL            equ 0x7F
@@ -39,7 +40,6 @@ entry:
         inc word [starts]
         cmp word [starts], 1
         jne .again
-        call drives_init
         PRINT "rx286 shell: type help for the commands", CHAR_LF
         jmp .loop
 .again:
@@ -213,14 +213,17 @@ commands_start      equ $
         command "mem", cmd_mem, "the shell's own segments, as the CPU sees them"
         command "crash", cmd_crash, "crash KIND: try what no program may (crash help)"
         command "spin", cmd_spin, "loop forever; Ctrl+Break gets the shell back"
+        command "ps", cmd_ps, "the programs, the drivers and the servers, as the root keeps them"
+        command "kill", cmd_kill, "kill NAME: stop a background program"
+        command "start", cmd_start, "start NAME: start a stopped background program again"
         command "exit", cmd_exit, "end the shell; the kernel starts it again"
         dw 0
 
 %include "commands.asm"
 %include "fat12.asm"
 %include "fatname.asm"
-%include "fat.asm"
 %include "drives.asm"
+%include "programs.asm"
 %include "devices.asm"
 %include "crash.asm"
 %include "parse.asm"

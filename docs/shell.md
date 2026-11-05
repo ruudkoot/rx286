@@ -8,13 +8,14 @@ program.
 ## The prompt and the drives
 
 The prompt is the current drive and its current directory, as DOS's
-`$p$g`: `A:\>`, `C:\DOCS>`. The shell keeps a current directory for each of
-the four drives (*docs/storage.md*); a drive's letter and a colon alone
+`$p$g`: `A:\>`, `C:\DOCS>`. The OS server keeps the shell's current drive
+and a current directory for each of the four drives, as DOS does
+(*docs/syscalls.md*, *docs/storage.md*); a drive's letter and a colon alone
 (`b:`) makes it the current drive. The shell starts on A, every drive at
 its root.
 
-A path is DOS's: an optional drive (`C:`), then names separated by `\` (or
-`/`). After a separator it goes from the root, else from that drive's
+A path is DOS's: an optional drive (`C:`), which the shell takes off and
+passes as the call's drive, then names separated by `\` (or `/`). After a separator it goes from the root, else from that drive's
 current directory. `.` is where it is, `..` its parent. Names are 8.3, in
 any case; DOS's forbidden characters are refused. Commands are matched in
 any case too: `DIR`, `Dir` and `dir` are one.
@@ -45,7 +46,42 @@ any case too: `DIR`, `Dir` and `dir` are one.
 | `mem` | the shell's segments, as the CPU sees them |
 | `crash KIND` | tries what no program may (`crash help` lists the kinds) |
 | `spin` | loops until Ctrl+Break |
+| `ps` | every module the root built: its number, name, kind, priority, main thread's state and runs |
+| `kill NAME` | kills a background program (the clock, the counter): its memory is free again |
+| `start NAME` | builds a killed background program again, and starts it |
 | `exit` | ends the shell; the kernel starts it again |
+
+## Beside the shell
+
+The shell is the program the keys are for. Two more programs run beside
+it in `make run` (roadmap l4.md L11, D19), each in its field of the status
+line, the screen's top line:
+
+- **the clock** (`src/userland/clock.asm`), above the shell's priority,
+  writes the time from the real-time clock every second, so it ticks on
+  even while the shell computes (`spin`);
+- **the counter** (`src/userland/counter.asm`), at the lowest priority,
+  counts whenever nothing else runs, and says how fast once a second:
+  `idle 1900k/s` while the shell waits for a key, little or nothing while
+  it works.
+
+`ps` shows them with everything else that runs:
+
+```
+A:\>ps
+  # name     kind       priority state, runs
+  0 root     root       7        running, 2
+  1 os       OS server  5        awaiting a notification, 1
+  2 printer  driver     6        receiving, 1
+ ...
+ 11 program  foreground 3        awaiting its reply, 358
+ 12 clock    background 4        awaiting its reply, 60
+ 13 counter  background 1        ready, 257
+```
+
+`kill clock` kills the clock, and the time stays as it was; `start clock`
+builds it again, from the memory the kill gave back. A background program that faults is reported, as the
+shell is, and starts again while the shell works on.
 
 `dir` looks like DOS 5's:
 
@@ -86,32 +122,22 @@ DOS's, where DOS has one:
 | `Printer out of paper` | `E_PAPER`: no paper, or no printer |
 | `Printer not answering` | `E_TIMEOUT`: the printer stayed busy |
 
-## The FAT12 library
+## The files
 
-`src/userland/fat.asm`, on `SYS_DISK_READ`; the shell's commands are in
-`drives.asm`. It reads; it does not write.
-
-- **`fat_mount`** reads what a command needs of a drive, afresh each time
-  (a changed diskette is read as it is): on a fixed disk, the master boot
-  record's first partition of type 01h, FAT12; then the volume's boot
-  sector. Its BPB is checked before it is used: 512-byte sectors, clusters
-  of a power of two sectors, one or two FATs, whole sectors of root
-  entries, and fewer than 4,085 clusters (more would be FAT16).
-- **`fat_find`** follows a path from a drive's current directory (a record
-  of its first cluster and its path) and gives what the last name names:
-  its first cluster, its path in DOS's form, whether it is a directory,
-  and its directory entry.
-- **`dir_first`, `dir_next`** walk a directory an entry at a time, passing
-  over deleted entries, volume labels and long names; **`file_first`,
-  `file_next`** read a file a sector at a time; **`fat_free`** counts the
-  free clusters.
-- A cluster's successor comes from the FAT through a window of two sectors,
-  enough for an entry that straddles them; `fat12_next` (`src/lib/fat12.asm`,
-  the loader's too) decodes it. Every cluster is checked against the volume
-  and every chain counted against its size, so a damaged FAT is an error
-  (`E_BROKEN`), never a hang.
-- Its errors follow the kernel's (*docs/syscalls.md*): `E_NOT_FAT12` (16),
-  `E_NOT_FOUND` (17), `E_NOT_DIR` (18), `E_BAD_NAME` (19), `E_BROKEN` (20).
+The shell's drive commands (`drives.asm`) are the OS server's file calls
+(*docs/syscalls.md*; roadmap l4.md L9): `dir` is `SYS_FIND`, then
+`SYS_DIR_NEXT` to the directory's end and `SYS_FREE`; `cd` is `SYS_GETCWD`
+or `SYS_CHDIR`; `type` and `print` are `SYS_FIND`, then `SYS_FILE_NEXT` a
+sector at a time; the prompt is `SYS_DRIVE` and `SYS_GETCWD`. The FAT12
+library that was the shell's is the server's now (`src/os/fat.asm`,
+*docs/storage.md*): it reads; it does not write. It checks a volume's BPB
+before it uses it: 512-byte sectors, clusters of a power of two sectors,
+one or two FATs, whole sectors of root entries, and fewer than 4,085
+clusters (more would be FAT16). A cluster's successor comes from the FAT
+through a window of two sectors, enough for an entry that straddles them;
+`fat12_next` (`src/lib/fat12.asm`, the loader's too) decodes it. Every
+cluster is checked against the volume and every chain counted against its
+size, so a damaged FAT is an error (`E_BROKEN`), never a hang.
 
 Names and time stamps become text in `src/lib/fatname.asm`, pure routines
 the host tests run (`tests/unit/test_fatname.py`).
@@ -119,7 +145,7 @@ the host tests run (`tests/unit/test_fatname.py`).
 ## The shell's own data
 
 The shell's data survives a restart (*docs/memory-map.md*), so it knows
-whether it has started before, and keeps its last line for Up and each
-drive's current directory. Its buffers are its own and fixed: a sector for
-directories and files, two for the FAT, a line, and the four current
-directories.
+whether it has started before, and keeps its last line for Up; the OS
+server keeps its drives' current directories. Its buffers are its own and
+fixed: a line, the last line, a file's sector, a directory's entry and
+what `SYS_FIND` found.

@@ -61,25 +61,89 @@ def read_map(path):
     return symbols
 
 
+def map_sections(path):
+    """name -> (file offset, length) for every section of a NASM map file."""
+    sections = {}
+    for line in open(path, encoding='utf-8', errors='replace'):
+        m = re.match(r'^\s*([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]{8})\s+'
+                     r'(progbits|nobits)\s+(\S+)', line)
+        if m:
+            sections[m.group(6)] = (int(m.group(2), 16), int(m.group(4), 16))
+    return sections
+
+
+# ---------------------------------------------------------------- the boot image
+
+def image_modules(image):
+    """The modules of a boot image (bytes): a list of dicts of the module
+    table's fields (layout.inc), the first the root's."""
+    L = LAYOUT
+    table = L['MODULE_TABLE_OFF']
+    count = int.from_bytes(image[table + L['MH_COUNT']:table + L['MH_COUNT'] + 2], 'little')
+    modules = []
+    for n in range(count):
+        e = table + L['MODULE_HEADER_SIZE'] + n * L['MODULE_ENTRY_SIZE']
+
+        def word(field):
+            return int.from_bytes(image[e + field:e + field + 2], 'little')
+        modules.append({
+            'name': image[e:e + L['M_NAME_SIZE']].split(b'\0', 1)[0].decode('ascii'),
+            'code': word(L['M_CODE']) * 16, 'code_size': word(L['M_CODE_SIZE']),
+            'data': word(L['M_DATA']) * 16, 'data_size': word(L['M_DATA_SIZE']),
+            'data_room': word(L['M_DATA_ROOM']), 'stack': word(L['M_STACK']),
+            'entry': word(L['M_ENTRY']), 'ring': image[e + L['M_RING']],
+            'priority': image[e + L['M_PRIORITY']], 'flags': image[e + L['M_FLAGS']],
+        })
+    return modules
+
+
+def fletcher(data):
+    """The boot tests' sum of an image (entry.asm): over its words, the sum
+    of the running sums, 16 bits."""
+    plain = total = 0
+    for i in range(0, len(data) - 1, 2):
+        plain = (plain + data[i] + 256 * data[i + 1]) & 0xFFFF
+        total = (total + plain) & 0xFFFF
+    return total
+
+
 def symbol_offsets(path):
     """name -> offset in its segment, for every symbol of a map file."""
     return {name: virt for _, _, virt, name in read_map(path)}
 
 
-# Where each binary's file offset 0 lies in memory.
-def binary_bases():
-    return {
+# The modules' binaries, by their names in the module table, and the
+# prefixes of their symbols.
+MODULE_BINARIES = {'root': ('root', 'r.'), 'os': ('os', 'o.'), 'program': ('user', 'u.'),
+                   'counter': ('counter', 'c.'), 'printer': ('printer', 'p.'),
+                   'mouse': ('mouse', 'm.'), 'console': ('console', 'v.'),
+                   'kbd': ('keyboard', 'k.'), 'fd': ('diskette', 'f.'),
+                   'hd': ('fixeddisk', 'h.'), 'serial': ('serial', 's.'),
+                   'sound': ('sound', 'a.'), 'rtc': ('rtc', 't.'),
+                   'clock': ('clock', 'l.')}
+
+
+def binary_bases(build_dir):
+    """Where each binary's file offset 0 lies in memory: for a module, where
+    its code is in the image (its data is copied elsewhere at start)."""
+    bases = {
         'boot-sector': (LAYOUT['BOOT_SECTOR_PHYS'], 'bs.'),
         'boot-loader': (LAYOUT['LOADER_PHYS'], 'ld.'),
         'kernel': (LAYOUT['KERNEL_PHYS'], ''),
-        'user': (LAYOUT['KERNEL_PHYS'] + LAYOUT['UTEXT_OFF'], 'u.'),
     }
+    path = os.path.join(build_dir, 'image.bin')
+    if os.path.exists(path):
+        for module in image_modules(open(path, 'rb').read()):
+            if module['name'] in MODULE_BINARIES:
+                binary, prefix = MODULE_BINARIES[module['name']]
+                bases[binary] = (LAYOUT['KERNEL_PHYS'] + module['code'], prefix)
+    return bases
 
 
 def bochs_symbols(build_dir):
     """Lines of a Bochs symbol file: every symbol at its linear address."""
     lines = []
-    for binary, (base, prefix) in binary_bases().items():
+    for binary, (base, prefix) in binary_bases(build_dir).items():
         path = os.path.join(build_dir, binary + '.map')
         if not os.path.exists(path):
             continue
@@ -253,7 +317,7 @@ SC_LSHIFT, SC_CTRL, SC_ALT = 0x2A, 0x1D, 0x38
 SC_SCROLL_LOCK, SC_DELETE = 0x46, 0x53
 NAMED = {'up': 0x48, 'down': 0x50, 'left': 0x4B, 'right': 0x4D,
          'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'f1': 0x3B, 'caps': 0x3A,
-         'scroll-lock': 0x46, 'del': 0x53}
+         'scroll-lock': 0x46, 'del': 0x53, 'sysrq': 0x54}
 
 
 def compile_keys(script):
@@ -262,6 +326,7 @@ def compile_keys(script):
     Plain characters are typed as the US keyboard types them; escapes are
     \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc). Braces name others:
     {up}, {down}, {left}, {right}, {esc}, {f1}, {caps}, {scroll-lock}, {del},
+    {sysrq} (the kernel's thread dump, in debug and test builds),
     {ctrl-X} and {alt-X} for a key X,
     {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
     not wait), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's
@@ -361,10 +426,16 @@ def keys_include(script):
 FORM_FEED = '[form feed]'
 
 
+STATUS_START, STATUS_END = '\x01', '\x02'
+
+
 def normalise_transcript(raw):
     """COM1's bytes as the lines a person would read: CR dropped, a form
     feed (or a run of them) as a line of its own, FORM_FEED, backspaces
-    applied, trailing spaces trimmed."""
+    applied, trailing spaces trimmed. A background program's status, which
+    a TEST_DEMO build puts between STATUS_START and STATUS_END wherever the
+    log is (roadmap l4.md L11), comes out as a line of its own, "status,
+    NAME: TEXT", after the line it fell in."""
     text = raw.decode('latin-1')
     # Test builds write trace lines straight to COM1, even in the middle of
     # a line of the console's: cut them out, so the console's line joins up.
@@ -372,6 +443,8 @@ def normalise_transcript(raw):
     text = re.sub(r'\f+', '\n' + FORM_FEED + '\n', text.replace('\r', ''))
     lines = []
     for line in text.split('\n'):
+        statuses = re.findall(STATUS_START + '([^' + STATUS_END + ']*)' + STATUS_END, line)
+        line = re.sub(STATUS_START + '[^' + STATUS_END + ']*' + STATUS_END, '', line)
         chars = []
         for c in line:
             if c == '\b':
@@ -380,6 +453,7 @@ def normalise_transcript(raw):
             else:
                 chars.append(c)
         lines.append(''.join(chars).rstrip())
+        lines.extend('status, ' + s.rstrip() for s in statuses)
     while lines and lines[-1] == '':
         lines.pop()
     return lines
@@ -468,7 +542,9 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     four slots hold the EGA, the diskette controller, the serial card and
     the IDE card, which the diskettes need too (docs/emulators.md). MAME
     writes a diskette back to its file only when it stops, so it is asked
-    to stop (SIGTERM) before it is killed."""
+    to stop (SIGTERM) before it is killed. SDL's dummy drivers keep MAME
+    from opening any window: `-video none` alone still opens one under
+    WSLg."""
     nvram = os.path.join(directory, 'mame-nvram')
     os.makedirs(os.path.join(nvram, 'ibm5170'), exist_ok=True)
     with open(os.path.join(nvram, 'ibm5170', 'mb_rtc'), 'wb') as f:
@@ -498,7 +574,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
          '-nvram_directory', nvram, '-cfg_directory', os.path.join(directory, 'mame-cfg'),
          '-autoboot_script', MAME_SCRIPT, '-autoboot_delay', '0',
          '-seconds_to_run', str(int(timeout * 10))] + args,
-        stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory)
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory,
+        env=dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy'))
     status = 'exit'
     while proc.poll() is None:
         if time.monotonic() - started > timeout:

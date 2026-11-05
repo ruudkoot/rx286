@@ -53,7 +53,7 @@ says so in Out.
 - **Ports are named (lint):** `out PIC1_CMD, al` or `out dx, al`, never
   `out 0x20, al`.
 - Routines and variables are `lower_case`, prefixed by their module:
-  `con_putc`, `kbd_ring`, `pic_eoi`.
+  `con_putc`, `test_reader`, `pic_eoi`.
 - Selectors are `SEL_*`, vectors `VEC_*`, system calls `SYS_*`.
 
 ## Comments

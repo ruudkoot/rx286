@@ -33,11 +33,15 @@ It reads the BPB the boot sector left at 7C00h and:
 2. reads the first FAT into its buffer at 8400h and the root directory into
    its buffer at 9800h;
 3. finds `KERNEL  BIN` (not a volume label or a directory), and checks its
-   size: at most `KERNEL_FILE_SIZE`;
+   size: at most `IMAGE_MAX`, 128 KB;
 4. follows its cluster chain (`fat12.asm`: `fat12_next`), reading **one
    sector at a time** to 1000:0000h onwards, so no INT 13h read crosses a
    64 KB boundary; a cluster outside the disk ends the load with an error;
-5. hands over, using the BIOS for the last time:
+5. checks the boot image (roadmap l4.md L5; *docs/memory-map.md*): its last
+   word is `KERNEL_END_MARK`; its module table's magic and length match the
+   file; its first module is the root; every module lies inside it, after
+   the table;
+6. hands over, using the BIOS for the last time:
    - text mode 3, 80x25 colour (INT 10h AX=0003h);
    - the floppy motor off (DOR = `FDC_DOR_MOTORS_OFF`), since the BIOS's
      timer interrupt, which would switch it off, never runs again;
@@ -47,11 +51,15 @@ It reads the BPB the boot sector left at 7C00h and:
 It hands the kernel nothing else: no registers, no tables. Every read is
 retried `BOOT_TRIES` times. The errors are "this disk's format is not one I
 can read", "cannot read the disk", "no KERNEL.BIN on this disk",
-"KERNEL.BIN is larger than its room" and "KERNEL.BIN's cluster chain is
-broken", each followed by a key and INT 19h. Debug and test builds trace
+"KERNEL.BIN is larger than its room", "KERNEL.BIN's cluster chain is
+broken", "KERNEL.BIN is incomplete", "KERNEL.BIN's module table is not
+sound", "KERNEL.BIN has no root module" and "a module lies outside
+KERNEL.BIN", each followed by a key and INT 19h. Debug and test builds trace
 "started" and "KERNEL.BIN loaded" on the log (COM2).
 
 ## 4. The kernel
 
 The kernel's real-mode entry loads the GDT and IDT and enters protected
-mode; *docs/protected-mode.md* and *docs/architecture.md* go on from there.
+mode; *docs/protected-mode.md* and *docs/architecture.md* go on from there:
+the kernel builds the root from the image's first module, and the root
+starts the rest.

@@ -17,19 +17,31 @@ bits 16
 %include "ports.inc"
 %include "selectors.inc"
 %include "program.inc"
+%include "kcalls.inc"
+%include "os.inc"
 
 FLAGS_TF            equ 0x0100
 FLAGS_IOPL3         equ 0x3000
 FLAGS_NT            equ 0x4000
-SEL_BEYOND_GDT      equ 0x60 | RPL_USER
-SEL_LDT_ENTRY       equ 0x08 | 0x04 | RPL_USER  ; index 1, TI = 1
+SEL_BEYOND_GDT      equ (GDT_LIMIT + 1) | RPL_USER                  ; one past the GDT
+SEL_PAST_LDT        equ PROGRAM_SLOTS * 8 | SEL_TI_LDT | RPL_USER   ; one slot past its LDT
+SEL_EMPTY_SLOT      equ (PROGRAM_SLOTS - 1) * 8 | SEL_TI_LDT | RPL_USER ; its last slot: empty
 FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
+
+; probe which - KCALL_TEST's TEST_PROBE: the kernel changes one of the
+; program's own descriptors before it returns
+%macro probe 1
+        mov bl, %1
+        mov al, TEST_PROBE
+        kcall KCALL_TEST
+%endmacro
 
 begin_udata
 next_attack         dw 0
 scratch             times 8 db 0
 scratch_sector      times SECTOR_SIZE db 0
 bounds              dw 0, 5
+path_root           db '\', 0
 fpu_cw              dw FPU_CW_ZM
 end_udata
 
@@ -97,12 +109,12 @@ attacks:
 .video_f: mov es, ax
 .beyond: mov ax, SEL_BEYOND_GDT
 .beyond_f: mov es, ax
-.ldt:   mov ax, SEL_LDT_ENTRY
+.ldt:   mov ax, SEL_PAST_LDT
 .ldt_f: mov ds, ax
 .kcall: call SEL_KCODE:0
 .tss:   jmp SEL_TSS:0
 .dftss: call SEL_DFTSS:0
-.int31: int 0x31                        ; beyond the IDT's limit
+.int32: int 0x32                        ; beyond the IDT's limit
 .int21: int 0x21                        ; IRQ1's gate: DPL 0
 .int3:  int3
 .into:  mov al, 127
@@ -204,8 +216,9 @@ attacks:
         arpl ax, bx
         PRINT "attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed", CHAR_LF
         jmp entry
-.edge:  mov ah, SYS_TICKS
-        jmp edge_of_code                ; INT 30h as the code segment's last bytes
+.edge:  mov ah, KCALL_TICKS
+        jmp edge_of_code                ; INT 31h as the code segment's last bytes
+.int30: int 0x30                        ; the system call's gate until l4.md L10: DPL 0
 .sgdt:  sgdt [scratch]                  ; unprivileged on the 286: allowed
         PRINT "attack: sgdt allowed", CHAR_LF
         jmp entry
@@ -264,6 +277,163 @@ attacks:
         pop es
         call report_refusal
         jmp entry
+; The file calls (roadmap l4.md L9): the OS server's, refused as the
+; sectors' are: a buffer the stub checks, then the OS server's own checks
+.fnull: push ds                         ; a path through a null DS
+        xor ax, ax
+        mov ds, ax
+        xor si, si
+        mov di, scratch_sector
+        mov al, DRIVE_A
+        sys SYS_FIND
+        pop ds
+        call report_refusal
+        jmp entry
+.fcode: push es                         ; a record into the code: not writable
+        push cs
+        pop es
+        xor di, di
+        mov si, path_root
+        mov al, DRIVE_A
+        sys SYS_FIND
+        pop es
+        call report_refusal
+        jmp entry
+.flimit: mov di, UDATA_ROOM - PATH_MAX / 2  ; a directory's path across the limit
+        mov al, DRIVE_A
+        sys SYS_GETCWD
+        call report_refusal
+        jmp entry
+.fdrive: mov si, path_root              ; drive 80h: no such drive
+        mov di, scratch_sector
+        mov al, 0x80
+        sys SYS_FIND
+        call report_refusal
+        jmp entry
+.flong: mov di, scratch_sector          ; a path with no end in the bytes passed
+        mov cx, PATH_IN_MAX + 8
+        mov al, 'A'
+        rep stosb
+        mov si, scratch_sector
+        mov al, DRIVE_A
+        sys SYS_CHDIR
+        call report_refusal
+        jmp entry
+.fnone: mov di, scratch_sector          ; a file's sector, nothing found
+        sys SYS_FILE_NEXT
+        call report_refusal
+        jmp entry
+.fsect: push es                         ; a file's sector into the code
+        push cs
+        pop es
+        xor di, di
+        sys SYS_FILE_NEXT
+        pop es
+        call report_refusal
+        jmp entry
+.empty: mov ax, SEL_EMPTY_SLOT          ; an empty slot of the LDT: all zeros
+.empty_f: mov ds, ax
+.slots: mov bx, SEL_UCODE               ; what ring 3 learns of every LDT slot
+        jmp ldt_slots
+; The probes (roadmap l4.md L1): the kernel changes one of the program's
+; descriptors during a kernel call (KCALL_TEST's TEST_PROBE), as a
+; revocation would. On the way back a DS it may no longer load becomes
+; null, and a CS or SS is the program's fault, reported at the return
+; address.
+.pds:   probe PROBE_DS_ABSENT
+.pds_f: mov ax, [0]                     ; DS is null now
+.pdsx:  probe PROBE_DS_EXEC
+.pdsx_f: mov ax, [0]
+.pss:   probe PROBE_SS_ABSENT
+.pss_r: PRINT "attack: back, with a stack not present", CHAR_LF
+        jmp entry
+.pssr:  probe PROBE_SS_READONLY
+.pssr_r: PRINT "attack: back, with a read-only stack", CHAR_LF
+        jmp entry
+.pcs:   probe PROBE_CS_ABSENT
+.pcs_r: PRINT "attack: back, with code not present", CHAR_LF
+        jmp entry
+.pcsd:  probe PROBE_CS_DATA
+.pcsd_r: PRINT "attack: back, with data for code", CHAR_LF
+        jmp entry
+; The kernel's calls (roadmap l4.md L3), from a program that holds no
+; capability but its three segments: each refused, nothing changed.
+.kgdt:  mov dx, SEL_KDATA               ; a GDT selector: no one's slot
+        jmp retype_attack
+.kown:  mov dx, SEL_UDATA               ; its own data: not untyped
+        jmp retype_attack
+.kempty: mov dx, SEL_EMPTY_SLOT         ; an empty slot
+        jmp retype_attack
+.kpast: mov dx, SEL_PAST_LDT            ; past its LDT
+        jmp retype_attack
+.kcopy: mov dx, SEL_UCODE               ; its code, as a space to copy into
+        mov si, SEL_UDATA
+        mov di, SEL_EMPTY_SLOT
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        call report_refusal
+        jmp entry
+.kthread: mov dx, SEL_UDATA             ; its data, as a thread to start
+        mov al, THREAD_START
+        mov cx, 7
+        kcall KCALL_THREAD
+        call report_refusal
+        jmp entry
+.knone: mov ah, 0x80                    ; no such call
+        int KCALL_VECTOR
+        call report_refusal
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; retype_attack - KCALL_RETYPE from DX into the empty slot, reported
+;   In:       DX = the selector given as the untyped
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+retype_attack:
+        mov al, CAP_ENDPOINT
+        mov si, SEL_EMPTY_SLOT
+        kcall KCALL_RETYPE
+        call report_refusal
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; ldt_slots - every slot of the program's LDT as ring 3 sees it: LAR's
+; access rights (FFFF if refused), LSL's limit (FFFF if refused), r if VERR
+; passes, w if VERW does
+;   In:       BX = the first slot's selector
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+ldt_slots:
+        PRINT "attack: slot "
+        mov ax, bx
+        call print_hex16
+        PRINT " lar "
+        mov ax, 0xFFFF
+        lar ax, bx
+        call print_hex16
+        PRINT " lsl "
+        mov ax, 0xFFFF
+        lsl ax, bx
+        call print_hex16
+        mov al, ' '
+        call print_char
+        mov al, '-'
+        verr bx
+        jnz .read
+        mov al, 'r'
+.read:  call print_char
+        mov al, '-'
+        verw bx
+        jnz .write
+        mov al, 'w'
+.write: call print_char
+        call print_newline
+        add bx, 8
+        cmp bx, SEL_PAST_LDT
+        jb ldt_slots
+        jmp entry
 
 ; ----------------------------------------------------------------------------
 ; disk_read_attack - SYS_DISK_READ of A's sector 0 into ES:DI, reported
@@ -317,11 +487,12 @@ attack_table:
         attack "kernel stack", attacks.kstack
         attack "video", attacks.video
         attack "beyond the GDT", attacks.beyond
-        attack "an LDT selector", attacks.ldt
+        attack "a selector past the LDT", attacks.ldt
         attack "call the kernel", attacks.kcall
         attack "jump to the TSS", attacks.tss
         attack "call the double-fault TSS", attacks.dftss
-        attack "int 31h", attacks.int31
+        attack "int 32h", attacks.int32
+        attack "int 30h, the system call that was", attacks.int30
         attack "int 21h", attacks.int21
         attack "int 3", attacks.int3
         attack "into", attacks.into
@@ -350,7 +521,7 @@ attack_table:
         attack "write from a null selector", attacks.nullw
         attack "write past FFFFh", attacks.wrap
         attack "unprivileged reads", attacks.reads
-        attack "int 30h at the end of the code", attacks.edge
+        attack "int 31h at the end of the code", attacks.edge
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
         attack "read a sector into the code", attacks.dcode
@@ -361,20 +532,42 @@ attack_table:
         attack "print from a null selector", attacks.pnull
         attack "read drive 80h", attacks.drive
         attack "read sector FFFFh of A", attacks.sector
+        attack "find a path through a null DS", attacks.fnull
+        attack "find into the code", attacks.fcode
+        attack "a directory's path across the limit", attacks.flimit
+        attack "find on drive 80h", attacks.fdrive
+        attack "a path with no end", attacks.flong
+        attack "a file's sector, nothing found", attacks.fnone
+        attack "a file's sector into the code", attacks.fsect
+        attack "an empty slot of the LDT", attacks.empty
+        attack "every slot of the LDT", attacks.slots
+        attack "probe: data not present", attacks.pds
+        attack "probe: execute-only code for data", attacks.pdsx
+        attack "probe: stack not present", attacks.pss
+        attack "probe: read-only stack", attacks.pssr
+        attack "probe: code not present", attacks.pcs
+        attack "probe: data for code", attacks.pcsd
+        attack "retype from a GDT selector", attacks.kgdt
+        attack "retype from its own data", attacks.kown
+        attack "retype from an empty slot", attacks.kempty
+        attack "retype from past its LDT", attacks.kpast
+        attack "copy into its code, as a space", attacks.kcopy
+        attack "start its data, as a thread", attacks.kthread
+        attack "a kernel call that does not exist", attacks.knone
         dw 0
 end_udata
 
 %include "uprint.asm"
 %include "format.asm"
 
-; The last two bytes of the code segment: the system call returns to IP
+; The last two bytes of the code segment: the kernel call returns to IP
 ; UTEXT_ROOM, past the limit, and IRET would fault in ring 0 (M10).
         times UTEXT_ROOM - 2 - ($ - $$) db 0
 ; ----------------------------------------------------------------------------
-; edge_of_code - INT 30h as the code segment's last two bytes
-;   In:       AH = a system call (attacks.edge)
+; edge_of_code - INT 31h as the code segment's last two bytes
+;   In:       AH = a kernel call (attacks.edge)
 ;   Out:      does not return: the kernel finds the return IP past the limit
 ;   Destroys: what the call destroys
 ; ----------------------------------------------------------------------------
 edge_of_code:
-        int SYSCALL_VECTOR
+        int KCALL_VECTOR

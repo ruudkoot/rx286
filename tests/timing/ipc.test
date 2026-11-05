@@ -1,0 +1,15 @@
+# What a call and its reply cost (roadmap l4.md L4): 10,000 round trips
+# between a program and a server of its making (tests/programs/ipc.asm with
+# TEST_IPC_TIMING), as instructions on Bochs, which runs a fixed number a
+# second. A regression check: no emulator gives an AT's clocks (l4.md E4).
+program: ipc
+emulators: bochs
+define: TEST_CAPS
+define: TEST_IPC_TIMING
+define: TEST_END_TICKS=300
+match: contains
+timeout: 60
+---
+ipc: the server runs
+ipc: a round trip within the budget
+ipc: done

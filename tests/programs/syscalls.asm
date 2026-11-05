@@ -1,6 +1,7 @@
 ; ============================================================================
 ; rx286 - tests/programs/syscalls.asm
-; Every system call, with good and bad arguments (tests/syscalls).
+; Every system call, with good and bad arguments (tests/syscalls); in
+; TEST_FILES builds, the file calls on the boot diskette.
 ;
 ; Each check prints one line; tests/syscalls/calls.test holds the lines it
 ; must print. The run ends with SYS_EXIT: the program starts again, sees
@@ -12,12 +13,20 @@ cpu 286
 bits 16
 %include "build.inc"
 %include "program.inc"
+%include "kcalls.inc"
+%include "os.inc"
 
 WINDOW_LINES        equ WRITE_MAX / 2   ; bytes a window write: what the data segment holds
 WINDOW_SLACK        equ 2               ; ticks either way the edges allow
 
+ENTRY_FILE_SIZE     equ 0x1C            ; a directory entry's size (FAT's): a dword
+
 begin_udata
 runs                dw 0
+kernel_name         db "KERNEL.BIN", 0
+root_name           db "\", 0
+file_record         times FIND_SIZE db 0
+file_sector         times SECTOR_SIZE db 0
 hello               db "hello"
 hello_end:
 before              dd 0
@@ -145,8 +154,7 @@ check_others:
 .bad_time:
         PRINT "INVALID", CHAR_LF
 .unknown:
-        mov ah, 0x7F                    ; no such call
-        int SYSCALL_VECTOR
+        sys 0x7F                        ; no such call
         call report_error
         ; The registers a call does not return are kept.
         mov bx, 0x1111
@@ -168,9 +176,149 @@ check_others:
         cmp bp, 0x6666
         jne .changed
         PRINT "kept", CHAR_LF
-        jmp check_window
+        jmp check_transfer
 .changed:
         PRINT "CHANGED", CHAR_LF
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; check_transfer - the transfer segment's limit (roadmap l4.md L6): a write
+; asked of the OS server straight on its endpoint, of bytes past the
+; segment's end, which the stub never passes on: the kernel refuses it
+;   In:       DS = ES = the program's data
+;   Out:      falls through to the next check
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+check_transfer:
+        mov ax, OS_XFER
+        mov es, ax
+        mov word [es:XFER_CX], 16
+        mov word [es:XFER_SI], XFER_SIZE - 8
+        mov al, SYS_WRITE               ; the label: the function
+        mov dx, OS_EP
+        xor bp, bp
+        kcall KCALL_CALL
+        mov ax, OS_XFER                 ; its results, before the next call's
+        mov es, ax
+        push word [es:XFER_FLAGS]
+        push word [es:XFER_AX]
+        push ds
+        pop es
+        PRINT "transfer: a write past its end: "
+        pop ax
+        pop bx
+        shr bx, 1                       ; CF: the call's
+        call report_error
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; check_files - TEST_FILES builds (tests/syscalls/files.test: not DOSBox-X,
+; whose diskette controller never interrupts): the file calls (roadmap
+; l4.md L9), on the boot diskette: the current drive and A's directory;
+; KERNEL.BIN found and read back; a file refused as a directory; the root's
+; entries; the free bytes; another drive made current, and A again
+;   In:       DS = ES = the program's data
+;   Out:      falls through to the next check
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+check_files:
+%ifdef TEST_FILES
+        mov al, DRIVES                  ; none made current: which is
+        sys SYS_DRIVE
+        PRINT "files: drive "
+        call print_dec
+        PRINT " current", CHAR_LF
+        mov al, DRIVE_A
+        mov di, file_record
+        sys SYS_GETCWD
+        jc .failed
+        PRINT "files: its directory "
+        mov si, file_record
+        call print_str
+        call print_newline
+        mov al, DRIVE_A
+        mov si, kernel_name
+        mov di, file_record
+        sys SYS_FIND
+        jc .failed
+        PRINT "files: "
+        mov si, file_record + FIND_PATH
+        call print_str
+        PRINT ", a "
+        cmp byte [file_record + FIND_DIR], 0
+        je .file
+        PRINT "directory"
+        jmp .size
+.file:
+        PRINT "file"
+.size:
+        PRINT " of "
+        mov ax, [file_record + FIND_ENTRY + ENTRY_FILE_SIZE]
+        mov dx, [file_record + FIND_ENTRY + ENTRY_FILE_SIZE + 2]
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        xor bx, bx                      ; DX:BX = the bytes read (sys takes AH)
+        xor dx, dx
+.sector:
+        mov di, file_sector
+        sys SYS_FILE_NEXT
+        jc .failed
+        jcxz .read
+        add bx, cx
+        adc dx, 0
+        jmp .sector
+.read:
+        PRINT "files: read back "
+        mov ax, bx
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        PRINT "files: a file's entries: "
+        mov di, file_sector
+        sys SYS_DIR_NEXT
+        call report_error
+        PRINT "files: a file as the directory: "
+        mov al, DRIVE_A
+        mov si, kernel_name
+        sys SYS_CHDIR
+        call report_error
+        mov al, DRIVE_A
+        mov si, root_name
+        mov di, file_record
+        sys SYS_FIND
+        jc .failed
+        xor bx, bx
+.entry:
+        mov di, file_sector
+        sys SYS_DIR_NEXT
+        jc .failed
+        add bx, ax                      ; AX: 1, or 0 at the end
+        test ax, ax
+        jnz .entry
+        PRINT "files: the root's entries "
+        mov ax, bx
+        call print_dec
+        call print_newline
+        mov al, DRIVE_A
+        sys SYS_FREE
+        jc .failed
+        PRINT "files: free "
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        mov al, DRIVE_B
+        sys SYS_DRIVE
+        PRINT "files: drive "
+        call print_dec
+        mov al, DRIVE_A
+        sys SYS_DRIVE
+        PRINT " current, then drive "
+        call print_dec
+        call print_newline
+        jmp check_window
+.failed:
+        PRINT "files: FAILED, error "
+        call print_dec
+        call print_newline
+%endif
         ; falls through
 
 ; ----------------------------------------------------------------------------

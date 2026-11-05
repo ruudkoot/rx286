@@ -165,3 +165,7 @@ print_newline:
         call print_char
         pop ax
         ret
+
+%ifndef KERNEL_LOG
+%include "stub.asm"                     ; what the sys macro calls
+%endif

@@ -1,12 +1,14 @@
-# The shell's segments: bases from layout.inc, limits from the CPU (LSL).
+# The shell's segments: where the root put them (KCALL_SEGMENT): its code in
+# the image, its data and stack after the root's own, the OS server's, the
+# drivers' and the transfer segments; limits from the CPU (LSL).
 program: shell
 keys: mem\n
 ---
 rx286, test build
 rx286 shell: type help for the commands
 A:\>mem
-code:  selector 0043h, base 13100h, limit 1FFFh
-data:  selector 004Bh, base 15100h, limit 1FFFh
-stack: selector 0053h, base 17700h, limit 07FFh
+code:  selector 0007h, base {m:program.base}h, limit {m:program.limit}h
+data:  selector 000Fh, base 50E20h, limit 1FFFh
+stack: selector 0017h, base 52E20h, limit 07FFh
 Nothing else is reachable: the kernel's selectors fault here.
 A:\>

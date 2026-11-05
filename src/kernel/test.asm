@@ -6,12 +6,13 @@
 ; Typing: tools/run-test compiles a test's key script into test_keys (see
 ; tools/rxlib.py for the operations). On every tick, test_tick types the
 ; next byte through the 8042's command D2h, which puts it where the keyboard
-; would and raises IRQ1 (roadmap E7). It types only while something waits
-; for a key (kbd_wait_key, SYS_WAIT) with nothing buffered, unless the
-; script says "now"; a mouse packet in the script goes to the mouse driver
-; at the next tick, as IRQ4 would hand it over. When the script is done and
-; something waits again for a key, with no time limit, the test ends: "TEST
-; END" on the log, then the shutdown port.
+; would and raises IRQ1 (roadmap E7), for the keyboard driver (roadmap
+; l4.md L8). It types only while a reader waits for a key with nothing
+; buffered - the OS server says so (KCALL_TEST's TEST_READER) when it found
+; no key and waits - unless the script says "now"; a mouse packet in the
+; script goes to the mouse driver at the next tick, as IRQ4 would hand it
+; over. When the script is done and a reader waits again, with no time
+; limit, the test ends: "TEST END" on the log, then the shutdown port.
 ;
 ; A test image asks for more with -d (tools/run-test):
 ;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK
@@ -22,16 +23,27 @@
 ;   TEST_TICKS          compare the timer with the RTC
 ;   TEST_SOUND          measure every tone SYS_SOUND starts, by its output and
 ;                       port B's bits, and check the silence after each sound
-;   TEST_KEYBOARD       print every key read (the program never starts)
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
 ;   TEST_TYPE_DIRECT    type keys by handing each byte to the driver instead
-;                       of through the 8042: MAME runs IBM's own 8042
-;                       firmware, which has no command D2h (M9)
+;                       of through the 8042 (KCALL_TEST's TEST_KEY_BYTE, with
+;                       IRQ1's bits): MAME runs IBM's own 8042 firmware,
+;                       which has no command D2h (M9)
 ;   TEST_ATTACK         the attack program runs: check the kernel's code and
 ;                       tables before every restart (M8)
 ;   TEST_FUZZ           the fuzzer runs: the same checks, faults counted
 ;                       instead of reported, a watchdog, and the end after
 ;                       FUZZ_ITERATIONS starts (M8)
+;   TEST_COUNTER_SAME   the counter at the program's priority (thread.asm;
+;   TEST_COUNTER_ABOVE  roadmap l4.md L2), or above it; either also starts
+;                       the counter beside a test program (Makefile)
+;   TEST_COUNTER_FPU    the counter checks its 287 state (counter.asm)
+;   TEST_THREAD_REPORT  at the end: which threads ran
+;   TEST_CAPS           the root gives the program capabilities to try
+;                       (src/root; roadmap l4.md L3)
+;   TEST_END_TICKS=n    end the test after n ticks, keys or not
+;   TEST_STRETCH        measure every stretch with interrupts off, and say
+;                       at the end how long the longest was, and where
+;                       (roadmaps/realtime.md R0)
 ; Release and debug builds assemble none of this.
 ; ============================================================================
 
@@ -42,6 +54,11 @@ TEST_OP_WHEN_WAITING equ 1
 TEST_OP_NOW         equ 2
 TEST_OP_WAIT        equ 3
 TEST_OP_MOUSE       equ 4               ; three bytes of a mouse packet follow
+TEST_MOUSE_PACKET   equ 3
+TEST_RING_SIZE      equ 16              ; bytes a driver has not yet taken
+TR_HEAD             equ 0               ; a test ring: the next byte to take
+TR_TAIL             equ 1               ;    where the next byte goes
+TR_BYTES            equ 2
 TEST_SOUND_SLACK    equ 2               ; changes of channel 2's output either way
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
@@ -64,11 +81,13 @@ test_keys           db TEST_OP_END
 %endif
 test_key_ptr        dw test_keys
 test_wait_left      db 0
+test_mouse_ring     times TR_BYTES + TEST_RING_SIZE db 0   ; the mouse driver's
+test_key_ring       times TR_BYTES + TEST_RING_SIZE db 0   ; the keyboard driver's (MAME)
+test_reader         db TEST_READER_NONE                 ; KCALL_TEST's TEST_READER
+test_keys_ready     db 0                ; the keyboard driver has started (TEST_KEYS_READY)
 test_fpu_cw         dw TEST_FPU_CW_ZM
 msg_test_end        db "TEST END", CHAR_LF, 0
 msg_shutdown        db "Shutdown", 0
-msg_key             db "key ", 0
-msg_key_abandoned   db "key: waiting abandoned for a restart", CHAR_LF, 0
 msg_probe_rtc       db "probe: the RTC kept interrupting; IRQ8 stayed masked", CHAR_LF, 0
 msg_sound_ok        db "probe: the speaker sounds at the frequency asked", CHAR_LF, 0
 msg_sound_bad       db "probe: the speaker's output changed this often in a tick: ", 0
@@ -139,37 +158,6 @@ test_start:
 %endif
         ret
 
-%ifdef TEST_KEYBOARD
-; ----------------------------------------------------------------------------
-; test_after_start - TEST_KEYBOARD: the kernel reads and prints keys itself,
-; and the program never starts
-;   In:       DS = ES = SEL_KDATA; interrupts off
-;   Out:      does not return
-;   Destroys: everything
-; ----------------------------------------------------------------------------
-test_after_start:
-.next:
-        call kbd_wait_key
-        jz .abandoned
-        mov si, msg_key
-        call kputs
-        xchg al, ah
-        call kput_hex8                  ; the scancode
-        mov al, ' '
-        call kputc
-        mov al, ah
-        call kput_hex8                  ; the ASCII
-        mov al, CHAR_LF
-        call kputc
-        jmp .next
-.abandoned:
-        mov si, msg_key_abandoned
-        call kputs
-        mov byte [restart_pending], 0
-        jmp .next
-%else
-        jmp test_end
-%endif
 
 %ifdef TEST_PANIC_STACK
 ; ----------------------------------------------------------------------------
@@ -190,18 +178,27 @@ test_recurse:
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 test_tick:
+%ifdef TEST_END_TICKS
+        cmp word [ticks], TEST_END_TICKS ; a test with nothing to type: it ends
+        jae test_end                    ; after so many ticks
+%endif
 %ifdef TEST_FUZZ
         inc word [fuzz_ticks]
         cmp word [fuzz_ticks], FUZZ_WATCHDOG
         jb .keys
         mov word [fuzz_ticks], 0
         inc word [fuzz_watchdogs]
-        mov byte [restart_pending], 1   ; in the kernel: on the way back
+        mov bx, [fg_thread]             ; the fuzz program's thread, whichever runs:
+        call thread_restart             ; in the kernel, on the way back
+        cmp bx, [cur_thread]
+        jne .keys
         test byte [bp + FRAME_CS], CPL_MASK
         jz .keys
         call restart_program            ; in ring 3: now
 .keys:
 %endif
+        cmp byte [test_keys_ready], 0
+        je .done                        ; no keyboard driver yet: the script waits
         mov si, [test_key_ptr]
         mov al, [si]
         cmp al, TEST_OP_WAIT
@@ -212,17 +209,14 @@ test_tick:
         je .now
         ; TEST_OP_WHEN_WAITING and TEST_OP_END: only while a reader waits
         ; with nothing buffered
-        cmp byte [kbd_waiting], 0
+        cmp byte [test_reader], TEST_READER_NONE
         je .done
-        mov bl, [kbd_head]
-        cmp bl, [kbd_tail]
-        jne .done
         cmp al, TEST_OP_END
 %ifdef TEST_FUZZ
         je .done                        ; the fuzzer ends by its count, not by keys
 %else
         jne .now
-        cmp byte [kbd_waiting], KBD_WAIT_FOREVER
+        cmp byte [test_reader], TEST_READER_FOREVER
         je test_end
         ret                             ; a wait with a limit: not the end
 %endif
@@ -236,13 +230,16 @@ test_tick:
         mov al, [si + 1]
         jmp test_type
 .mouse:
-        add word [test_key_ptr], 1 + MOUSE_PACKET
+        add word [test_key_ptr], 1 + TEST_MOUSE_PACKET
+        mov bx, test_mouse_ring
         mov al, [si + 1]
-        call mouse_byte
+        call test_ring_push
         mov al, [si + 2]
-        call mouse_byte
+        call test_ring_push
         mov al, [si + 3]
-        jmp mouse_byte
+        call test_ring_push
+        mov bx, IRQ_MOUSE               ; to the mouse's driver, as IRQ4 would
+        jmp irq_signal                  ; (it takes them with KCALL_TEST)
 .wait:
         cmp byte [test_wait_left], 0
         jne .count
@@ -263,16 +260,33 @@ test_tick:
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 test_type:
+        mov byte [test_reader], TEST_READER_NONE    ; until the reader finds none again
 %ifdef TEST_TYPE_DIRECT
-        jmp kbd_byte
-%endif
+        mov bx, test_key_ring
+        call test_ring_push
+        mov bx, IRQ_KEYBOARD            ; to the keyboard driver, as IRQ1 would
+        jmp irq_signal
+%else
         mov ah, al
-        call kbc_wait_input
+        call test_kbc_wait
         mov al, KBC_CMD_WRITE_OUT
         out KBC_COMMAND, al
-        call kbc_wait_input
+        call test_kbc_wait
         mov al, ah
         out KBC_DATA, al
+        ret
+%endif
+
+; ----------------------------------------------------------------------------
+; test_kbc_wait - wait until the 8042 can take a byte
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: AL
+; ----------------------------------------------------------------------------
+test_kbc_wait:
+        in al, KBC_STATUS
+        test al, KBC_STATUS_IBF
+        jnz test_kbc_wait
         ret
 
 %ifdef TEST_PROBES
@@ -512,6 +526,49 @@ test_ticks:
 %endif
 
 ; ----------------------------------------------------------------------------
+; test_ring_push - a byte for a driver outside the kernel (l4.md L7, L8),
+; which takes it with KCALL_TEST; a full ring drops it
+;   In:       AL = the byte; BX = the ring; DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: CX, DI
+; ----------------------------------------------------------------------------
+test_ring_push:
+        mov cl, [bx + TR_TAIL]
+        mov ch, cl
+        inc ch
+        and ch, TEST_RING_SIZE - 1
+        cmp ch, [bx + TR_HEAD]
+        je .full
+        mov [bx + TR_TAIL], ch
+        xor ch, ch
+        mov di, cx
+        mov [bx + TR_BYTES + di], al
+.full:
+        ret
+
+; ----------------------------------------------------------------------------
+; test_ring_pop - the next byte of a test ring
+;   In:       BX = the ring; DS = SEL_KDATA
+;   Out:      CF clear and AL = the byte; CF set if none
+;   Destroys: CX, DI
+; ----------------------------------------------------------------------------
+test_ring_pop:
+        mov cl, [bx + TR_HEAD]
+        cmp cl, [bx + TR_TAIL]
+        je .none
+        xor ch, ch
+        mov di, cx
+        mov al, [bx + TR_BYTES + di]
+        inc cl
+        and cl, TEST_RING_SIZE - 1
+        mov [bx + TR_HEAD], cl
+        clc
+        ret
+.none:
+        stc
+        ret
+
+; ----------------------------------------------------------------------------
 ; test_program_started - every start of the program: in attack and fuzz
 ; builds, the kernel's code and tables must be as they were at the first
 ; start; the fuzzer counts its starts and ends the test after enough
@@ -553,7 +610,7 @@ test_program_started:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_restart_check:
-        cmp bp, KSTACK_SIZE - FRAME_SIZE_USER
+        cmp bp, TCB_STACK_SIZE - FRAME_SIZE_USER    ; the running thread's kernel stack
         je .ok
         mov si, msg_stack_leak
         xor bp, bp
@@ -614,8 +671,8 @@ test_kernel_sum:
         mov si, irq_drivers
         mov cx, IRQ_LINES
         call .data
-        mov si, syscall_table
-        mov cx, SYSCALL_COUNT
+        mov si, kcall_table
+        mov cx, KCALL_COUNT
         call .data
         mov si, tss
         mov cx, TSS286_SIZE                ; words: both TSSs, one after the other
@@ -699,6 +756,160 @@ test_fuzz_seed:
         jmp kputc
 %endif
 
+%ifdef TEST_ATTACK
+PROBE_ACC_EXEC_ONLY equ 0xF9            ; present, DPL 3, code, not readable, accessed
+PROBE_ACC_READ_ONLY equ 0xF1            ; present, DPL 3, data, not writable, accessed
+
+begin_kdata
+; Each probe: the LDT slot it changes (an offset in the LDT), and the
+; access byte it leaves there (0: only the present bit cleared).
+test_probes:
+        dw 0, 0                                         ; (no probe 0)
+        dw SEL_UDATA & ~7, 0                            ; PROBE_DS_ABSENT
+        dw SEL_UDATA & ~7, PROBE_ACC_EXEC_ONLY          ; PROBE_DS_EXEC
+        dw SEL_USTACK & ~7, 0                           ; PROBE_SS_ABSENT
+        dw SEL_USTACK & ~7, PROBE_ACC_READ_ONLY         ; PROBE_SS_READONLY
+        dw SEL_UCODE & ~7, 0                            ; PROBE_CS_ABSENT
+        dw SEL_UCODE & ~7, ACC_UDATA                    ; PROBE_CS_DATA
+probe_changed       dw 0                ; the descriptor the last probe changed, or 0
+probe_access        db 0                ; its access byte before
+end_kdata
+
+; ----------------------------------------------------------------------------
+; test_probe - KCALL_TEST's TEST_PROBE: change one of the program's
+; descriptors, as a revocation would; the way back to ring 3 must then null
+; a DS or ES it may no longer load, and report a CS or SS it may not as the
+; program's fault, never fault itself (roadmap l4.md L1). test_probe_undo
+; undoes it at the next start of the program.
+;   In:       BP = the frame (BL the probe); DS = SEL_KDATA
+;   Out:      the program's LDT changed, KE_OK; or KE_ARG
+;   Destroys: AX, BX, SI
+; ----------------------------------------------------------------------------
+test_probe:
+        mov bl, [bp + FRAME_BX]
+        test bl, bl
+        jz .invalid
+        cmp bl, PROBE_COUNT
+        jae .invalid
+        xor bh, bh
+        shl bx, 2
+        mov ax, [test_probes + bx + 2]
+        mov bx, [test_probes + bx]
+        mov si, [cur_thread]
+        add bx, [si + T_LDT_LIVE]       ; the program's live LDT, in its space
+        call test_probe_undo            ; one probe at a time
+        mov [probe_changed], bx
+        mov ah, [bx + 5]
+        mov [probe_access], ah
+        test al, al
+        jz .absent
+        mov [bx + 5], al                ; the access byte
+        jmp kc_done.ok
+.absent:
+        and byte [bx + 5], ~ACC_PRESENT
+        jmp kc_done.ok
+.invalid:
+        jmp kc_done.arg
+
+; ----------------------------------------------------------------------------
+; test_probe_undo - the descriptor the last probe changed, as it was
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+test_probe_undo:
+        push ax
+        push si
+        mov si, [probe_changed]
+        test si, si
+        jz .done
+        mov al, [probe_access]
+        mov [si + 5], al
+        mov word [probe_changed], 0
+.done:
+        pop si
+        pop ax
+        ret
+%endif
+
+%ifdef TEST_FUZZ
+; ----------------------------------------------------------------------------
+; test_fuzz_alias - the fuzzer's code alias of its data, SEL_UFUZZ: slot 1's
+; descriptor as code in slot 3 of the program's space, at its every start
+; (the random code may have deleted it). No program can make code (l4.md
+; X14), so the test build's kernel does.
+;   In:       BX = the thread; DS = SEL_KDATA
+;   Out:      nothing (for a thread not the program's, nothing done)
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+test_fuzz_alias:
+        test byte [bx + T_FLAGS], TF_FOREGROUND
+        jz .out
+        push ax
+        push bx
+        push si
+        push di
+        mov bx, [bx + T_SPACE]
+        test byte [bx + SP_LDT + (SEL_UDATA & ~7) + 5], ACC_PRESENT
+        jz .done                        ; no data: nothing to alias
+        mov ax, SEL_UFUZZ >> 3
+        call slot_at                    ; SI, DI = slot 3
+        add bx, SP_LDT + (SEL_UDATA & ~7)
+        call slot_put_descriptor
+        mov byte [di + 5], ACC_UCODE
+.done:
+        pop di
+        pop si
+        pop bx
+        pop ax
+.out:
+        ret
+%endif
+
+%ifdef TEST_THREAD_REPORT
+begin_kdata
+msg_report_thread   db "thread ", 0
+msg_report_ran      db " ran", CHAR_LF, 0
+msg_report_idle     db " did not run", CHAR_LF, 0
+end_kdata
+
+; ----------------------------------------------------------------------------
+; test_thread_report - at the end of a test of threads: which of them ran
+; (roadmap l4.md L2)
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, BX, SI
+; ----------------------------------------------------------------------------
+test_thread_report:
+        xor di, di
+.thread:
+        cmp di, [thread_count]
+        jae .done
+        push di
+        shl di, 1
+        mov bx, [thread_list + di]
+        pop di
+        cmp byte [bx + T_STATE], TS_FREE
+        je .next                        ; never started
+        mov si, msg_log_prefix
+        call kputs
+        mov si, msg_report_thread
+        call kputs
+        mov si, [bx + T_NAME]
+        call kputs
+        mov si, msg_report_ran
+        cmp word [bx + T_RUNS], 0
+        jne .say
+        mov si, msg_report_idle
+.say:
+        call kputs
+.next:
+        inc di
+        jmp .thread
+.done:
+        ret
+%endif
+
 ; ----------------------------------------------------------------------------
 ; test_end - "TEST END" on the log on a line of its own, then end Bochs
 ;   In:       DS = SEL_KDATA
@@ -707,14 +918,17 @@ test_fuzz_seed:
 ; ----------------------------------------------------------------------------
 test_end:
         cli
-        mov ax, [con_pos]
-        mov dl, VIDEO_COLUMNS
-        div dl
-        test ah, ah                     ; the console's column
-        jz .line_start
+        cmp byte [log_at_start], 0      ; the log's line: begun?
+        jne .line_start
         mov al, CHAR_LF
         call com_putc
 .line_start:
+%ifdef TEST_STRETCH
+        call stretch_report
+%endif
+%ifdef TEST_THREAD_REPORT
+        call test_thread_report         ; (on the console too: it starts a line on
+%endif                                  ; the log, where the tests read it)
         mov si, msg_test_end
         call com_puts
         call com_drain
@@ -729,5 +943,237 @@ test_end:
 .halt:
         hlt
         jmp .halt
+
+%ifdef TEST_STRETCH
+STRETCH_LIMIT_US    equ 10000           ; the measure's reach: half the timer's period
+
+begin_kdata
+stretch_start       dw 0                ; channel 0's count when interrupts went off
+stretch_place       dw 0                ; and where (STRETCH_BEGIN's place)
+stretch_open        db 0                ; 1 while a stretch is measured
+stretch_max         dw 0                ; the longest, in the 8254's clocks
+stretch_max_place   dw 0
+stretch_logged      dw 0                ; clocks of the stretch the log took
+stretch_log_count   dw 0                ; channel 0's count when a byte of it began
+stretch_work_max    dw 0                ; the longest but the log's time: a release
+stretch_work_place  dw 0                ; build's, which has no log
+msg_stretch         db "rx286: interrupts off at most ", 0
+msg_stretch_us      db " us, at vector ", 0
+msg_stretch_call    db ", call ", 0
+msg_stretch_idle    db " us, in the idle loop", 0
+msg_stretch_work    db "rx286: but the log's bytes, at most ", 0
+msg_stretch_under   db "rx286: interrupts never off for 10 ms", CHAR_LF, 0
+msg_stretch_over    db "rx286: interrupts off for 10 ms or more", CHAR_LF, 0
+end_kdata
+
+; ----------------------------------------------------------------------------
+; stretch_begin - interrupts have just gone off: note channel 0's count
+;   In:       AX = the place; DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_begin:
+        mov [stretch_place], ax
+        push ax
+        call pit_count
+        mov [stretch_start], ax
+        mov byte [stretch_open], 1
+        mov word [stretch_logged], 0
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_log_start - a byte of the log begins: its time is counted apart
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_log_start:
+        push ax
+        call pit_count
+        mov [stretch_log_count], ax
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_log_stop - the byte is out: its time added to the log's
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_log_stop:
+        push ax
+        push si
+        mov si, [stretch_log_count]
+        call pit_elapsed
+        add [stretch_logged], ax
+        pop si
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_end - interrupts are about to come on: the stretch measured, and
+; kept if it is the longest
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_end:
+        cmp byte [stretch_open], 0
+        je .done
+        mov byte [stretch_open], 0
+        push ax
+        push si
+        mov si, [stretch_start]
+        call pit_elapsed                ; AX = the 8254's clocks
+        cmp ax, [stretch_max]
+        jbe .kept
+        mov [stretch_max], ax
+        push ax
+        mov ax, [stretch_place]
+        mov [stretch_max_place], ax
+        pop ax
+.kept:
+        sub ax, [stretch_logged]        ; the work alone
+        jb .worked                      ; (a byte begun before the stretch)
+        cmp ax, [stretch_work_max]
+        jbe .worked
+        mov [stretch_work_max], ax
+        mov ax, [stretch_place]
+        mov [stretch_work_place], ax
+.worked:
+        pop si
+        pop ax
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_report - the longest stretch: how long, in microseconds, and where
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      two lines on the log
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+stretch_report:
+        mov byte [stretch_open], 0      ; (its own bytes are not measured)
+        mov si, msg_stretch_work
+        mov ax, [stretch_work_max]
+        mov bx, [stretch_work_place]
+        call stretch_line
+        mov si, msg_stretch
+        mov ax, [stretch_max]
+        mov bx, [stretch_max_place]
+        call stretch_line
+        mov si, msg_stretch_under
+        cmp ax, STRETCH_LIMIT_US
+        jb .verdict
+        mov si, msg_stretch_over
+.verdict:
+        jmp com_puts
+
+; ----------------------------------------------------------------------------
+; stretch_line - a stretch's line: how long, and where
+;   In:       SI = its text; AX = its clocks; BX = its place
+;   Out:      AX = its microseconds
+;   Destroys: BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+stretch_line:
+        call com_puts
+        mov cx, STRETCH_NS_PER_CLOCK
+        mul cx
+        mov cx, 1000
+        div cx                          ; AX = microseconds
+        push ax
+        call stretch_dec
+        mov ax, bx
+        cmp ax, 0xFFFF
+        jne .vector
+        mov si, msg_stretch_idle
+        call com_puts
+        jmp .line
+.vector:
+        mov si, msg_stretch_us
+        call com_puts
+        push ax
+        mov al, ah
+        call stretch_hex
+        pop ax
+        mov si, msg_stretch_call
+        call com_puts
+        call stretch_hex
+.line:
+        mov al, CHAR_LF
+        call com_putc
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_dec - a number in decimal on the log
+;   In:       AX = the number; DS = ES = SEL_KDATA
+;   Out:      nothing
+;   Destroys: SI, DI
+; ----------------------------------------------------------------------------
+stretch_dec:
+        mov di, stretch_text
+        call fmt_dec16
+        mov byte [di], 0
+        mov si, stretch_text
+        jmp com_puts
+
+; ----------------------------------------------------------------------------
+; stretch_hex - a byte in hexadecimal on the log
+;   In:       AL = the byte; DS = ES = SEL_KDATA
+;   Out:      nothing
+;   Destroys: SI, DI
+; ----------------------------------------------------------------------------
+stretch_hex:
+        mov di, stretch_text
+        call fmt_hex8
+        mov byte [di], 0
+        mov si, stretch_text
+        jmp com_puts
+
+begin_kdata
+stretch_text        times 12 db 0
+end_kdata
+
+STRETCH_NS_PER_CLOCK  equ 1000000000 / PIT_INPUT_HZ      ; 838 ns a clock of the 8254
+
+; ----------------------------------------------------------------------------
+; pit_count - timer channel 0's count, latched
+;   In:       interrupts off
+;   Out:      AX = the count
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+pit_count:
+        mov al, PIT_LATCH_CH0
+        out PIT_MODE, al
+        in al, PIT_CH0
+        mov ah, al
+        in al, PIT_CH0
+        xchg al, ah
+        ret
+
+; ----------------------------------------------------------------------------
+; pit_elapsed - the 8254's clocks since a count of channel 0. In mode 3 the
+; count falls by two a clock from PIT_DIVISOR, twice a period; so for a span
+; under half a period (10 ms), the clocks are half the counts between, with
+; PIT_DIVISOR added if the count reloaded meanwhile
+;   In:       SI = the count then (pit_count)
+;   Out:      AX = the clocks since
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+pit_elapsed:
+        push dx
+        call pit_count
+        mov dx, si
+        sub dx, ax
+        jae .halve
+        add dx, PIT_DIVISOR             ; it reloaded between
+.halve:
+        shr dx, 1
+        mov ax, dx
+        pop dx
+        ret
+%endif
 
 %endif

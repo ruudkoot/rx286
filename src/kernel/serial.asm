@@ -7,6 +7,10 @@
 ; fires for it. Transmit only. Release builds assemble none of this.
 ; ============================================================================
 
+begin_kdata
+log_at_start        db 1                ; the log's last byte ended a line
+end_kdata
+
 ; ----------------------------------------------------------------------------
 ; serial_quiet - COM3 and COM4, which nothing uses, with their interrupts
 ; off and OUT2 clear, whatever ran before: they share IRQ4 and IRQ3 with the
@@ -62,15 +66,24 @@ com_init:
         ret
 
 ; ----------------------------------------------------------------------------
-; com_putc - send one byte on the log
-;   In:       AL = the byte
+; com_putc - send one byte on the log, whose line it keeps track of
+; (log_at_start: the screen is the console driver's, l4.md L8)
+;   In:       AL = the byte; DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 com_putc:
         push ax
         push dx
+        mov byte [log_at_start], 0
+        cmp al, CHAR_LF
+        jne .send
+        mov byte [log_at_start], 1
+.send:
         mov ah, al
+%ifdef TEST_STRETCH
+        call stretch_log_start          ; the log's time, apart (realtime.md R0)
+%endif
         mov dx, LOG_PORT + UART_LSR
 .wait:
         in al, dx
@@ -79,6 +92,9 @@ com_putc:
         mov al, ah
         mov dx, LOG_PORT + UART_THR
         out dx, al
+%ifdef TEST_STRETCH
+        call stretch_log_stop
+%endif
         pop dx
         pop ax
         ret

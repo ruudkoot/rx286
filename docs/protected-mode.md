@@ -23,32 +23,75 @@ writes the GDT except for the TSS's busy bit.
 |---|---|---|---|---|---|
 | 00h | `SEL_NULL` | | | | |
 | 08h | `SEL_KCODE` | 10100h | size | 9Bh: present, DPL 0, code, readable | the kernel |
-| 10h | `SEL_KDATA` | 12100h | size | 93h: present, DPL 0, data, writable | its tables and variables |
-| 18h | `SEL_KSTACK` | 17100h | 3FFh | 93h | its stack (SS0 in the TSS) |
+| 10h | `SEL_KDATA` | 04B00h | FFFFh | 93h: present, DPL 0, data, writable | its stacks, the arena, its tables and variables, the module table (*docs/memory-map.md*) |
+| 18h | `SEL_KSTACK` | 04600h | 3FFh | 93h | its own stack: the start's, then the idle loop's |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
-| 30h | `SEL_DFSTACK` | 17500h | 1FFh | 93h | its stack |
+| 30h | `SEL_DFSTACK` | 04400h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
-| 43h | `SEL_UCODE` | 13100h | 1FFFh | FBh: present, DPL 3, code, readable | the program |
-| 4Bh | `SEL_UDATA` | 15100h | 1FFFh | F3h: present, DPL 3, data, writable | its data |
-| 53h | `SEL_USTACK` | 17700h | 7FFh | F3h | its stack |
-| 5Bh | `SEL_UFUZZ` | 15100h | 1FFFh | FBh | test builds with the fuzzer only: code over the program's data |
+| 40h-F8h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`, 24) |
+| 100h-1B8h | `SEL_STACK_POOL` | in the arena | 15Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`, 24): SS0 while it runs |
+| 1C0h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
+| 1C8h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
 
-`RPL_KERNEL` and `RPL_USER` are the two privilege levels in use. The GDT has
-`GDT_ENTRIES` descriptors and its limit is `GDT_LIMIT`: 57h, or 5Fh with the
-fuzzer. Any selector beyond the limit is a general protection fault.
+Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
+be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
+levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
+`GDT_LIMIT`, 1CFh. A free descriptor of a pool is all zeros, which no one
+can load. The kernel takes one when it makes a space or a thread
+(*docs/kernel-calls.md*). Any selector beyond the limit is a general protection
+fault.
 
-There is no LDT, and the kernel loads LDTR with a null selector at start:
-Bochs starts with a live LDT at address 0 that a program could otherwise use
-(roadmap X8).
+## The programs' LDTs
+
+Each program runs in a space of its own: an LDT and its slots, in the arena
+(roadmap l4.md L3; *docs/kernel-calls.md*). The kernel makes the root's
+space at its start, and the root makes every other program's
+(*docs/architecture.md*, roadmap l4.md L5); the kernel loads each thread's
+LDT at every switch. Until the first switch LDTR is null: never Bochs' live
+LDT at address 0 (roadmap X8). A selector of the LDT has its table
+indicator set (`SEL_TI_LDT`). A program's space the root builds has
+`PROGRAM_SLOTS` (16) slots, its LDT's limit 7Fh (*docs/syscalls.md*), 64
+in `TEST_CAPS` builds; the OS server's has 256 and the root's own 256. A
+selector past a space's slots is a general protection fault. The first
+slots are the same in every space:
+
+| Selector | Constant | Base | Limit | Access | What |
+|---|---|---|---|---|---|
+| 07h | `SEL_UCODE` | in the image | its code's size | FBh: present, DPL 3, code, readable | the program, where the boot image has it |
+| 0Fh | `SEL_UDATA` | from the memory for programs | its data room | F3h: present, DPL 3, data, writable | its data |
+| 17h | `SEL_USTACK` | from the memory for programs | its stack's size | F3h | its stack |
+| 1Fh | `SEL_UFUZZ` | its data's | its data's | FBh | test builds with the fuzzer only: code over the program's data; empty in every other build |
+| 27h-3Fh | | | | 00h | empty |
+
+Then slot 8 holds its endpoint to the OS server (an all-zero descriptor,
+like an empty slot's) and slot 9 its transfer segment (F3h); slots 10 to
+15 are empty.
+
+A program of another ring has the same slots at its ring's RPL: the root's,
+in ring 2, are 06h, 0Eh and 16h. `make run`'s shell says where its own
+segments are (`mem`).
+
+An empty slot is all zeros: not present, DPL 0, no valid type. Ring 3 can
+neither load it (#GP) nor learn anything of it: `LAR`, `LSL`, `VERR` and
+`VERW` all refuse it (roadmap l4.md E2; the attack "every slot of the LDT").
+
+A test probe that changed a descriptor (*docs/kernel-calls.md*,
+`KCALL_TEST`'s `TEST_PROBE`) is undone at the next start of the program; a program
+that deleted one of its first three slots gets it back from the root when
+the loss makes it fault. The fuzzer's code alias is the test build's
+kernel's, made again at every start.
 
 ## The TSSs
 
 A 286 TSS is 44 bytes (Intel 8.2.1). rx286 has two:
 
-- **`SEL_TSS`**, the one task. Only SS0:SP0 matters: the CPU loads the kernel's
-  stack from it on every interrupt from ring 3. Its back link is 0, so a
-  program that sets NT and runs `IRET` faults instead of switching tasks.
+- **`SEL_TSS`**, the one task: the threads switch in software, not by the
+  CPU's task switch (roadmap l4.md D2, E5). Only SS0:SP0 matters: the CPU
+  loads the kernel's stack from it on every interrupt from ring 3, and the
+  kernel sets it at every switch to the running thread's kernel stack
+  (from `SEL_STACK_POOL`, its top). Its back link is 0, so a program that sets
+  NT and runs `IRET` faults instead of switching tasks.
 - **`SEL_DFTSS`**, the double-fault task, entered through the task gate at
   vector 8 with its own stack (`SEL_DFSTACK`). Intel: "a task gate must be
   used for the double fault handler" (9.6.2). A kernel stack overflow then
@@ -57,7 +100,7 @@ A 286 TSS is 44 bytes (Intel 8.2.1). rx286 has two:
 
 ## The IDT
 
-See *docs/interrupts.md*: 49 gates, vectors 00h to 30h; any higher vector is
+See *docs/interrupts.md*: 50 gates, vectors 00h to 31h; any higher vector is
 beyond the IDT's limit.
 
 ## Entering protected mode

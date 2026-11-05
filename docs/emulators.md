@@ -15,8 +15,9 @@ on Bochs; `make test-286` runs them on DOSBox-X's 286 and MAME's IBM PC/AT;
 | Diskettes, fixed disks | both | neither (no IRQ6 from its controller, no fixed disk controller) | both: IBM's BIOS and a 765; the IDE card stands in for the fixed disk controller |
 | Printers | LPT1, LPT2, into files | LPT1, LPT2, into files | none: no slot for the card |
 | Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS, the disks |
-| Tests that run | all 51 | 31 | 43 |
+| Tests that run | all 57 | 36 | 48 |
 | A boot in a test | 0.3-0.5 s | about 1.5 s | about 6 s (IBM's power-on test) |
+| Without a window | `rfb`, with no client | SDL's dummy drivers | `-video none`, and SDL's dummy drivers: `-video none` alone still opens a window under WSLg |
 
 ## Bochs and the AT
 

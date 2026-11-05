@@ -1,9 +1,12 @@
-# Ctrl+Break (Ctrl+Scroll Lock) while something waits in the kernel: the
-# restart is asked for and the wait abandoned; keys go on working.
-define: TEST_KEYBOARD
-keys: {ctrl-break}a
+# Ctrl+Break (Ctrl+Scroll Lock) while the program waits for a key: the
+# keyboard driver signals the OS server, which restarts the program and
+# gives up the wait; keys go on working (roadmap l4.md L8). Ctrl+Break is
+# typed at once, waiting for no reader: ten ticks first, so that the
+# program, which starts after every driver, waits by then.
+program: keys
+keys: {wait 10}{ctrl-break}a
 ---
 rx286, test build
 rx286: Ctrl+Break: the program starts again
-key: waiting abandoned for a restart
+keys: started again
 key 1E 61

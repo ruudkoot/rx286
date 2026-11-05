@@ -1,6 +1,6 @@
 ; ============================================================================
 ; rx286 - tests/unit/keymap.asm
-; The kernel's scancode table, assembled alone for the host tests.
+; The keyboard driver's scancode table, assembled alone for the host tests.
 ; ============================================================================
 
 cpu 286

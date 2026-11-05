@@ -1,14 +1,17 @@
 ; ============================================================================
 ; rx286 - src/boot-loader/boot-loader.asm
-; The loader: finds KERNEL.BIN on the FAT12 floppy, loads it to 1000:0000h
-; and hands the machine to it.
+; The loader: finds KERNEL.BIN, the boot image, on the FAT12 floppy, loads
+; it to 1000:0000h and hands the machine to it.
 ;
 ; The boot sector loads this file from the reserved sectors 1-3 to
 ; 0000:7E00h and jumps here with the boot drive in DL. The loader reads the
 ; BPB the boot sector left at 7C00h, the FAT and the root directory into its
 ; buffers, finds KERNEL  BIN, and follows its cluster chain one sector at a
-; time (an INT 13h read never crosses a 64 KB boundary: roadmap X3). Then,
-; with the BIOS's help for the last time (roadmap D14), it sets text mode 3,
+; time (an INT 13h read never crosses a 64 KB boundary: roadmap X3), up to
+; IMAGE_MAX bytes. It checks what arrived: the end mark at the image's last
+; word, and a module table that matches the file, names the root first and
+; places every module inside the image (roadmap l4.md L5). Then, with the
+; BIOS's help for the last time (roadmap D14), it sets text mode 3,
 ; stops the floppy motor (X2), disables interrupts and NMI, and jumps to
 ; 1000:0000h. It hands the kernel nothing else.
 ; ============================================================================
@@ -52,13 +55,7 @@ start:
         call read_sectors
         call find_kernel                ; SI = its directory entry
         call load_kernel
-        mov ax, KERNEL_SEG
-        mov es, ax
-        cmp word [es:KERNEL_FILE_SIZE - 2], KERNEL_END_MARK
-        mov si, msg_incomplete
-        jne fail                        ; the file is short, or arrived short
-        xor ax, ax
-        mov es, ax
+        call check_image
         mov si, msg_trace_loaded
         call trace
         ; The hand-over.
@@ -144,13 +141,19 @@ find_kernel:
         mov si, msg_no_kernel
         jmp fail
 .found:
-        cmp word [si + DIR_FILE_SIZE + 2], 0
-        jne .too_large
         mov ax, [si + DIR_FILE_SIZE]
-        test ax, ax
+        mov dx, [si + DIR_FILE_SIZE + 2]
+        mov [file_size], ax
+        mov [file_size + 2], dx
+        mov cx, ax
+        or cx, dx
         jz .missing
-        cmp ax, KERNEL_FILE_SIZE
+        cmp dx, IMAGE_MAX >> 16
+        jb .fits
         ja .too_large
+        cmp ax, IMAGE_MAX & 0xFFFF
+        ja .too_large
+.fits:
         ret
 .too_large:
         mov si, msg_too_large
@@ -158,14 +161,18 @@ find_kernel:
 
 ; ----------------------------------------------------------------------------
 ; load_kernel - read KERNEL.BIN's clusters to KERNEL_SEG:0000
-;   In:       SI = its directory entry
+;   In:       SI = its directory entry; file_size
 ;   Out:      the file in memory; returns only if the chain was sound
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 load_kernel:
-        mov ax, [si + DIR_FILE_SIZE]
+        mov ax, [file_size]
+        mov dx, [file_size + 2]
         add ax, SECTOR_SIZE - 1
-        shr ax, SECTOR_SHIFT
+        adc dx, 0
+        mov al, ah                      ; DX:AX / 512 (SECTOR_SHIFT): / 256 ...
+        mov ah, dl
+        shr ax, 1                       ; ... / 2
         mov di, ax                      ; DI = sectors still to read
         mov ax, [si + DIR_FIRST_CLUSTER]
         mov [cluster], ax
@@ -209,6 +216,91 @@ load_kernel:
         mov es, ax
         mov si, msg_bad_chain
         jmp fail
+
+; ----------------------------------------------------------------------------
+; check_image - did the image arrive whole, and is its module table sound?
+; Its last word is the end mark; the table's magic and length match the
+; file; its first module is the root; every module lies inside the image
+;   In:       the image at KERNEL_SEG:0000; file_size
+;   Out:      returns only if so
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+check_image:
+        mov ax, [file_size]
+        mov dx, [file_size + 2]
+        sub ax, 2
+        sbb dx, 0                       ; DX:AX = its last word's offset
+        mov bx, ax
+        and bx, 15
+        shr ax, 4
+        mov cl, 12
+        shl dx, cl
+        or ax, dx
+        add ax, KERNEL_SEG
+        mov es, ax
+        mov si, msg_incomplete
+        cmp word [es:bx], KERNEL_END_MARK
+        jne fail                        ; the file is short, or arrived short
+        mov ax, KERNEL_SEG
+        mov es, ax
+        mov si, msg_bad_table
+        cmp word [es:MODULE_TABLE_OFF + MH_MAGIC], MODULE_MAGIC
+        jne fail
+        mov ax, [es:MODULE_TABLE_OFF + MH_PARAGRAPHS]
+        mov dx, ax
+        shl ax, 4
+        mov cl, 12
+        shr dx, cl
+        cmp ax, [file_size]
+        jne fail
+        cmp dx, [file_size + 2]
+        jne fail
+        mov cx, [es:MODULE_TABLE_OFF + MH_COUNT]
+        dec cx                          ; 1 to MODULE_MAX
+        cmp cx, MODULE_MAX - 1
+        ja fail
+        inc cx
+        mov di, MODULE_TABLE_OFF + MODULE_HEADER_SIZE
+        mov si, msg_no_root
+        cmp word [es:di + M_NAME], ROOT_NAME
+        jne fail
+        cmp word [es:di + M_NAME + 2], ROOT_NAME_2
+        jne fail
+        cmp byte [es:di + M_NAME + 4], 0
+        jne fail
+        mov si, msg_bad_module
+.module:
+        mov ax, [es:di + M_CODE]
+        mov bx, [es:di + M_CODE_SIZE]
+        call module_fits
+        mov ax, [es:di + M_DATA]
+        mov bx, [es:di + M_DATA_SIZE]
+        call module_fits
+        add di, MODULE_ENTRY_SIZE
+        loop .module
+        xor ax, ax
+        mov es, ax
+        ret
+
+; ----------------------------------------------------------------------------
+; module_fits - does a part of a module lie inside the image, after the
+; module table?
+;   In:       AX = its paragraph; BX = its bytes; ES = KERNEL_SEG; SI = what
+;             to say if not
+;   Out:      returns only if so
+;   Destroys: AX, BX
+; ----------------------------------------------------------------------------
+module_fits:
+        cmp ax, MODULES_OFF / 16
+        jb fail
+        add bx, 15
+        rcr bx, 1                       ; (the carry is bit 16)
+        shr bx, 3                       ; BX = its paragraphs
+        add ax, bx
+        jc fail
+        cmp ax, [es:MODULE_TABLE_OFF + MH_PARAGRAPHS]
+        ja fail
+        ret
 
 ; ----------------------------------------------------------------------------
 ; read_sectors - read CX sectors from AX on, to ES:BX, retrying each one
@@ -363,12 +455,16 @@ msg_no_kernel       db "no KERNEL.BIN on this disk", 13, 10, 0
 msg_too_large       db "KERNEL.BIN is larger than its room", 13, 10, 0
 msg_bad_chain       db "KERNEL.BIN's cluster chain is broken", 13, 10, 0
 msg_incomplete      db "KERNEL.BIN is incomplete", 13, 10, 0
+msg_bad_table       db "KERNEL.BIN's module table is not sound", 13, 10, 0
+msg_no_root         db "KERNEL.BIN has no root module", 13, 10, 0
+msg_bad_module      db "a module lies outside KERNEL.BIN", 13, 10, 0
 msg_press_key       db "Press a key to try again.", 13, 10, 0
 msg_trace_prefix    db "[trace] loader: ", 0
 msg_trace_start     db "started", 13, 10, 0
 msg_trace_loaded    db "KERNEL.BIN loaded at 1000:0000", 13, 10, 0
 
 drive               db 0
+file_size           dw 0, 0             ; KERNEL.BIN's, from its directory entry
 root_lba            dw 0
 root_sectors        dw 0
 data_lba            dw 0

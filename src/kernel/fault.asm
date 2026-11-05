@@ -26,6 +26,11 @@ end_kdata
 exception:
         cmp word [bp + FRAME_VECTOR], VEC_NMI
         je nmi
+        cmp word [bp + FRAME_VECTOR], VEC_NM
+        jne .not_nm
+        test byte [bp + FRAME_CS], CPL_MASK
+        jnz fpu_nm                      ; a program's first 287 instruction since TS
+.not_nm:
         test byte [bp + FRAME_CS], CPL_MASK
         jnz fault_program
         cmp word [bp + FRAME_VECTOR], VEC_DB
@@ -41,8 +46,12 @@ exception:
         ; the way back; the restart's FNINIT resets the 287.
         mov si, msg_fpu_overrun
         call klog
-        mov byte [restart_pending], 1
-        ret
+        mov bx, [fpu_owner]             ; the 287's owner's, whichever thread runs
+        test bx, bx
+        jnz .owner
+        mov bx, [cur_thread]
+.owner:
+        jmp thread_restart
 .carried_trap:
         ; A single-step trap in the kernel. The kernel never sets TF: this is
         ; the program's. When an instruction with TF set faults, the 286

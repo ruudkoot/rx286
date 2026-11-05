@@ -24,6 +24,9 @@ A:\>help
   mem      the shell's own segments, as the CPU sees them
   crash    crash KIND: try what no program may (crash help)
   spin     loop forever; Ctrl+Break gets the shell back
+  ps       the programs, the drivers and the servers, as the root keeps them
+  kill     kill NAME: stop a background program
+  start    start NAME: start a stopped background program again
   exit     end the shell; the kernel starts it again
   A: B: C: D: make that drive the current one
 Keys: Backspace, Esc (clear the line), Up (the last line);

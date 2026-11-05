@@ -181,7 +181,9 @@ ktrace:
         call kputs
         pop si
 %elifdef WITH_SERIAL
-        push si
+        push ax
+        mov al, [log_at_start]          ; a trace is cut out of the transcript:
+        push si                         ; the log's line is as it was
         mov si, msg_trace_prefix
         call com_puts
         pop si
@@ -190,6 +192,8 @@ ktrace:
         mov si, msg_newline
         call com_puts
         pop si
+        mov [log_at_start], al
+        pop ax
 %endif
         ret
 

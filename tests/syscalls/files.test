@@ -1,0 +1,22 @@
+# The file calls (roadmap l4.md L9), the OS server's, on the boot diskette
+# (tests/programs/syscalls.asm's TEST_FILES checks): the current drive and
+# A's directory; KERNEL.BIN found, and read back a sector at a time; a file
+# refused as a directory; the root's one entry; the free bytes; drive B made
+# current, and A again. Not on DOSBox-X: no interrupt from its diskette
+# controller (docs/emulators.md).
+program: syscalls
+define: TEST_FILES
+keys: x
+timeout: 60
+emulators: bochs mame
+match: contains
+---
+files: drive 0 current
+files: its directory \
+files: \KERNEL.BIN, a file of {image_size} bytes
+files: read back {image_size} bytes
+files: a file's entries: error 18
+files: a file as the directory: error 18
+files: the root's entries 1
+files: free {image_free} bytes
+files: drive 1 current, then drive 0

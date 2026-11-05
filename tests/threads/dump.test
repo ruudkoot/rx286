@@ -1,0 +1,29 @@
+# The thread dump of debug and test builds (roadmap l4.md L2), on the AT's
+# Sys Req key: every thread, its state and priority, and how much of its
+# kernel stack it has used. The keyboard driver asks for the dump (roadmap
+# l4.md L8), and is running; the shell waits for the reply of the OS
+# server's thread, which looks for a key once a tick; the OS server's
+# control thread awaits Ctrl+Break; the mouse's driver is still in the
+# mouse's reset (roadmap l4.md L7). Whether the shell's OS thread is in its
+# tick's sleep or just out of it depends on the emulator's timing.
+program: shell
+keys: {sysrq}
+match: contains
+---
+rx286: thread root receiving priority 7, kernel stack used
+rx286: thread printer receiving priority 6, kernel stack used
+rx286: thread mouse awaiting a notification priority 6, kernel stack used
+rx286: thread console receiving priority 6, kernel stack used
+rx286: thread kbd running priority 6, kernel stack used
+rx286: thread fd receiving priority 6, kernel stack used
+rx286: thread hd receiving priority 6, kernel stack used
+rx286: thread serial receiving priority 6, kernel stack used
+rx286: thread sound receiving priority 6, kernel stack used
+rx286: thread rtc receiving priority 6, kernel stack used
+rx286: thread program awaiting its reply priority 3, kernel stack used
+rx286: thread counter ready priority 1, kernel stack used
+rx286: thread os awaiting a notification priority 5, kernel stack used
+@bochs rx286: thread os ready priority 5, kernel stack used
+@mame rx286: thread os ready priority 5, kernel stack used
+@dosbox-x rx286: thread os awaiting a notification priority 5, kernel stack used
+rx286: thread os receiving priority 5, kernel stack used

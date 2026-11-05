@@ -19,8 +19,15 @@ ACC_KDATA           equ 0x93        ; present, DPL 0, data, writable, accessed
 ACC_UCODE           equ 0xFB        ; present, DPL 3, code, readable, accessed
 ACC_UDATA           equ 0xF3        ; present, DPL 3, data, writable, accessed
 ACC_TSS             equ 0x81        ; present, DPL 0, available 286 TSS
+ACC_LDT             equ 0x82        ; present, DPL 0, an LDT
 ACC_TSS_BUSY_BIT    equ 0x02        ; set by LTR and task switches
 ACC_EXPAND_DOWN     equ 0x04        ; data: expand-down (code: conforming)
+ACC_SEGMENT         equ 0x10        ; a code or data segment, not a system descriptor
+ACC_ACCESSED        equ 0x01        ; set by the CPU on a load; rx286 presets it
+ACC_CODE            equ 0x08        ; of a segment: code, not data
+ACC_RW              equ 0x02        ; data: writable; code: readable
+ACC_DPL_MASK        equ 0x60
+ACC_DPL_SHIFT       equ 5
 ACC_TASK_GATE       equ 0x85        ; present, DPL 0, task gate
 ACC_INT_GATE        equ 0x86        ; present, DPL 0, 286 interrupt gate
 ACC_INT_GATE_USER   equ 0xE6        ; present, DPL 3, 286 interrupt gate

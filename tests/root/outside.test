@@ -1,0 +1,8 @@
+# A boot image whose module table places a module past the image's end: the
+# loader refuses it and waits for a key (roadmap l4.md L5).
+image: outside
+match: prefix
+timeout: 15
+---
+rx286 loader: a module lies outside KERNEL.BIN
+Press a key to try again.

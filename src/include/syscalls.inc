@@ -1,16 +1,17 @@
 ; ============================================================================
 ; rx286 - src/include/syscalls.inc
-; The system calls: the program's only view of the kernel (roadmap D9).
+; The system calls: the program's view of the system (roadmap D9; l4.md
+; D16), the OS server's services.
 ;
-; INT 30h with the function in AH. Results come back in registers; an error
-; sets CF and puts its code in AX. A call preserves every register it does
-; not return. docs/syscalls.md is the reference.
+; The function in AH, through the sys macro (program.inc), which calls the
+; stub to the OS server; INT 30h, their gate until l4.md L10, is gone.
+; Results come back in registers; an error sets CF and puts its code in AX.
+; A call preserves every register it does not return. docs/syscalls.md is
+; the reference.
 ; ============================================================================
 
 %ifndef RX286_SYSCALLS_INC
 %define RX286_SYSCALLS_INC
-
-SYSCALL_VECTOR      equ 0x30
 
 SYS_EXIT            equ 0   ; no arguments; does not return: the program starts again
 SYS_WRITE           equ 1   ; DS:SI buffer, CX length -> AX bytes written
@@ -28,7 +29,51 @@ SYS_SERIAL_WRITE    equ 11  ; DS:SI buffer, CX length -> AX bytes sent on COM2
 SYS_SERIAL_READ     equ 12  ; ES:DI buffer, CX room -> AX bytes from COM2 (perhaps 0)
 SYS_WAIT            equ 13  ; AL WAIT_* events, CX ticks at most (0: no limit)
                             ;    -> AL the events that are there (0: the time ran out)
-SYSCALL_COUNT       equ 14
+; The files, in DOS's way: the OS server's (roadmap l4.md L9, D16)
+SYS_FIND            equ 14  ; AL drive, DS:SI a path, ending at a zero or a space (from
+                            ;    the drive's current directory, or its root after a
+                            ;    separator) -> ES:DI what it names (FIND_SIZE bytes);
+                            ;    a directory's entries then come from SYS_DIR_NEXT, a
+                            ;    file's sectors from SYS_FILE_NEXT
+SYS_CHDIR           equ 15  ; AL drive, DS:SI a path: the drive's current directory
+SYS_DRIVE           equ 16  ; AL a drive to make current (DRIVES or more: none)
+                            ;    -> AX the current drive
+SYS_GETCWD          equ 17  ; AL drive -> ES:DI its current directory (PATH_MAX + 1 bytes)
+SYS_DIR_NEXT        equ 18  ; -> AX 1 and ES:DI the next entry (FIND_ENTRY_SIZE bytes) of
+                            ;    the directory found last; AX 0 at its end
+SYS_FILE_NEXT       equ 19  ; -> ES:DI the next sector of the file found last (SECTOR_SIZE
+                            ;    bytes of room), CX its bytes; CX 0 at the end
+SYS_FREE            equ 20  ; AL drive -> DX:AX the bytes free on its volume
+; The programs, as the root keeps them (roadmap l4.md L11, D19)
+SYS_PS              equ 21  ; AL a module's number -> ES:DI what runs it (PS_SIZE bytes);
+                            ;    E_INVAL past the last module
+SYS_KILL            equ 22  ; AL a module: a background program killed, all made for it
+                            ;    revoked and its memory free (E_INVAL, E_BUSY: killed)
+SYS_START           equ 23  ; AL a module: a killed background program built again, from
+                            ;    its module (E_INVAL, E_BUSY: running, E_IO: no room)
+SYSCALL_COUNT       equ 24
+
+PATH_MAX            equ 64  ; DOS's longest path, the drive's letter not counted
+FIND_PATH           equ 0   ; SYS_FIND's record: the path found, from the root
+FIND_DIR            equ FIND_PATH + PATH_MAX + 1    ; 1 if a directory (the root too)
+FIND_ENTRY          equ FIND_DIR + 1                ; its directory entry, unless the root
+FIND_ENTRY_SIZE     equ 32                          ;    (FAT's: DIR_* of fat12.asm)
+FIND_LABEL          equ FIND_ENTRY + FIND_ENTRY_SIZE    ; the volume's label, space padded
+FIND_LABEL_SIZE     equ 11
+FIND_SIZE           equ FIND_LABEL + FIND_LABEL_SIZE
+
+PS_NAME             equ 0   ; SYS_PS's record: the module's name, zero-padded
+PS_NAME_SIZE        equ 8
+PS_KIND             equ 8   ; PS_*, below
+PS_STATE            equ 9   ; its main thread's state (kcalls.inc's STATE_*)
+PS_PRIORITY         equ 10
+PS_RUNS             equ 11  ; word: the times it was switched to (they wrap)
+PS_SIZE             equ 13
+PS_ROOT             equ 0   ; the kinds: the root
+PS_OS               equ 1   ;    the OS server (its control thread)
+PS_DRIVER           equ 2
+PS_FOREGROUND       equ 3   ;    the program the keys are for
+PS_BACKGROUND       equ 4   ;    a background program: SYS_KILL and SYS_START's
 
 SYS_TICKS_HZ        equ 50
 WRITE_MAX           equ 4096
@@ -70,6 +115,11 @@ E_TIMEOUT           equ 5   ; the device did not answer: no diskette, no printer
 E_PROTECTED         equ 6   ; the diskette is write-protected
 E_PAPER             equ 7   ; the printer is out of paper (or not there)
 E_BUSY              equ 8   ; the device is the kernel's: COM2 carries the log
+E_NOT_FAT12         equ 16  ; no FAT12 volume: no partition, or no such BPB
+E_NOT_FOUND         equ 17  ; no such file or directory
+E_NOT_DIR           equ 18  ; a path goes on through a file; a directory wanted
+E_BAD_NAME          equ 19  ; a name DOS does not allow, or a path too long
+E_BROKEN            equ 20  ; a cluster outside the volume, or a chain that loops
 
 ; Scancodes (set 1) the program may look for in AH when AL = 0.
 SC_ESC              equ 0x01
@@ -77,11 +127,5 @@ SC_UP               equ 0x48
 SC_DOWN             equ 0x50
 SC_LEFT             equ 0x4B
 SC_RIGHT            equ 0x4D
-
-; sys function   - load AH and trap into the kernel
-%macro sys 1
-    mov ah, (%1)
-    int SYSCALL_VECTOR
-%endmacro
 
 %endif

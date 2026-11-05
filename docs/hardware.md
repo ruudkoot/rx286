@@ -153,8 +153,11 @@ numbers below are the Technical Reference's.
   `UART_LSR_OVERRUN` (one was lost), `UART_LSR_THRE` (room for a byte) and
   `UART_LSR_TEMT` (the last byte has gone), and `UART_LSR_ABSENT`, what a port
   without a UART reads; `UART_FCR` takes `UART_FCR_FIFO` to turn on a
-  16550's FIFO (an 8250 or 16450 has none, and ignores it); `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the modem),
-  `UART_DIVISOR_1200` (the mouse).
+  16550's FIFO (an 8250 or 16450 has none, and ignores it), and
+  `UART_IIR`'s two `UART_IIR_FIFO` bits then read set if it did: its
+  transmit FIFO takes `UART_FIFO_BYTES` (16) once `UART_LSR_THRE` says it
+  is empty; `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the
+  modem), `UART_DIVISOR_1200` (the mouse).
 - **EGA**: `CRTC_CURSOR_HIGH` and `CRTC_CURSOR_LOW` hold the cursor's
   position.
 
@@ -186,13 +189,13 @@ gives the rule for each line.
 | Channel | Device |
 |---|---|
 | 0, 1, 3 | free (8-bit) |
-| 2 | diskette: the kernel's driver (and the BIOS, in the boot code) |
+| 2 | diskette: the diskette driver (and the BIOS, in the boot code) |
 | 4 | cascade |
 | 5-7 | free (16-bit) |
 
-rx286 resets both controllers at start, cascades channel 4, and programs
-channel 2 for each diskette sector, into and out of `disk_buffer`
-(*docs/storage.md*).
+The diskette driver resets both controllers at its start, cascades
+channel 4, and programs channel 2 for each diskette sector, into and out
+of its DMA buffer (*docs/storage.md*).
 
 ## What Bochs differs in
 

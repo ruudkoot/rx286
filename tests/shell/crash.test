@@ -14,48 +14,48 @@ A:\>crash help
 crash what? The kinds: gp ud de ss io cli hlt int kernel call write fpu tf nt
 A:\>crash gp
 crash: jump past the end of my code
-@bochs rx286: program fault #GP(0000) at 0043:{crash_kinds.gp}
-@mame rx286: program fault #GP(0000) at 0043:2000
+@bochs rx286: program fault #GP(0000) at 0007:{crash_kinds.gp}
+@mame rx286: program fault #GP(0000) at 0007:2000
 rx286 shell, started again
 A:\>crash ud
 crash: an instruction that does not exist
-rx286: program fault #UD at 0043:{crash_kinds.ud}
+rx286: program fault #UD at 0007:{crash_kinds.ud}
 rx286 shell, started again
 A:\>crash de
 crash: divide by zero
-rx286: program fault #DE at 0043:{crash_kinds.de_f}
+rx286: program fault #DE at 0007:{crash_kinds.de_f}
 rx286 shell, started again
 A:\>crash ss
 crash: push past the end of my stack
-rx286: program fault #SS(0000) at 0043:{crash_kinds.ss_f}
+rx286: program fault #SS(0000) at 0007:{crash_kinds.ss_f}
 rx286 shell, started again
 A:\>crash io
 crash: read the keyboard's port myself
-rx286: program fault #GP(0000) at 0043:{crash_kinds.io}
+rx286: program fault #GP(0000) at 0007:{crash_kinds.io}
 rx286 shell, started again
 A:\>crash cli
 crash: turn interrupts off
-rx286: program fault #GP(0000) at 0043:{crash_kinds.cli}
+rx286: program fault #GP(0000) at 0007:{crash_kinds.cli}
 rx286 shell, started again
 A:\>crash hlt
 crash: halt the CPU
-rx286: program fault #GP(0000) at 0043:{crash_kinds.hlt}
+rx286: program fault #GP(0000) at 0007:{crash_kinds.hlt}
 rx286 shell, started again
 A:\>crash int
-crash: INT 31h, beyond the IDT
-rx286: program fault #GP(018A) at 0043:{crash_kinds.int}
+crash: INT 32h, beyond the IDT
+rx286: program fault #GP(0192) at 0007:{crash_kinds.int}
 rx286 shell, started again
 A:\>crash kernel
 crash: load the kernel's data selector
-rx286: program fault #GP(0010) at 0043:{crash_kinds.kernel_f}
+rx286: program fault #GP(0010) at 0007:{crash_kinds.kernel_f}
 rx286 shell, started again
 A:\>crash call
 crash: call into the kernel's code
-rx286: program fault #GP(0008) at 0043:{crash_kinds.call}
+rx286: program fault #GP(0008) at 0007:{crash_kinds.call}
 rx286 shell, started again
 A:\>crash write
 crash: write over my own code
-rx286: program fault #GP(0000) at 0043:{crash_kinds.write}
+rx286: program fault #GP(0000) at 0007:{crash_kinds.write}
 rx286 shell, started again
 A:\>crash fpu
 crash: divide by zero on the 287, unmasked
@@ -64,10 +64,10 @@ crash: divide by zero on the 287, unmasked
 @mame crash: no 287 error arrived; is there a 287?
 A:\>crash tf
 crash: set the trap flag
-rx286: program fault #DB at 0043:{crash_kinds.tf_after}
+rx286: program fault #DB at 0007:{crash_kinds.tf_after}
 rx286 shell, started again
 A:\>crash nt
 crash: set NT and IRET
-rx286: program fault #TS(0000) at 0043:{crash_kinds.nt_f}
+rx286: program fault #TS(0000) at 0007:{crash_kinds.nt_f}
 rx286 shell, started again
 A:\>
