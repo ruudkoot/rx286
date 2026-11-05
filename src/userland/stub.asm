@@ -10,9 +10,9 @@
 ; It checks a buffer as the kernel's check_buffer does, with the 286's own
 ; instructions at the program's privilege; one the program may not use so
 ; is passed on as XFER_BAD, past the transfer segment's end, so that the
-; kernel refuses it after its other checks, as it did (E_FAULT). (The test
-; probe, about the caller's own descriptors, never comes here: the sys
-; macro traps into the kernel for it.) os.inc has the constants.
+; OS server refuses it after its other checks, as the kernel did (E_FAULT).
+; (The test probe, about the caller's own descriptors, never comes here:
+; the sys macro traps into the kernel for it.) os.inc has the constants.
 ; ============================================================================
 
 %ifndef RX286_STUB_ASM

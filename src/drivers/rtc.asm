@@ -36,12 +36,16 @@ entry:
         kcall KCALL_RECV
 .message:
         jc .receive
+        cmp al, NOTIFY_LABEL
+        je .receive                     ; its notification's bits: nothing to answer
+        mov bx, E_INVAL                 ; a call it does not know
         cmp al, DRV_CLOCK_TIME
-        jne .receive                    ; its notification's bits: nothing to answer
+        jne .reply
         call rtc_read                   ; CX, DX, BX, AL: the date and time
         mov si, dx                      ; SI = month and day
         xor ah, ah
         mov di, ax                      ; DI = the seconds
+.reply:
         mov dx, EP
         xor bp, bp
         kcall KCALL_REPLY_RECV

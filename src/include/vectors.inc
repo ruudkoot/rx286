@@ -3,9 +3,10 @@
 ; The IDT's vectors (roadmap D10). The table itself is src/kernel/idt.asm.
 ;
 ; Vectors 00h-1Fh are the CPU's, 20h-2Fh the IRQs after the kernel's
-; programming of the 8259As, 30h the system call, 31h the kernel's calls
-; on capabilities (roadmap l4.md D20). The IDT ends at 31h: any higher
-; vector is beyond its limit, a general protection fault.
+; programming of the 8259As, 30h the system call's until l4.md L10 (a gate
+; of DPL 0 now), 31h the kernel's calls on capabilities (roadmap l4.md D20).
+; The IDT ends at 31h: any higher vector is beyond its limit, a general
+; protection fault.
 ; ============================================================================
 
 %ifndef RX286_VECTORS_INC

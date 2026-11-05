@@ -30,11 +30,14 @@ KCALL_RETYPE        equ 7   ; DX untyped; AL type; SI destination slot; a segmen
                             ;    BL its access byte; a space: CX slots; untyped: CX
                             ;    paragraphs (l4.md L12)
 KCALL_COPY          equ 8   ; DX the destination's space; SI the caller's slot; DI the
-                            ;    destination slot; AL COPY_*; BX a badge (mint)
+                            ;    destination slot; AL COPY_*; a mint: BX the badge, CL
+                            ;    the rights it keeps (0: all). Untyped and a saved reply:
+                            ;    moved only (KE_ARG)
 KCALL_THREAD        equ 9   ; DX thread; AL THREAD_*; configure: SI space, BX IP, CX SP;
                             ;    start: CL priority, CH START_*
 KCALL_IRQ           equ 10  ; DX an interrupt line; AL IRQ_* (l4.md L7, D10)
-KCALL_TIMER         equ 11  ; DX notification; CX ticks: signalled once, CX ticks from now
+KCALL_TIMER         equ 11  ; DX notification; CX ticks (1-7FFFh): signalled once, CX
+                            ;    ticks from now
 KCALL_SEGMENT       equ 12  ; DX segment -> DL:AX its physical base, CX its limit
 KCALL_DELETE        equ 13  ; DX a slot of the caller's: emptied
 KCALL_SAVE_REPLY    equ 14  ; SI an empty slot: the reply owed, as a capability to send on
@@ -121,8 +124,9 @@ STATE_REPLY         equ 6   ;    awaiting its call's reply
 STATE_NOTIFY        equ 7   ;    awaiting a notification
 STATE_STOPPED       equ 8
 START_IOPL          equ 1   ; THREAD_START's CH: IOPL 1, for a ring-1 thread
-START_FOREGROUND    equ 2   ;    the program the keys are for; from rings 1-2 only, until
-                            ;    the keyboard leaves the kernel (l4.md L8)
+START_FOREGROUND    equ 2   ;    the program the keys are for, which the test hooks follow
+                            ;    (the keys are the OS server's since l4.md L8); from
+                            ;    rings 1-2 only
 START_SESSION       equ 4   ;    a server's thread that serves one client: restarted
                             ;    with it (l4.md L6); from rings 1-2 only
 

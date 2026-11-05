@@ -131,6 +131,9 @@ ut_arena            dw ARENA            ; the untyped a module's objects come fr
 ut_memory           dw UNTYPED          ; root's, or a background program's own
 info_state          dw 0                ; request's: THREAD_INFO's BX and CX
 info_runs           dw 0
+building            db 0                ; 1 while program_build builds: a failure
+build_sp            dw 0                ; is its, not the root's (build_failed)
+build_module        dw 0
 line                times 64 db 0       ; a fault's report
 end_udata
 
@@ -176,6 +179,9 @@ entry:
         cmp byte [es:di + M_NAME + 2], 0
         jne .next
         mov [server], bx
+        mov ax, KE_ARG                  ; the second module, or none: its programs'
+        cmp bx, 1                       ; slots, 8n on, must miss its own (mkimage)
+        jne failed
 .next:
         inc bx
         jmp .find
@@ -252,11 +258,11 @@ serve:
 
 ; ----------------------------------------------------------------------------
 ; request - the OS server's request about a module (os.inc): what runs it,
-; or a background program stopped or started again
+; or a background program killed or built again
 ;   In:       AL = ROOT_INFO, ROOT_KILL or ROOT_START; BX = the module
 ;   Out:      BX = 0 or the error; ROOT_INFO: CL the kind, CH the state, SI
 ;             the priority, DI the times it ran
-;   Destroys: AX, DX, ES
+;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 request:
         push ax
@@ -290,9 +296,7 @@ request:
         jne .invalid
         test ch, ch
         jnz .busy                       ; running already
-        call program_build              ; built again, from its own untyped
-        xor bx, bx
-        ret
+        jmp program_build               ; built again, from its own untyped
 .kill:
         test ch, ch
         jz .busy                        ; killed already
@@ -350,10 +354,13 @@ program_kill:
 ; untyped as at the start: its endpoint, transfer and files segments, space,
 ; data, stack and thread, and the OS server's thread for it
 ;   In:       BX = the module
-;   Out:      nothing (stops on a failure)
+;   Out:      BX = 0; or E_IO if a kernel call failed (what it made revoked)
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 program_build:
+        mov [build_module], bx
+        mov [build_sp], sp              ; (build_failed comes back here)
+        mov byte [building], 1
         push bx
         call use_untyped
         call program_ends
@@ -365,8 +372,28 @@ program_build:
         call server_params
         call serve_program
         pop bx
+        mov byte [building], 0
         mov word [ut_arena], ARENA
         mov word [ut_memory], UNTYPED
+        xor bx, bx
+        ret
+
+; ----------------------------------------------------------------------------
+; build_failed - program_build's kernel call failed (a must): what it made
+; revoked, and E_IO from program_build, instead of the root stopping
+;   In:       build_sp, build_module
+;   Out:      returns from program_build: BX = E_IO
+;   Destroys: AX, DX, SI, DI
+; ----------------------------------------------------------------------------
+build_failed:
+        mov sp, [build_sp]
+        mov byte [building], 0
+        mov word [ut_arena], ARENA
+        mov word [ut_memory], UNTYPED
+        mov bx, [build_module]
+        call program_slots
+        call program_kill
+        mov bx, E_IO
         ret
 
 ; ----------------------------------------------------------------------------
@@ -444,7 +471,7 @@ children_make:
         ret
 
 ; ----------------------------------------------------------------------------
-; paragraphs - bytes as paragraphs, rounded up (0 bytes: 64 KB)
+; paragraphs - bytes as paragraphs, rounded up (FFFFh bytes: 1000h)
 ;   In:       AX = bytes
 ;   Out:      AX = paragraphs
 ;   Destroys: nothing
@@ -534,6 +561,8 @@ module_kind:
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 failed:
+        cmp byte [building], 0
+        jne build_failed
         push ds
         pop es
         xor ah, ah
@@ -554,7 +583,7 @@ failed:
 ; neither it nor a driver
 ;   In:       BX = the module's number
 ;   Out:      nothing (stops on a failure)
-;   Destroys: AX, CX, DX, SI
+;   Destroys: AX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 program_ends:
         cmp word [server], 0
@@ -859,7 +888,7 @@ driver_device:
 ; ----------------------------------------------------------------------------
 ; build_server - the OS server's threads: one for each program, which
 ; serves it alone, on its own part of the server's stack, with the
-; program's capabilities in the server's slots 8n to 8n + 6
+; program's capabilities in the server's slots 8n to 8n + 7
 ;   In:       nothing
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES

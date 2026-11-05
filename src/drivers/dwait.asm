@@ -77,7 +77,9 @@ dw_sleep:
 
 ; ----------------------------------------------------------------------------
 ; dw_poll - read a port until the bits of a mask have a value, for CX
-; ticks at most (the driver runs with interrupts on: nothing waits for it)
+; ticks at most: a burst of reads, then a tick's sleep if they did not find
+; it, so that a device slow to answer keeps no thread below the driver from
+; running (l4.md L13)
 ;   In:       DX = the port; AH = the mask; AL = the value wanted under it;
 ;             CX = the limit in ticks (1 or more)
 ;   Out:      CF clear or set (the time ran out); AL = what the port read
@@ -108,8 +110,12 @@ dw_poll:
         call dw_ticks
         sub ax, si
         cmp ax, cx
+        jae .late
+        call dw_tick                    ; until the next tick (or the interrupt)
         pop ax
-        jb .burst
+        jmp .burst
+.late:
+        pop ax
         stc
         jmp .out
 .done:
@@ -120,7 +126,7 @@ dw_poll:
         pop bx
         ret
 
-DW_POLL_BURST       equ 64              ; reads between looks at the time
+DW_POLL_BURST       equ 256             ; reads between sleeps: a millisecond or so
 
 ; ----------------------------------------------------------------------------
 ; dw_tick - wait until the next tick or the interrupt, whichever is first;
@@ -165,3 +171,26 @@ dw_bits:
         pop bx
 .done:
         ret
+
+; ----------------------------------------------------------------------------
+; dw_readable - may the driver still read the segment passed? After a wait
+; it may be gone: a program killed meanwhile has its segments revoked
+; (l4.md L12), and loading it would fault in ring 1
+;   In:       BP = the segment
+;   Out:      ZF set if so
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+dw_readable:
+        verr bp
+        ret
+
+; ----------------------------------------------------------------------------
+; dw_writable - may the driver still write the segment passed? (dw_readable)
+;   In:       BP = the segment
+;   Out:      ZF set if so
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+dw_writable:
+        verw bp
+        ret
+

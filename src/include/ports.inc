@@ -158,6 +158,7 @@ UART_DLM            equ 1           ; divisor latch, high (DLAB = 1)
 UART_IER            equ 1           ; interrupt enable
 UART_IER_RECEIVED   equ 0x01        ; an interrupt when a byte has come
 UART_FCR            equ 2           ; write: FIFO control (a 16550's; nothing on an 8250 or 16450)
+UART_IIR            equ 2           ; read: interrupt identification
 UART_LCR            equ 3           ; line control
 UART_MCR            equ 4           ; modem control
 UART_LSR            equ 5           ; line status
@@ -171,6 +172,8 @@ UART_LSR_DATA       equ 0x01        ; a byte waits in the receive buffer
 UART_LSR_OVERRUN    equ 0x02        ; a byte came before the last was read: lost
 UART_LSR_ABSENT     equ 0xFF        ; what a port with no UART reads
 UART_FCR_FIFO       equ 0x07        ; FIFOs on and emptied, an interrupt for each byte
+UART_IIR_FIFO       equ 0xC0        ; both set: the FIFOs are on (a 16550A)
+UART_FIFO_BYTES     equ 16          ; what a 16550's transmit FIFO holds
 UART_LSR_THRE       equ 0x20        ; transmit holding register empty
 UART_LSR_TEMT       equ 0x40        ; transmitter empty: the last byte has gone
 UART_DIVISOR_115200 equ 1           ; 1.8432 MHz / 16 / 1

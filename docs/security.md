@@ -8,7 +8,8 @@ more than that.
 No program can make the kernel:
 
 - fault, panic, reset or hang, whatever its devices do or fail to do;
-- read or write memory outside the program's own three segments;
+- read or write memory outside the program's own segments: its code, data
+  and stack, and the transfer segment it shares with the OS server;
 - touch an I/O port;
 - disable interrupts;
 - keep the CPU from the kernel: the timer and keyboard interrupts always
@@ -26,7 +27,7 @@ kernel for a thread without a handler.
   LDT (*docs/protected-mode.md*). Every descriptor of the GDT has DPL 0, so
   the program cannot load any of them; the LDT's empty slots are all zeros,
   invisible to it. LDTR always holds the program's LDT, never Bochs' live
-  one at address 0 (roadmap X8). The GDT ends at 14Fh and the program's LDT
+  one at address 0 (roadmap X8). The GDT ends at 1CFh and a program's LDT
   at 7Fh, so any selector past either faults.
 - **Rings 1 and 2.** Only a thread of ring 1 gets IOPL, and only if its
   starter asks: the drivers (roadmap l4.md D11). A thread of ring 2 that
@@ -35,12 +36,15 @@ kernel for a thread without a handler.
   can load the kernel's data, and no capability names the kernel's own
   interrupt lines (`tests/rings`).
 - **The OS server** (roadmap l4.md L6) shares with each program only that
-  program's transfer segment; its thread for the program makes the call
-  with the program's buffer copied there, so the kernel's buffer checks see
-  only the transfer segment. The stub refuses for the program what the
-  kernel would have refused, by passing an offset past the segment's end;
-  a program that goes around the stub can name nothing but its own
-  transfer segment.
+  program's transfer segment, and its thread for the program makes the
+  call with the program's buffer copied there. The stub checks a buffer
+  before it copies it, with the 286's own instructions at the program's
+  privilege: `ARPL` against the caller's CS, `VERR` or `VERW`, `LSL`, `LAR`
+  (no expand-down segment) and bounds (*docs/syscalls.md*). A buffer the
+  program may not use goes on as an offset past the transfer segment's end,
+  which the OS server refuses with `E_FAULT` after its other checks, as the
+  kernel did. A program that goes around the stub can name nothing but its
+  own transfer segment.
 - **The way back.** Every segment register the kernel's POPs and `IRET`
   load is checked for its own use first (*docs/interrupts.md*), so a
   descriptor changed during a call is the program's fault, never the
@@ -50,20 +54,22 @@ kernel for a thread without a handler.
   IF there.
 - **Privileged instructions** (`LGDT`, `LIDT`, `LLDT`, `LTR`, `LMSW`, `CLTS`,
   `HLT`) fault at CPL 3.
-- **The IDT.** Only vector 30h has a gate of DPL 3; `INT n` for any other
-  vector faults, and vectors past 30h are beyond the IDT's limit.
+- **The IDT.** Only vector 31h, the kernel's calls, has a gate of DPL 3
+  (roadmap l4.md D20); `INT n` for any other vector faults, 30h too, and
+  vectors past 31h are beyond the IDT's limit.
 - **Tasks.** The TSS's back link is 0, so `IRET` with NT set faults instead of
   switching tasks; the TSSs have DPL 0, so the program cannot jump to them.
 - **The kernel's stack** is switched to on every interrupt from ring 3
   (SS0:SP0 in the TSS), so a broken program stack cannot hurt the kernel.
-- **System calls** check every buffer with the 286's own instructions before
-  reading it: `ARPL` against the caller's CS, `VERR`, `LSL`, `LAR` (no
-  expand-down segment) and bounds (*docs/syscalls.md*). A program can only
-  pass a selector it could load, which is one of its own or null; the checks
-  hold even if that changes.
+- **The kernel's own buffer.** `KCALL_LOG`, the one kernel call that reads
+  memory, checks its buffer as the stub does, and checks it again after
+  every window, since the segment may have gone meanwhile (roadmap l4.md
+  X2). A program can only pass a selector it could load, which is one of
+  its own or null; the checks hold even if that changes.
 - **No starvation.** The kernel runs with interrupts off only for short
-  stretches: `write` and `print` open a window after every byte, and
-  `read_key` and the drivers wait with interrupts on. A program that spins
+  stretches: `KCALL_LOG` opens a window after every byte, a revocation
+  after every capability it deletes, and the drivers wait with interrupts
+  on, a tick at a time (roadmap l4.md L12, L13). A program that spins
   is preempted at the end of its time slice by any thread of its priority
   or above, and stopped by Ctrl+Break if it is the program the keys are
   for; it starves only threads below it (roadmap l4.md L2,
@@ -89,12 +95,16 @@ kernel for a thread without a handler.
 - **No device can hang the kernel.** Every wait for a disk, printer or
   modem has a limit in ticks (*docs/storage.md*, *docs/devices.md*); a
   diskette that is not there, a fixed disk that does not answer and a
-  printer that stays busy are errors. A sound or a `SYS_WAIT` ends when the
-  program is to restart, so the fuzzer's watchdog ends them too.
+  printer that stays busy are errors. A `SYS_WAIT` or a wait for a key ends
+  when the program is to restart, so the fuzzer's watchdog ends them too: the
+  OS server's thread for the program is restarted with it. A sound runs on
+  for its ticks (`SOUND_MAX_TICKS` at most) unless Ctrl+Break ends it.
 - **Disk buffers** are checked like any other, before a device is touched;
-  a buffer the kernel fills must also pass `VERW`, so no read can land in
-  the program's code. The disks themselves are the program's: it may read
-  and write any sector of any drive, the boot diskette included.
+  a buffer to be filled must also pass `VERW`, so no read can land in the
+  program's code. The drivers check the transfer segment again after each
+  wait, since its program may have been killed meanwhile (roadmap l4.md
+  L12). The disks themselves are the program's: it may read and write any
+  sector of any drive, the boot diskette included.
 - **The way back.** Before every `IRET` to ring 3 the kernel checks the return
   IP against the program's code limit, so a return past it is the program's
   fault, not the kernel's. A single-step trap or a 287 overrun (vector 9)
@@ -107,7 +117,7 @@ kernel for a thread without a handler.
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 74 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 82 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -115,13 +125,13 @@ that faulted:
 |---|---|
 | `CLI`, `STI`, `IN`, `OUT`, `INSB`, `OUTSB`, `HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT` | #GP(0000) |
 | the kernel's data, the kernel's stack, the screen (DS, SS, ES) | #GP(selector) |
-| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(0060), #GP(0044), #GP(003C), #GP(0000) |
-| every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments as they are; every empty slot refused by all four |
+| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(01D0), #GP(0084), #GP(007C), #GP(0000) |
+| every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments and its transfer segment as they are; its endpoint and every empty slot refused by all four |
 | the test probe (`KCALL_TEST`'s `TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
 | the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |
 | the probe: the code's descriptor not present; refilled with data | #NP(0004); #GP(0004), at the return address |
 | a far call to the kernel's code; a jump to the TSS; a call to the double-fault TSS; a jump through the null selector | #GP(0008), #GP(0020), #GP(0028), #GP(0000) |
-| `INT 32h`; `INT 30h`, the system call until roadmap l4.md L10; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(0192), #GP(0182), #GP(010A), #GP(001A), #GP(0022) |
+| `INT 32h`; `INT 30h`, the system call until roadmap l4.md L10 and now a gate of DPL 0; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(0192), #GP(0182), #GP(010A), #GP(001A), #GP(0022) |
 | writing through CS; reading past the data's limit; a word across it; executing data | #GP(0000), #GP(0000), #GP(0000), #GP(000C) |
 | pushing past the stack's bottom; popping past its top | #SS(0000) |
 | divide by zero; an invalid opcode; `BOUND` | #DE, #UD, #BR |

@@ -117,6 +117,27 @@ work is a retype's zeroing, which happens while the root builds the system
 and when a program makes memory: under a fifth of a tick, so no tick is
 lost, but above R2's millisecond.
 
+Measured again at roadmap l4.md L13, after revocation (L12) had made a
+delete look through every slot of every space for the capability's
+children and for others naming its object, and a kill revoke everything
+made for a program (`tests/kernel/stretch-kill.test`: the clock killed and
+started again). A first measure found a kill's stretches at 9.7 ms on
+MAME's AT, half a tick, and every delete at a pass over all 632 slots of
+`make run`'s spaces (about 6 ms there). Since then a revoke deletes from
+the top with a window after each pass, a delete makes one pass at most,
+and none for a capability that is no parent and names no object (a
+driver's segment, a move's), so:
+
+| | MAME's AT | Bochs |
+|---|---|---|
+| `tests/kernel/stretch.test`, all told | 4,541 us: `KCALL_RECV`, its trace line | 3,770 us |
+| the same without the log's bytes | 3,538 us: `KCALL_DELETE` of an object | 1,138 us |
+| `tests/kernel/stretch-kill.test`, without the log's bytes | 6,481 us: `KCALL_REVOKE`, one pass over every slot | 1,143 us |
+
+A kill is now the kernel's longest work: under a third of a tick. Its cost
+grows with the slots of every space, so a system with more spaces needs a
+faster way to find a capability's children (a list of them, as seL4 keeps).
+
 ## What it costs
 
 - **The modem's bytes.** A 16450 holds one byte, and at 9600 baud one comes

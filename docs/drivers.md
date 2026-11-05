@@ -86,7 +86,8 @@ builds, a key script's mouse bytes come from the kernel (`KCALL_TEST`,
 `TEST_MOUSE_BYTE`) with IRQ4's bits, as IRQ4 would bring them. The OS
 server asks it for `SYS_MOUSE` (`DRV_MOUSE_GET`), and, for a `SYS_WAIT`
 with `WAIT_MOUSE`, whether the mouse has news (`DRV_MOUSE_NEWS`), once a
-tick, while the kernel waits a tick at a time for the other events.
+tick, while the OS server's thread for the program waits a tick at a time
+for the other events.
 
 ## The console driver
 

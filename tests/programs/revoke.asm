@@ -13,6 +13,9 @@
 ; of their own, the untyped revoked: both gone. And E3's ABA case: the
 ; program's DS and a worker's name the same slot of two spaces; across a
 ; call to the worker, which reads its own, the program still reads its own.
+; Then (l4.md L13) a worker that deletes its own stack: its way back fails
+; each time, and the kernel stops it rather than retry for ever; and copies
+; the kernel refuses, of untyped and of a saved reply (KE_ARG).
 ; Workers run above the program, so each has done its part when the
 ; program goes on; they write to the kernel's log (KCALL_LOG): their spaces
 ; hold no endpoint to the OS server.
@@ -43,6 +46,12 @@ W3_SPACE            equ 0xD7            ; 26, 27: the worker revoked with its sp
 W3_THREAD           equ 0xDF
 EP2                 equ 0xE7            ; 28: the ABA case's endpoint
 SCRATCH             equ 0xEF            ; 29: segments on their way to a space
+W4_SPACE            equ 0xF7            ; 30, 31: the worker without its stack
+W4_THREAD           equ 0xFF
+W5_SPACE            equ 0x107           ; 32, 33: the caller whose reply is saved
+W5_THREAD           equ 0x10F
+EP3                 equ 0x117           ; 34: its endpoint
+REPLY               equ 0x11F           ; 35: the reply owed it
 
 W_CODE              equ 0x07            ; a worker's slots
 W_DATA              equ 0x0F
@@ -55,6 +64,8 @@ W_LINE              equ 0x40            ; where a worker builds a line
 ROLE_CALLER         equ 1
 ROLE_SERVER         equ 2
 ROLE_WAITER         equ 3
+ROLE_STRANDED       equ 4               ; deletes its own stack
+ROLE_ASKER          equ 5               ; calls, and waits once answered
 MARK_PROGRAM        equ 'A'             ; the ABA case: what each space's SAME holds
 MARK_WORKER         equ 'B'
 WORKER_PRIORITY     equ 4               ; above the program
@@ -90,6 +101,8 @@ entry:
         call check_endpoint
         call check_space
         call check_aba
+        call check_stranded
+        call check_copies
         PRINT "revoke: done", CHAR_LF
 .wait:
         mov al, KEY_WAIT
@@ -291,6 +304,77 @@ check_aba:
         ret
 
 ; ----------------------------------------------------------------------------
+; check_stranded - a worker that deletes its own stack slot: each way back
+; fails, and after a few the kernel stops it (STATE_STOPPED, 8)
+;   In:       DS = ES = its data
+;   Out:      a line
+;   Destroys: everything but DS, ES
+; ----------------------------------------------------------------------------
+check_stranded:
+        mov al, ROLE_STRANDED
+        mov bx, W4_SPACE
+        mov dx, W4_THREAD
+        mov si, UT_ARENA
+        xor di, di
+        call make_worker                ; it runs, and stops
+        mov dx, W4_THREAD
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD              ; BL = its state
+        must
+        mov al, bl
+        xor ah, ah
+        report "a worker without its stack: stopped (8)"
+        ret
+
+; ----------------------------------------------------------------------------
+; check_copies - the copies the kernel refuses (KE_ARG, 2): of untyped,
+; whose memory two retypes would carve; and of a saved reply, answered once
+;   In:       DS = ES = its data
+;   Out:      two lines
+;   Destroys: everything but DS, ES
+; ----------------------------------------------------------------------------
+check_copies:
+        mov dx, MY_SPACE
+        mov si, UT_MEMORY
+        mov di, SCRATCH
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        xor ah, ah
+        report "untyped copied: status (2)"
+        mov dx, UT_ARENA
+        mov al, CAP_ENDPOINT
+        mov si, EP3
+        kcall KCALL_RETYPE
+        must
+        mov al, ROLE_ASKER
+        mov bx, W5_SPACE
+        mov dx, W5_THREAD
+        mov si, UT_ARENA
+        mov di, EP3
+        call make_worker                ; its call, queued
+        mov dx, EP3
+        xor bp, bp
+        kcall KCALL_RECV
+        must
+        mov si, REPLY
+        kcall KCALL_SAVE_REPLY
+        must
+        mov dx, MY_SPACE
+        mov si, REPLY
+        mov di, SCRATCH
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        push ax
+        mov dx, REPLY                   ; answered: the worker goes on
+        xor bp, bp
+        xor al, al
+        kcall KCALL_SEND
+        pop ax
+        xor ah, ah
+        report "a saved reply copied: status (2)"
+        ret
+
+; ----------------------------------------------------------------------------
 ; make_worker - a worker: a space and a thread from untyped, the program's
 ; code, data (its first word the role), a stack, a notification nobody
 ; signals, and in W_EP a copy of an endpoint; a server's own segment in slot
@@ -434,6 +518,10 @@ worker:
         je .caller
         cmp word [0], ROLE_SERVER
         je .server
+        cmp word [0], ROLE_STRANDED
+        je .stranded
+        cmp word [0], ROLE_ASKER
+        je .asker
 .wait:
         mov dx, W_WAIT                  ; for good: nobody signals it
         kcall KCALL_RECV
@@ -457,6 +545,17 @@ worker:
         mov si, W_LINE
         sub cx, si
         kcall KCALL_LOG
+        jmp .wait
+.stranded:
+        mov dx, W_STACK                 ; its own stack: no way back to ring 3
+        kcall KCALL_DELETE
+.stranded_back:
+        jmp .wait                       ; never: the kernel stops it
+.asker:
+        mov dx, W_EP
+        xor bp, bp
+        mov al, 1
+        kcall KCALL_CALL
         jmp .wait
 .server:
         mov dx, W_EP

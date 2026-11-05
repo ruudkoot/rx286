@@ -74,6 +74,10 @@ isr_exit:
         jz .alive
         call thread_die
 .alive:
+        test byte [bx + T_FLAGS], TF_ORPHAN ; its space gone: it stops
+        jz .whole
+        call thread_orphan
+.whole:
         ; A thread more urgent is ready, or the time slice is over: give way
         ; here, at the edge of ring 3, where nothing of the kernel's is half done.
         cmp byte [resched], 0
@@ -83,11 +87,16 @@ isr_exit:
         ; Back to ring 3 with a restart pending (Ctrl+Break or a 287 error
         ; during a system call): restart the program instead.
         cmp byte [restart_pending], 0
-        je .check_segments
+        je .checks
         call restart_program
+.checks:
+        mov bx, [cur_thread]
+        mov byte [bx + T_WAY_BACK], 0
 .check_segments:
         call way_back_check             ; may report a fault: the frame restarts,
-        jc .check_segments              ; and its segments are checked in turn
+        jnc .check_ip                   ; and its segments are checked in turn
+        call way_back_again
+        jmp .check_segments
 .check_ip:
         ; IRET checks the return IP against CS's limit (Intel B-51) and would
         ; fault here, in ring 0: a program whose INT 31h is its segment's last
@@ -100,6 +109,7 @@ isr_exit:
         mov word [bp + FRAME_VECTOR], VEC_GP
         mov word [bp + FRAME_ERROR], 0
         call fault_program
+        call way_back_again
         jmp .check_segments
 .restore:
         STRETCH_END
@@ -108,6 +118,35 @@ isr_exit:
         popa
         add sp, 4                       ; the vector and the error code
         iret
+
+; ----------------------------------------------------------------------------
+; way_back_again - a fault reported on the way back, and the frame restarted:
+; once too often, and the restart cannot mend it (its slot 0 or 2 empty or
+; wrong, its entry past its code, and no handler to put them back), the
+; thread stops, said once, instead of the kernel trying for ever with
+; interrupts off (l4.md L13); THREAD_START tries again
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing (perhaps after a stop)
+;   Destroys: AX, BX, SI
+; ----------------------------------------------------------------------------
+way_back_again:
+        mov bx, [cur_thread]
+        inc byte [bx + T_WAY_BACK]
+        cmp byte [bx + T_WAY_BACK], WAY_BACK_TRIES
+        jb .done
+        mov byte [bx + T_WAY_BACK], 0
+        mov si, msg_way_back
+        call klog
+        mov byte [bx + T_STATE], TS_STOPPED
+        call schedule                   ; back here only once started again
+.done:
+        ret
+
+WAY_BACK_TRIES      equ 3
+
+begin_kdata
+msg_way_back        db "a thread cannot go back to its ring: stopped", 0
+end_kdata
 
 ; ----------------------------------------------------------------------------
 ; way_back_check - may the frame's segments be loaded on the way back to

@@ -194,7 +194,7 @@ pic_unmask:
 ; pic_line_bit - a line's mask port and bit
 ;   In:       BX = the line, 0-15
 ;   Out:      DX = its 8259A's data port; AH = its bit there
-;   Destroys: CL
+;   Destroys: CX
 ; ----------------------------------------------------------------------------
 pic_line_bit:
         mov cx, bx

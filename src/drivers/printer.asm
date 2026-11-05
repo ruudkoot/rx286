@@ -58,15 +58,22 @@ serve:
         kcall KCALL_RECV
 .message:
         jc serve
+        cmp al, NOTIFY_LABEL
+        je serve                        ; its timer's bits, late: nothing to answer
         cmp al, DRV_PRINT
-        jne serve                       ; its timer's bits, late: nothing to answer
+        jne .unknown
         call print                      ; BX the status, CX the bytes printed
+.answer:
         mov dx, RECV                    ; the segment, used: room for the next
         kcall KCALL_DELETE
         mov dx, EP
         mov bp, RECV
         kcall KCALL_REPLY_RECV
         jmp .message
+.unknown:
+        mov bx, E_INVAL                 ; a call it does not know
+        xor cx, cx
+        jmp .answer
 
 ; ----------------------------------------------------------------------------
 ; printer_init - reset both printers: -INIT low, then high
@@ -107,10 +114,12 @@ print:
         jz .fault
         shl bx, 1
         mov di, [printer_ports + bx]
-        mov es, bp
         xor bx, bx                      ; BX = bytes printed
 .next:
         jcxz .done
+        verr bp                         ; still there after the last wait? (a
+        jnz .gone                       ; program killed meanwhile: l4.md L12)
+        mov es, bp
         mov al, [es:si]
         call lpt_byte
         jc .failed
@@ -125,6 +134,10 @@ print:
 .failed:
         mov cx, bx
         mov bx, ax
+        ret
+.gone:
+        mov cx, bx
+        mov bx, E_FAULT
         ret
 .invalid:
         mov bx, E_INVAL

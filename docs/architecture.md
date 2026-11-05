@@ -8,12 +8,12 @@ L5):
 |---|---|---|---|
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
-| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 9 KB of code and data |
-| the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
-| the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 3.5 KB of code |
-| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | a few hundred bytes each, the diskettes' about 1 KB |
+| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 8.6 KB of code, 2.6 KB of data |
+| the root | `src/root/` | a module of the image, ring 2 | about 2.9 KB of code |
+| the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 4.2 KB of code |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
-| the clock | `src/userland/clock.asm` | a module of the image, ring 3, beside the shell, above it | a few hundred bytes |
+| the clock | `src/userland/clock.asm` | a module of the image, ring 3, beside the shell, above it | about 850 bytes |
 | the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell, below everything | a few hundred bytes |
 
 `src/include/` holds what more than one part shares: the memory layout, the
@@ -37,10 +37,11 @@ server.
    to `pm_start`.
 4. `start.asm` zeroes the stacks, loads TR and a null LDTR, reprograms the
    8259As, initialises the 287, the log on COM2 (debug and test builds) and the
-   console, prints the banner, sets up the timer, keyboard, clock and
-   printer ports, unmasks every IRQ line and enables NMI. The DMA
-   controllers and the diskette and fixed disk controllers are their
-   drivers' (*docs/drivers.md*).
+   console, prints the banner, sets up the timer, quiets the clock's
+   interrupts, unmasks every IRQ line and enables NMI. Every other device -
+   the keyboard, the printers, the serial lines, the DMA controllers, the
+   diskette and fixed disk controllers - is its driver's
+   (*docs/drivers.md*).
 5. `cap.asm` builds the root from the image's first module and gives it
    every other capability there is; `thread.asm` starts it, and becomes the
    idle loop. The first switch starts the root in ring 2 with `IRET`.
@@ -74,7 +75,7 @@ name nothing of the kernel's, and reaches it only through `INT 31h`.
 | `fault.asm` | the CPU's exceptions: the program's fault, a kernel panic, NMI, a carried single-step trap |
 | `panic.asm` | the red screen and halt; the double-fault task |
 | `program.asm` | a program: its restart; its fault, to its fault endpoint or reported |
-| `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump; the start of the first two |
+| `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the log's turn (`call_owner`), stopping a thread, the thread dump; the start of the first two |
 | `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*); the root, built at start from the image |
 | `revoke.asm` | delete and revoke: the tree of capabilities, objects that die with their last capability, untyped memory given back |
 | `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
@@ -153,7 +154,8 @@ untyped memory and a space can make more with the kernel's calls.
 
 ## The root
 
-The root (`src/root/root.asm`; roadmap l4.md L5, D12) is the first thread,
+*docs/root.md* has the details. The root (`src/root/root.asm`; roadmap
+l4.md L5, D12) is the first thread,
 in ring 2, which the kernel builds from the image's first module and gives
 everything else: the untyped memory left, the module table, each other
 module's code and data. For each other module it builds a space - the
@@ -171,7 +173,8 @@ memory of its own, which `kill` revokes and `start` builds it again from.
 
 ## The OS server
 
-The OS server (`src/os/os.asm`; roadmap l4.md L6, D16) serves the
+*docs/os-server.md* has the details. The OS server (`src/os/os.asm`;
+roadmap l4.md L6, D16) serves the
 programs' system calls as messages, with a thread for each program that
 serves it alone, so that one program's wait holds up no other (l4.md X13).
 The `sys` macro calls a stub that puts the registers and a buffer in the

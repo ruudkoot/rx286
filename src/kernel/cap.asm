@@ -15,10 +15,10 @@
 ; is an all-zero descriptor, invisible to the program (l4.md E2), and its
 ; shadow entry says what it is. The GDT gives each space an LDT descriptor
 ; and each thread a kernel stack from two pools, and holds nothing else a
-; program could load. No call here waits, so they need not be serialised as
-; the system calls are (thread.asm). At its start the kernel makes one
-; space and one thread, the root's, from the image's first module, and
-; gives the root everything else (l4.md L5).
+; program could load. These calls run with interrupts off from start to
+; end, but for a revocation's windows (revoke.asm). At its start the kernel
+; makes one space and one thread, the root's, from the image's first
+; module, and gives the root everything else (l4.md L5).
 ; ============================================================================
 
 ARENA_PARA          equ ARENA_PHYS >> 4
@@ -809,7 +809,8 @@ boot_slot_segment:
 
 ; ----------------------------------------------------------------------------
 ; boot_slot_shadow - an untyped capability of the kernel's into a slot of
-; the root's space: a copy of its shadow entry
+; the root's space: what the root's own space, thread, data and stack left
+; of it, so that no revoke of it can give theirs out again (l4.md L13)
 ;   In:       AX = the slot; DX = the shadow entry
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, SI, DI, ES
@@ -824,6 +825,14 @@ boot_slot_shadow:
         mov cx, SHADOW_SIZE / 2
         cld
         rep movsw
+        sub di, SHADOW_SIZE             ; the copy: from the watermark on
+        mov ax, [di + SH_WATERMARK]
+        add [di + SH_OBJECT], ax
+        sub [di + SH_SIZE], ax
+        xor ax, ax
+        mov [di + SH_WATERMARK], ax
+        mov [di + SH_HOLE], ax
+        mov [di + SH_HOLE_END], ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -984,10 +993,11 @@ kc_retype:
 ; ----------------------------------------------------------------------------
 retype_parent:
         mov bx, [cur_thread]
-        mov ax, [bx + T_SPACE]
-        mov [si + SH_PARENT], ax
+        mov bx, [bx + T_SPACE]
+        mov [si + SH_PARENT], bx
         mov ax, [retype_parent_slot]
         mov [si + SH_PARENT_SLOT], ax
+        call parent_mark
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -1049,6 +1059,8 @@ kc_copy:
         je .copy
         cmp byte [si + SH_TYPE], CAP_UNTYPED
         je kc_done.arg                      ; untyped is moved, never shared
+        cmp byte [si + SH_TYPE], CAP_REPLY
+        je kc_done.arg                      ; nor a reply, answered once
         cmp al, COPY_COPY
         je .copy
         cmp al, COPY_MINT
@@ -1091,6 +1103,11 @@ kc_copy:
         mov [bx + SH_PARENT], ax
         mov ax, [copy_slot]
         mov [bx + SH_PARENT_SLOT], ax
+        and byte [bx + SH_RIGHTS], ~SR_PARENT & 0xFF    ; new: no child yet
+        push bx
+        mov bx, [bx + SH_PARENT]
+        call parent_mark                ; the source: a parent now
+        pop bx
         cmp byte [bp + FRAME_AX], COPY_MINT
         jne kc_done.ok
         mov ax, [bp + FRAME_BX]
@@ -1107,6 +1124,9 @@ kc_copy:
         mov di, si
         mov cx, SHADOW_SIZE / 2
         rep stosw
+        mov bx, [copy_shadow]
+        test byte [bx + SH_RIGHTS], SR_PARENT
+        jz kc_done.ok                   ; no child to take along
         mov bx, [cur_thread]            ; its children go with it (l4.md L12)
         mov bx, [bx + T_SPACE]
         mov ax, [copy_slot]

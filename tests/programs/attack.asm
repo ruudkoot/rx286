@@ -18,13 +18,14 @@ bits 16
 %include "selectors.inc"
 %include "program.inc"
 %include "kcalls.inc"
+%include "os.inc"
 
 FLAGS_TF            equ 0x0100
 FLAGS_IOPL3         equ 0x3000
 FLAGS_NT            equ 0x4000
-SEL_BEYOND_GDT      equ 0x60 | RPL_USER
-SEL_PAST_LDT        equ LDT_ENTRIES * 8 | SEL_TI_LDT | RPL_USER    ; one slot past the LDT
-SEL_EMPTY_SLOT      equ (LDT_ENTRIES - 1) * 8 | SEL_TI_LDT | RPL_USER  ; its last slot: empty
+SEL_BEYOND_GDT      equ (GDT_LIMIT + 1) | RPL_USER                  ; one past the GDT
+SEL_PAST_LDT        equ PROGRAM_SLOTS * 8 | SEL_TI_LDT | RPL_USER   ; one slot past its LDT
+SEL_EMPTY_SLOT      equ (PROGRAM_SLOTS - 1) * 8 | SEL_TI_LDT | RPL_USER ; its last slot: empty
 FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 
 ; probe which - KCALL_TEST's TEST_PROBE: the kernel changes one of the

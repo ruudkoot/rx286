@@ -6,8 +6,9 @@
 ; of layout.inc, or a label of kdata at its physical address (the TSSs);
 ; every
 ; segment's accessed bit is preset, so the CPU never writes this table but
-; for the TSS's busy bit. Every descriptor has DPL 0: the program's segments
-; are in its LDT (ldt.asm), and the GDT holds none a program could load.
+; for the TSS's busy bit. Every descriptor has DPL 0: a program's segments
+; are in its space's LDT (cap.asm), and the GDT holds none a program could
+; load.
 ; ============================================================================
 
 ; kdata_descriptor label, limit, access - a descriptor of something in kdata.

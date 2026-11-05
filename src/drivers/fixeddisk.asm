@@ -186,6 +186,8 @@ hd_transfer:
         jnz .error
         test al, HDC_STATUS_DRQ
         jz .error
+        call dw_writable                ; gone while it waited?
+        jnz .gone
         push di
         mov es, bp
         mov di, si
@@ -202,6 +204,8 @@ hd_transfer:
         jc .timeout
         test al, HDC_STATUS_DRQ
         jz .error
+        call dw_readable
+        jnz .gone
         push si
         push ds
         mov ds, bp
@@ -222,6 +226,11 @@ hd_transfer:
         dec byte [hd_tries]
         jnz .try
         mov bx, E_IO
+        ret
+.gone:
+        mov byte [hd_ready], 0          ; the sector half done: a reset next time
+        mov byte [hd_ready + 1], 0
+        mov bx, E_FAULT
         ret
 .timeout:
         mov ax, E_TIMEOUT

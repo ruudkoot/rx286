@@ -64,7 +64,7 @@ M_ENTRY             equ 20          ; its IP at a start
 M_RING              equ 22          ; 1-3: its code's DPL
 M_PRIORITY          equ 23          ; 0-7
 M_FLAGS             equ 24
-MF_FOREGROUND       equ 1           ; the program the keys are for (until l4.md L8)
+MF_FOREGROUND       equ 1           ; the program the keys are for (the OS server's, L8)
 MF_DRIVER           equ 2           ; a driver: IOPL 1, an endpoint, a notification (L7)
 MF_IOPL             equ 4           ; a program that asks for IOPL (tests of rings 1 and 2)
 M_IRQ               equ 25          ; a driver's interrupt line, plus one (0: none)

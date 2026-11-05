@@ -200,6 +200,8 @@ fd_transfer:
         mov [fd_head], dl
         cmp byte [fd_transfer_command], FDC_CMD_WRITE
         jne .moved_in
+        call dw_readable                ; (a program killed meanwhile: l4.md L12)
+        jnz .fault
         call buffer_in                  ; a write: its bytes into the DMA buffer
 .moved_in:
         push si                         ; (the controller's commands use SI)
@@ -210,6 +212,8 @@ fd_transfer:
         xor bx, bx
         cmp byte [fd_transfer_command], FDC_CMD_READ
         jne .out
+        call dw_writable                ; gone while it waited?
+        jnz .fault
         call buffer_out                 ; a read: its bytes to the segment passed
 .out:
         ret

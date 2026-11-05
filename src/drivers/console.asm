@@ -84,16 +84,23 @@ serve:
         kcall KCALL_RECV
 .message:
         jc serve
+        cmp al, NOTIFY_LABEL
+        je serve                        ; its notification's bits: nothing to answer
         cmp al, DRV_CON_WRITE
-        jne serve
+        jne .unknown
         test bp, bp
         jz .written                     ; no segment came: nothing to write
+        verr bp                         ; (gone already: a program killed, l4.md L12)
+        jnz .unknown
         cmp bx, CON_STATUS
         je .status
         call write_main
         jmp .written
 .status:
         call write_status
+        jmp .written
+.unknown:
+        xor cx, cx                      ; nothing written
 .written:
         push cx
         mov dx, RECV                    ; the segment, used: room for the next

@@ -10,8 +10,8 @@
 ; segment's block and a buffer in its data, and calls the endpoint; the OS
 ; server (src/os/os.asm) makes the call and puts the results back. A buffer
 ; the program may not use so is passed on as XFER_BAD, past the transfer
-; segment's end, so that the kernel's own checks refuse it in their own
-; order. docs/syscalls.md describes it.
+; segment's end, so that the OS server refuses it after its other checks,
+; in the order the kernel's own checks had. docs/syscalls.md describes it.
 ; ============================================================================
 
 %ifndef RX286_OS_INC
@@ -50,9 +50,11 @@ OS_SLOT_ROOT        equ 160
 ROOT_INFO           equ 1       ; BX a module's number -> BX 0 or E_INVAL (no such module);
                                 ;    CL its kind (PS_*), CH its main thread's state
                                 ;    (STATE_*), SI its priority, DI the times it ran
-ROOT_KILL           equ 2       ; BX a module: stopped, if a background program -> BX 0,
-                                ;    or E_INVAL (not one), E_BUSY (stopped already)
-ROOT_START          equ 3       ; BX a module: started again, at its entry, if a stopped
-                                ;    background program -> BX 0, E_INVAL or E_BUSY (running)
+ROOT_KILL           equ 2       ; BX a module: killed, if a background program, its untyped
+                                ;    revoked -> BX 0, or E_INVAL (not one), E_BUSY (killed
+                                ;    already)
+ROOT_START          equ 3       ; BX a module: built again from its untyped, if a killed
+                                ;    background program -> BX 0, E_INVAL, E_BUSY (running)
+                                ;    or E_IO (a kernel call failed: nothing left built)
 
 %endif

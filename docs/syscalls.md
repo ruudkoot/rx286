@@ -43,7 +43,7 @@ and `program.inc` the macro `sys`, a call of the stub to the OS server:
 | 20 | `SYS_FREE` | AL = the drive | DX:AX = the bytes free on its volume; CF with `E_INVAL`, `E_NOT_FAT12`, `E_BROKEN`, the disk's errors |
 | 21 | `SYS_PS` | AL = a module's number, ES:DI = `PS_SIZE` bytes to fill | what runs it, as the root keeps it (*Programs*, below); CF with `E_INVAL` past the last module the root built, `E_FAULT` |
 | 22 | `SYS_KILL` | AL = a module's number | nothing: the background program killed, its memory free again; CF with `E_INVAL` (not a background program), `E_BUSY` (killed already) |
-| 23 | `SYS_START` | AL = a module's number | nothing: the killed background program built again and started, as at the start; CF with `E_INVAL`, `E_BUSY` (running already) |
+| 23 | `SYS_START` | AL = a module's number | nothing: the killed background program built again and started, as at the start; CF with `E_INVAL`, `E_BUSY` (running already), `E_IO` (the root could not build it: what it made is revoked, and the program stays killed) |
 | other | | | CF, AX = `E_NOSYS` |
 
 `SYSCALL_COUNT` is the number of calls.
@@ -201,11 +201,14 @@ it alone. `src/include/os.inc` holds the interface:
   state, priority and runs), `ROOT_KILL` and `ROOT_START`, for `SYS_PS`,
   `SYS_KILL` and `SYS_START`.
 - **What has no system calls:** the root, the OS server and the drivers,
-  which are not the OS server's clients; the counter; and threads a program
-  makes, whose spaces hold no endpoint to the OS server (the IPC test's
-  workers). They use the kernel's calls (*docs/kernel-calls.md*): their
-  lines go to the kernel's log (`KCALL_LOG`, which their `sys SYS_WRITE`
-  becomes: `KERNEL_LOG`), and the ticks come from `KCALL_TICKS`.
+  which are not the OS server's clients; and threads a program makes,
+  whose spaces hold no endpoint to the OS server (the IPC test's workers).
+  They use the kernel's calls (*docs/kernel-calls.md*): their lines go to
+  the kernel's log (`KCALL_LOG`, which their `sys SYS_WRITE` becomes:
+  `KERNEL_LOG`), and the ticks come from `KCALL_TICKS`. The counter, a
+  background program, makes one system call, `SYS_WRITE` for its report,
+  without the stub (`os_write`): its line goes to its field of the status
+  line.
 
 ## How a buffer is checked
 

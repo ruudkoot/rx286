@@ -41,14 +41,13 @@ kc_log:
         call con_emit
         inc si
         inc bx
-        ; Let interrupts in after every byte (STI acts after the next
-        ; instruction). Stop early if the thread is to restart.
-        STRETCH_END
-        sti
-        nop
-        cli
-        STRETCH_BEGIN (VEC_KCALL << 8) | KCALL_LOG
-        call kpreempt                   ; a more urgent thread may run here
+        ; Let interrupts in after every byte, and a more urgent thread run;
+        ; not with the caller's segment in ES, which a switch would reload
+        ; in ring 0 after its slot may have gone (l4.md X2): recheck_buffer
+        ; loads it again. Stop early if the thread is to restart.
+        push ds
+        pop es
+        KWINDOW (VEC_KCALL << 8) | KCALL_LOG
         cmp byte [restart_pending], 0
         jne .written
         loop .next

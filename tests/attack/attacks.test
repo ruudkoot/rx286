@@ -35,9 +35,9 @@ rx286: program fault #GP(0018) at 0007:{attacks.kstack_f}
 attack: video
 rx286: program fault #GP(0038) at 0007:{attacks.video_f}
 attack: beyond the GDT
-rx286: program fault #GP(0060) at 0007:{attacks.beyond_f}
+rx286: program fault #GP(01D0) at 0007:{attacks.beyond_f}
 attack: a selector past the LDT
-rx286: program fault #GP(0044) at 0007:{attacks.ldt_f}
+rx286: program fault #GP(0084) at 0007:{attacks.ldt_f}
 attack: call the kernel
 rx286: program fault #GP(0008) at 0007:{attacks.kcall}
 attack: jump to the TSS
@@ -145,7 +145,7 @@ attack: refused, error 3
 attack: a file's sector into the code
 attack: refused, error 1
 attack: an empty slot of the LDT
-rx286: program fault #GP(003C) at 0007:{attacks.empty_f}
+rx286: program fault #GP(007C) at 0007:{attacks.empty_f}
 attack: every slot of the LDT
 attack: slot 0007 lar FB00 lsl 1FFF r-
 attack: slot 000F lar F300 lsl 1FFF rw
@@ -155,6 +155,14 @@ attack: slot 0027 lar FFFF lsl FFFF --
 attack: slot 002F lar FFFF lsl FFFF --
 attack: slot 0037 lar FFFF lsl FFFF --
 attack: slot 003F lar FFFF lsl FFFF --
+attack: slot 0047 lar FFFF lsl FFFF --
+attack: slot 004F lar F300 lsl 100F rw
+attack: slot 0057 lar FFFF lsl FFFF --
+attack: slot 005F lar FFFF lsl FFFF --
+attack: slot 0067 lar FFFF lsl FFFF --
+attack: slot 006F lar FFFF lsl FFFF --
+attack: slot 0077 lar FFFF lsl FFFF --
+attack: slot 007F lar FFFF lsl FFFF --
 attack: probe: data not present
 rx286: program fault #GP(0000) at 0007:{attacks.pds_f}
 attack: probe: execute-only code for data

@@ -6,13 +6,12 @@
 ; builds and starts (roadmap l4.md L5). A program's code, data and stack are
 ; slots 0, 1 and 2 of its space; it starts with its registers zero, IF on
 ; and IOPL 0 (or 1: D11). A fault of a thread that has a fault endpoint is
-; a call on that endpoint, which its handler - the root - answers by
-; reporting it and restarting it (l4.md D18); a thread without one is
-; reported by the kernel (and its registers, in debug and test builds). A
-; restart begins at its entry with a fresh stack and a fresh 287; the
-; program the keys are for also with an empty keyboard ring. The kernel
-; does not reset a program's data: its entry code initialises what it
-; needs.
+; a call on that endpoint, which its handler - the OS server for a
+; program, the root for the rest - answers by reporting it and restarting
+; it (l4.md D18); a thread without one is reported by the kernel (and its
+; registers, in debug and test builds). A restart begins at its entry with
+; a fresh stack and a fresh 287. The kernel does not reset a program's
+; data: its entry code initialises what it needs.
 ; ============================================================================
 
 begin_kdata

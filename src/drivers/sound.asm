@@ -73,16 +73,23 @@ serve:
         kcall KCALL_RECV
 .message:
         jc serve
-        cmp al, DRV_SOUND
+        cmp al, NOTIFY_LABEL
+        je serve                        ; its notification's bits: a stop or a
+        cmp al, DRV_SOUND               ; timer left over, nothing to answer
         je .sound
+        mov bx, E_INVAL                 ; a call it does not know
         cmp al, DRV_JOYSTICK
-        jne serve                       ; its notification's bits: a stop or a
-        call joystick                   ; timer left over, nothing to answer
+        jne .unknown
+        call joystick
         mov dx, RECV                    ; the segment, used: room for the next
         kcall KCALL_DELETE
         jmp .reply
 .sound:
         call sound                      ; BX the status
+        jmp .reply
+.unknown:
+        mov dx, RECV
+        kcall KCALL_DELETE
 .reply:
         mov dx, EP
         mov bp, RECV
@@ -180,6 +187,8 @@ speaker_off:
 joystick:
         test bp, bp
         jz .done
+        verw bp                         ; (a program killed meanwhile: l4.md L12)
+        jnz .done
         mov dx, GAME_PORT
         in al, dx
         not al
@@ -190,6 +199,8 @@ joystick:
         push ds
         pop es
         call joy_axes
+        verw bp
+        jnz .done
         mov es, bp
         mov ax, [joy_times]
         mov [es:XFER_BX], ax

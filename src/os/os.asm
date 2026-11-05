@@ -609,7 +609,11 @@ forward:
         mov word [XFER_FLAGS], 0        ; every register kept
         jmp .done
 .read_key:
-        ; SYS_READ_KEY: the keyboard driver's ring; a wait asks it once a tick
+        ; SYS_READ_KEY: the keyboard driver's ring; a wait asks it once a
+        ; tick. The keys are the foreground program's alone (l4.md L13)
+        call foreground
+        mov ax, E_BUSY
+        jnz .error
         mov al, [XFER_AX]
         cmp al, KEY_POLL
         je .poll
@@ -717,6 +721,8 @@ events_there:
         xor ah, ah
         test byte [XFER_AX], WAIT_KEY
         jz .mouse
+        call foreground                 ; a background program's: never a key
+        jnz .mouse
         push ax
         mov dx, OS_KEYBOARD
         mov al, DRV_KBD_PEEK
@@ -752,6 +758,28 @@ events_there:
         or ah, WAIT_SERIAL
 .done:
         mov al, ah
+        ret
+
+; ----------------------------------------------------------------------------
+; foreground - is this thread's program the one the keys are for?
+;   In:       nothing (the thread's program)
+;   Out:      ZF set if so
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+foreground:
+        push ax
+        push di
+        push es
+        call module_entry
+        test byte [es:di + M_FLAGS], MF_FOREGROUND
+        pop es
+        pop di
+        pop ax
+        jz .not
+        cmp ax, ax                      ; ZF set
+        ret
+.not:
+        or sp, sp                       ; ZF clear (SP is not 0)
         ret
 
 ; ----------------------------------------------------------------------------

@@ -16,9 +16,12 @@
 ;
 ; The OS server takes what is in the ring for SYS_SERIAL_READ, which never
 ; waits, and asks whether bytes wait for SYS_WAIT (DRV_SERIAL_NEWS).
-; SYS_SERIAL_WRITE sends each byte once the UART can take it, for 2 s at
-; most. In debug and test builds COM2 is the kernel's log: the driver never
-; touches it, and answers E_BUSY.
+; SYS_SERIAL_WRITE sends bytes whenever the UART can take them, for 2 s at
+; most: a FIFO's worth (16 bytes) at a time on a 16550, one on a 16450, so
+; the driver sleeps between rather than spinning. A segment passed is looked
+; at again after each wait, since its program may have been killed
+; meanwhile (roadmap l4.md L12). In debug and test builds COM2 is the
+; kernel's log: the driver never touches it, and answers E_BUSY.
 ; ============================================================================
 
 cpu 286
@@ -47,6 +50,7 @@ ring_tail           db 0                ; where the next byte goes
 dropped             dw 0                ; bytes lost to a full ring
 overruns            dw 0                ; bytes the UART lost before they were read
 irq_seen            db 0                ; set when IRQ3 came (dwait.asm)
+fifo_bytes          dw 1                ; bytes the UART takes when it is empty
 end_udata
 
 ; ----------------------------------------------------------------------------
@@ -170,6 +174,13 @@ serial_init:
         mov dx, COM2_BASE + UART_FCR
         mov al, UART_FCR_FIFO
         out dx, al
+        mov dx, COM2_BASE + UART_IIR
+        in al, dx
+        and al, UART_IIR_FIFO
+        cmp al, UART_IIR_FIFO
+        jne .no_fifo
+        mov word [fifo_bytes], UART_FIFO_BYTES
+.no_fifo:
         mov dx, COM2_BASE + UART_RBR
         in al, dx                       ; nothing stale
         mov dx, COM2_BASE + UART_IER
@@ -181,18 +192,17 @@ serial_init:
         ret
 
 ; ----------------------------------------------------------------------------
-; serial_write - bytes of the segment passed, on COM2, each once the UART
-; can take it
+; serial_write - bytes of the segment passed, on COM2, as many as the UART
+; takes each time it is empty
 ;   In:       CX = bytes; SI = their offset; BP = the segment (0: none came)
 ;   Out:      BX = 0 or E_FAULT, E_TIMEOUT; CX = the bytes sent
-;   Destroys: AX, DX, SI, ES
+;   Destroys: AX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 serial_write:
         xor bx, bx                      ; BX = bytes sent
         jcxz .done
         test bp, bp
         jz .fault
-        mov es, bp
 .next:
         push cx
         mov dx, COM2_BASE + UART_LSR
@@ -202,12 +212,21 @@ serial_write:
         call dw_poll
         pop cx
         jc .late
-        mov al, [es:si]
+        call dw_readable                ; still there after the wait?
+        jnz .gone
+        mov es, bp
+        mov di, [fifo_bytes]
         mov dx, COM2_BASE + UART_THR
+.burst:
+        mov al, [es:si]
         out dx, al
         inc si
         inc bx
-        loop .next
+        dec cx
+        jz .done
+        dec di
+        jnz .burst
+        jmp .next
 .done:
         mov cx, bx
         xor bx, bx
@@ -216,6 +235,8 @@ serial_write:
         mov cx, bx
         mov bx, E_TIMEOUT
         ret
+.gone:
+        mov cx, bx
 .fault:
         mov bx, E_FAULT
         ret

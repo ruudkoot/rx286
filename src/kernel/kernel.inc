@@ -68,6 +68,11 @@ T_BOUND             equ 44      ; its bound notification, or 0
 T_CALLS             equ 46      ; the calls it has made: a stale reply cannot answer a later one
 T_FPU               equ 48      ; its 287's state (FNSAVE: 94 bytes) while not the owner
 T_FAULT_BADGE       equ 142     ; the badge of the fault endpoint's capability
+T_WAY_BACK          equ 144     ; byte: faults reported on this way back (isr_exit)
+T_REVOKE_SPACE      equ 146     ; what its KCALL_REVOKE revokes, across its windows
+T_REVOKE_SLOT       equ 148
+T_REVOKE_CHILD      equ 150     ; and the child it deletes next: its space
+T_REVOKE_CHILD_SLOT equ 152     ;    and its slot
 TCB_SIZE            equ 160
 %if T_FPU + 94 > T_FAULT_BADGE
   %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
@@ -93,7 +98,9 @@ SP_DEAD             equ 4       ; byte: 1 once its last capability went (revoke.
 SP_HEADER_SIZE      equ 16
 SP_LDT              equ SP_HEADER_SIZE
 SH_TYPE             equ 0       ; byte: CAP_*
-SH_RIGHTS           equ 1       ; byte
+SH_RIGHTS           equ 1       ; byte: RIGHT_*, and SR_PARENT
+SR_PARENT           equ 0x80    ; a capability has named it as its parent: a delete looks for
+                                ;    its children (revoke.asm); none has, if clear
 SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's base in
                                 ; paragraphs (a segment, untyped); an IRQ line
 SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
@@ -140,6 +147,8 @@ TF_IOPL             equ 0x04    ; it runs with IOPL 1 (a ring-1 thread that aske
 TF_SESSION          equ 0x08    ; it serves one client, and starts again with it
 TF_DEAD             equ 0x10    ; its last capability went while it ran: it dies at its
                                 ; way back (revoke.asm)
+TF_ORPHAN           equ 0x20    ; its space died while it ran: at its way back it stops,
+                                ; to be configured again (revoke.asm)
 
 PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
@@ -198,6 +207,17 @@ VECTOR_NAME_CHARS   equ 3       ; "#GP", "NMI": the longest name of an exception
 %ifdef TEST_STRETCH
         call stretch_end
 %endif
+%endmacro
+
+; KWINDOW place - interrupts in for an instruction, and a more urgent
+; thread let run: inside a long kernel call, where its state is whole
+%macro KWINDOW 1
+        STRETCH_END
+        sti                             ; (STI acts after the next instruction)
+        nop
+        cli
+        STRETCH_BEGIN %1
+        call kpreempt
 %endmacro
 
 

@@ -47,8 +47,10 @@ SYS_FREE            equ 20  ; AL drive -> DX:AX the bytes free on its volume
 ; The programs, as the root keeps them (roadmap l4.md L11, D19)
 SYS_PS              equ 21  ; AL a module's number -> ES:DI what runs it (PS_SIZE bytes);
                             ;    E_INVAL past the last module
-SYS_KILL            equ 22  ; AL a module: a background program, stopped
-SYS_START           equ 23  ; AL a module: a stopped background program, started again
+SYS_KILL            equ 22  ; AL a module: a background program killed, all made for it
+                            ;    revoked and its memory free (E_INVAL, E_BUSY: killed)
+SYS_START           equ 23  ; AL a module: a killed background program built again, from
+                            ;    its module (E_INVAL, E_BUSY: running, E_IO: no room)
 SYSCALL_COUNT       equ 24
 
 PATH_MAX            equ 64  ; DOS's longest path, the drive's letter not counted

@@ -33,7 +33,7 @@ idle_tcb:
         dw msg_thread_idle              ; T_NAME
         times TCB_SIZE - T_SLICE db 0
 cur_thread          dw idle_tcb         ; the thread running
-fg_thread           dw idle_tcb         ; the thread the keys and Ctrl+Break are for
+fg_thread           dw idle_tcb         ; START_FOREGROUND's: the test hooks follow it
 call_owner          dw 0                ; the thread writing to the log, or 0
 resched             db 0                ; a thread should give way: at the next chance
 ready_mask          db 0                ; bit n: queue n is not empty
@@ -673,6 +673,8 @@ thread_dump:
         inc di
         jmp .thread
 .done:
+        push ds                         ; ES held a thread's stack: not across a switch
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------

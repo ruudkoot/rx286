@@ -135,7 +135,8 @@ every other line.
 All gates but the double fault's are interrupt gates, so the kernel runs with
 IF clear and nothing interleaves with a half-done change. Since the devices
 left it (roadmap l4.md L7-L10), no kernel path waits for one, and it sets IF
-in two places only, each where its state is whole:
+in three places only, each where its state is whole (the `KWINDOW` macro,
+but for the idle loop):
 
 - **The log's bytes** (`KCALL_LOG`, *docs/kernel-calls.md*), after each
   one: `sti; nop; cli`. `STI` takes effect after the next instruction, so
@@ -143,24 +144,34 @@ in two places only, each where its state is whole:
   would keep IF clear for a third of a second at the log's 115,200 baud.
   Before it writes a byte, a thread waits its turn at the log (`kwait`),
   so that lines never mix.
+- **A revocation's passes** (`KCALL_REVOKE`, and the objects a delete
+  takes with it: `revoke.asm`), after each search for a child and after
+  each capability deleted. The
+  revocation's place is kept in the thread's control block, so another
+  thread's revocation may run meanwhile; one whose thread is to restart
+  stops there (roadmap l4.md L13).
 - **The idle loop**: with no thread ready, the kernel halts on its own
   stack (`sti; hlt; cli`).
 
-After a window of the log, a thread more urgent than the running one may
-run (`kpreempt`): the running thread's kernel context waits on its own
-kernel stack. Everything else - IPC, capabilities, the timer's tick - runs
-to its end with interrupts off. The drivers run with interrupts on, in ring
-1; only the sound driver turns them off, while it times the game port's
-axes: 4 ms at most, a fifth of a tick, so no tick is lost.
+After a window of the log or of a revocation, a thread more urgent than
+the running one may run (`kpreempt`): the running thread's kernel context
+waits on its own kernel stack. Everything else - IPC, the other calls on
+capabilities, the timer's tick - runs to its end with interrupts off. The
+drivers run with interrupts on, in ring 1, and a wait that polls sleeps a
+tick after each burst of reads (`dw_poll`); only the sound driver turns
+interrupts off, while it times the game port's axes: 4 ms at most, a fifth
+of a tick, so no tick is lost.
 
 **How long.** Test builds made with `TEST_STRETCH` measure every stretch
 with interrupts off, with timer channel 0's latched count, from the
 kernel's entry or a window's end to the next window or `IRET`, and say at
 the end of a test how long the longest was and where
-(`tests/kernel/stretch.test`; roadmaps/realtime.md R0). On MAME's AT, which
-runs at an AT's speed: 4.5 ms at most in a test build, most of it a trace
-line on the log, written whole; 3.4 ms without the log's bytes, which a
-release build does not have: `KCALL_RETYPE` zeroing a segment of 8 KB.
+(`tests/kernel/stretch.test`, `stretch-kill.test`; roadmaps/realtime.md
+R0). On MAME's AT, which runs at an AT's speed: 4.5 ms at most in a test
+build, most of it a trace line on the log, written whole; 3.5 ms without
+the log's bytes, which a release build does not have. A kill is the longest
+work: 6.5 ms, one pass of its revocation over every slot of every space,
+which a window ends.
 
 An IRQ at either point nests once on the running thread's kernel stack
 (or the kernel's own, when it idles): handlers run with IF clear and never

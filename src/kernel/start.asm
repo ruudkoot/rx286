@@ -4,10 +4,10 @@
 ;
 ; entry.asm jumps here at CPL 0 with interrupts and NMI off. The order
 ; matters: the stacks are zeroed before one is used; the TSS is loaded before
-; anything could interrupt from ring 3; LDTR is loaded with the program's
-; LDT, never left as Bochs' live one at address 0 (roadmap X8); the 8259As
-; are reprogrammed before interrupts are enabled (X1); the devices are set
-; up before their lines are unmasked. NMI comes on with the clock's set-up
+; anything could interrupt from ring 3; LDTR is loaded with null until a
+; thread runs, never left as Bochs' live one at address 0 (roadmap X8); the
+; 8259As are reprogrammed before interrupts are enabled (X1); the devices
+; are set up before their lines are unmasked. NMI comes on with the clock's set-up
 ; (any write of the CMOS index with bit 7 clear enables it), once every
 ; handler is in place.
 ; ============================================================================
@@ -66,7 +66,7 @@ pm_start:
         call pic_unmask_all
         mov al, CMOS_REG_D              ; bit 7 clear: NMI on
         out CMOS_INDEX, al
-        TRACE "kernel: timer, keyboard and clock ready; every IRQ line unmasked"
+        TRACE "kernel: timer and clock ready; every IRQ line unmasked"
 %ifdef TEST_IMAGE_SUM
         LOG_NUMBER "kernel image sum ", [test_image_sum]
 %endif

@@ -21,6 +21,7 @@
 ; ============================================================================
 
 TIMER_MAX           equ 16              ; timers armed at once: one a notification
+TIMER_TICKS_MAX     equ 0x7FFF          ; ten minutes and more
 TIMER_SIZE          equ 6
 TM_NOTIFY           equ 0               ; the notification, or 0: free
 TM_BITS             equ 2
@@ -204,6 +205,10 @@ deliver:
         jc .done
         cmp byte [si + SH_TYPE], CAP_EMPTY
         je .done
+        cmp byte [si + SH_TYPE], CAP_UNTYPED
+        je .done                        ; untyped is moved, never shared: two
+        cmp byte [si + SH_TYPE], CAP_REPLY  ; retypes would carve the same memory;
+        je .done                        ; a reply is answered once (l4.md L13)
         mov [dl_slot], ax
         push ds
         pop es
@@ -221,6 +226,8 @@ deliver:
         mov [di + SH_PARENT], bx        ; its parent: the sender's space and slot
         mov ax, [dl_slot]
         mov [di + SH_PARENT_SLOT], ax
+        and byte [di + SH_RIGHTS], ~SR_PARENT & 0xFF    ; new: no child yet
+        call parent_mark                ; the sender's: a parent now
         pop bx                          ; the receiver: BP = the selector, at its ring
         push bx
         mov ax, [bx + T_RSLOT]
@@ -760,6 +767,8 @@ kc_timer:
         jz kc_done.cap
         cmp word [bp + FRAME_CX], 0
         je kc_done.arg
+        cmp word [bp + FRAME_CX], TIMER_TICKS_MAX
+        ja kc_done.arg                  ; (a due tick is compared signed)
         mov ax, [si + SH_OBJECT]
         mov di, timers                  ; its own timer, armed again
         mov cx, TIMER_MAX
@@ -823,8 +832,9 @@ timers_tick:
         ret
 
 ; ----------------------------------------------------------------------------
-; kc_delete - KCALL_DELETE: empty a slot of the caller's (what it named
-; lives on: revocation is L12's)
+; kc_delete - KCALL_DELETE: empty a slot of the caller's; its children
+; become its parent's, and the last capability to an object takes the
+; object with it (revoke.asm; l4.md L12)
 ;   In:       BP = the frame (DX the slot)
 ;   Out:      the frame's status
 ;   Destroys: AX, BX, CX, SI, DI, ES

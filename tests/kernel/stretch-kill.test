@@ -1,0 +1,14 @@
+# roadmaps/realtime.md R0 across a kill and a start (roadmap l4.md L12,
+# L13): the clock killed, everything made for it revoked a capability at a
+# time with a window after each, then built again; the kernel still never
+# keeps interrupts off for half a tick. Without the windows a kill is one
+# stretch over every slot of every space, for each capability it deletes.
+program: shell
+define: TEST_STRETCH
+define: TEST_DEMO
+keys: {wait 100}kill clock\n{wait 50}start clock\n{wait 50}
+timeout: 60
+emulators: bochs mame
+match: contains
+---
+rx286: interrupts never off for 10 ms

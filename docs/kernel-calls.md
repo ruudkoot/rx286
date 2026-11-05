@@ -69,10 +69,10 @@ milestone.
 | 5 | `KCALL_SIGNAL` | DX a notification | |
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots; untyped: CX paragraphs | the object made, zeroed, its capability in the slot |
-| 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; BX a badge (mint) | the capability there |
+| 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; a mint: BX the badge, CL the rights it keeps (`RIGHT_*`; 0: all) | the capability there |
 | 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint), `THREAD_RESTART`, `THREAD_STOP` or `THREAD_INFO` | `THREAD_INFO`: BL its state (`STATE_*`), BH its priority, CX how often it ran |
 | 10 | `KCALL_IRQ` | DX an interrupt line; AL `IRQ_BIND` (SI a notification) or `IRQ_ACK` | the line unmasked |
-| 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 or more | |
+| 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 to 7FFFh (`KE_ARG` otherwise) | |
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
 | 14 | `KCALL_SAVE_REPLY` | SI an empty slot of the caller's | the reply owed, as a `CAP_REPLY` there |
@@ -106,8 +106,11 @@ shadow entry: a later object that fits goes there first (roadmap l4.md L10):
 
 - **Copy** puts a second capability to the same thing in the slot; **move**
   empties the source; **mint** copies an endpoint or a notification that has
-  no badge yet with a badge, which can never be changed. Untyped memory is
-  moved, never copied.
+  no badge yet with a badge, which can never be changed, and with fewer
+  rights if CL names them. Untyped memory and a saved reply are moved,
+  never copied (`KE_ARG`), and a message may not grant them (they are left
+  out of it): two retypes of the same untyped would carve the same memory,
+  and a reply is answered once (roadmap l4.md L13).
 - **A copy records its parent:** the space and slot it came from, for
   revocation (roadmap l4.md L12). A move takes the capability's children
   with it.
@@ -123,9 +126,11 @@ A thread made by retype is configured, then started:
   its DPL is the thread's ring (never 0).
 - **Start** puts it in the scheduler at a priority. `START_IOPL` asks for
   IOPL 1, which goes only to a thread of ring 1 (roadmap l4.md D11);
-  `START_FOREGROUND` makes it the program the keys and Ctrl+Break are for,
-  which only a thread of ring 1 or 2 may say (the root does, until the
-  keyboard leaves the kernel: l4.md L8).
+  `START_FOREGROUND` marks it as the program the keys are for, which only
+  a thread of ring 1 or 2 may say. Since the keyboard left the kernel
+  (l4.md L8) the mark serves only the kernel's test hooks, which follow
+  that program; the keys and Ctrl+Break are the keyboard driver's and the
+  OS server's (*docs/os-server.md*).
 - A thread is configured and started once: `KE_STATE` after that.
 - **Bind** ties it to a notification it may receive on, in any state: one
   each, so binding again unbinds the old.
@@ -192,9 +197,10 @@ A notification is a word of bits, for events and interrupts:
 to timeouts: a driver waits on one notification, bound or not, for its
 interrupt or its timer, whichever comes first. A notification has one
 timer at most: arming it again replaces the one armed, so a wait's timer
-left behind cannot use the kernel's up (roadmap l4.md L9). Eight
-notifications can have a timer armed at once across the system: `KE_POOL`
-after that.
+left behind cannot use the kernel's up (roadmap l4.md L9). Sixteen
+notifications (`TIMER_MAX`) can have a timer armed at once across the
+system: `KE_POOL` after that. A timer is at most 7FFFh ticks away, about
+11 minutes.
 
 ### Stopping a thread
 
@@ -262,7 +268,11 @@ copied, minted or granted from, or the untyped it was retyped from
 
 - **`KCALL_DELETE`** empties a slot of the caller's. Its children become its
   parent's, so the tree holds. A segment deleted while DS or ES holds it is
-  gone at once, as for a move: the way back makes the register null.
+  gone at once, as for a move: the way back makes the register null. A
+  delete looks through every slot of every space once, for the children and
+  for another capability to the object; not at all for a slot no capability
+  was ever copied, minted, granted or retyped from (`SR_PARENT`) that names
+  no object, such as the segment a driver was passed (roadmap l4.md L13).
 - **The last capability to an object** takes the object with it:
   - an endpoint: every thread queued on it, to send or to receive, fails
     with `KE_CAP`, and no thread's faults go to it any more;
@@ -279,11 +289,18 @@ copied, minted or granted from, or the untyped it was retyped from
   - an interrupt line: unbound.
   Segments and untyped are memory: nothing dies with them.
 - **`KCALL_REVOKE`** deletes every capability below a slot, in every space,
-  a leaf at a time, and keeps the slot's own. Revoking untyped deletes
+  and keeps the slot's own: each child of the slot in turn, whose own
+  children become the slot's, until it has none. Revoking untyped deletes
   everything made from it, so none of its memory is used any more: its
   watermark and hole go back to 0, and the next retype uses it again,
-  zeroed. The tree is searched slot by slot over every space, with
-  interrupts off: a revoke is slow, and kept for rare work such as `kill`.
+  zeroed. (The root's untyped in slots 3 and 4 begin past what the kernel
+  made for the root itself, which is no child of theirs.) The tree is
+  searched slot by slot over every space: a revoke is slow, and kept for
+  rare work such as `kill`. Interrupts are open after each search - for a
+  child, and to delete it - and other threads may run there; a child that
+  is no longer the slot's after a window is left to the next search. A
+  thread that is to restart meanwhile gives the revoke up, partly done, and
+  may call it again (roadmap l4.md L13).
 
 ## Errors
 
@@ -316,7 +333,11 @@ has `ROOT_SLOTS` slots:
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
 | 111 | `ROOT_SLOT_VIDEO` | the screen's text page, a segment of DPL 1, for the console driver |
 | 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
-| 128-255 | | the root's own: eight slots for each module it builds (roadmap l4.md L10) |
+
+The rest are the root's own (*docs/root.md*): its fault endpoint (36), a
+scratch slot (37), a background program's own untyped from 38 on, the OS
+server's control notification (110), and from 128 on eight slots for each
+module it builds (roadmap l4.md L10, L12).
 
 The root (`src/root/root.asm`) builds a space for every other module: the
 module's code copied in as slot 0; a data segment of its room, initialised

@@ -3,9 +3,10 @@
 ; The selectors: the GDT's, which are the kernel's, and the program's LDT's.
 ;
 ; A selector is index * 8 + TI * 4 + RPL. The GDT holds only descriptors of
-; DPL 0 (roadmap l4.md L1): the kernel's segments, its tasks, the screen and
-; the program's LDT. The program's own segments are in that LDT (TI = 1) and
-; carry RPL 3. docs/protected-mode.md describes each descriptor.
+; DPL 0 (roadmap l4.md L1): the kernel's segments, its tasks, the screen,
+; each space's LDT and each thread's kernel stack. A program's own segments
+; are in its space's LDT (TI = 1) and carry RPL 3. docs/protected-mode.md
+; describes each descriptor.
 ; ============================================================================
 
 %ifndef RX286_SELECTORS_INC
@@ -45,7 +46,5 @@ SEL_UCODE           equ 0x00 | SEL_TI_LDT | RPL_USER    ; the program's code
 SEL_UDATA           equ 0x08 | SEL_TI_LDT | RPL_USER    ; its data
 SEL_USTACK          equ 0x10 | SEL_TI_LDT | RPL_USER    ; its stack
 SEL_UFUZZ           equ 0x18 | SEL_TI_LDT | RPL_USER    ; fuzzer builds: code over UDATA
-LDT_ENTRIES         equ 8
-LDT_LIMIT           equ LDT_ENTRIES * 8 - 1
 
 %endif
