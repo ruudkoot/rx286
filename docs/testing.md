@@ -102,7 +102,7 @@ The suites:
 | `tests/boot` | the boot sector and loader: every word of `KERNEL.BIN` arrives (contiguous, fragmented, and past 64 KB), a missing, truncated or oversized one, a disk without a loader |
 | `tests/rings` | attacks from ring 2 (`IN`, `OUT`, `CLI`, the kernel's data, binding the timer's line; IOPL asked for and refused) and from ring 1 with IOPL (`HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT`, the kernel's data) |
 | `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; a boot image without a root, or with a module outside it, refused by the loader |
-| `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break and Ctrl+Alt+Del, through the keyboard driver and the OS server (`tests/programs/keys.asm`), the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC |
+| `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break and Ctrl+Alt+Del, through the keyboard driver and the OS server (`tests/programs/keys.asm`), the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC, the longest stretch with interrupts off (`stretch.test`, roadmaps/realtime.md R0) |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
 | `tests/syscalls` | every system call with good and bad arguments, through the OS server; `write`'s interrupt window; a call past the transfer segment's end; the file calls on the boot diskette (`files.test`, not on DOSBox-X) |
 | `tests/storage` | the disk and printer calls: known sectors of every drive, a marked sector written to each and found on the host's image, bad arguments, a line on each printer, a diskette missing or write-protected, a fixed disk missing |
@@ -113,8 +113,8 @@ The suites:
 | `tests/caps` | the kernel's calls on capabilities: every kind of object retyped, every refusal, a space built for a new thread by copy, move and mint, the thread started (*docs/kernel-calls.md*) |
 | `tests/ipc` | IPC between threads the program makes: 1,000 calls; a segment passed, deleted, passed again, kept and refused; the kernel's timer; a saved reply; three callers queued, served in order with their badges; notifications, bound and not; a client above its server and below it; every refusal; a call nobody answers, ended by Ctrl+Break (Bochs and MAME) |
 | `tests/timing` | the instructions of an IPC round trip, on Bochs, against a budget: a regression check, since no emulator gives an AT's clocks |
-| `tests/attack` | 74 attacks (*docs/security.md*) |
-| `tests/fuzz` | 10,000 iterations of random code in ring 3, with random calls on `INT 30h` and `INT 31h` |
+| `tests/attack` | 82 attacks (*docs/security.md*) |
+| `tests/fuzz` | 10,000 iterations of random code in ring 3, with random system calls through the stub and random kernel calls on `INT 31h` |
 | `tests/unit` | the host tests (layer 3) |
 
 ## 5. The attack suite and the fuzzer

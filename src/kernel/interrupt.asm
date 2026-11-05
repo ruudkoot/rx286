@@ -45,6 +45,15 @@ isr_common:
         mov ds, ax
         mov es, ax
         cld
+%ifdef TEST_STRETCH
+        mov ah, [bp + FRAME_VECTOR]     ; the place: the vector, and a kernel call
+        xor al, al
+        cmp ah, VEC_KCALL
+        jne .place
+        mov al, [bp + FRAME_AX + 1]
+.place:
+        STRETCH_BEGIN ax
+%endif
         mov bx, [bp + FRAME_VECTOR]
         shl bx, 1
         call [isr_handlers + bx]
@@ -76,7 +85,7 @@ isr_exit:
         jc .check_segments              ; and its segments are checked in turn
 .check_ip:
         ; IRET checks the return IP against CS's limit (Intel B-51) and would
-        ; fault here, in ring 0: a program whose INT 30h is its segment's last
+        ; fault here, in ring 0: a program whose INT 31h is its segment's last
         ; two bytes, or one interrupted at an IP past its limit (a 286 checks
         ; the limit when it fetches). That is the program's #GP.
         mov ax, [bp + FRAME_CS]
@@ -88,6 +97,7 @@ isr_exit:
         call fault_program
         jmp .check_segments
 .restore:
+        STRETCH_END
         pop es
         pop ds
         popa
@@ -211,10 +221,10 @@ isr_handlers:
         dw exception
   %elif vector <= VEC_IRQ_LAST
         dw irq
-  %elif vector == VEC_SYSCALL
-        dw syscall
-  %else
+  %elif vector == VEC_KCALL
         dw kcall_handler
+  %else
+        dw exception                    ; 30h: only from ring 0, which never does
   %endif
   %assign vector vector + 1
 %endrep

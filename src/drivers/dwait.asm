@@ -8,7 +8,7 @@
 ; DRV_IRQ_BIT, and a one-tick timer of the kernel's DRV_TIMER_BIT, so the
 ; driver looks at the time once a tick; a timer that comes after it is no
 ; longer wanted only makes another look. The ticks are the kernel's
-; (SYS_TICKS). The driver that includes this defines NOTIFY and IRQ (its
+; (KCALL_TICKS). The driver that includes this defines NOTIFY and IRQ (its
 ; slots' selectors), irq_seen (a byte, set here when the interrupt came),
 ; and driver_irq (what the interrupt needs at once: the fixed disk reads its
 ; status); each wait acknowledges the interrupt, so the line is on again.
@@ -22,8 +22,7 @@
 ; ----------------------------------------------------------------------------
 dw_ticks:
         push dx
-        mov ah, SYS_TICKS
-        int SYSCALL_VECTOR
+        kcall KCALL_TICKS
         pop dx
         ret
 

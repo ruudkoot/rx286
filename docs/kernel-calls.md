@@ -1,11 +1,11 @@
 # The kernel's calls: capabilities and IPC
 
-`INT 31h` (`KCALL_VECTOR`), an interrupt gate of DPL 3, is the kernel's own
-interface: calls on capabilities and IPC between threads (roadmap l4.md
-L3-L5, D20). Today's system
-calls stay on `INT 30h` (*docs/syscalls.md*) until the OS server takes them
-over. `src/include/kcalls.inc` holds the numbers, the types and the macro
-`kcall`:
+`INT 31h` (`KCALL_VECTOR`), an interrupt gate of DPL 3, is the kernel's
+only interface (roadmap l4.md L3-L5, L10, D20): calls on capabilities, IPC
+between threads, the timer, the ticks and the log. The system calls are the
+OS server's (*docs/syscalls.md*); `INT 30h`, theirs until L10, faults like
+any vector of the kernel's. `src/include/kcalls.inc` holds the numbers, the
+types and the macro `kcall`:
 
 ```nasm
         mov dx, UT_MEMORY               ; an untyped capability
@@ -54,8 +54,9 @@ wrong type. The GDT holds nothing a program could name.
 ## The calls
 
 AH is the call. The status comes back in AL, with CF set on an error;
-`KCALL_SEGMENT` returns data in AX, so its status is CF alone, and a
-receive returns the message's label in AL with CF clear. `KCALL_COUNT` is
+`KCALL_SEGMENT`, `KCALL_LOG` and `KCALL_TICKS` return data in AX, so their
+status is CF alone (and AX the error), and a receive returns the message's
+label in AL with CF clear. `KCALL_COUNT` is
 the number of calls; the ones not listed answer `KE_NOSYS` until their
 milestone.
 
@@ -76,12 +77,15 @@ milestone.
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
 | 14 | `KCALL_SAVE_REPLY` | SI an empty slot of the caller's | the reply owed, as a `CAP_REPLY` there |
 | 16 | `KCALL_TEST` | debug and test builds: AL `TEST_*` (*In test builds*, below) | |
+| 17 | `KCALL_LOG` | DS:SI bytes, CX how many (`LOG_MAX` at most) | AX the bytes written to the kernel's log (fewer if the thread is to restart); or `KE_ARG`, `KE_CAP` (a buffer the caller may not read) |
+| 18 | `KCALL_TICKS` | | DX:AX the ticks since the start, `TICKS_HZ` (50) a second |
 
 ### Retype
 
 Retype makes an object from untyped memory, at the untyped's next address
 aligned to the object's size (`retype_place`, `src/lib/caps.asm`), and
-zeroes it:
+zeroes it. The room an alignment skips is the untyped's hole, kept in its
+shadow entry: a later object that fits goes there first (roadmap l4.md L10):
 
 - **Kernel objects** - spaces, threads, endpoints, notifications - only from
   the arena's untyped. A thread takes a kernel stack's descriptor, and a
@@ -185,6 +189,20 @@ left behind cannot use the kernel's up (roadmap l4.md L9). Eight
 notifications can have a timer armed at once across the system: `KE_POOL`
 after that.
 
+### The log and the ticks
+
+`KCALL_LOG` writes bytes to the kernel's log (roadmap l4.md L10, D15): COM2
+in debug and test builds (COM3 when COM2 is the modem), which every test
+reads; and the screen, until the threads start. The OS server writes a
+program's `SYS_WRITE` there, before the console driver writes the screen;
+the root, the drivers and the test programs' workers write their own lines.
+The buffer is checked as the stub checks a system call's
+(*docs/syscalls.md*), against the caller's CS, and again after every
+interrupt window: interrupts come in after each byte, and a thread more
+urgent may run. One thread's line at a time: a thread that finds another
+writing waits its turn, so lines never mix. `KCALL_TICKS` gives the
+timer's count, 50 a second, 32 bits.
+
 ### Faults
 
 A thread with a fault endpoint does not fault alone (roadmap l4.md D18):
@@ -244,14 +262,17 @@ has `ROOT_SLOTS` slots:
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
 | 111 | `ROOT_SLOT_VIDEO` | the screen's text page, a segment of DPL 1, for the console driver |
 | 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
+| 128-255 | | the root's own: eight slots for each module it builds (roadmap l4.md L10) |
 
 The root (`src/root/root.asm`) builds a space for every other module: the
 module's code copied in as slot 0; a data segment of its room, initialised
 from its data, as slot 1; a stack as slot 2. The OS server's module ("os")
-gets a thread for each program, which serves it alone (`START_SESSION`),
-and the program's capabilities (*docs/syscalls.md*), and for each program
-a files segment of `FILES_SIZE` bytes that is the server's alone. A driver
-(`MF_DRIVER`) gets a thread with IOPL, an endpoint, a notification and its
+gets a space of 256 slots and a thread for each program, which serves it
+alone (`START_SESSION`), with the program's capabilities in slots 8n to
+8n + 7 (*docs/syscalls.md*), among them a files segment of `FILES_SIZE`
+bytes that is the server's alone, and in slot 128 + n a notification the
+thread sleeps on, a tick at a time. A driver (`MF_DRIVER`) gets a space of
+`DRV_SLOTS` slots, a thread with IOPL, an endpoint, a notification and its
 interrupt line (*docs/drivers.md*). Every other module is a program: a
 thread, an endpoint to the OS server and a transfer segment, and its
 faults go to the OS server. The root starts each at the priority
@@ -273,6 +294,25 @@ answer `KE_NOSYS`:
 | 2 | `TEST_READER` | test builds: BL `TEST_READER_NONE`, `TEST_READER_TIMED` or `TEST_READER_FOREVER`: whether the OS server waits for a key, having found none, and for how long. The script types while one waits, and ends once one waits for ever |
 | 3 | `TEST_DUMP` | debug and test builds: every thread on the log (the keyboard driver's Sys Req) |
 | 4 | `TEST_KEYS_READY` | test builds: the keyboard driver has started; the script waits for it |
+| 5 | `TEST_SOUND_PROBE` | `TEST_SOUND` builds: BX the frequency the speaker sounds; the sound driver asks, and the kernel measures channel 2's output over a tick and says on the log whether it is that |
+| 6 | `TEST_SILENCE_PROBE` | `TEST_SOUND` builds: the speaker silent over a tick? |
+| 7 | `TEST_PROBE` | `TEST_ATTACK` builds: BL `PROBE_*`, below |
+
+The test probe changes one of the caller's own descriptors during the
+call, as a revocation would, so that the way back to its ring can be
+tested (roadmap l4.md L1; *docs/interrupts.md*). The next start of its
+program undoes the change; another BL is `KE_ARG`:
+
+| BL | Constant | The change |
+|---|---|---|
+| 1 | `PROBE_DS_ABSENT` | the data segment's descriptor not present |
+| 2 | `PROBE_DS_EXEC` | the data segment's slot refilled with execute-only code |
+| 3 | `PROBE_SS_ABSENT` | the stack's descriptor not present |
+| 4 | `PROBE_SS_READONLY` | the stack's slot refilled with read-only data |
+| 5 | `PROBE_CS_ABSENT` | the code's descriptor not present |
+| 6 | `PROBE_CS_DATA` | the code's slot refilled with data |
+
+`PROBE_COUNT` is one past the last.
 
 In `TEST_CAPS` builds the root gives the program, in slots 10-13 of a
 space of 64, the rest of the memory for segments and of the arena as

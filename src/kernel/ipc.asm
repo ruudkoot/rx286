@@ -20,7 +20,7 @@
 ; restart (Ctrl+Break, a 287 error) takes it out of any queue.
 ; ============================================================================
 
-TIMER_MAX           equ 8               ; timers armed at once
+TIMER_MAX           equ 16              ; timers armed at once: one a notification
 TIMER_SIZE          equ 6
 TM_NOTIFY           equ 0               ; the notification, or 0: free
 TM_BITS             equ 2

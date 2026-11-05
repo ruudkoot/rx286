@@ -8,10 +8,10 @@ L5):
 |---|---|---|---|
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
-| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 10 KB of code and data |
+| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 9 KB of code and data |
 | the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
 | the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 3.5 KB of code |
-| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes' and the fixed disks' | a few hundred bytes each, the diskettes' about 1 KB |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the clock's | a few hundred bytes each, the diskettes' about 1 KB |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
 | the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
 
@@ -58,8 +58,7 @@ base is a constant. `kernel.asm` declares the sections first, then includes
 the kernel's own files; any of them can add to the data segment with
 `begin_kdata` / `end_kdata`. The GDT, IDT and TSSs open the data segment
 (*docs/protected-mode.md*). Each module is assembled on its own: it can
-name nothing of the kernel's, and reaches it only through `INT 30h` and
-`INT 31h`.
+name nothing of the kernel's, and reaches it only through `INT 31h`.
 
 ## The kernel's files
 
@@ -77,34 +76,34 @@ name nothing of the kernel's, and reaches it only through `INT 30h` and
 | `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the lock around the system calls, the thread dump; the start of the first two |
 | `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*); the root, built at start from the image |
 | `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
-| `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
+| `log.asm` | `KCALL_LOG`, the kernel's log, with its buffer checks; `KCALL_TICKS` |
 | `pic.asm` | the 8259As; the driver of each line, its binding to a driver outside the kernel, or the rule for none; spurious IRQ7 and IRQ15 |
-| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the kernel's drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
-| `rtc.asm` | the MC146818: 24-hour BCD, read by polling |
+| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; in test builds, a sleep for the probes at the start |
 | `fpu.asm` | the 287: FNINIT, FSETPM; switched between threads lazily (TS, #NM); IRQ13, charged to its owner |
-| `speaker.asm` | `SYS_SOUND`: timer channel 2 through port B |
-| `gameport.asm` | `SYS_JOYSTICK`: the buttons, and the axes timed with channel 0 |
-| `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM2 in release builds, IRQ3, a ring of bytes |
 | `console.asm` | 80x25 colour text on the EGA, the copy to the log; once the threads start, the log alone, and the screen again for a panic |
 | `serial.asm` | the log, polled: COM2, or COM3 when COM2 is the modem (debug and test builds) |
 | `print.asm` | strings, numbers, the kernel's messages, trace lines, register dumps |
-| `test.asm` | test builds only: typed keys, probes, faults on purpose, the end of a test |
+| `test.asm` | test builds only: typed keys, probes, faults on purpose, the stretches with interrupts off (`TEST_STRETCH`), the end of a test |
+
+From `src/lib/` the kernel takes `format.asm`, `caps.asm` (retype's
+placement, a selector's slot) and `rtc.asm`, with which it sets the clock
+quiet at its start.
 
 ## Interrupts
 
 Every interrupt enters through its stub and `isr_common`, which builds a frame
 on the kernel stack (*kernel.inc*) and calls the vector's handler with BP at
 the frame. A handler changes the frame to change what the interrupted code
-gets back: a system call's results, or the program's entry for a restart.
+gets back: a kernel call's results, or the program's entry for a restart.
 Every gate but the double fault's is an interrupt gate, so the kernel runs
-with IF clear, except where it waits: in `read_key`, after each byte `write`
-or `print` writes, and while a driver waits for its device
-(*docs/interrupts.md*). Before every `IRET` to ring 3 it checks the
-return IP against the program's code limit.
+with IF clear, except after each byte of its log and while it idles
+(*docs/interrupts.md*). Before every `IRET` to rings 1-3 it checks each
+segment register the way back loads, and the return IP against the code's
+limit.
 
 A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
-287 error during a system call, the fuzzer's watchdog) waits in
-`restart_pending` until the frame returns to ring 3.
+287 error during a kernel call, the fuzzer's watchdog) waits in
+`restart_pending` until the frame returns to its ring.
 
 ## Threads
 
@@ -129,13 +128,11 @@ untyped memory and a space can make more with the kernel's calls.
   priority 3 and the counter at 1, so the counter runs only when the
   program waits. Preemption happens on the way back to ring 3 and at the
   kernel's interrupt windows (`kpreempt`), never in the middle of a handler.
-- **Waiting inside the kernel:** a system call that waits (for a sound,
-  SYS_WAIT's events) waits until the next interrupt
-  (`kwait`), and other threads run meanwhile; every IRQ wakes every waiting
-  thread, which looks again at what it waits for.
-- **One thread at a time inside the system calls** (`call_enter`): they were
-  written for one program (l4.md X15). A thread waiting for a key or for
-  SYS_WAIT's events lets others in meanwhile.
+- **Waiting:** a thread waits in IPC (*docs/kernel-calls.md*): for a
+  message, a reply, or its notification's bits, which its interrupt or the
+  kernel's timer signals. Inside the kernel it waits only for its turn at
+  the log (`call_enter`: one thread's line at a time, l4.md X15), until the
+  next interrupt (`kwait`).
 - **Idling:** with no thread ready, the kernel halts on its own stack
   (`SEL_KSTACK`), never on a thread's (l4.md X8).
 - **The 287** is switched lazily (l4.md D17): TS is set at a switch to a
@@ -173,9 +170,9 @@ The OS server (`src/os/os.asm`; roadmap l4.md L6, D16) serves the
 programs' system calls as messages, with a thread for each program that
 serves it alone, so that one program's wait holds up no other (l4.md X13).
 The `sys` macro calls a stub that puts the registers and a buffer in the
-program's transfer segment and calls the server; the server's thread makes
-today's `INT 30h` call on that segment and puts the results back
-(*docs/syscalls.md*), or calls the driver of the device. The files are its
+program's transfer segment and calls the server; the server's thread
+answers from that segment, through the driver of the device, the kernel's
+log and ticks, or itself, and puts the results back (*docs/syscalls.md*). The files are its
 own (`files.asm`, `fat.asm`; roadmap l4.md L9): each program's current
 drive and directories, and the FAT12 library, which reads a sector at a
 time from the disk drivers into a files segment the root gives the server
@@ -185,9 +182,10 @@ what the program lost, and restarts it.
 
 ## The drivers
 
-Devices leave the kernel one at a time (roadmap l4.md L7-L10): so far the
-printers, the mouse, the console, the keyboard, the diskettes and the fixed
-disks. A driver is a module in ring 1 with IOPL 1, which
+Every device left the kernel, one at a time (roadmap l4.md L7-L10): the
+printers, the mouse, the console, the keyboard, the diskettes, the fixed
+disks, the serial line, the speaker and the game port, and the clock. A
+driver is a module in ring 1 with IOPL 1, which
 the root builds with an endpoint it serves, a notification bound to its
 thread for its timer and its interrupt, and its interrupt line
 (*docs/drivers.md*). The OS server calls it for the system calls of its

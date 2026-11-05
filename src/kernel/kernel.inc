@@ -98,6 +98,8 @@ SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's ba
 SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
 SH_BADGE            equ 4       ; an endpoint's or notification's badge
 SH_WATERMARK        equ 6       ; untyped: paragraphs retyped so far
+SH_HOLE             equ 12      ; untyped: the room an alignment skipped, kept for
+SH_HOLE_END         equ 14      ;    smaller objects (paragraphs, as the watermark)
 SH_PARENT           equ 8       ; the space it was copied from (0: made, not copied)
 SH_PARENT_SLOT      equ 10      ; and the slot there
 SHADOW_SIZE         equ 16
@@ -172,6 +174,25 @@ VECTOR_NAME_CHARS   equ 3       ; "#GP", "NMI": the longest name of an exception
 %1: db %2, 0
     end_kdata
 %endmacro
+
+; STRETCH_BEGIN place / STRETCH_END - TEST_STRETCH builds: interrupts have
+; just gone off, or are about to come on; the stretch between is measured
+; (roadmaps/realtime.md R0; test.asm). The place: the vector in the high
+; byte, a kernel call in the low; 0FFFFh the idle loop and its waits.
+%macro STRETCH_BEGIN 1
+%ifdef TEST_STRETCH
+        push ax
+        mov ax, %1
+        call stretch_begin
+        pop ax
+%endif
+%endmacro
+%macro STRETCH_END 0
+%ifdef TEST_STRETCH
+        call stretch_end
+%endif
+%endmacro
+
 
 ; ---------------------------------------------------------------- messages
 ; LOG "text" - a line of the kernel's own (yellow, every build), with "rx286: "

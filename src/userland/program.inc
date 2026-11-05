@@ -4,8 +4,9 @@
 ; macros to put data in its data segment and to print.
 ;
 ; The sys macro calls the stub to the OS server (stub.asm, which uprint.asm
-; includes; roadmap l4.md L6), but in the root and the OS server themselves,
-; which define RAW_SYSCALLS and trap into the kernel with INT 30h.
+; includes; roadmap l4.md L6). The root, the OS server and the drivers are
+; not the OS server's clients: they define KERNEL_LOG, and their one system
+; call, SYS_WRITE, is a line on the kernel's log (KCALL_LOG; l4.md L10).
 ;
 ; A program is assembled on its own (roadmap D5): code at UCODE:0000 (its
 ; entry), data in UDATA, both at the offsets layout.inc gives. The kernel
@@ -17,19 +18,22 @@
 
 %include "layout.inc"
 %include "syscalls.inc"
+%include "kcalls.inc"
 
-%ifndef RAW_SYSCALLS
-; sys function - a system call, through the OS server (stub.asm); but the
-; test probe, which is about the caller's own descriptors, traps into the
-; kernel where it stands
-%unmacro sys 1
+%ifdef KERNEL_LOG
+; sys SYS_WRITE - outside the OS server's programs: DS:SI, CX bytes to the
+; kernel's log; no other system call is theirs
+%macro sys 1
+  %ifnidn %1, SYS_WRITE
+    %error "sys: only SYS_WRITE, the kernel's log, outside the OS server's programs"
+  %endif
+    kcall KCALL_LOG
+%endmacro
+%else
+; sys function - a system call, through the OS server (stub.asm)
 %macro sys 1
     mov ah, (%1)
-  %ifidn %1, SYS_TEST_PROBE
-    int SYSCALL_VECTOR
-  %else
     call os_call
-  %endif
 %endmacro
 %endif
 

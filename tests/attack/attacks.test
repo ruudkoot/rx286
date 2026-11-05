@@ -46,6 +46,8 @@ attack: call the double-fault TSS
 rx286: program fault #GP(0028) at 0007:{attacks.dftss}
 attack: int 32h
 rx286: program fault #GP(0192) at 0007:{attacks.int32}
+attack: int 30h, the system call that was
+rx286: program fault #GP(0182) at 0007:{attacks.int30}
 attack: int 21h
 rx286: program fault #GP(010A) at 0007:{attacks.int21}
 attack: int 3
@@ -106,7 +108,7 @@ attack: write past FFFFh
 attack: refused, error 1
 attack: unprivileged reads
 attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed
-attack: int 30h at the end of the code
+attack: int 31h at the end of the code
 rx286: program fault #GP(0000) at 0007:2000
 attack: sgdt
 attack: sgdt allowed

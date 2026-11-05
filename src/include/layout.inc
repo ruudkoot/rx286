@@ -35,13 +35,13 @@ IMAGE_MAX           equ 0x20000     ; its most: up to UMEM_PHYS, the memory for 
 ; l4.md L5, D13): tools/mkimage puts them there.
 ENTRY_OFF           equ 0x0000      ; real-mode entry
 ENTRY_ROOM          equ 0x0100
-KTEXT_OFF           equ 0x0100      ; kernel code (16 KB while the old calls and the new
-KTEXT_ROOM          equ 0x4000      ; kernel live side by side: roadmap l4.md Constraints)
-KDATA_OFF           equ 0x4100      ; kernel data: GDT, IDT, TSSs, variables, messages
-KDATA_ROOM          equ 0x2000
-MODULE_TABLE_OFF    equ 0x6100      ; the table of the image's modules
+KTEXT_OFF           equ 0x0100      ; kernel code (12 KB: 16 KB until the old calls left,
+KTEXT_ROOM          equ 0x3000      ; roadmap l4.md L10)
+KDATA_OFF           equ 0x3100      ; kernel data: GDT, IDT, TSSs, variables, messages
+KDATA_ROOM          equ 0x1800
+MODULE_TABLE_OFF    equ 0x4900      ; the table of the image's modules
 MODULE_TABLE_SIZE   equ 0x0200
-MODULES_OFF         equ 0x6300      ; the modules, each on a paragraph
+MODULES_OFF         equ 0x4B00      ; the modules, each on a paragraph
 KERNEL_END_MARK     equ 0x286E      ; the image's last word: the loader checks it arrived
 
 ; The module table: a header, then an entry a module, the root's first.
@@ -75,17 +75,17 @@ ROOT_NAME_2         equ 'ot'
 ; Below the image: the boot code's memory, free once the kernel runs. The
 ; kernel's data segment, SEL_KDATA, starts at KDATA_BASE: its 64 KB reach
 ; the arena, the kernel's variables and the module table, just.
-DFSTACK_PHYS        equ 0x05A00     ; the double-fault task's stack
+DFSTACK_PHYS        equ 0x04400     ; the double-fault task's stack
 DFSTACK_SIZE        equ 0x0200
-KSTACK_PHYS         equ 0x05C00     ; the kernel's own stack: the start's, then the idle loop's
+KSTACK_PHYS         equ 0x04600     ; the kernel's own stack: the start's, then the idle loop's
 KSTACK_SIZE         equ 0x0400
-KDATA_BASE          equ 0x06300
+KDATA_BASE          equ 0x04B00
 ; The arena (roadmap l4.md D7, L3): the kernel's objects - spaces, threads,
 ; endpoints, notifications - reached with DS = SEL_KDATA, never at its
 ; offset 0 (an object's address 0 means none). Only the kernel maps it: it
 ; is given out as untyped memory, never as a segment.
-ARENA_PHYS          equ 0x06400
-ARENA_SIZE          equ 0x9C00
+ARENA_PHYS          equ 0x04C00
+ARENA_SIZE          equ 0xB400
 ; Memory for programs' segments, given out as untyped (l4.md L3)
 UMEM_PHYS           equ 0x30000
 UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h

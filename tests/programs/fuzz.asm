@@ -3,11 +3,12 @@
 ; The fuzzer's program: random bytes as code, in ring 3 (roadmap M8).
 ;
 ; At each start it makes 256 random bytes from a seed (one time in four
-; starting with a call, so calls get random arguments: INT 30h, or the
-; kernel's INT 31h with selectors of slots in DX, SI, DI and BP; roadmap
-; l4.md L4), random registers, random DS and ES among the selectors a
-; program might hold, and jumps into the bytes through SEL_UFUZZ, the test
-; builds' code alias of its own data.
+; starting with a call, so calls get random arguments: a far call of the
+; stub, a system call to the OS server and its drivers (l4.md L10; INT 30h
+; until then), or the kernel's INT 31h with selectors of slots in DX, SI, DI
+; and BP; roadmap l4.md L4), random registers, random DS and ES among the
+; selectors a program might hold, and jumps into the bytes through
+; SEL_UFUZZ, the test builds' code alias of its own data.
 ; Whatever the bytes do ends in a fault, a system call that restarts it, or
 ; the kernel's watchdog; the kernel counts the starts, checks its code and
 ; tables at each, and ends the test after FUZZ_ITERATIONS (test.asm).
@@ -28,11 +29,14 @@ FUZZ_BYTES          equ 256
 FUZZ_CODE           equ 0x0100          ; where the bytes go in the data segment
 SEED_MIX            equ 0x9E37          ; spreads consecutive seeds apart
 SYSCALL_EVERY       equ 4               ; one iteration in four starts with a call...
-KCALL_EVERY         equ 4               ; ...INT 31h if the seed has this bit, else INT 30h
-INT_30H             equ 0x30CD          ; CD 30, as a little-endian word
-INT_31H             equ 0x31CD
-SYSCALL_FUNCTIONS   equ 16              ; AH in those iterations: every call, and as many past them
+KCALL_EVERY         equ 4               ; ...INT 31h if the seed has this bit, else the stub
+CALL_FAR            equ 0x9A            ; CALL ptr16:16
+INT_31H             equ 0x31CD          ; CD 31, as a little-endian word
+SYSCALL_FUNCTIONS   equ 32              ; AH in those iterations: every call, and some past them
 KCALL_FUNCTIONS     equ 32
+%if SYSCALL_FUNCTIONS < SYSCALL_COUNT || KCALL_FUNCTIONS < KCALL_COUNT
+  %error "fuzz.asm: the random calls must reach every call"
+%endif
 
 begin_udata
 seed                dw 0                ; must stay the first word (test.asm)
@@ -70,7 +74,9 @@ entry:
         ; with random registers and selectors.
         test byte [seed], SYSCALL_EVERY - 1
         jnz .registers
-        mov word [fuzz_code], INT_30H
+        mov byte [fuzz_code], CALL_FAR  ; the stub: CALL SEL_UCODE:fuzz_sys
+        mov word [fuzz_code + 1], fuzz_sys
+        mov word [fuzz_code + 3], SEL_UCODE
         test byte [seed], KCALL_EVERY
         jz .registers
         mov word [fuzz_code], INT_31H
@@ -131,6 +137,16 @@ entry:
 .go:
         pop ds                          ; may fault too
         jmp SEL_UFUZZ:FUZZ_CODE
+
+; ----------------------------------------------------------------------------
+; fuzz_sys - a system call for the random code, which calls it far
+;   In:       AH = the function; the registers it takes
+;   Out:      what it returns
+;   Destroys: what it destroys
+; ----------------------------------------------------------------------------
+fuzz_sys:
+        call os_call
+        retf
 
 ; ----------------------------------------------------------------------------
 ; xorshift - the next of a 16-bit xorshift sequence (7, 9, 8)

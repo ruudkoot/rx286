@@ -41,6 +41,9 @@
 ;   TEST_CAPS           the root gives the program capabilities to try
 ;                       (src/root; roadmap l4.md L3)
 ;   TEST_END_TICKS=n    end the test after n ticks, keys or not
+;   TEST_STRETCH        measure every stretch with interrupts off, and say
+;                       at the end how long the longest was, and where
+;                       (roadmaps/realtime.md R0)
 ; Release and debug builds assemble none of this.
 ; ============================================================================
 
@@ -668,8 +671,8 @@ test_kernel_sum:
         mov si, irq_drivers
         mov cx, IRQ_LINES
         call .data
-        mov si, syscall_table
-        mov cx, SYSCALL_COUNT
+        mov si, kcall_table
+        mov cx, KCALL_COUNT
         call .data
         mov si, tss
         mov cx, TSS286_SIZE                ; words: both TSSs, one after the other
@@ -773,17 +776,17 @@ probe_access        db 0                ; its access byte before
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; test_probe - SYS_TEST_PROBE: change one of the program's descriptors, as a
-; revocation would; the way back to ring 3 must then null a DS or ES it may
-; no longer load, and report a CS or SS it may not as the program's fault,
-; never fault itself (roadmap l4.md L1). test_probe_undo undoes it at the
-; next start of the program.
-;   In:       BP = the frame (AL the probe); DS = SEL_KDATA
-;   Out:      the program's LDT changed; or E_INVAL
+; test_probe - KCALL_TEST's TEST_PROBE: change one of the program's
+; descriptors, as a revocation would; the way back to ring 3 must then null
+; a DS or ES it may no longer load, and report a CS or SS it may not as the
+; program's fault, never fault itself (roadmap l4.md L1). test_probe_undo
+; undoes it at the next start of the program.
+;   In:       BP = the frame (BL the probe); DS = SEL_KDATA
+;   Out:      the program's LDT changed, KE_OK; or KE_ARG
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 test_probe:
-        mov bl, [bp + FRAME_AX]
+        mov bl, [bp + FRAME_BX]
         test bl, bl
         jz .invalid
         cmp bl, PROBE_COUNT
@@ -801,13 +804,12 @@ test_probe:
         test al, al
         jz .absent
         mov [bx + 5], al                ; the access byte
-        ret
+        jmp kc_done.ok
 .absent:
         and byte [bx + 5], ~ACC_PRESENT
-        ret
+        jmp kc_done.ok
 .invalid:
-        mov ax, E_INVAL
-        jmp sys_fail
+        jmp kc_done.arg
 
 ; ----------------------------------------------------------------------------
 ; test_probe_undo - the descriptor the last probe changed, as it was
@@ -921,6 +923,9 @@ test_end:
         mov al, CHAR_LF
         call com_putc
 .line_start:
+%ifdef TEST_STRETCH
+        call stretch_report
+%endif
 %ifdef TEST_THREAD_REPORT
         call test_thread_report         ; (on the console too: it starts a line on
 %endif                                  ; the log, where the tests read it)
@@ -938,5 +943,237 @@ test_end:
 .halt:
         hlt
         jmp .halt
+
+%ifdef TEST_STRETCH
+STRETCH_LIMIT_US    equ 10000           ; the measure's reach: half the timer's period
+
+begin_kdata
+stretch_start       dw 0                ; channel 0's count when interrupts went off
+stretch_place       dw 0                ; and where (STRETCH_BEGIN's place)
+stretch_open        db 0                ; 1 while a stretch is measured
+stretch_max         dw 0                ; the longest, in the 8254's clocks
+stretch_max_place   dw 0
+stretch_logged      dw 0                ; clocks of the stretch the log took
+stretch_log_count   dw 0                ; channel 0's count when a byte of it began
+stretch_work_max    dw 0                ; the longest but the log's time: a release
+stretch_work_place  dw 0                ; build's, which has no log
+msg_stretch         db "rx286: interrupts off at most ", 0
+msg_stretch_us      db " us, at vector ", 0
+msg_stretch_call    db ", call ", 0
+msg_stretch_idle    db " us, in the idle loop", 0
+msg_stretch_work    db "rx286: but the log's bytes, at most ", 0
+msg_stretch_under   db "rx286: interrupts never off for 10 ms", CHAR_LF, 0
+msg_stretch_over    db "rx286: interrupts off for 10 ms or more", CHAR_LF, 0
+end_kdata
+
+; ----------------------------------------------------------------------------
+; stretch_begin - interrupts have just gone off: note channel 0's count
+;   In:       AX = the place; DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_begin:
+        mov [stretch_place], ax
+        push ax
+        call pit_count
+        mov [stretch_start], ax
+        mov byte [stretch_open], 1
+        mov word [stretch_logged], 0
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_log_start - a byte of the log begins: its time is counted apart
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_log_start:
+        push ax
+        call pit_count
+        mov [stretch_log_count], ax
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_log_stop - the byte is out: its time added to the log's
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_log_stop:
+        push ax
+        push si
+        mov si, [stretch_log_count]
+        call pit_elapsed
+        add [stretch_logged], ax
+        pop si
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_end - interrupts are about to come on: the stretch measured, and
+; kept if it is the longest
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stretch_end:
+        cmp byte [stretch_open], 0
+        je .done
+        mov byte [stretch_open], 0
+        push ax
+        push si
+        mov si, [stretch_start]
+        call pit_elapsed                ; AX = the 8254's clocks
+        cmp ax, [stretch_max]
+        jbe .kept
+        mov [stretch_max], ax
+        push ax
+        mov ax, [stretch_place]
+        mov [stretch_max_place], ax
+        pop ax
+.kept:
+        sub ax, [stretch_logged]        ; the work alone
+        jb .worked                      ; (a byte begun before the stretch)
+        cmp ax, [stretch_work_max]
+        jbe .worked
+        mov [stretch_work_max], ax
+        mov ax, [stretch_place]
+        mov [stretch_work_place], ax
+.worked:
+        pop si
+        pop ax
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_report - the longest stretch: how long, in microseconds, and where
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      two lines on the log
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+stretch_report:
+        mov byte [stretch_open], 0      ; (its own bytes are not measured)
+        mov si, msg_stretch_work
+        mov ax, [stretch_work_max]
+        mov bx, [stretch_work_place]
+        call stretch_line
+        mov si, msg_stretch
+        mov ax, [stretch_max]
+        mov bx, [stretch_max_place]
+        call stretch_line
+        mov si, msg_stretch_under
+        cmp ax, STRETCH_LIMIT_US
+        jb .verdict
+        mov si, msg_stretch_over
+.verdict:
+        jmp com_puts
+
+; ----------------------------------------------------------------------------
+; stretch_line - a stretch's line: how long, and where
+;   In:       SI = its text; AX = its clocks; BX = its place
+;   Out:      AX = its microseconds
+;   Destroys: BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+stretch_line:
+        call com_puts
+        mov cx, STRETCH_NS_PER_CLOCK
+        mul cx
+        mov cx, 1000
+        div cx                          ; AX = microseconds
+        push ax
+        call stretch_dec
+        mov ax, bx
+        cmp ax, 0xFFFF
+        jne .vector
+        mov si, msg_stretch_idle
+        call com_puts
+        jmp .line
+.vector:
+        mov si, msg_stretch_us
+        call com_puts
+        push ax
+        mov al, ah
+        call stretch_hex
+        pop ax
+        mov si, msg_stretch_call
+        call com_puts
+        call stretch_hex
+.line:
+        mov al, CHAR_LF
+        call com_putc
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stretch_dec - a number in decimal on the log
+;   In:       AX = the number; DS = ES = SEL_KDATA
+;   Out:      nothing
+;   Destroys: SI, DI
+; ----------------------------------------------------------------------------
+stretch_dec:
+        mov di, stretch_text
+        call fmt_dec16
+        mov byte [di], 0
+        mov si, stretch_text
+        jmp com_puts
+
+; ----------------------------------------------------------------------------
+; stretch_hex - a byte in hexadecimal on the log
+;   In:       AL = the byte; DS = ES = SEL_KDATA
+;   Out:      nothing
+;   Destroys: SI, DI
+; ----------------------------------------------------------------------------
+stretch_hex:
+        mov di, stretch_text
+        call fmt_hex8
+        mov byte [di], 0
+        mov si, stretch_text
+        jmp com_puts
+
+begin_kdata
+stretch_text        times 12 db 0
+end_kdata
+
+STRETCH_NS_PER_CLOCK  equ 1000000000 / PIT_INPUT_HZ      ; 838 ns a clock of the 8254
+
+; ----------------------------------------------------------------------------
+; pit_count - timer channel 0's count, latched
+;   In:       interrupts off
+;   Out:      AX = the count
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+pit_count:
+        mov al, PIT_LATCH_CH0
+        out PIT_MODE, al
+        in al, PIT_CH0
+        mov ah, al
+        in al, PIT_CH0
+        xchg al, ah
+        ret
+
+; ----------------------------------------------------------------------------
+; pit_elapsed - the 8254's clocks since a count of channel 0. In mode 3 the
+; count falls by two a clock from PIT_DIVISOR, twice a period; so for a span
+; under half a period (10 ms), the clocks are half the counts between, with
+; PIT_DIVISOR added if the count reloaded meanwhile
+;   In:       SI = the count then (pit_count)
+;   Out:      AX = the clocks since
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+pit_elapsed:
+        push dx
+        call pit_count
+        mov dx, si
+        sub dx, ax
+        jae .halve
+        add dx, PIT_DIVISOR             ; it reloaded between
+.halve:
+        shr dx, 1
+        mov ax, dx
+        pop dx
+        ret
+%endif
 
 %endif

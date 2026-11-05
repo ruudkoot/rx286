@@ -25,7 +25,7 @@
 
 cpu 286
 bits 16
-%define RAW_SYSCALLS
+%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"
@@ -377,8 +377,7 @@ kbd_get:
 kbd_reset:
         mov si, msg_reset
         mov cx, msg_reset_end - msg_reset
-        mov ah, SYS_WRITE               ; the kernel's own: its log
-        int SYSCALL_VECTOR
+        kcall KCALL_LOG
         mov dx, NOTIFY
         mov cx, KBD_RESET_TICKS
         kcall KCALL_TIMER

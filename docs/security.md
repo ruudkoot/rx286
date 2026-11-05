@@ -117,11 +117,11 @@ that faulted:
 | the kernel's data, the kernel's stack, the screen (DS, SS, ES) | #GP(selector) |
 | a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(0060), #GP(0044), #GP(003C), #GP(0000) |
 | every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments as they are; every empty slot refused by all four |
-| the test probe (`SYS_TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
+| the test probe (`KCALL_TEST`'s `TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
 | the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |
 | the probe: the code's descriptor not present; refilled with data | #NP(0004); #GP(0004), at the return address |
 | a far call to the kernel's code; a jump to the TSS; a call to the double-fault TSS; a jump through the null selector | #GP(0008), #GP(0020), #GP(0028), #GP(0000) |
-| `INT 32h`; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(0192), #GP(010A), #GP(001A), #GP(0022) |
+| `INT 32h`; `INT 30h`, the system call until roadmap l4.md L10; `INT 21h` (IRQ1's gate); `INT 3`; `INTO` | #GP(0192), #GP(0182), #GP(010A), #GP(001A), #GP(0022) |
 | writing through CS; reading past the data's limit; a word across it; executing data | #GP(0000), #GP(0000), #GP(0000), #GP(000C) |
 | pushing past the stack's bottom; popping past its top | #SS(0000) |
 | divide by zero; an invalid opcode; `BOUND` | #DE, #UD, #BR |
@@ -133,7 +133,7 @@ that faulted:
 | `LOADALL` (0Fh 05h) | #UD on Bochs; #GP(0000) on MAME's 286 |
 | a 287 error, unmasked | IRQ13: reported, the program restarted (MAME has no 287) |
 | a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
-| `INT 30h` as the code segment's last two bytes | #GP(0000) at 0007:2000: the return IP is past the limit |
+| `INT 31h` as the code segment's last two bytes | #GP(0000) at 0007:2000: the return IP is past the limit |
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
 | `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
@@ -164,9 +164,11 @@ written as `sti; cli`, which opens nothing.
 `tests/programs/fuzz.asm` runs 10,000 iterations of 256 random bytes as code
 in ring 3, with random registers and random DS and ES (one choice in eight a
 selector it may not load). One iteration in four starts with a call, so
-calls run with random arguments: `INT 30h`, or the kernel's `INT 31h` with
-selectors of the program's slots and others in DX, SI, DI and BP (deleting
-its own code or data, say, which the way back and the restart survive). A watchdog restarts an iteration
+calls run with random arguments: a system call, through the stub to the OS
+server and its drivers (`INT 30h` until roadmap l4.md L10), or the kernel's
+`INT 31h` with selectors of the program's slots and others in DX, SI, DI
+and BP (deleting its own code or data, say, which the way back and the
+restart survive). A watchdog restarts an iteration
 that runs for 5 ticks. The kernel counts the faults by vector instead of
 reporting each, checks its code and tables at every start, and ends the
 test after 10,000 starts. It runs on Bochs and MAME. A typical run: three quarters of the iterations

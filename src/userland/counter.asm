@@ -11,7 +11,7 @@
 ; Test builds with TEST_COUNTER_FPU make it a check of the 287 instead: it
 ; keeps 1 on the 287's stack and compares it with a fresh 1 for ever, so
 ; any loss of its 287 state while other threads use the 287 shows; it then
-; says so through SYS_WRITE and stops counting. TEST_COUNTER_FAULT makes it
+; says so on the kernel's log (KCALL_LOG) and stops counting. TEST_COUNTER_FAULT makes it
 ; fault once, at its first start, so that the root reports a fault of a
 ; module of its name (tests/root).
 ; ============================================================================
@@ -20,7 +20,7 @@ cpu 286
 bits 16
 %include "build.inc"
 %include "layout.inc"
-%include "syscalls.inc"
+%include "kcalls.inc"
 
 section ctext start=0 vstart=0
 section cdata start=COUNTER_DATA_START vstart=0
@@ -55,7 +55,7 @@ entry:
 .lost:
         mov si, msg_lost
         mov cx, msg_lost_end - msg_lost
-        sys SYS_WRITE
+        kcall KCALL_LOG
 .stop:
         jmp .stop
 %else

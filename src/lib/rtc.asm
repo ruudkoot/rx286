@@ -1,12 +1,15 @@
 ; ============================================================================
-; rx286 - src/kernel/rtc.asm
-; The MC146818 real-time clock, read for the `time` call (roadmap D20 B).
+; rx286 - src/lib/rtc.asm
+; The MC146818 real-time clock, read for the `time` call (roadmap D20 B):
+; the kernel sets it up at its start, and the clock driver reads it (l4.md
+; L10); the kernel's test hooks read it too.
 ;
 ; rtc_init sets register B to 24-hour BCD with every interrupt off, so the
 ; clock never raises IRQ8 and its format is known, not detected. The clock
 ; is read by polling: wait until no update is in progress, read every field,
 ; and read again if the seconds moved meanwhile. Every write to the index
-; port keeps bit 7 clear, which keeps NMI enabled.
+; port keeps bit 7 clear, which keeps NMI enabled. Only one reader at a
+; time: the index port and the data port are a pair.
 ; ============================================================================
 
 RTC_UIP_LIMIT       equ 2000            ; polls of UIP before reading anyway
@@ -29,7 +32,7 @@ rtc_init:
 
 ; ----------------------------------------------------------------------------
 ; rtc_read - the date and time, in BCD
-;   In:       interrupts off
+;   In:       nothing
 ;   Out:      CH = century, CL = year, DH = month, DL = day, BH = hours,
 ;             BL = minutes, AL = seconds; all BCD
 ;   Destroys: AH

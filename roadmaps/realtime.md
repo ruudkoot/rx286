@@ -12,7 +12,7 @@ measurements, and on the emulators every stretch is far shorter.
 | | State |
 |---|---|
 | The survey | done (this document) |
-| R0: measure the stretches | not started |
+| R0: measure the stretches | done (2026-11-05, roadmap l4.md L10): *Measured*, below |
 | R1: a limit on the two waits without one | not started |
 | R2: scroll and clear the screen in pieces | not started |
 | R3: the log sent by interrupt | not started |
@@ -90,6 +90,32 @@ other wait for a device has a limit in ticks.
   good.
 - The start, before interrupts are first let in: the boot code, the
   stacks zeroed, the devices set up, the printers' 50 us reset.
+
+## Measured (R0)
+
+Measured on 2026-11-05, at roadmap l4.md L10, after every device had left
+the kernel for a driver in ring 1. A test build made with `TEST_STRETCH`
+times every stretch with interrupts off, with timer channel 0's latched
+count, from the kernel's entry or a window's end to the next window or
+`IRET`, and says at the end of a test how long the longest was and where
+(`tests/kernel/stretch.test`: the shell lists a directory, types a file of
+32 KB from C, reads the game port, beeps and crashes; *docs/interrupts.md*).
+The log's bytes are counted apart, since a release build has no log. The
+measure reaches 10 ms, half the timer's period.
+
+| | MAME's AT (a 286 at an AT's speed) | Bochs (instructions, not time) |
+|---|---|---|
+| the longest stretch, all told | 4,526 us: `KCALL_RECV`, ending in a thread's first start, whose trace line the kernel writes whole | 3,770 us |
+| the longest without the log's bytes | 3,441 us: `KCALL_RETYPE`, zeroing a segment of 8 KB | 1,125 us |
+
+So the survey above is history: of its places only the log, in debug and
+test builds, is still the kernel's. The screen is the console driver's, in
+ring 1 with interrupts on; the disks, the clock and the modem are their
+drivers', with interrupts on too; the game port's 4 ms is the sound driver's,
+the one stretch a driver keeps interrupts off for. The kernel's own longest
+work is a retype's zeroing, which happens while the root builds the system
+and when a program makes memory: under a fifth of a tick, so no tick is
+lost, but above R2's millisecond.
 
 ## What it costs
 

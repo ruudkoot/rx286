@@ -32,7 +32,8 @@ VEC_IRQ0            equ 0x20        ; IRQn is VEC_IRQ0 + n
 VEC_IRQ8            equ 0x28
 VEC_IRQ_LAST        equ 0x2F
 
-VEC_SYSCALL         equ 0x30
+VEC_RETIRED         equ 0x30        ; INT 30h, the system call until l4.md L10: now a gate of
+                                    ; DPL 0, #GP from rings 1-3 like the kernel's others
 VEC_KCALL           equ 0x31        ; the kernel's calls (kcalls.inc)
 
 IDT_ENTRIES         equ VEC_KCALL + 1

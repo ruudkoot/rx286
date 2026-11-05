@@ -12,8 +12,9 @@
 ; one above it while a thread between them is busy, is refused every way it
 ; can think of, and last calls an endpoint nobody receives on, which only
 ; Ctrl+Break ends. Its own lines come through uprint; the workers build
-; each of theirs in their own data and write it with one SYS_WRITE, the
-; kernel's own (ksys: their spaces hold no endpoint to the OS server).
+; each of theirs in their own data and write it to the kernel's log with
+; one KCALL_LOG, and read the ticks with KCALL_TICKS: their spaces hold no
+; endpoint to the OS server.
 ;
 ; TEST_IPC_TIMING (tests/timing) makes 10,000 calls instead, and says how
 ; many instructions a round trip took on Bochs.
@@ -100,12 +101,6 @@ end_udata
         call print_newline
 %endmacro
 
-; ksys function - the kernel's own system call, for the workers: their
-; spaces hold no endpoint to the OS server
-%macro ksys 1
-        mov ah, (%1)
-        int SYSCALL_VECTOR
-%endmacro
 
 ; must - stop the test if the last kernel call failed
 %macro must 0
@@ -800,10 +795,10 @@ client_queue:
 busy:
         mov dx, W_CTRL
         kcall KCALL_RECV
-        ksys SYS_TICKS
+        kcall KCALL_TICKS
         mov si, ax
 .spin:
-        ksys SYS_TICKS
+        kcall KCALL_TICKS
         sub ax, si
         cmp ax, BUSY_TICKS
         jb .spin
@@ -858,7 +853,7 @@ wline:
         mov cx, di
         mov si, W_LINE
         sub cx, si
-        ksys SYS_WRITE
+        kcall KCALL_LOG
         ret
 
 line_badge          db "server: a call from badge ", 0

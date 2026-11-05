@@ -14,12 +14,20 @@ descriptor it was not given, nor run the CPU's privileged instructions
 | the keyboard driver ("kbd") | `src/drivers/keyboard.asm` | the 8042, IRQ1 | `SERVICE_KEYBOARD` |
 | the diskette driver ("fd") | `src/drivers/diskette.asm` | the NEC 765, IRQ6, DMA channel 2: drives A and B | `SERVICE_DISKETTE` |
 | the fixed disk driver ("hd") | `src/drivers/fixeddisk.asm` | the AT's fixed disk controller, IRQ14: drives C and D | `SERVICE_FIXED_DISK` |
+| the serial driver | `src/drivers/serial.asm` | COM2, the modem's line, IRQ3 | `SERVICE_SERIAL` |
+| the sound driver | `src/drivers/sound.asm` | the speaker (timer channel 2, port B) and the game port | `SERVICE_SOUND` |
+| the clock driver | `src/drivers/clock.asm` | the MC146818 real-time clock | `SERVICE_CLOCK` |
+
+Every device has left the kernel (roadmap l4.md L10): it keeps the timer's
+channel 0, the interrupt controllers, the 287, NMI and, in debug and test
+builds, its log (D15).
 
 ## How the root builds one
 
 A driver's module table entry has `MF_DRIVER`, and perhaps an interrupt
 line (`M_IRQ`) and a service (`M_SERVICE`; *docs/memory-map.md*). The root
-(*docs/kernel-calls.md*) gives it, besides its code, data and stack:
+(*docs/kernel-calls.md*) gives it a space of `DRV_SLOTS` slots and,
+besides its code, data and stack:
 
 | Slot | Constant | What |
 |---|---|---|
@@ -31,7 +39,8 @@ line (`M_IRQ`) and a service (`M_SERVICE`; *docs/memory-map.md*). The root
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
-service.
+service; and a copy of the sound driver's notification, badged
+`DRV_STOP_BIT`, in its slot 13, to end a sound with on Ctrl+Break.
 
 A driver's data segment is of DPL 2, so that the root can fill it from the
 module; ring 3 cannot load it, and the driver can. Its stack is of DPL 1.
@@ -53,8 +62,8 @@ drivers share their waits (`src/drivers/dwait.asm`), which take the place of
 the kernel's `ksleep_until`, `ksleep` and `kpoll`: for the interrupt, for
 some ticks, or for a port's bits, each with a limit in ticks. Each sets a
 one-tick timer and receives on the notification, so it looks at the time
-(`SYS_TICKS`) once a tick, and takes and acknowledges the interrupt when its
-bit comes.
+(`KCALL_TICKS`) once a tick, and takes and acknowledges the interrupt when
+its bit comes.
 
 ## The printer driver
 
@@ -118,3 +127,39 @@ the driver checks them again. The diskette driver moves the sector through
 its DMA buffer, and stops the motor two seconds after its last transfer on
 its timer; the fixed disk driver moves the words straight to or from the
 segment passed.
+
+## The serial driver
+
+COM2, for a modem (*docs/devices.md*), with the kernel's modem code as it
+was (roadmap l4.md L10). In release builds, and test builds made with
+`MODEM_COM2`, it sets COM2 to 9600 baud, 8N1, and takes each byte that comes
+into a ring of 256, at IRQ3 and on a one-tick timer for an interrupt that
+was lost. The OS server asks it with `DRV_SERIAL_WRITE` (CX bytes from SI in
+the segment passed, each once the UART takes it, 2 s at most: `E_TIMEOUT`
+with the count so far), `DRV_SERIAL_READ` (up to CX bytes of the ring into
+the segment passed; it never waits) and `DRV_SERIAL_NEWS` (BX 1 if bytes
+wait), for SYS_WAIT once a tick. In debug and test builds COM2 is the
+kernel's log: the driver never touches it, and answers `E_BUSY`.
+
+## The sound driver
+
+The speaker and the game port, with the kernel's code for both as it was
+(*docs/devices.md*). `DRV_SOUND` (BX hertz, 0 a rest; CX ticks) checks
+them as `SYS_SOUND` always did (`E_INVAL`), sets timer channel 2 and opens
+the gate, sleeps on its timer for the ticks, and closes the gate before it
+answers; a stop the OS server signals (`DRV_STOP_BIT`, on Ctrl+Break) ends
+the sound at once, and a stop left over from before a sound is dropped
+when it starts. In `TEST_SOUND` builds it asks the kernel to measure the
+tone and the silence after it (`KCALL_TEST`). `DRV_JOYSTICK` times the
+game port's four axes with timer channel 0's latched count, interrupts off
+for 4 ms at most, and puts the buttons and the axes in the block of the
+transfer segment passed: five results, more than a reply's four words.
+
+## The clock driver
+
+`DRV_CLOCK_TIME`: the RTC's date and time in BCD, read by polling
+(`src/lib/rtc.asm`), in the reply's four words: BX hours and minutes, CX
+century and year, SI month and day, DI seconds. The kernel sets the clock
+to 24-hour BCD with its interrupts off at its start; the driver is its one
+reader.
+

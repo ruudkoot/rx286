@@ -87,9 +87,9 @@ entry:
         kcall KCALL_SEGMENT
         mov bx, ax
         mov ax, dx
-        report "its base, high byte (4)"
+        report "its base, high byte (5)"
         mov ax, bx                      ; past the others' segments, and its own
-        report "its base, low word (39952)"
+        report "its base, low word (5136)"
         mov ax, cx
         report "its limit (255)"
         mov dx, UT_ARENA
@@ -330,8 +330,8 @@ new_thread:
         mov byte [16], CHAR_LF
         xor si, si
         mov cx, 17
-        mov ah, SYS_WRITE               ; the kernel's own call: this thread has
-        int SYSCALL_VECTOR              ; no endpoint to the OS server
+        kcall KCALL_LOG                 ; the kernel's log: this thread has no
+                                        ; endpoint to the OS server
 .spin:
         jmp .spin
 

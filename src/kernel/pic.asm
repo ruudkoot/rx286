@@ -27,11 +27,7 @@ irq_drivers:
         dw timer_irq                    ; IRQ0
         dw 0                            ; IRQ1: the keyboard driver's (l4.md L8)
         dw 0                            ; IRQ2
-%ifdef WITH_MODEM
-        dw modem_irq                    ; IRQ3: COM2, the modem
-%else
-        dw 0                            ; IRQ3: COM2 is the log, polled
-%endif
+        dw 0                            ; IRQ3: COM2, the serial driver's (l4.md L10)
         dw 0                            ; IRQ4: COM1, the mouse: its driver's
         dw 0                            ; IRQ5
         dw 0                            ; IRQ6: the diskette driver's (l4.md L9)

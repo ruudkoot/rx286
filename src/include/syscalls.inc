@@ -1,16 +1,17 @@
 ; ============================================================================
 ; rx286 - src/include/syscalls.inc
-; The system calls: the program's only view of the kernel (roadmap D9).
+; The system calls: the program's view of the system (roadmap D9; l4.md
+; D16), the OS server's services.
 ;
-; INT 30h with the function in AH. Results come back in registers; an error
-; sets CF and puts its code in AX. A call preserves every register it does
-; not return. docs/syscalls.md is the reference.
+; The function in AH, through the sys macro (program.inc), which calls the
+; stub to the OS server; INT 30h, their gate until l4.md L10, is gone.
+; Results come back in registers; an error sets CF and puts its code in AX.
+; A call preserves every register it does not return. docs/syscalls.md is
+; the reference.
 ; ============================================================================
 
 %ifndef RX286_SYSCALLS_INC
 %define RX286_SYSCALLS_INC
-
-SYSCALL_VECTOR      equ 0x30
 
 SYS_EXIT            equ 0   ; no arguments; does not return: the program starts again
 SYS_WRITE           equ 1   ; DS:SI buffer, CX length -> AX bytes written
@@ -53,18 +54,6 @@ FIND_ENTRY_SIZE     equ 32                          ;    (FAT's: DIR_* of fat12.
 FIND_LABEL          equ FIND_ENTRY + FIND_ENTRY_SIZE    ; the volume's label, space padded
 FIND_LABEL_SIZE     equ 11
 FIND_SIZE           equ FIND_LABEL + FIND_LABEL_SIZE
-
-; Attack test builds only (TEST_ATTACK): change one of the program's own
-; descriptors as a revocation would, so the way back to ring 3 can be tested
-; (roadmap l4.md L1). AL says which; the next start of the program undoes it.
-SYS_TEST_PROBE      equ 0x7E
-PROBE_DS_ABSENT     equ 1   ; the data segment's descriptor not present
-PROBE_DS_EXEC       equ 2   ; the data segment's slot refilled with execute-only code
-PROBE_SS_ABSENT     equ 3   ; the stack's descriptor not present
-PROBE_SS_READONLY   equ 4   ; the stack's slot refilled with read-only data
-PROBE_CS_ABSENT     equ 5   ; the code's descriptor not present
-PROBE_CS_DATA       equ 6   ; the code's slot refilled with data
-PROBE_COUNT         equ 7
 
 SYS_TICKS_HZ        equ 50
 WRITE_MAX           equ 4096
@@ -118,11 +107,5 @@ SC_UP               equ 0x48
 SC_DOWN             equ 0x50
 SC_LEFT             equ 0x4B
 SC_RIGHT            equ 0x4D
-
-; sys function   - load AH and trap into the kernel
-%macro sys 1
-    mov ah, (%1)
-    int SYSCALL_VECTOR
-%endmacro
 
 %endif

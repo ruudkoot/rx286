@@ -15,10 +15,15 @@ rx286: thread printer receiving priority 6, kernel stack used
 rx286: thread mouse awaiting a notification priority 6, kernel stack used
 rx286: thread console receiving priority 6, kernel stack used
 rx286: thread kbd running priority 6, kernel stack used
+rx286: thread fd receiving priority 6, kernel stack used
+rx286: thread hd receiving priority 6, kernel stack used
+rx286: thread serial receiving priority 6, kernel stack used
+rx286: thread sound receiving priority 6, kernel stack used
+rx286: thread clock receiving priority 6, kernel stack used
 rx286: thread program awaiting its reply priority 3, kernel stack used
 rx286: thread counter ready priority 1, kernel stack used
 rx286: thread os awaiting a notification priority 5, kernel stack used
 @bochs rx286: thread os ready priority 5, kernel stack used
 @mame rx286: thread os ready priority 5, kernel stack used
-@dosbox-x rx286: thread os waiting priority 5, kernel stack used
+@dosbox-x rx286: thread os awaiting a notification priority 5, kernel stack used
 rx286: thread os receiving priority 5, kernel stack used

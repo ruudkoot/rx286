@@ -1,12 +1,13 @@
 # System calls
 
-A program's system calls go to the OS server, which makes them in the
-kernel through `INT 30h` (`SYSCALL_VECTOR`), an interrupt gate of DPL 3
-(roadmap D9; *Through the OS server*, below). The function goes in AH;
-results come back in registers. An error sets CF and puts its code in AX. A
-call preserves every register it does not return. `src/include/syscalls.inc`
-holds the numbers and the macro `sys`, which `program.inc` turns into a call
-of the stub to the OS server:
+A program's system calls are messages to the OS server, which answers
+them itself or through the drivers of its devices (roadmap D9, l4.md D16;
+*Through the OS server*, below). Until roadmap l4.md L10 they were `INT
+30h`, a gate of DPL 3; that gate is gone, and `INT 30h` faults like any
+other vector of the kernel's. The function goes in AH; results come back in
+registers. An error sets CF and puts its code in AX. A call preserves every
+register it does not return. `src/include/syscalls.inc` holds the numbers,
+and `program.inc` the macro `sys`, a call of the stub to the OS server:
 
 ```nasm
         mov si, message
@@ -43,25 +44,6 @@ of the stub to the OS server:
 | other | | | CF, AX = `E_NOSYS` |
 
 `SYSCALL_COUNT` is the number of calls.
-
-### The test probe
-
-Attack test builds only (`TEST_ATTACK`) have one more call, `SYS_TEST_PROBE`
-(7Eh). It changes one of the program's own descriptors during the call, as
-a revocation would, so that the way back to ring 3 can be tested (roadmap
-l4.md L1; *docs/interrupts.md*). AL says which:
-
-| AL | Constant | The change |
-|---|---|---|
-| 1 | `PROBE_DS_ABSENT` | the data segment's descriptor not present |
-| 2 | `PROBE_DS_EXEC` | the data segment's slot refilled with execute-only code |
-| 3 | `PROBE_SS_ABSENT` | the stack's descriptor not present |
-| 4 | `PROBE_SS_READONLY` | the stack's slot refilled with read-only data |
-| 5 | `PROBE_CS_ABSENT` | the code's descriptor not present |
-| 6 | `PROBE_CS_DATA` | the code's slot refilled with data |
-
-Another AL, up to `PROBE_COUNT`, is `E_INVAL`. The next start of the
-program undoes the change.
 
 ### Errors
 
@@ -159,67 +141,63 @@ it alone. `src/include/os.inc` holds the interface:
   buffer the call reads (DS:SI, a path too) in its data
   (`XFER_DATA`, `XFER_DATA_SIZE` bytes: as much as a write takes), and calls
   the endpoint with the function as the label; `XFER_SI` and `XFER_DI` then
-  name the buffers in the transfer segment. The OS server's thread makes
-  the call with `INT 30h` on the transfer segment, or a driver's, or its
-  own, and puts the registers and the flags (`XFER_FLAGS`) back; the stub
-  copies what the call filled (ES:DI) into the program's buffer.
-- **A buffer the program may not use so** is checked by the stub as the
-  kernel would (below), at the program's own privilege, and passed on as
-  `XFER_BAD`, at the transfer segment's end: so the kernel refuses it with
-  `E_FAULT` after its other checks, in the order it always did. A call made
+  name the buffers in the transfer segment. The OS server's thread answers
+  the call from the transfer segment, itself or through a driver, and puts
+  the registers and the flags (`XFER_FLAGS`) back; the stub copies what the
+  call filled (ES:DI) into the program's buffer.
+- **A buffer the program may not use so** is checked by the stub (below),
+  at the program's own privilege, and passed on as `XFER_BAD`, at the
+  transfer segment's end: so the OS server refuses it with `E_FAULT` after
+  its other checks, in the order the kernel always made them. A call made
   straight on the endpoint that names bytes past the transfer segment is
   refused the same way (`tests/syscalls`).
 - **`SYS_EXIT`:** the OS server restarts the program (the kernel's
   `THREAD_RESTART`, *docs/kernel-calls.md*), and its own thread for it with
   it, since that thread serves the program alone (`START_SESSION`). So does
   Ctrl+Break, which the keyboard driver signals to the OS server's control
-  thread: a wait in the kernel on the program's behalf is given up with it.
-- **The drivers:** `SYS_WRITE` is the kernel's write, which checks the
-  buffer and writes the log, then the console driver's, on the screen;
-  `SYS_READ_KEY`, `SYS_PRINT`, `SYS_MOUSE`, `SYS_DISK_READ` and
-  `SYS_DISK_WRITE` go to their drivers, and `SYS_WAIT` asks the keyboard's
-  and the mouse's drivers once a tick while the kernel waits for COM2's
-  bytes (*docs/drivers.md*). The file calls are the server's own
+  thread: a wait on the program's behalf is given up with it, and a sound
+  ends.
+- **The drivers:** `SYS_WRITE` goes to the kernel's log (`KCALL_LOG`) and
+  to the console driver, on the screen; `SYS_READ_KEY`, `SYS_TIME`,
+  `SYS_DISK_READ`, `SYS_DISK_WRITE`, `SYS_PRINT`, `SYS_SOUND`,
+  `SYS_JOYSTICK`, `SYS_MOUSE`, `SYS_SERIAL_WRITE` and `SYS_SERIAL_READ` go
+  to their drivers; `SYS_TICKS` is the kernel's count (`KCALL_TICKS`); and
+  `SYS_WAIT` asks the keyboard's, the mouse's and the serial line's drivers
+  once a tick (*docs/drivers.md*). The file calls are the server's own
   (`src/os/files.asm`), each program's in a files segment of its own
   (`FILES_SIZE` bytes), which the program never sees.
 - **Faults:** a program's fault comes to the OS server on the same
   endpoint, badged `FAULT_BADGE`; it reports it as the kernel did and
   restarts the program (*docs/kernel-calls.md*).
-- **What still calls the kernel itself:** the root, the OS server and the
-  drivers; the counter; the test probe; threads a program makes, whose
-  spaces hold no endpoint to the OS server (the IPC test's workers); and the
-  fuzzer's random code. The kernel's `SYS_READ_KEY`, `SYS_DISK_READ`,
-  `SYS_DISK_WRITE`, `SYS_PRINT` and `SYS_MOUSE` answer `E_NOSYS` since their
-  devices left it, as do the file calls, which were never its; its
-  `SYS_WRITE` writes the log alone. `INT 30h` stays until the drivers have left the kernel
-  (roadmap l4.md L10).
+- **What has no system calls:** the root, the OS server and the drivers,
+  which are not the OS server's clients; the counter; and threads a program
+  makes, whose spaces hold no endpoint to the OS server (the IPC test's
+  workers). They use the kernel's calls (*docs/kernel-calls.md*): their
+  lines go to the kernel's log (`KCALL_LOG`, which their `sys SYS_WRITE`
+  becomes: `KERNEL_LOG`), and the ticks come from `KCALL_TICKS`.
 
-## How the kernel checks a buffer
+## How a buffer is checked
 
-For `SYS_WRITE`, `SYS_PRINT` and `SYS_DISK_WRITE`, the kernel takes the
-caller's DS from the interrupt frame and:
+The stub checks each buffer it passes, at the program's own privilege,
+with the 286's own instructions, as the kernel checked its system calls'
+buffers until they left it. For a buffer the call reads (DS:SI):
 
-1. `ARPL`s it against the caller's CS, so its RPL is at least 3;
-2. `VERR`s it: is it readable at that privilege?
-3. `LAR`s it: is it present? `VERR` and `VERW` say yes to a segment that is
-   not present (roadmap l4.md E2), and a copy from it would fault in ring 0;
-4. `LSL`s its limit, and checks that SI + CX − 1 neither wraps nor passes it
-   (CX = 0 writes nothing);
-5. loads it into ES and copies from it.
+1. `VERR`: is the segment readable at the program's privilege?
+2. `LAR`: is it present? `VERR` and `VERW` say yes to a segment that is not
+   present (roadmap l4.md E2);
+3. `LSL`: its limit; SI + CX − 1 must neither wrap nor pass it (CX = 0
+   passes nothing).
 
-For `SYS_DISK_READ` it did the same with the caller's ES:DI and `VERW`:
-the buffer must be writable at the caller's privilege, which no code
-segment is. Both checks come before any device is touched. The stub makes
-the same checks, with the same instructions at the program's privilege,
-for every buffer it passes: the disk calls' and the file calls', which
-the kernel no longer sees.
+A buffer the call fills (ES:DI) takes `VERW` instead: it must be writable,
+which no code segment is. An expand-down segment (and a conforming code
+segment, whose bit is the same) is refused, since 0..limit is not its
+valid range (`LAR`); so is a buffer ending at FFFFh exactly: no program
+segment is that large. A path is taken up to `PATH_IN_MAX` bytes, or to its
+segment's limit if that comes first.
 
-It also refuses an expand-down segment (and a conforming code segment, whose
-bit is the same), for which 0..limit is not the valid range (`LAR`). A
-descriptor may change while interrupts are in (roadmap l4.md X2), so a call
-that lets them in checks the buffer again before it next touches it:
-`write` and `serial_write` before every byte. No call keeps a program's segment loaded across an
-interrupt window. Any selector the program can name has DPL 3 or
-is refused, so the kernel never reads through a selector the program could
-not use itself. A buffer ending at FFFFh exactly is refused too: no program
-segment is that large.
+The kernel checks the buffer of its own log the same way (`KCALL_LOG`,
+*docs/kernel-calls.md*), against the caller's CS (`ARPL`), and again after
+every interrupt window, since a descriptor may change while interrupts are
+in (roadmap l4.md X2): it never keeps a caller's segment loaded across a
+window, and never reads through a selector the caller could not use
+itself.

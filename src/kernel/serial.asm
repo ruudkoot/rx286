@@ -81,6 +81,9 @@ com_putc:
         mov byte [log_at_start], 1
 .send:
         mov ah, al
+%ifdef TEST_STRETCH
+        call stretch_log_start          ; the log's time, apart (realtime.md R0)
+%endif
         mov dx, LOG_PORT + UART_LSR
 .wait:
         in al, dx
@@ -89,6 +92,9 @@ com_putc:
         mov al, ah
         mov dx, LOG_PORT + UART_THR
         out dx, al
+%ifdef TEST_STRETCH
+        call stretch_log_stop
+%endif
         pop dx
         pop ax
         ret

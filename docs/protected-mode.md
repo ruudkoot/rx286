@@ -23,11 +23,11 @@ writes the GDT except for the TSS's busy bit.
 |---|---|---|---|---|---|
 | 00h | `SEL_NULL` | | | | |
 | 08h | `SEL_KCODE` | 10100h | size | 9Bh: present, DPL 0, code, readable | the kernel |
-| 10h | `SEL_KDATA` | 07000h | FFFFh | 93h: present, DPL 0, data, writable | its stacks, the arena, its tables and variables, the module table (*docs/memory-map.md*) |
-| 18h | `SEL_KSTACK` | 07000h | 3FFh | 93h | its own stack: the start's, then the idle loop's |
+| 10h | `SEL_KDATA` | 04B00h | FFFFh | 93h: present, DPL 0, data, writable | its stacks, the arena, its tables and variables, the module table (*docs/memory-map.md*) |
+| 18h | `SEL_KSTACK` | 04600h | 3FFh | 93h | its own stack: the start's, then the idle loop's |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
-| 30h | `SEL_DFSTACK` | 07400h | 1FFh | 93h | its stack |
+| 30h | `SEL_DFSTACK` | 04400h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
 | 40h-F8h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`, 24) |
 | 100h-1B8h | `SEL_STACK_POOL` | in the arena | 15Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`, 24): SS0 while it runs |
@@ -74,8 +74,8 @@ An empty slot is all zeros: not present, DPL 0, no valid type. Ring 3 can
 neither load it (#GP) nor learn anything of it: `LAR`, `LSL`, `VERR` and
 `VERW` all refuse it (roadmap l4.md E2; the attack "every slot of the LDT").
 
-A test probe that changed a descriptor (*docs/syscalls.md*,
-`SYS_TEST_PROBE`) is undone at the next start of the program; a program
+A test probe that changed a descriptor (*docs/kernel-calls.md*,
+`KCALL_TEST`'s `TEST_PROBE`) is undone at the next start of the program; a program
 that deleted one of its first three slots gets it back from the root when
 the loss makes it fault. The fuzzer's code alias is the test build's
 kernel's, made again at every start.

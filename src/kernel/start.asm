@@ -62,10 +62,7 @@ pm_start:
         call con_set_attr
         TRACE "kernel: protected mode; GDT, IDT, TSS and LDTR loaded"
         call timer_init
-        call rtc_init
-%ifdef WITH_MODEM
-        call modem_init
-%endif
+        call rtc_init                   ; the clock quiet: its driver reads it
         call pic_unmask_all
         mov al, CMOS_REG_D              ; bit 7 clear: NMI on
         out CMOS_INDEX, al

@@ -27,6 +27,14 @@ SEL_PAST_LDT        equ LDT_ENTRIES * 8 | SEL_TI_LDT | RPL_USER    ; one slot pa
 SEL_EMPTY_SLOT      equ (LDT_ENTRIES - 1) * 8 | SEL_TI_LDT | RPL_USER  ; its last slot: empty
 FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 
+; probe which - KCALL_TEST's TEST_PROBE: the kernel changes one of the
+; program's own descriptors before it returns
+%macro probe 1
+        mov bl, %1
+        mov al, TEST_PROBE
+        kcall KCALL_TEST
+%endmacro
+
 begin_udata
 next_attack         dw 0
 scratch             times 8 db 0
@@ -207,8 +215,9 @@ attacks:
         arpl ax, bx
         PRINT "attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed", CHAR_LF
         jmp entry
-.edge:  mov ah, SYS_TICKS
-        jmp edge_of_code                ; INT 30h as the code segment's last bytes
+.edge:  mov ah, KCALL_TICKS
+        jmp edge_of_code                ; INT 31h as the code segment's last bytes
+.int30: int 0x30                        ; the system call's gate until l4.md L10: DPL 0
 .sgdt:  sgdt [scratch]                  ; unprivileged on the 286: allowed
         PRINT "attack: sgdt allowed", CHAR_LF
         jmp entry
@@ -326,29 +335,24 @@ attacks:
 .slots: mov bx, SEL_UCODE               ; what ring 3 learns of every LDT slot
         jmp ldt_slots
 ; The probes (roadmap l4.md L1): the kernel changes one of the program's
-; descriptors during a system call, as a revocation would. On the way back
-; a DS it may no longer load becomes null, and a CS or SS is the program's
-; fault, reported at the return address.
-.pds:   mov al, PROBE_DS_ABSENT
-        sys SYS_TEST_PROBE
+; descriptors during a kernel call (KCALL_TEST's TEST_PROBE), as a
+; revocation would. On the way back a DS it may no longer load becomes
+; null, and a CS or SS is the program's fault, reported at the return
+; address.
+.pds:   probe PROBE_DS_ABSENT
 .pds_f: mov ax, [0]                     ; DS is null now
-.pdsx:  mov al, PROBE_DS_EXEC
-        sys SYS_TEST_PROBE
+.pdsx:  probe PROBE_DS_EXEC
 .pdsx_f: mov ax, [0]
-.pss:   mov al, PROBE_SS_ABSENT
-        sys SYS_TEST_PROBE
+.pss:   probe PROBE_SS_ABSENT
 .pss_r: PRINT "attack: back, with a stack not present", CHAR_LF
         jmp entry
-.pssr:  mov al, PROBE_SS_READONLY
-        sys SYS_TEST_PROBE
+.pssr:  probe PROBE_SS_READONLY
 .pssr_r: PRINT "attack: back, with a read-only stack", CHAR_LF
         jmp entry
-.pcs:   mov al, PROBE_CS_ABSENT
-        sys SYS_TEST_PROBE
+.pcs:   probe PROBE_CS_ABSENT
 .pcs_r: PRINT "attack: back, with code not present", CHAR_LF
         jmp entry
-.pcsd:  mov al, PROBE_CS_DATA
-        sys SYS_TEST_PROBE
+.pcsd:  probe PROBE_CS_DATA
 .pcsd_r: PRINT "attack: back, with data for code", CHAR_LF
         jmp entry
 ; The kernel's calls (roadmap l4.md L3), from a program that holds no
@@ -487,6 +491,7 @@ attack_table:
         attack "jump to the TSS", attacks.tss
         attack "call the double-fault TSS", attacks.dftss
         attack "int 32h", attacks.int32
+        attack "int 30h, the system call that was", attacks.int30
         attack "int 21h", attacks.int21
         attack "int 3", attacks.int3
         attack "into", attacks.into
@@ -515,7 +520,7 @@ attack_table:
         attack "write from a null selector", attacks.nullw
         attack "write past FFFFh", attacks.wrap
         attack "unprivileged reads", attacks.reads
-        attack "int 30h at the end of the code", attacks.edge
+        attack "int 31h at the end of the code", attacks.edge
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
         attack "read a sector into the code", attacks.dcode
@@ -554,14 +559,14 @@ end_udata
 %include "uprint.asm"
 %include "format.asm"
 
-; The last two bytes of the code segment: the system call returns to IP
+; The last two bytes of the code segment: the kernel call returns to IP
 ; UTEXT_ROOM, past the limit, and IRET would fault in ring 0 (M10).
         times UTEXT_ROOM - 2 - ($ - $$) db 0
 ; ----------------------------------------------------------------------------
-; edge_of_code - INT 30h as the code segment's last two bytes
-;   In:       AH = a system call (attacks.edge)
+; edge_of_code - INT 31h as the code segment's last two bytes
+;   In:       AH = a kernel call (attacks.edge)
 ;   Out:      does not return: the kernel finds the return IP past the limit
 ;   Destroys: what the call destroys
 ; ----------------------------------------------------------------------------
 edge_of_code:
-        int SYSCALL_VECTOR
+        int KCALL_VECTOR

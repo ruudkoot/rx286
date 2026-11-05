@@ -24,7 +24,7 @@
 
 cpu 286
 bits 16
-%define RAW_SYSCALLS
+%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"

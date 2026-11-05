@@ -31,7 +31,7 @@
 
 cpu 286
 bits 16
-%define RAW_SYSCALLS                    ; INT 30h itself: the root is not the OS server's
+%define KERNEL_LOG                      ; its lines: the kernel's log, not the OS server's
 %include "build.inc"
 %include "program.inc"
 %include "kcalls.inc"
@@ -48,7 +48,8 @@ MODULES             equ SLOT(ROOT_SLOT_MODULES)
 FAULT_SLOT          equ ROOT_SLOT_MODULE + 2 * (MODULE_MAX - 1)  ; past every module's two
 FAULT_EP            equ SLOT(FAULT_SLOT)        ; the fault endpoint
 SCRATCH             equ SLOT(FAULT_SLOT + 1)    ; a badged copy on its way
-PROGRAM_SLOT        equ FAULT_SLOT + 2          ; then eight slots a module it builds:
+PROGRAM_SLOT        equ ROOT_SLOT_IRQ + 16      ; past the kernel's gifts (the 16 lines), eight
+                                                ; slots a module it builds:
 P_SPACE             equ 0                       ; its space
 P_THREAD            equ 8                       ; its thread
 P_DATA              equ 16                      ; its data and stack (the root keeps a
@@ -58,7 +59,10 @@ P_XFER              equ 40                      ; its transfer segment, and the 
 P_SERVER            equ 48                      ; server's thread that serves it,
 P_FILES             equ 56                      ; and its files segment, the server's
 CONTROL             equ SLOT(ROOT_SLOT_VIDEO - 1)  ; the OS server's control notification
-PROGRAMS_MAX        equ (ROOT_SLOT_VIDEO - 1 - PROGRAM_SLOT) / 8   ; below those slots
+PROGRAMS_MAX        equ MODULE_MAX - 1          ; every module but the root
+%if PROGRAM_SLOT + 8 * PROGRAMS_MAX > ROOT_SLOTS
+  %error "root.asm: its space has no room for every module's slots"
+%endif
 
 ; A module's slots in its own space, as selectors (any RPL names a slot)
 W_CODE              equ 0x04
@@ -71,10 +75,13 @@ W_DRV_EP            equ DRV_SLOT_EP * 8 + 4     ; a driver's
 W_DRV_NOTIFY        equ DRV_SLOT_NOTIFY * 8 + 4
 W_DRV_IRQ           equ DRV_SLOT_IRQ * 8 + 4
 W_DRV_DEVICE        equ DRV_SLOT_DEVICE * 8 + 4
-W_CONTROL           equ 14 * 8 + 4      ; the OS server's: its control notification,
+W_SOUND_STOP        equ 13 * 8 + 4      ; the OS server's: the sound driver's notification,
+W_CONTROL           equ 14 * 8 + 4      ;    its control notification,
 W_FOREGROUND        equ 15 * 8 + 4      ;    the foreground program's thread
 OS_CONTROL_N        equ 16              ; its control thread's part of its stack
-OS_SLOTS            equ 128             ; the OS server's space: 8n + k for program n
+OS_SLOTS            equ 256             ; the OS server's space: 8n + k for program n,
+OS_SLOT_SLEEP       equ 128             ;    and n's thread's notification at 128 + n
+DRIVER_SLOTS        equ DRV_SLOTS       ; a driver's space (drivers.inc)
 OS_STACK            equ 512             ; each of its threads' part of its stack
 %ifdef TEST_CAPS
 CAPS_SLOTS          equ 64              ; the program's, with what TEST_CAPS gives it:
@@ -232,8 +239,9 @@ failed:
         call print_dec
         call print_newline
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        mov dx, FAULT_EP                ; a receive that is never answered: the
+        xor bp, bp                      ; faults of what it built wait with it
+        kcall KCALL_RECV
         jmp .wait
 
 ; ----------------------------------------------------------------------------
@@ -314,6 +322,9 @@ build:
         mov cx, OS_SLOTS
         cmp bx, [server]
         je .slots
+        mov cx, DRIVER_SLOTS
+        test byte [m_flags], MF_DRIVER
+        jnz .slots
         mov cx, PROGRAM_SLOTS
         test byte [m_flags], MF_FOREGROUND
         jz .slots
@@ -655,10 +666,11 @@ server_control:
 
 ; ----------------------------------------------------------------------------
 ; give_service - a driver's endpoint to the OS server, in the slot its
-; service names (OS_SLOT_SERVICE + service; drivers.inc)
+; service names (OS_SLOT_SERVICE + service; drivers.inc); and the sound
+; driver's notification, badged DRV_STOP_BIT, for Ctrl+Break
 ;   In:       BX = the driver's module number; CL = its service (0: none)
 ;   Out:      nothing (stops on a failure)
-;   Destroys: AX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 give_service:
         test cl, cl
@@ -672,6 +684,16 @@ give_service:
         mov si, [s_ep]
         mov dx, [server_space]
         mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        cmp cl, SERVICE_SOUND
+        jne .done
+        mov dx, [server_space]          ; the sound driver's notification, for
+        mov si, [s_xfer]                ; Ctrl+Break to end a sound with
+        mov di, W_SOUND_STOP
+        mov al, COPY_MINT
+        mov bx, DRV_STOP_BIT
+        mov cl, RIGHT_SEND
         kcall KCALL_COPY
         must
 .done:
@@ -710,6 +732,20 @@ serve_program:
         call give_server
         mov si, [s_files]
         call give_server
+        mov dx, ARENA                   ; its thread's notification, to sleep on:
+        mov al, CAP_NOTIFY              ; made in the scratch slot, moved to the
+        mov si, SCRATCH                 ; server's OS_SLOT_SLEEP + n
+        kcall KCALL_RETYPE
+        must
+        mov di, bx
+        add di, OS_SLOT_SLEEP
+        shl di, 3
+        add di, 4
+        mov dx, [server_space]
+        mov si, SCRATCH
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        must
         mov dx, ARENA                   ; its thread
         mov al, CAP_THREAD
         mov si, [s_server]

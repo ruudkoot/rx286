@@ -1,8 +1,10 @@
 # Ctrl+Break (Ctrl+Scroll Lock) while the program waits for a key: the
 # keyboard driver signals the OS server, which restarts the program and
-# gives up the wait; keys go on working (roadmap l4.md L8).
+# gives up the wait; keys go on working (roadmap l4.md L8). Ctrl+Break is
+# typed at once, waiting for no reader: ten ticks first, so that the
+# program, which starts after every driver, waits by then.
 program: keys
-keys: {ctrl-break}a
+keys: {wait 10}{ctrl-break}a
 ---
 rx286, test build
 rx286: Ctrl+Break: the program starts again

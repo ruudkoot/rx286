@@ -58,6 +58,8 @@ kcall_table:
         dw kc_save_reply                            ; KCALL_SAVE_REPLY
         dw kc_done.nosys                            ; 15: revoke (L12)
         dw kc_test                                  ; KCALL_TEST
+        dw kc_log                                   ; KCALL_LOG (log.asm)
+        dw kc_ticks                                 ; KCALL_TICKS
 kcall_table_end:
 msg_thread_made     db "thread", 0
 ; Temporaries of the calls: no kernel call waits, so none is ever two deep.
@@ -200,21 +202,50 @@ cap_get:
         ret
 
 ; ----------------------------------------------------------------------------
-; untyped_carve - room in untyped memory for an object, the watermark moved
+; untyped_carve - room in untyped memory for an object: in the hole an
+; earlier object's alignment left, if it fits there (l4.md L10: the arena's
+; objects of 16, 512 and 4,096 bytes left a quarter of it in holes); else at
+; the watermark, which moves, and the room skipped to align it becomes the
+; hole if it is larger than the one kept
 ;   In:       SI = the untyped's shadow entry; CX = the object's paragraphs;
 ;             DX = its alignment in paragraphs (a power of two)
 ;   Out:      CF clear and AX = its base in paragraphs; CF set if no room
-;   Destroys: DX
+;   Destroys: nothing else
 ; ----------------------------------------------------------------------------
 untyped_carve:
         push bx
+        push cx
+        push dx
+        mov ax, [si + SH_HOLE]
+        mov bx, [si + SH_HOLE_END]
+        call retype_place               ; within the hole?
+        jc .watermark
+        mov [si + SH_HOLE], dx          ; the hole now starts past it
+        jmp .placed
+.watermark:
+        pop dx
+        push dx
         mov ax, [si + SH_WATERMARK]
         mov bx, [si + SH_SIZE]
         call retype_place               ; AX = its place, DX = the new watermark
         jc .done
+        mov bx, ax
+        sub bx, [si + SH_WATERMARK]     ; BX = the room skipped
+        mov cx, [si + SH_HOLE_END]
+        sub cx, [si + SH_HOLE]          ; CX = the hole kept
+        cmp bx, cx
+        jbe .kept
+        mov bx, [si + SH_WATERMARK]
+        mov [si + SH_HOLE], bx
+        mov [si + SH_HOLE_END], ax
+.kept:
         mov [si + SH_WATERMARK], dx
+.placed:
         add ax, [si + SH_OBJECT]
+        clc
 .done:
+        pop dx
+        pop cx
         pop bx
         ret
 
@@ -1234,9 +1265,11 @@ kc_irq:
 ; ----------------------------------------------------------------------------
 ; kc_test - KCALL_TEST: the hooks of debug and test builds (KE_NOSYS in
 ; release builds): the thread dump; in test builds, the bytes a key script
-; gave the mouse or typed where the 8042 cannot, and whether the OS server
-; waits for a key
-;   In:       BP = the frame (AL TEST_*; TEST_READER: BL)
+; gave the mouse or typed where the 8042 cannot, whether the OS server
+; waits for a key, the sound driver's probes (TEST_SOUND builds) and the
+; attack program's (TEST_ATTACK builds)
+;   In:       BP = the frame (AL TEST_*; TEST_READER, TEST_PROBE: BL;
+;             TEST_SOUND_PROBE: BX)
 ;   Out:      the frame's BL = a byte; or KE_EMPTY
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
@@ -1250,6 +1283,23 @@ kc_test:
 .hooks:
 %endif
 %ifdef WITH_TEST_HOOKS
+%ifdef TEST_SOUND
+        cmp al, TEST_SOUND_PROBE
+        jne .silence
+        mov bx, [bp + FRAME_BX]
+        call test_sound
+        jmp kc_done.ok
+.silence:
+        cmp al, TEST_SILENCE_PROBE
+        jne .attack
+        call test_silence
+        jmp kc_done.ok
+.attack:
+%endif
+%ifdef TEST_ATTACK
+        cmp al, TEST_PROBE
+        je test_probe
+%endif
         cmp al, TEST_READER
         je .reader
         cmp al, TEST_KEYS_READY

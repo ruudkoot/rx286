@@ -118,7 +118,8 @@ MODULE_BINARIES = {'root': ('root', 'r.'), 'os': ('os', 'o.'), 'program': ('user
                    'counter': ('counter', 'c.'), 'printer': ('printer', 'p.'),
                    'mouse': ('mouse', 'm.'), 'console': ('console', 'v.'),
                    'kbd': ('keyboard', 'k.'), 'fd': ('diskette', 'f.'),
-                   'hd': ('fixeddisk', 'h.')}
+                   'hd': ('fixeddisk', 'h.'), 'serial': ('serial', 's.'),
+                   'sound': ('sound', 'a.'), 'clock': ('clock', 't.')}
 
 
 def binary_bases(build_dir):

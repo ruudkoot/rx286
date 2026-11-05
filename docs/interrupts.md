@@ -11,15 +11,16 @@ has a rule (roadmap D10-D15). `src/include/vectors.inc` names the vectors;
 | 00h-07h, 09h-1Fh | interrupt | 0 | the exception path: a fault of the program, or a kernel panic |
 | 08h | task, to `SEL_DFTSS` | 0 | the double-fault task |
 | 20h-2Fh | interrupt | 0 | IRQ0-15: a driver, or the rule for lines without one |
-| 30h | interrupt | 3 | the system call (`VEC_SYSCALL`; *docs/syscalls.md*) |
-| 31h | interrupt | 3 | the kernel's calls on capabilities (`VEC_KCALL`; *docs/kernel-calls.md*) |
+| 30h | interrupt | 0 | the system call until roadmap l4.md L10 deleted it (`VEC_RETIRED`): now a fault from rings 1-3 like any other DPL 0 gate |
+| 31h | interrupt | 3 | the kernel's calls (`VEC_KCALL`; *docs/kernel-calls.md*) |
 
 The IDT has `IDT_ENTRIES` gates (50) and its limit is `IDT_LIMIT` (18Fh). Any
 vector above `VEC_KCALL` is beyond the limit: a general protection fault
 whose error code is the vector × 8 + 2, so a program's `INT 41h` is reported
 as a fault naming the vector. A program's `INT 3`, `INTO` or `INT n` for any
-other n goes through a gate of DPL 0 and faults the same way. Only `INT 30h`
-and `INT 31h` reach the kernel by the program's choice. No external interrupt can come
+other n goes through a gate of DPL 0 and faults the same way, `INT 30h`
+too: #GP(0182). Only `INT 31h` reaches the kernel by the program's choice;
+its system calls go to the OS server (*docs/syscalls.md*). No external interrupt can come
 above `VEC_IRQ_LAST`, since both 8259As are programmed below it.
 
 Every gate but 08h's is an interrupt gate, so the kernel runs with IF clear;
@@ -104,20 +105,19 @@ slave's; there are `IRQ_LINES` (16).
 | `IRQ_TIMER` (0) | the timer driver: 50 ticks a second |
 | `IRQ_KEYBOARD` (1) | bound to the keyboard driver, outside the kernel (*docs/drivers.md*) |
 | `IRQ_CASCADE` (2) | the cascade: never masked, never delivered |
-| 3 | the modem's driver, in release builds: bytes from COM2 (in debug and test builds COM2 is the log, polled, and the line has no driver) |
+| 3 | bound to the serial driver: bytes from COM2, the modem's line in release builds (in debug and test builds COM2 is the log, polled, and the line stays quiet) |
 | `IRQ_MOUSE` (4) | bound to the mouse driver, outside the kernel (*docs/drivers.md*): bytes from COM1 |
-| 6 | the diskette driver: a command has ended |
+| 6 | bound to the diskette driver: a command has ended |
 | `IRQ_FPU` (13) | the 287's error: a fault of the program |
-| 14 | the fixed disk driver: a sector is ready, or written |
+| 14 | bound to the fixed disk driver: a sector is ready, or written |
 | `IRQ_RTC` (8) and every other line | no driver: the first interrupt is reported ("unhandled IRQ n"), acknowledged, and the line masked. The printer ports' lines (7 and 5) stay quiet: the printer driver polls, with the ports' interrupts off |
 
 **A line bound to a driver outside the kernel** (`KCALL_IRQ`; roadmap l4.md
 L7, D10): at each interrupt the kernel masks the line, sends EOI and
 signals the driver's notification; the driver's `IRQ_ACK` unmasks it, and
 an interrupt that came meanwhile waits in the 8259A. The kernel keeps the
-timer's line, the cascade, the keyboard's, the disks', the 287's and (in
-release builds) the modem's; it gives the root a capability for every
-other line.
+timer's line, the cascade and the 287's; it gives the root a capability for
+every other line.
 
 - **At start** every line is unmasked, IRQ2 too: masking the cascade would cut
   off IRQ8-15 and with them the 287's errors.
@@ -128,48 +128,48 @@ other line.
 - **EOI**: an IRQ of the slave sends EOI to the slave, then the master.
 - **The RTC** raises IRQ8 only if its periodic, alarm or update interrupt is
   on, and then only once until register C is read. rx286 turns all three off
-  and reads the clock by polling.
+  at the start, and the clock driver reads the clock by polling.
 
 ## Interrupts inside the kernel
 
 All gates but the double fault's are interrupt gates, so the kernel runs with
-IF clear and nothing interleaves with a half-done change. It sets IF only
-where it waits, and only where its state is whole:
+IF clear and nothing interleaves with a half-done change. Since the devices
+left it (roadmap l4.md L7-L10), no kernel path waits for one, and it sets IF
+in two places only, each where its state is whole:
 
-- **`read_key` waiting for a key**: until a key arrives, in `kwait`: the
-  thread waits until the next interrupt while other threads run, or the
-  kernel halts on its own stack (`sti; hlt; cli`) if none is ready
-  (*docs/architecture.md*, *Threads*).
-- **`write`, after each byte**: `sti; nop; cli`. `STI` takes
-  effect after the next instruction, so `sti; cli` would open nothing. A
-  byte's work is at most one scroll or one clear of the screen; without the
-  window, a `write` of 4,096 newlines, spaces or form feeds would keep IF
-  clear for seconds.
-- **A driver waiting for its device** (*docs/storage.md*): `ksleep_until`
-  sleeps (`kwait`) until the device's interrupt handler sets a byte,
-  `kpoll` reads a port with a window (`sti; nop; cli`) after every 64 reads,
-  and `ksleep` sleeps for a number of ticks (a motor coming up, a sound).
-  Every wait has a limit in ticks.
-- **`SYS_WAIT`**: `kwait` until a key or the modem's bytes, or its limit
-  (*docs/devices.md*); the mouse's news is its driver's, which the OS
-  server asks once a tick (*docs/drivers.md*).
+- **The log's bytes** (`KCALL_LOG`, *docs/kernel-calls.md*), after each
+  one: `sti; nop; cli`. `STI` takes effect after the next instruction, so
+  `sti; cli` would open nothing. Without the window, a line of 4,096 bytes
+  would keep IF clear for a third of a second at the log's 115,200 baud.
+  Before it writes a byte, a thread waits its turn at the log (`kwait`),
+  so that lines never mix.
+- **The idle loop**: with no thread ready, the kernel halts on its own
+  stack (`sti; hlt; cli`).
 
-After a window of `write`, `serial_write` or `kpoll`, a thread more
-urgent than the running one may run (`kpreempt`): the running thread's
-kernel context waits on its own kernel stack.
+After a window of the log, a thread more urgent than the running one may
+run (`kpreempt`): the running thread's kernel context waits on its own
+kernel stack. Everything else - IPC, capabilities, the timer's tick - runs
+to its end with interrupts off. The drivers run with interrupts on, in ring
+1; only the sound driver turns them off, while it times the game port's
+axes: 4 ms at most, a fifth of a tick, so no tick is lost.
 
-The game port's timing is the one stretch the kernel spends with
-interrupts off by design: 4 ms at most, a fifth of a tick, so no tick is
-lost.
+**How long.** Test builds made with `TEST_STRETCH` measure every stretch
+with interrupts off, with timer channel 0's latched count, from the
+kernel's entry or a window's end to the next window or `IRET`, and say at
+the end of a test how long the longest was and where
+(`tests/kernel/stretch.test`; roadmaps/realtime.md R0). On MAME's AT, which
+runs at an AT's speed: 4.5 ms at most in a test build, most of it a trace
+line on the log, written whole; 3.4 ms without the log's bytes, which a
+release build does not have: `KCALL_RETYPE` zeroing a segment of 8 KB.
 
-An IRQ at any of these points nests once on the running thread's kernel
-stack (or the kernel's own, when it idles): handlers run with IF clear and
-never wait. After every IRQ, every thread waiting inside the kernel is made
-ready to look again at what it waits for (`wake_waiters`).
+An IRQ at either point nests once on the running thread's kernel stack
+(or the kernel's own, when it idles): handlers run with IF clear and never
+wait. After every IRQ, a thread waiting its turn at the log is made ready
+to look again (`wake_waiters`).
 
-A restart that arrives during a system call - the OS server's
-`THREAD_RESTART` for Ctrl+Break or an exit, which takes the OS server's
-thread for the program with it, or a 287 error - sets a flag of the thread
-it is for, and that thread's return to its ring restarts its program
-instead; a disk call finishes its sector first. The flag is `restart_pending` while the
+A restart that arrives while a thread is inside the kernel - the OS
+server's `THREAD_RESTART` for Ctrl+Break or an exit, which takes the OS
+server's thread for the program with it, or a 287 error - sets a flag of
+the thread it is for, and that thread's return to its ring restarts its
+program instead; a line of the log stops early. The flag is `restart_pending` while the
 thread runs, and kept in its control block while another does.

@@ -2,23 +2,25 @@
 # the end of pm_start). Every descriptor of the GDT has DPL 0; its pools of
 # LDT and kernel stack descriptors, and its two scratch windows, are still
 # empty, and no LDT is loaded: the root's space is made after this point
-# (roadmap l4.md L3, L5). The kernel's data segment starts below the image,
-# at KDATA_BASE, with the kernel's stacks. Code and data limits change with
-# the code, so they are left out; everything else is checked.
+# (roadmap l4.md L3, L5). Of the IDT's gates only 31h, the kernel's calls,
+# has DPL 3: 30h, the system call until l4.md L10, has DPL 0. The kernel's
+# data segment starts below the image, at KDATA_BASE, above the kernel's
+# stacks. Code and data limits change with the code, so they are left out;
+# everything else is checked.
 emulators: bochs
 break: pm_start.ready
 debugger: info gdt 0 57
 debugger: info idt 0 0x31
 debugger: sreg
 ---
-Global Descriptor Table (base=0x0000000000014100, limit=463):
+Global Descriptor Table (base=0x0000000000013100, limit=463):
 GDT[0x0000]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x0008]=Code segment, base=0x00010100, limit=0x
-GDT[0x0010]=Data segment, base=0x00006300, limit=0x0000ffff, Read/Write, Accessed
-GDT[0x0018]=Data segment, base=0x00005c00, limit=0x000003ff, Read/Write, Accessed
+GDT[0x0010]=Data segment, base=0x00004b00, limit=0x0000ffff, Read/Write, Accessed
+GDT[0x0018]=Data segment, base=0x00004600, limit=0x000003ff, Read/Write, Accessed
 GDT[0x0020]=16-Bit TSS (Busy) at 0x
 GDT[0x0028]=16-Bit TSS (available) at 0x
-GDT[0x0030]=Data segment, base=0x00005a00, limit=0x000001ff, Read/Write, Accessed
+GDT[0x0030]=Data segment, base=0x00004400, limit=0x000001ff, Read/Write, Accessed
 GDT[0x0038]=Data segment, base=0x000b8000, limit=0x00000f9f, Read/Write, Accessed
 GDT[0x0040]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x00f8]=??? descriptor hi=0x00000000, lo=0x00000000
@@ -32,9 +34,9 @@ IDT[0x07]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_7}, DPL=0
 IDT[0x08]=Task Gate target=0x0028:0x00000000, DPL=0
 IDT[0x0d]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_13}, DPL=0
 IDT[0x2f]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_47}, DPL=0
-IDT[0x30]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_48}, DPL=3
+IDT[0x30]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_48}, DPL=0
 IDT[0x31]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_49}, DPL=3
 ldtr:0x0000, dh=0x00008200, dl=0x0000ffff, valid=0
 tr:0x0020
-gdtr:base=0x0000000000014100, limit=0x1cf
+gdtr:base=0x0000000000013100, limit=0x1cf
 , limit=0x18f

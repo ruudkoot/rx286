@@ -39,7 +39,13 @@ KCALL_DELETE        equ 13  ; DX a slot of the caller's: emptied
 KCALL_SAVE_REPLY    equ 14  ; SI an empty slot: the reply owed, as a capability to send on
 KCALL_TEST          equ 16  ; debug and test builds: AL TEST_*, the hooks of debugging and
                             ;    tests (KE_NOSYS in release builds)
-KCALL_COUNT         equ 17
+KCALL_LOG           equ 17  ; DS:SI bytes, CX how many (LOG_MAX at most): to the kernel's
+                            ;    log (l4.md L10, D15) -> AX the bytes written (fewer if
+                            ;    the thread is to restart); CF and AX KE_ARG or KE_CAP
+KCALL_TICKS         equ 18  ; -> DX:AX the ticks since the start (TICKS_HZ a second)
+KCALL_COUNT         equ 19
+LOG_MAX             equ 4096
+TICKS_HZ            equ 50
 
 IRQ_BIND            equ 0   ; KCALL_IRQ: SI a notification, which the line's interrupts
                             ;    signal (its badge, or 1); the line unmasked
@@ -52,6 +58,20 @@ TEST_READER         equ 2   ;    BL TEST_READER_*: whether the OS server waits f
                             ;    having found none (the test hooks type then)
 TEST_DUMP           equ 3   ;    every thread, on the log (Sys Req; debug builds too)
 TEST_KEYS_READY     equ 4   ;    the keyboard driver has started: the script may begin
+TEST_SOUND_PROBE    equ 5   ;    TEST_SOUND builds: BX the frequency the speaker sounds:
+                            ;    measured over a tick, a probe line on the log
+TEST_SILENCE_PROBE  equ 6   ;    TEST_SOUND builds: the speaker silent over a tick?
+TEST_PROBE          equ 7   ;    TEST_ATTACK builds: BL PROBE_*: change one of the caller's
+                            ;    own descriptors as a revocation would, so the way back
+                            ;    to its ring can be tested (l4.md L1); its next start
+                            ;    undoes it
+PROBE_DS_ABSENT     equ 1   ; the data segment's descriptor not present
+PROBE_DS_EXEC       equ 2   ; the data segment's slot refilled with execute-only code
+PROBE_SS_ABSENT     equ 3   ; the stack's descriptor not present
+PROBE_SS_READONLY   equ 4   ; the stack's slot refilled with read-only data
+PROBE_CS_ABSENT     equ 5   ; the code's descriptor not present
+PROBE_CS_DATA       equ 6   ; the code's slot refilled with data
+PROBE_COUNT         equ 7
 TEST_READER_NONE    equ 0
 TEST_READER_TIMED   equ 1   ; a wait with a limit
 TEST_READER_FOREVER equ 2
@@ -98,7 +118,7 @@ FAULT_COUNTED       equ 1   ; DI: a test build counted it (the fuzzer): say noth
 
 PRIORITY_MAX        equ 7
 SPACE_SLOTS_MIN     equ 8   ; a space's slots: a power of two between these
-SPACE_SLOTS_MAX     equ 128
+SPACE_SLOTS_MAX     equ 256
 
 ; The root's slots at its start (roadmap l4.md L5): slots 0, 1 and 2 its
 ; code, data and stack, as every program's; then the kernel's gifts.
@@ -112,7 +132,7 @@ ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2
 ROOT_SLOT_VIDEO     equ 111 ; the screen's text page, a segment of DPL 1 (l4.md L8)
 ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
                             ;    does not keep (its own are left empty)
-ROOT_SLOTS          equ 128 ; its space's slots
+ROOT_SLOTS          equ 256 ; its space's slots: past the kernel's gifts, its own (l4.md L10)
 
 KE_OK               equ 0
 KE_CAP              equ 1   ; not a capability of the type the call needs

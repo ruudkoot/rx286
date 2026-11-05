@@ -166,6 +166,6 @@ print_newline:
         pop ax
         ret
 
-%ifndef RAW_SYSCALLS
+%ifndef KERNEL_LOG
 %include "stub.asm"                     ; what the sys macro calls
 %endif

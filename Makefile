@@ -78,6 +78,8 @@ MODULES := root=$(B)/root.bin:2:7 os=$(B)/os.bin:2:5:stack=8192 \
     printer=$(B)/printer.bin:1:6:driver:service=1 mouse=$(B)/mouse.bin:1:6:driver:irq=4:service=2 \
     console=$(B)/console.bin:1:6:driver:service=3 kbd=$(B)/keyboard.bin:1:6:driver:irq=1:service=4 \
     fd=$(B)/diskette.bin:1:6:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:6:driver:irq=14:service=6 \
+    serial=$(B)/serial.bin:1:6:driver:irq=3:service=7 sound=$(B)/sound.bin:1:6:driver:service=8 \
+    clock=$(B)/clock.bin:1:6:driver:service=9 \
     program=$(B)/user.bin:$(PROGRAM_RING) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.bin:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
@@ -94,7 +96,8 @@ FLOPPY_SERIAL := 52583836
 IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.bin $(B)/os.bin \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
-    $(B)/fixeddisk.bin $(B)/user.bin $(B)/counter.bin $(B)/kernel.bin $(B)/image.bin
+    $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/clock.bin $(B)/user.bin \
+    $(B)/counter.bin $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
@@ -159,8 +162,8 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 # The boot image: the kernel, the module table and the modules. On the
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
 $(B)/image.bin: $(B)/kernel.bin $(B)/root.bin $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
-    $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/user.bin \
-    $(B)/counter.bin tools/mkimage \
+    $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
+    $(B)/sound.bin $(B)/clock.bin $(B)/user.bin $(B)/counter.bin tools/mkimage \
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 

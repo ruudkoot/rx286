@@ -154,8 +154,7 @@ check_others:
 .bad_time:
         PRINT "INVALID", CHAR_LF
 .unknown:
-        mov ah, 0x7F                    ; no such call
-        int SYSCALL_VECTOR
+        sys 0x7F                        ; no such call
         call report_error
         ; The registers a call does not return are kept.
         mov bx, 0x1111

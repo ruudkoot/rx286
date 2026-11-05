@@ -1,7 +1,7 @@
 ; ============================================================================
 ; rx286 - src/kernel/thread.asm
 ; Threads: their control blocks, the switch, the scheduler, the idle loop,
-; waiting, and the lock around the system calls (roadmap l4.md L2).
+; waiting, and the lock around the log (roadmap l4.md L2, L10).
 ;
 ; Each thread runs a program in ring 3 with an LDT of its own, and has a
 ; kernel stack of its own (from SEL_STACK_POOL): SP0 points at its top while the
@@ -14,13 +14,12 @@
 ; no thread is ready the kernel idles on its own stack (SEL_KSTACK), never on
 ; a thread's (l4.md X8).
 ;
-; A thread waits inside the kernel only until the next interrupt (kwait):
-; every IRQ wakes every waiting thread, which looks again at what it waits
-; for. The system calls were written for one program and are not reentrant,
-; so one thread at a time is inside them (call_enter; l4.md X15); a thread
-; that waits for a key or SYS_WAIT's events lets others in meanwhile.
-; Preemption happens on the way back to ring 3 and at the kernel's own
-; interrupt windows (kpreempt), never in the middle of a handler.
+; A thread waits inside the kernel only for its turn at the log, and then
+; only until the next interrupt (kwait): every IRQ wakes every waiting
+; thread, which looks again (call_enter; l4.md X15). Every other wait is
+; IPC's. Preemption happens on the way back to ring 3 and at the kernel's
+; own interrupt windows (kpreempt, between a line's bytes), never in the
+; middle of a handler.
 ; ============================================================================
 
 begin_kdata
@@ -35,7 +34,7 @@ idle_tcb:
         times TCB_SIZE - T_SLICE db 0
 cur_thread          dw idle_tcb         ; the thread running
 fg_thread           dw idle_tcb         ; the thread the keys and Ctrl+Break are for
-call_owner          dw 0                ; the thread inside a system call, or 0
+call_owner          dw 0                ; the thread writing to the log, or 0
 resched             db 0                ; a thread should give way: at the next chance
 ready_mask          db 0                ; bit n: queue n is not empty
 rq_head             times PRIORITIES dw 0
@@ -85,9 +84,11 @@ idle_loop:
         call ready_pop
         test bx, bx
         jnz .run
+        STRETCH_END
         sti
         hlt
         cli
+        STRETCH_BEGIN 0xFFFF
         jmp idle_loop
 .run:
         call switch_to
@@ -291,38 +292,19 @@ kwait:
         pop bx
         ret
 .halt:
+        STRETCH_END
         sti                             ; STI acts after HLT has begun: an
         hlt                             ; interrupt already pending still wakes it
         cli
+        STRETCH_BEGIN 0xFFFF
         pop bx
         ret
 
 ; ----------------------------------------------------------------------------
-; kwait_unlocked - as kwait, letting other threads into the system calls
-; meanwhile: for waits that hold nothing of the calls' (a key, SYS_WAIT)
+; call_enter - into the log's writes (KCALL_LOG): one thread at a time, so
+; that lines never mix (l4.md X15)
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      nothing, after an interrupt, inside the calls again if it was
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-kwait_unlocked:
-        push ax
-        mov ax, [cur_thread]
-        cmp [call_owner], ax
-        jne .wait
-        mov word [call_owner], 0
-        call kwait
-        call call_enter
-        pop ax
-        ret
-.wait:
-        call kwait
-        pop ax
-        ret
-
-; ----------------------------------------------------------------------------
-; call_enter - into the system calls: one thread at a time (l4.md X15)
-;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      the running thread holds the calls
+;   Out:      the running thread holds the log
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 call_enter:
@@ -340,7 +322,7 @@ call_enter:
         ret
 
 ; ----------------------------------------------------------------------------
-; call_leave - out of the system calls
+; call_leave - out of the log's writes
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: nothing

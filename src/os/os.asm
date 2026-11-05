@@ -1,7 +1,7 @@
 ; ============================================================================
 ; rx286 - src/os/os.asm
-; The OS server (roadmap l4.md L6, D16): today's system calls, as messages,
-; and the faults of the programs it serves.
+; The OS server (roadmap l4.md L6, D16): the system calls, as messages, and
+; the faults of the programs it serves.
 ;
 ; The root builds it in ring 2 with a thread for each program, which serves
 ; that program alone: the thread's stack is the n-th OS_STACK of the
@@ -9,18 +9,20 @@
 ; knows its program. For each program the root gives it, in slots 8n to
 ; 8n + 7 (OS_K_*): the endpoint the program calls on, the program's thread
 ; and space, its code, data, stack and transfer segment, and a files
-; segment for the program's file calls (files.asm).
+; segment for the program's file calls (files.asm); and in slot
+; OS_SLOT_SLEEP + n a notification its thread sleeps on, a tick at a time.
 ;
 ; A system call comes from the program's stub (src/userland/stub.asm) with
 ; the function as the label and the registers in the transfer segment's
-; block (os.inc). The thread makes the call itself, on the transfer
-; segment, with INT 30h, and puts the results back; but the printer's and
-; the mouse's calls go to their drivers, whose endpoints the root gave it
-; (drivers.inc; l4.md L7), and so does SYS_WAIT's look for the mouse's
-; news, once a tick; the disks' calls go to the disk drivers, and the file
-; calls are the server's own (files.asm; l4.md L9). SYS_EXIT restarts the
-; program (KCALL_THREAD's THREAD_RESTART), and this thread with it, since it
-; serves that program alone (START_SESSION).
+; block (os.inc). The thread answers it from the transfer segment and puts
+; the results back: each device's calls go to its driver, whose endpoint
+; the root gave it (drivers.inc; l4.md L7-L10), after the checks the
+; kernel made, in the kernel's order; a write goes to the kernel's log too
+; (KCALL_LOG); the ticks are the kernel's (KCALL_TICKS); a wait for a key
+; or SYS_WAIT's events asks the drivers once a tick; the file calls are the
+; server's own (files.asm; l4.md L9). SYS_EXIT restarts the program
+; (KCALL_THREAD's THREAD_RESTART), and this thread with it, since it serves
+; that program alone (START_SESSION).
 ; A fault of the program comes on the same endpoint, badged FAULT_BADGE: the
 ; thread reports it as the kernel did, puts back any of the program's
 ; segments and capabilities that is gone from its slot, and restarts it at
@@ -29,7 +31,7 @@
 
 cpu 286
 bits 16
-%define RAW_SYSCALLS                    ; INT 30h itself: it makes the calls
+%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "kcalls.inc"
@@ -47,6 +49,10 @@ OS_CONSOLE          equ (OS_SLOT_SERVICE + SERVICE_CONSOLE) * 8 + 4 + RING
 OS_KEYBOARD         equ (OS_SLOT_SERVICE + SERVICE_KEYBOARD) * 8 + 4 + RING
 OS_DISKETTE         equ (OS_SLOT_SERVICE + SERVICE_DISKETTE) * 8 + 4 + RING
 OS_FIXED_DISK       equ (OS_SLOT_SERVICE + SERVICE_FIXED_DISK) * 8 + 4 + RING
+OS_SERIAL           equ (OS_SLOT_SERVICE + SERVICE_SERIAL) * 8 + 4 + RING
+OS_SOUND            equ (OS_SLOT_SERVICE + SERVICE_SOUND) * 8 + 4 + RING
+OS_CLOCK            equ (OS_SLOT_SERVICE + SERVICE_CLOCK) * 8 + 4 + RING
+OS_SOUND_STOP       equ 13 * 8 + 4 + RING   ; slot 13: the sound driver's notification
 OS_CONTROL          equ 14 * 8 + 4 + RING   ; slot 14: the control notification
 OS_FOREGROUND       equ 15 * 8 + 4 + RING   ; slot 15: the foreground program's thread
 OS_CONTROL_N        equ 16              ; the control thread's part of the stack
@@ -60,6 +66,8 @@ OS_K_DATA           equ 4
 OS_K_STACK          equ 5
 OS_K_XFER           equ 6
 OS_K_FILES          equ 7               ; its files segment (files.asm), the server's alone
+OS_SLOT_SLEEP       equ 128             ; program n's thread's notification, to sleep on:
+                                        ; slot OS_SLOT_SLEEP + n
 W_CODE              equ 0x04            ; the program's own slots
 W_DATA              equ 0x0C
 W_STACK             equ 0x14
@@ -138,7 +146,8 @@ serve:
 
 ; ----------------------------------------------------------------------------
 ; control - the control thread: Ctrl+Break, which the keyboard driver
-; signals, restarts the foreground program (and its thread here with it)
+; signals, ends a sound and restarts the foreground program (and its thread
+; here with it)
 ;   In:       nothing
 ;   Out:      does not return
 ;   Destroys: everything
@@ -149,10 +158,9 @@ control:
         jc control
         test bx, CONTROL_BREAK
         jz control
-        mov si, msg_ctrl_break          ; the log, through the kernel's write
+        mov si, msg_ctrl_break          ; the log
         mov cx, msg_ctrl_break_end - msg_ctrl_break
-        mov ah, SYS_WRITE
-        int SYSCALL_VECTOR
+        kcall KCALL_LOG
         mov si, msg_ctrl_break          ; and the screen
         mov cx, msg_ctrl_break_end - msg_ctrl_break
         mov bx, CON_MAIN
@@ -166,6 +174,8 @@ control:
         mov dx, OS_FOREGROUND
         mov al, THREAD_RESTART
         kcall KCALL_THREAD
+        mov dx, OS_SOUND_STOP           ; a sound of its ends at once
+        kcall KCALL_SIGNAL
         jmp control
 
 ; ----------------------------------------------------------------------------
@@ -255,7 +265,7 @@ program_slot:
         ret
 
 ; ----------------------------------------------------------------------------
-; forward - the program's system call, made here with INT 30h: its
+; forward - the program's system call, answered here: its
 ; registers from its transfer segment's block, its buffer there; the
 ; results put back in the block
 ;   In:       AL = the function (the label)
@@ -271,8 +281,6 @@ forward:
         mov ds, ax
         mov es, ax
         pop ax
-        cmp al, SYS_TEST_PROBE          ; the caller's own descriptors: never
-        je .nosys                       ; the server's
         cmp al, SYS_PRINT
         je .print
         cmp al, SYS_MOUSE
@@ -283,33 +291,27 @@ forward:
         je .read_key
         cmp al, SYS_WRITE
         je .write
+        cmp al, SYS_TICKS
+        je .ticks
         cmp al, SYS_DISK_READ
         je .disk
         cmp al, SYS_DISK_WRITE
         je .disk
+        cmp al, SYS_TIME
+        je .time
+        cmp al, SYS_SOUND
+        je .sound
+        cmp al, SYS_JOYSTICK
+        je .joystick
+        cmp al, SYS_SERIAL_WRITE
+        je .serial
+        cmp al, SYS_SERIAL_READ
+        je .serial
         cmp al, SYS_FIND
-        jb .kernel
+        jb .nosys
         cmp al, SYS_FREE
-        ja .kernel
+        ja .nosys
         call files                      ; the file calls: the server's own
-        jmp .done
-.kernel:
-        mov ah, al
-        mov al, [XFER_AX]
-        mov bx, [XFER_BX]
-        mov cx, [XFER_CX]
-        mov dx, [XFER_DX]
-        mov si, [XFER_SI]
-        mov di, [XFER_DI]
-        int SYSCALL_VECTOR
-        mov [XFER_AX], ax
-        mov [XFER_BX], bx
-        mov [XFER_CX], cx
-        mov [XFER_DX], dx
-        mov [XFER_SI], si
-        mov [XFER_DI], di
-        pushf
-        pop word [XFER_FLAGS]
         jmp .done
 .nosys:
         mov ax, E_NOSYS
@@ -360,6 +362,97 @@ forward:
 .fault:
         mov ax, E_FAULT
         jmp .error
+.ticks:
+        ; SYS_TICKS: the kernel's count
+        kcall KCALL_TICKS
+        mov [XFER_AX], ax
+        mov [XFER_DX], dx
+        mov word [XFER_FLAGS], 0
+        jmp .done
+.time:
+        ; SYS_TIME: the clock driver's
+        mov dx, OS_CLOCK
+        mov al, DRV_CLOCK_TIME
+        call driver
+        jc .nosys
+        mov [XFER_BX], bx
+        mov [XFER_CX], cx
+        mov [XFER_DX], si
+        mov [XFER_AX], di
+        mov word [XFER_FLAGS], 0
+        jmp .done
+.sound:
+        ; SYS_SOUND: the sound driver's, which checks it and answers once
+        ; the sound is over
+        mov bx, [XFER_BX]
+        mov cx, [XFER_CX]
+        mov dx, OS_SOUND
+        mov al, DRV_SOUND
+        call driver
+        jc .nosys
+        mov ax, bx
+        test ax, ax
+        jnz .error
+        mov word [XFER_FLAGS], 0
+        jmp .done
+.joystick:
+        ; SYS_JOYSTICK: the sound driver's; five results, in the block of
+        ; the transfer segment passed
+        push bp
+        mov bp, ds
+        mov dx, OS_SOUND
+        mov al, DRV_JOYSTICK
+        kcall KCALL_CALL
+        pop bp
+        jc .nosys
+        mov word [XFER_FLAGS], 0
+        jmp .done
+.serial:
+        ; SYS_SERIAL_WRITE, SYS_SERIAL_READ: the serial driver's, after the
+        ; kernel's checks in the kernel's order; COM2 is the log in debug and
+        ; test builds, and it never was the program's there
+%ifdef WITH_MODEM
+        mov dl, al
+        mov cx, [XFER_CX]
+        mov ax, E_INVAL
+        cmp cx, SERIAL_MAX
+        ja .error
+        mov word [XFER_AX], 0
+        mov word [XFER_FLAGS], 0
+        jcxz .serial_done
+        mov si, [XFER_SI]               ; the buffer: a write's, a read's
+        mov al, DRV_SERIAL_WRITE
+        cmp dl, SYS_SERIAL_WRITE
+        je .serial_buffer
+        mov si, [XFER_DI]
+        mov al, DRV_SERIAL_READ
+.serial_buffer:
+        mov bx, si
+        add bx, cx
+        jc .serial_fault
+        cmp bx, XFER_SIZE
+        ja .serial_fault                ; the stub's XFER_BAD
+        push bp
+        mov bp, ds                      ; the transfer segment, passed
+        mov dx, OS_SERIAL
+        kcall KCALL_CALL
+        pop bp
+        jc .nosys
+        mov [XFER_AX], cx
+        test bx, bx
+        jz .serial_done
+        mov [XFER_CX], cx               ; the bytes sent before the error
+        mov ax, bx
+        jmp .error
+.serial_done:
+        jmp .done
+.serial_fault:
+        mov ax, E_FAULT
+        jmp .error
+%else
+        mov ax, E_BUSY
+        jmp .error
+%endif
 .mouse:
         ; SYS_MOUSE: the mouse driver's
         push bp
@@ -376,18 +469,26 @@ forward:
         mov word [XFER_FLAGS], 0
         jmp .done
 .write:
-        ; SYS_WRITE: the kernel writes the log and checks as it did; then the
-        ; console driver writes the screen: the foreground program's, or the
-        ; status line for a program in the background
-        mov ah, al
-        mov al, [XFER_AX]
+        ; SYS_WRITE: the kernel's checks, in its order; the kernel's log;
+        ; then the console driver writes the screen: the foreground
+        ; program's, or the status line for a program in the background
         mov cx, [XFER_CX]
+        mov ax, E_INVAL
+        cmp cx, WRITE_MAX
+        ja .error
+        mov word [XFER_AX], 0
+        mov word [XFER_FLAGS], 0
+        test cx, cx
+        jz .done
         mov si, [XFER_SI]
-        int SYSCALL_VECTOR
+        mov ax, si
+        add ax, cx
+        jc .fault
+        cmp ax, XFER_SIZE
+        ja .fault                       ; the stub's XFER_BAD
+        kcall KCALL_LOG                 ; AX = bytes written (fewer: a restart)
+        jc .fault
         mov [XFER_AX], ax
-        pushf
-        pop word [XFER_FLAGS]
-        jc .done
         mov cx, ax
         test cx, cx
         jz .done
@@ -462,22 +563,21 @@ forward:
         call reader
         jmp .done
 .wait:
-        ; SYS_WAIT: each event's owner asked once a tick - the keyboard's
-        ; and the mouse's drivers, the kernel for COM2's bytes - for CX ticks
-        ; at most (0: no limit)
+        ; SYS_WAIT: each event's owner asked once a tick - the keyboard's,
+        ; the mouse's and the serial line's drivers - for CX ticks at most
+        ; (0: no limit)
         mov al, [XFER_AX]
         test al, ~WAIT_EVENTS & 0xFF
-        jnz .refused                    ; the kernel refuses it (E_INVAL)
+        jnz .refused                    ; an unknown event
         test al, al
         jnz .events_asked
         cmp word [XFER_CX], 0
         jne .events_asked
 .refused:
-        mov al, SYS_WAIT                ; nothing, for ever: the kernel refuses it
-        jmp .kernel
+        mov ax, E_INVAL                 ; or nothing, for ever
+        jmp .error
 .events_asked:
-        mov ah, SYS_TICKS
-        int SYSCALL_VECTOR
+        kcall KCALL_TICKS
         push ax                         ; the start
 .look:
         call events_there               ; AL = the events there
@@ -492,17 +592,10 @@ forward:
         mov bl, TEST_READER_TIMED
 .readers:
         call reader
-        mov al, [XFER_AX]               ; a tick's sleep, COM2's bytes looked for
-        and al, WAIT_SERIAL
-        mov cx, 1
-        mov ah, SYS_WAIT
-        int SYSCALL_VECTOR
-        test al, al
-        jnz .events
+        call tick                       ; until the next tick
         mov cx, [XFER_CX]
         jcxz .look                      ; no limit
-        mov ah, SYS_TICKS
-        int SYSCALL_VECTOR
+        kcall KCALL_TICKS
         mov bx, sp
         sub ax, [ss:bx]
         cmp ax, cx
@@ -544,8 +637,9 @@ disk_call:
         ret
 
 ; ----------------------------------------------------------------------------
-; events_there - which of SYS_WAIT's events, but COM2's, are there: a key
-; waiting at the keyboard driver, the mouse's news at the mouse driver
+; events_there - which of SYS_WAIT's events are there: a key waiting at
+; the keyboard driver, the mouse's news at the mouse driver, bytes from COM2
+; at the serial driver
 ;   In:       DS = the transfer segment (XFER_AX's AL: the events asked for)
 ;   Out:      AL = those there
 ;   Destroys: AH, BX, CX, DX, SI, DI
@@ -565,16 +659,28 @@ events_there:
         or ah, WAIT_KEY
 .mouse:
         test byte [XFER_AX], WAIT_MOUSE
-        jz .done
+        jz .serial
         push ax
         mov dx, OS_MOUSE
         mov al, DRV_MOUSE_NEWS
         call driver
         pop ax
+        jc .serial
+        test bx, bx
+        jz .serial
+        or ah, WAIT_MOUSE
+.serial:
+        test byte [XFER_AX], WAIT_SERIAL
+        jz .done
+        push ax
+        mov dx, OS_SERIAL
+        mov al, DRV_SERIAL_NEWS
+        call driver
+        pop ax
         jc .done
         test bx, bx
         jz .done
-        or ah, WAIT_MOUSE
+        or ah, WAIT_SERIAL
 .done:
         mov al, ah
         ret
@@ -601,16 +707,34 @@ key_take:
         ret
 
 ; ----------------------------------------------------------------------------
-; tick - sleep until the next tick (the kernel's SYS_WAIT, nothing asked)
-;   In:       nothing
+; tick - sleep until the next tick: the kernel's timer, on the thread's own
+; notification (a timer left over from before only wakes it early)
+;   In:       nothing (the thread's program)
 ;   Out:      nothing
 ;   Destroys: AX, CX
 ; ----------------------------------------------------------------------------
 tick:
-        xor al, al
+        push bx
+        push dx
+        push si
+        push di
+        push bp
+        call program_number
+        add ax, OS_SLOT_SLEEP
+        shl ax, 3
+        add ax, 4 + RING
+        push ax
+        mov dx, ax
         mov cx, 1
-        mov ah, SYS_WAIT
-        int SYSCALL_VECTOR
+        kcall KCALL_TIMER
+        pop dx
+        xor bp, bp
+        kcall KCALL_RECV
+        pop bp
+        pop di
+        pop si
+        pop dx
+        pop bx
         ret
 
 ; ----------------------------------------------------------------------------
