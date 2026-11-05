@@ -1,6 +1,7 @@
 ; ============================================================================
 ; rx286 - src/kernel/console.asm
-; The console: 80x25 colour text on the EGA, through SEL_VIDEO.
+; The kernel's console: 80x25 colour text on the EGA, through SEL_VIDEO,
+; until the console driver has the screen (roadmap l4.md L8, D15).
 ;
 ; Characters go to text page 0 at B8000h with the current attribute. CR,
 ; LF, BS, TAB and FF are control characters; every other byte is shown as
@@ -8,7 +9,9 @@
 ; through the CRTC once per call of con_putc, not per character. Debug and
 ; test builds copy every byte to the log (COM2), the transcript the tests
 ; read. The loader set text mode 3 through the BIOS (roadmap D14); this
-; module programs only the cursor.
+; module programs only the cursor. Once the threads start, the screen is
+; the console driver's (con_off): the kernel's lines go to the log alone,
+; and only a panic writes the screen again.
 ; ============================================================================
 
 CON_TAB_WIDTH       equ 8
@@ -23,6 +26,7 @@ CHAR_CR             equ 13
 begin_kdata
 con_pos             dw 0                ; the next cell, 0 .. CON_CELLS - 1
 con_attr            db ATTR_NORMAL
+con_off             db 0                ; 1: the screen is the console driver's
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -93,6 +97,8 @@ con_emit:
 %ifdef WITH_SERIAL
         call com_putc
 %endif
+        cmp byte [con_off], 0
+        jne .done                       ; the log alone
         mov bx, [con_pos]
         cmp al, CHAR_LF
         je .newline
@@ -244,6 +250,8 @@ con_scroll:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 con_cursor:
+        cmp byte [con_off], 0
+        jne .off
         push ax
         push bx
         push dx
@@ -263,4 +271,5 @@ con_cursor:
         pop dx
         pop bx
         pop ax
+.off:
         ret

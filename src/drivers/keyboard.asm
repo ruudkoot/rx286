@@ -1,20 +1,47 @@
 ; ============================================================================
-; rx286 - src/kernel/keyboard.asm
-; The keyboard: the 8042's IRQ1, the modifiers, a ring of keys, and the two
-; keys the kernel keeps for itself (Ctrl+Break, Ctrl+Alt+Del).
+; rx286 - src/drivers/keyboard.asm
+; The keyboard driver (roadmap l4.md L8): the 8042, IRQ1, the modifiers, a
+; ring of keys, and the three keys that are not the program's; in ring 1
+; with IOPL 1.
 ;
 ; The 8042 translates the AT keyboard's codes to set 1 (its command byte,
 ; written here: roadmap D14). Each key pressed is put in a ring of
-; KBD_RING_SIZE as its ASCII (keymap.asm) and scancode; a full ring drops
-; the key. The E0h prefix of an enhanced keyboard is followed for the right
-; Ctrl and Alt, the arrows, Delete and Ctrl+Pause; the E1h sequence (Pause)
-; is skipped. Ctrl+Break (Ctrl+Scroll Lock on the AT keyboard, Ctrl+Pause on
-; an enhanced one) restarts the program (D11); Ctrl+Alt+Del resets the
-; machine (D21). The keyboard's LEDs are left alone.
+; KBD_RING_SIZE as its ASCII (src/lib/keymap.asm) and scancode; a full ring
+; drops the key. The E0h prefix of an enhanced keyboard is followed for the
+; right Ctrl and Alt, the arrows, Delete and Ctrl+Pause; the E1h sequence
+; (Pause) is skipped. The keyboard's LEDs are left alone.
+;
+; Ctrl+Break (Ctrl+Scroll Lock on the AT keyboard, Ctrl+Pause on an
+; enhanced one) is never a call (l4.md X13): the driver signals the OS
+; server's control notification, and the OS server restarts the foreground
+; program. Ctrl+Alt+Del resets the machine through the 8042, as the kernel
+; did. Sys Req, in debug and test builds, asks the kernel for its thread
+; dump. IRQ1 comes as the root bound it (DRV_IRQ_BIT); the driver reads what
+; the 8042 has, then acknowledges the line. In MAME's test builds the
+; script's keys come from the kernel (KCALL_TEST), since IBM's 8042 cannot
+; take them. The OS server asks for keys with DRV_KBD_GET, looks with
+; DRV_KBD_PEEK, and drops them with DRV_KBD_CLEAR when it restarts a program.
 ; ============================================================================
 
+cpu 286
+bits 16
+%define RAW_SYSCALLS
+%include "build.inc"
+%include "program.inc"
+%include "ports.inc"
+%include "kcalls.inc"
+%include "drivers.inc"
+
+RING                equ 1
+%define SLOT(n) ((n) * 8 + 4 + RING)    ; a slot of the driver's, as a selector
+EP                  equ SLOT(DRV_SLOT_EP)
+NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
+IRQ                 equ SLOT(DRV_SLOT_IRQ)
+CONTROL             equ SLOT(DRV_SLOT_DEVICE)
 KBD_RING_SIZE       equ 16              ; a power of two
 KBD_E1_SEQUENCE     equ 5               ; the bytes after E1h in Pause's sequence
+KBD_IRQ_BYTES       equ 16              ; bytes taken at most in one look
+KBD_RESET_TICKS     equ 2               ; for the log to have said so, before a reset
 SC_RELEASE          equ 0x80            ; set in a key's release code
 SC_PREFIX_E0        equ 0xE0
 SC_PREFIX_E1        equ 0xE1
@@ -27,29 +54,27 @@ SC_SCROLL_LOCK      equ 0x46            ; Break, with Ctrl, on the AT keyboard
 SC_DELETE           equ 0x53            ; keypad . and Del
 SC_SYSRQ            equ 0x54            ; the AT keyboard's Sys Req
 KBC_FLUSH_LIMIT     equ 32              ; bytes read at most when emptying the 8042
-KBD_WAIT_FOREVER    equ 1               ; kbd_waiting: a key, however long it takes
-KBD_WAIT_TIMED      equ 2               ; a key, or the time runs out (SYS_WAIT)
 
-begin_kdata
+begin_udata
 kbd_ring            times KBD_RING_SIZE dw 0
 kbd_head            db 0                ; the next key to take
 kbd_tail            db 0                ; where the next key goes
 kbd_mods            db 0                ; KBD_* of keymap.asm
 kbd_e0              db 0                ; 1 after an E0h prefix
 kbd_e1_skip         db 0                ; bytes of Pause's sequence still to skip
-kbd_waiting         db 0                ; KBD_WAIT_*: what a test build may type into
 kbd_dropped         dw 0                ; keys lost to a full ring
-msg_ctrl_break      db "Ctrl+Break: the program starts again", 0
-msg_reset           db "Ctrl+Alt+Del: resetting", 0
-end_kdata
+msg_reset           db "rx286: Ctrl+Alt+Del: resetting", CHAR_LF
+msg_reset_end:
+end_udata
 
 ; ----------------------------------------------------------------------------
-; kbd_init - the 8042's command byte, and nothing left in its buffer
-;   In:       interrupts off; DS = SEL_KDATA
-;   Out:      nothing
-;   Destroys: AX, CX
+; entry - the 8042's command byte, then serve
+;   In:       its start: DS = ES = its data, IOPL 1
+;   Out:      does not return
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
-kbd_init:
+entry:
+        cld
         call kbd_flush
         call kbc_wait_input
         mov al, KBC_CMD_WRITE_CB
@@ -58,7 +83,91 @@ kbd_init:
         mov al, KBC_COMMAND_BYTE
         out KBC_DATA, al
         call kbd_flush
-        mov byte [kbd_mods], 0
+%ifdef WITH_TEST_HOOKS
+        mov al, TEST_KEYS_READY         ; a test's keys may come now
+        kcall KCALL_TEST
+%endif
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; serve - the keyboard's bytes as they come, and the OS server's questions
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+serve:
+        mov dx, EP
+        xor bp, bp
+        kcall KCALL_RECV
+.message:
+        jc serve
+        cmp al, NOTIFY_LABEL
+        je .news
+        xor bx, bx
+        cmp al, DRV_KBD_GET
+        je .get
+        cmp al, DRV_KBD_PEEK
+        je .peek
+        cmp al, DRV_KBD_CLEAR
+        jne .reply
+        mov al, [kbd_tail]
+        mov [kbd_head], al
+        jmp .reply
+.peek:
+        mov al, [kbd_head]
+        cmp al, [kbd_tail]
+        je .reply
+        inc bx
+        jmp .reply
+.get:
+        call kbd_get                    ; ZF clear and AX = the key
+        jz .reply
+        mov cx, ax
+        inc bx
+.reply:
+        mov dx, EP
+        xor bp, bp
+        kcall KCALL_REPLY_RECV
+        jmp .message
+.news:
+        push bx                         ; the bits
+        call kbd_take
+        pop bx
+        test bx, DRV_IRQ_BIT
+        jz serve
+        mov dx, IRQ
+        mov al, IRQ_ACK
+        kcall KCALL_IRQ                 ; the line on again
+        jmp serve
+
+; ----------------------------------------------------------------------------
+; kbd_take - the bytes the 8042 has (and, in MAME's test builds, the keys a
+; script typed)
+;   In:       DS = its data
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+kbd_take:
+        mov cx, KBD_IRQ_BYTES
+.next:
+        in al, KBC_STATUS
+        test al, KBC_STATUS_OBF
+        jz .script
+        in al, KBC_DATA
+        push cx
+        call kbd_byte
+        pop cx
+        loop .next
+.script:
+%ifdef WITH_TEST_HOOKS
+        mov al, TEST_KEY_BYTE
+        kcall KCALL_TEST
+        jc .done
+        mov al, bl
+        call kbd_byte
+        jmp .script
+.done:
+%endif
         ret
 
 ; ----------------------------------------------------------------------------
@@ -91,18 +200,8 @@ kbc_wait_input:
         ret
 
 ; ----------------------------------------------------------------------------
-; kbd_irq - IRQ1: one byte from the keyboard
-;   In:       BP = the frame; DS = ES = SEL_KDATA
-;   Out:      nothing (the dispatcher sends EOI)
-;   Destroys: AX, BX, CX, DX, SI, DI
-; ----------------------------------------------------------------------------
-kbd_irq:
-        in al, KBC_DATA
-        ; falls through
-
-; ----------------------------------------------------------------------------
-; kbd_byte - one byte from the keyboard, as IRQ1 reads it from port 60h
-;   In:       AL = the byte; BP = an interrupt's frame; DS = ES = SEL_KDATA
+; kbd_byte - one byte from the keyboard, as port 60h gives it
+;   In:       AL = the byte; DS = its data
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
@@ -155,10 +254,11 @@ kbd_byte:
         ret
 
 ; ----------------------------------------------------------------------------
-; kbd_scancode - a set-1 byte: the modifiers, the kernel's keys, or a key
-;   In:       AL = the byte; BP = the frame; DS = SEL_KDATA
+; kbd_scancode - a set-1 byte: the modifiers, the keys that are not the
+; program's, or a key
+;   In:       AL = the byte; DS = its data
 ;   Out:      nothing
-;   Destroys: AX, BX
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 kbd_scancode:
         mov ah, al
@@ -183,10 +283,8 @@ kbd_scancode:
         je .scroll_lock
         cmp ah, SC_DELETE
         je .delete
-%ifdef WITH_CHECKS
         cmp ah, SC_SYSRQ                ; debug and test builds: the threads
-        je thread_dump
-%endif
+        je .sysrq
 .translate:
         mov bl, [kbd_mods]
         call kbd_translate              ; AL = ASCII, AH = scancode
@@ -206,19 +304,24 @@ kbd_scancode:
 .scroll_lock:
         test byte [kbd_mods], KBD_CTRL
         jz .done
-        jmp kbd_ctrl_break
+        mov dx, CONTROL                 ; Ctrl+Break: the OS server's
+        kcall KCALL_SIGNAL
+        ret
 .delete:
         mov bl, [kbd_mods]
         and bl, KBD_CTRL | KBD_ALT
         cmp bl, KBD_CTRL | KBD_ALT
         jne .translate
         jmp kbd_reset
+.sysrq:
+        mov al, TEST_DUMP
+        kcall KCALL_TEST                ; (release builds: KE_NOSYS, nothing)
 .done:
         ret
 
 ; ----------------------------------------------------------------------------
 ; kbd_put - add a key to the ring, or drop it if the ring is full
-;   In:       AL = ASCII, AH = scancode; DS = SEL_KDATA
+;   In:       AL = ASCII, AH = scancode; DS = its data
 ;   Out:      nothing
 ;   Destroys: BX
 ; ----------------------------------------------------------------------------
@@ -239,7 +342,7 @@ kbd_put:
 
 ; ----------------------------------------------------------------------------
 ; kbd_get - take the oldest key from the ring
-;   In:       DS = SEL_KDATA; interrupts off
+;   In:       DS = its data
 ;   Out:      ZF clear and AX = the key (AL ASCII, AH scancode); ZF set and
 ;             AX = 0 if the ring is empty
 ;   Destroys: nothing
@@ -265,72 +368,22 @@ kbd_get:
         ret
 
 ; ----------------------------------------------------------------------------
-; kbd_wait_key - wait for a key, sleeping with interrupts on (D15)
-;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      ZF clear and AX = the key; or ZF set and AX = 0 if a restart
-;             of the program was asked for while waiting
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-kbd_wait_key:
-        call kbd_get
-        jnz .done
-        cmp byte [restart_pending], 0
-        jne .abandon
-        mov byte [kbd_waiting], KBD_WAIT_FOREVER
-        call kwait_unlocked             ; until an interrupt; other threads run
-        mov byte [kbd_waiting], 0
-        jmp kbd_wait_key
-.abandon:
-        xor ax, ax                      ; ZF set
-.done:
-        ret
-
-; ----------------------------------------------------------------------------
-; kbd_clear - empty the ring (a restarted program starts with no keys)
-;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      nothing
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-kbd_clear:
-        push ax
-        mov al, [kbd_tail]
-        mov [kbd_head], al
-        pop ax
-        ret
-
-; ----------------------------------------------------------------------------
-; kbd_ctrl_break - restart the program now, or when its system call returns
-;   In:       BP = the frame of IRQ1; DS = SEL_KDATA
-;   Out:      nothing
-;   Destroys: AX, BX, CX, DX, SI, DI
-; ----------------------------------------------------------------------------
-kbd_ctrl_break:
-        push si
-        mov si, msg_ctrl_break
-        call klog
-        pop si
-        mov bx, [fg_thread]             ; the program the keys are for
-        call thread_restart             ; (out of any IPC it waits in)
-        cmp bx, [cur_thread]
-        jne .later                      ; another thread runs: when it next runs
-        test byte [bp + FRAME_CS], CPL_MASK
-        jz .later                       ; in the kernel: on the way back to ring 3
-        jmp restart_program
-.later:
-        ret
-
-; ----------------------------------------------------------------------------
-; kbd_reset - Ctrl+Alt+Del: a soft reset through the 8042 (IBM 1-42)
-;   In:       DS = SEL_KDATA
+; kbd_reset - Ctrl+Alt+Del: a soft reset through the 8042 (IBM 1-42), once
+; the log has said so
+;   In:       DS = its data
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 kbd_reset:
         mov si, msg_reset
-        call klog
-%ifdef WITH_SERIAL
-        call com_drain
-%endif
+        mov cx, msg_reset_end - msg_reset
+        mov ah, SYS_WRITE               ; the kernel's own: its log
+        int SYSCALL_VECTOR
+        mov dx, NOTIFY
+        mov cx, KBD_RESET_TICKS
+        kcall KCALL_TIMER
+        mov dx, NOTIFY
+        kcall KCALL_RECV
         cli
         mov al, CMOS_SHUTDOWN
         out CMOS_INDEX, al
@@ -340,5 +393,6 @@ kbd_reset:
         mov al, KBC_CMD_PULSE_RESET
         out KBC_COMMAND, al
 .wait:
-        hlt
         jmp .wait
+
+%include "keymap.asm"

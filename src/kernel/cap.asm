@@ -497,7 +497,7 @@ slot_put_descriptor:
 ; its data (initialised from the module) and its stack; what is left of the
 ; memory for segments and of the arena, as untyped; the module table and
 ; each other module's code and data, read-only; its own space and thread;
-; every interrupt line the kernel does not keep
+; the screen's text page; every interrupt line the kernel does not keep
 ;   In:       DS = ES = SEL_KDATA
 ;   Out:      BX = the root's thread, configured, not started
 ;   Destroys: AX, CX, DX, SI, DI, ES
@@ -560,6 +560,13 @@ boot_root:
         mov byte [si + SH_TYPE], CAP_THREAD
         mov ax, [boot_thread]
         mov [si + SH_OBJECT], ax
+        ; the screen's text page, for the console driver (l4.md L8)
+        mov ax, VIDEO_PHYS & 0xFFFF
+        mov dl, VIDEO_PHYS >> 16
+        mov cx, VIDEO_SIZE - 1
+        mov dh, ACC_PRESENT | (1 << ACC_DPL_SHIFT) | ACC_SEGMENT | ACC_RW | ACC_ACCESSED
+        mov bx, ROOT_SLOT_VIDEO
+        call boot_slot_segment
         ; every interrupt line the kernel does not keep
         mov bx, [boot_space]
         xor cx, cx
@@ -1225,19 +1232,45 @@ kc_irq:
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
-; kc_test - KCALL_TEST: the tests' hooks, in test builds only (KE_NOSYS in
-; the others): TEST_MOUSE_BYTE, the next byte a key script gave the mouse
-;   In:       BP = the frame (AL TEST_*)
-;   Out:      the frame's BL = the byte; or KE_EMPTY
-;   Destroys: AX, BX
+; kc_test - KCALL_TEST: the hooks of debug and test builds (KE_NOSYS in
+; release builds): the thread dump; in test builds, the bytes a key script
+; gave the mouse or typed where the 8042 cannot, and whether the OS server
+; waits for a key
+;   In:       BP = the frame (AL TEST_*; TEST_READER: BL)
+;   Out:      the frame's BL = a byte; or KE_EMPTY
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 kc_test:
+        mov al, [bp + FRAME_AX]
+%ifdef WITH_CHECKS
+        cmp al, TEST_DUMP
+        jne .hooks
+        call thread_dump
+        jmp kc_done.ok
+.hooks:
+%endif
 %ifdef WITH_TEST_HOOKS
-        cmp byte [bp + FRAME_AX], TEST_MOUSE_BYTE
+        cmp al, TEST_READER
+        je .reader
+        cmp al, TEST_KEYS_READY
+        je .ready
+        mov bx, test_mouse_ring
+        cmp al, TEST_MOUSE_BYTE
+        je .byte
+        mov bx, test_key_ring
+        cmp al, TEST_KEY_BYTE
         jne kc_done.arg
-        call test_mouse_pop
+.byte:
+        call test_ring_pop
         jc kc_done.empty
         mov [bp + FRAME_BX], al
+        jmp kc_done.ok
+.reader:
+        mov al, [bp + FRAME_BX]
+        mov [test_reader], al
+        jmp kc_done.ok
+.ready:
+        mov byte [test_keys_ready], 1
         jmp kc_done.ok
 %else
         jmp kc_done.nosys

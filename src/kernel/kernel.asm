@@ -50,8 +50,6 @@ section ktext
 %include "panic.asm"
 %include "pic.asm"
 %include "timer.asm"
-%include "keyboard.asm"
-%include "keymap.asm"
 %include "rtc.asm"
 %include "fpu.asm"
 %include "dma.asm"

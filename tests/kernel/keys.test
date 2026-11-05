@@ -1,7 +1,7 @@
-# Keys typed through the 8042 under every modifier: what the driver puts in
-# its ring (scancode, ASCII). Before there is a program, the test build's
-# kernel reads and prints them itself.
-define: TEST_KEYBOARD
+# Keys typed through the 8042 under every modifier: what the keyboard
+# driver puts in its ring (scancode, ASCII), as a program reads them
+# through the OS server (tests/programs/keys.asm; roadmap l4.md L8).
+program: keys
 keys: aA1!{caps}aA{caps}a{ctrl-c}{alt-x}\b\t\n\e{up}{f1}{del}
 ---
 rx286, test build

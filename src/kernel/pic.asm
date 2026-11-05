@@ -25,7 +25,7 @@ begin_kdata
 ; The driver of each line, or 0 for none.
 irq_drivers:
         dw timer_irq                    ; IRQ0
-        dw kbd_irq                      ; IRQ1
+        dw 0                            ; IRQ1: the keyboard driver's (l4.md L8)
         dw 0                            ; IRQ2
 %ifdef WITH_MODEM
         dw modem_irq                    ; IRQ3: COM2, the modem

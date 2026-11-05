@@ -6,12 +6,13 @@
 ; Typing: tools/run-test compiles a test's key script into test_keys (see
 ; tools/rxlib.py for the operations). On every tick, test_tick types the
 ; next byte through the 8042's command D2h, which puts it where the keyboard
-; would and raises IRQ1 (roadmap E7). It types only while something waits
-; for a key (kbd_wait_key, SYS_WAIT) with nothing buffered, unless the
-; script says "now"; a mouse packet in the script goes to the mouse driver
-; at the next tick, as IRQ4 would hand it over. When the script is done and
-; something waits again for a key, with no time limit, the test ends: "TEST
-; END" on the log, then the shutdown port.
+; would and raises IRQ1 (roadmap E7), for the keyboard driver (roadmap
+; l4.md L8). It types only while a reader waits for a key with nothing
+; buffered - the OS server says so (KCALL_TEST's TEST_READER) when it found
+; no key and waits - unless the script says "now"; a mouse packet in the
+; script goes to the mouse driver at the next tick, as IRQ4 would hand it
+; over. When the script is done and a reader waits again, with no time
+; limit, the test ends: "TEST END" on the log, then the shutdown port.
 ;
 ; A test image asks for more with -d (tools/run-test):
 ;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK
@@ -22,11 +23,11 @@
 ;   TEST_TICKS          compare the timer with the RTC
 ;   TEST_SOUND          measure every tone SYS_SOUND starts, by its output and
 ;                       port B's bits, and check the silence after each sound
-;   TEST_KEYBOARD       print every key read (the program never starts)
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
 ;   TEST_TYPE_DIRECT    type keys by handing each byte to the driver instead
-;                       of through the 8042: MAME runs IBM's own 8042
-;                       firmware, which has no command D2h (M9)
+;                       of through the 8042 (KCALL_TEST's TEST_KEY_BYTE, with
+;                       IRQ1's bits): MAME runs IBM's own 8042 firmware,
+;                       which has no command D2h (M9)
 ;   TEST_ATTACK         the attack program runs: check the kernel's code and
 ;                       tables before every restart (M8)
 ;   TEST_FUZZ           the fuzzer runs: the same checks, faults counted
@@ -51,7 +52,10 @@ TEST_OP_NOW         equ 2
 TEST_OP_WAIT        equ 3
 TEST_OP_MOUSE       equ 4               ; three bytes of a mouse packet follow
 TEST_MOUSE_PACKET   equ 3
-TEST_MOUSE_RING     equ 16              ; bytes the mouse's driver has not yet taken
+TEST_RING_SIZE      equ 16              ; bytes a driver has not yet taken
+TR_HEAD             equ 0               ; a test ring: the next byte to take
+TR_TAIL             equ 1               ;    where the next byte goes
+TR_BYTES            equ 2
 TEST_SOUND_SLACK    equ 2               ; changes of channel 2's output either way
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
@@ -74,14 +78,13 @@ test_keys           db TEST_OP_END
 %endif
 test_key_ptr        dw test_keys
 test_wait_left      db 0
-test_mouse_ring     times TEST_MOUSE_RING db 0
-test_mouse_head     db 0
-test_mouse_tail     db 0
+test_mouse_ring     times TR_BYTES + TEST_RING_SIZE db 0   ; the mouse driver's
+test_key_ring       times TR_BYTES + TEST_RING_SIZE db 0   ; the keyboard driver's (MAME)
+test_reader         db TEST_READER_NONE                 ; KCALL_TEST's TEST_READER
+test_keys_ready     db 0                ; the keyboard driver has started (TEST_KEYS_READY)
 test_fpu_cw         dw TEST_FPU_CW_ZM
 msg_test_end        db "TEST END", CHAR_LF, 0
 msg_shutdown        db "Shutdown", 0
-msg_key             db "key ", 0
-msg_key_abandoned   db "key: waiting abandoned for a restart", CHAR_LF, 0
 msg_probe_rtc       db "probe: the RTC kept interrupting; IRQ8 stayed masked", CHAR_LF, 0
 msg_sound_ok        db "probe: the speaker sounds at the frequency asked", CHAR_LF, 0
 msg_sound_bad       db "probe: the speaker's output changed this often in a tick: ", 0
@@ -152,37 +155,6 @@ test_start:
 %endif
         ret
 
-%ifdef TEST_KEYBOARD
-; ----------------------------------------------------------------------------
-; test_after_start - TEST_KEYBOARD: the kernel reads and prints keys itself,
-; and the program never starts
-;   In:       DS = ES = SEL_KDATA; interrupts off
-;   Out:      does not return
-;   Destroys: everything
-; ----------------------------------------------------------------------------
-test_after_start:
-.next:
-        call kbd_wait_key
-        jz .abandoned
-        mov si, msg_key
-        call kputs
-        xchg al, ah
-        call kput_hex8                  ; the scancode
-        mov al, ' '
-        call kputc
-        mov al, ah
-        call kput_hex8                  ; the ASCII
-        mov al, CHAR_LF
-        call kputc
-        jmp .next
-.abandoned:
-        mov si, msg_key_abandoned
-        call kputs
-        mov byte [restart_pending], 0
-        jmp .next
-%else
-        jmp test_end
-%endif
 
 %ifdef TEST_PANIC_STACK
 ; ----------------------------------------------------------------------------
@@ -222,6 +194,8 @@ test_tick:
         call restart_program            ; in ring 3: now
 .keys:
 %endif
+        cmp byte [test_keys_ready], 0
+        je .done                        ; no keyboard driver yet: the script waits
         mov si, [test_key_ptr]
         mov al, [si]
         cmp al, TEST_OP_WAIT
@@ -232,17 +206,14 @@ test_tick:
         je .now
         ; TEST_OP_WHEN_WAITING and TEST_OP_END: only while a reader waits
         ; with nothing buffered
-        cmp byte [kbd_waiting], 0
+        cmp byte [test_reader], TEST_READER_NONE
         je .done
-        mov bl, [kbd_head]
-        cmp bl, [kbd_tail]
-        jne .done
         cmp al, TEST_OP_END
 %ifdef TEST_FUZZ
         je .done                        ; the fuzzer ends by its count, not by keys
 %else
         jne .now
-        cmp byte [kbd_waiting], KBD_WAIT_FOREVER
+        cmp byte [test_reader], TEST_READER_FOREVER
         je test_end
         ret                             ; a wait with a limit: not the end
 %endif
@@ -257,12 +228,13 @@ test_tick:
         jmp test_type
 .mouse:
         add word [test_key_ptr], 1 + TEST_MOUSE_PACKET
+        mov bx, test_mouse_ring
         mov al, [si + 1]
-        call test_mouse_push
+        call test_ring_push
         mov al, [si + 2]
-        call test_mouse_push
+        call test_ring_push
         mov al, [si + 3]
-        call test_mouse_push
+        call test_ring_push
         mov bx, IRQ_MOUSE               ; to the mouse's driver, as IRQ4 would
         jmp irq_signal                  ; (it takes them with KCALL_TEST)
 .wait:
@@ -285,16 +257,33 @@ test_tick:
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 test_type:
+        mov byte [test_reader], TEST_READER_NONE    ; until the reader finds none again
 %ifdef TEST_TYPE_DIRECT
-        jmp kbd_byte
-%endif
+        mov bx, test_key_ring
+        call test_ring_push
+        mov bx, IRQ_KEYBOARD            ; to the keyboard driver, as IRQ1 would
+        jmp irq_signal
+%else
         mov ah, al
-        call kbc_wait_input
+        call test_kbc_wait
         mov al, KBC_CMD_WRITE_OUT
         out KBC_COMMAND, al
-        call kbc_wait_input
+        call test_kbc_wait
         mov al, ah
         out KBC_DATA, al
+        ret
+%endif
+
+; ----------------------------------------------------------------------------
+; test_kbc_wait - wait until the 8042 can take a byte
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: AL
+; ----------------------------------------------------------------------------
+test_kbc_wait:
+        in al, KBC_STATUS
+        test al, KBC_STATUS_IBF
+        jnz test_kbc_wait
         ret
 
 %ifdef TEST_PROBES
@@ -534,40 +523,42 @@ test_ticks:
 %endif
 
 ; ----------------------------------------------------------------------------
-; test_mouse_push - a byte for the mouse's driver (l4.md L7), which takes it
-; with KCALL_TEST; a full ring drops it
-;   In:       AL = the byte; DS = SEL_KDATA
+; test_ring_push - a byte for a driver outside the kernel (l4.md L7, L8),
+; which takes it with KCALL_TEST; a full ring drops it
+;   In:       AL = the byte; BX = the ring; DS = SEL_KDATA
 ;   Out:      nothing
-;   Destroys: BX
+;   Destroys: CX, DI
 ; ----------------------------------------------------------------------------
-test_mouse_push:
-        mov bl, [test_mouse_tail]
-        mov bh, bl
-        inc bh
-        and bh, TEST_MOUSE_RING - 1
-        cmp bh, [test_mouse_head]
+test_ring_push:
+        mov cl, [bx + TR_TAIL]
+        mov ch, cl
+        inc ch
+        and ch, TEST_RING_SIZE - 1
+        cmp ch, [bx + TR_HEAD]
         je .full
-        mov [test_mouse_tail], bh
-        xor bh, bh
-        mov [test_mouse_ring + bx], al
+        mov [bx + TR_TAIL], ch
+        xor ch, ch
+        mov di, cx
+        mov [bx + TR_BYTES + di], al
 .full:
         ret
 
 ; ----------------------------------------------------------------------------
-; test_mouse_pop - the next byte for the mouse's driver
-;   In:       DS = SEL_KDATA
+; test_ring_pop - the next byte of a test ring
+;   In:       BX = the ring; DS = SEL_KDATA
 ;   Out:      CF clear and AL = the byte; CF set if none
-;   Destroys: BX
+;   Destroys: CX, DI
 ; ----------------------------------------------------------------------------
-test_mouse_pop:
-        mov bl, [test_mouse_head]
-        cmp bl, [test_mouse_tail]
+test_ring_pop:
+        mov cl, [bx + TR_HEAD]
+        cmp cl, [bx + TR_TAIL]
         je .none
-        xor bh, bh
-        mov al, [test_mouse_ring + bx]
-        inc bl
-        and bl, TEST_MOUSE_RING - 1
-        mov [test_mouse_head], bl
+        xor ch, ch
+        mov di, cx
+        mov al, [bx + TR_BYTES + di]
+        inc cl
+        and cl, TEST_RING_SIZE - 1
+        mov [bx + TR_HEAD], cl
         clc
         ret
 .none:
@@ -925,11 +916,8 @@ test_thread_report:
 ; ----------------------------------------------------------------------------
 test_end:
         cli
-        mov ax, [con_pos]
-        mov dl, VIDEO_COLUMNS
-        div dl
-        test ah, ah                     ; the console's column
-        jz .line_start
+        cmp byte [log_at_start], 0      ; the log's line: begun?
+        jne .line_start
         mov al, CHAR_LF
         call com_putc
 .line_start:

@@ -3,7 +3,7 @@
 # the emulator has a port that interrupts; the RTC, re-armed again and
 # again afterwards, stays quiet. The keyboard still works.
 define: TEST_PROBES
-define: TEST_KEYBOARD
+program: keys
 keys: a
 ---
 rx286, test build

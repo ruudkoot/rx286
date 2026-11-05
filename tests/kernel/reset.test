@@ -1,6 +1,6 @@
 # Ctrl+Alt+Del resets the machine through the 8042: the BIOS starts again,
 # and so does rx286.
-define: TEST_KEYBOARD
+program: keys
 keys: {ctrl-alt-del}
 match: prefix
 # DOSBox-X keeps protected-mode segment limits across the 8042's reset (docs/emulators.md).

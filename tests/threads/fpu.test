@@ -13,7 +13,10 @@ program: its 287 state kept
 rx286: thread root ran
 rx286: thread printer ran
 rx286: thread mouse ran
+rx286: thread console ran
+rx286: thread kbd ran
 rx286: thread program ran
 rx286: thread counter ran
+rx286: thread os ran
 rx286: thread os ran
 rx286: thread os ran

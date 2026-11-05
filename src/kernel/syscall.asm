@@ -17,7 +17,7 @@ begin_kdata
 syscall_table:
         dw sys_exit                     ; SYS_EXIT
         dw sys_write                    ; SYS_WRITE
-        dw sys_read_key                 ; SYS_READ_KEY
+        dw sys_gone                     ; SYS_READ_KEY: the keyboard driver's (l4.md L8)
         dw sys_ticks                    ; SYS_TICKS
         dw sys_time                     ; SYS_TIME
         dw sys_disk_read                ; SYS_DISK_READ
@@ -232,32 +232,10 @@ check_refuse:
         ret
 
 ; ----------------------------------------------------------------------------
-; sys_read_key - SYS_READ_KEY: a key, waiting for one or not
-;   In:       BP = the frame (its AL: KEY_WAIT or KEY_POLL); DS = SEL_KDATA
-;   Out:      the frame's AX = the key (AL ASCII, AH scancode), 0 if none
-;   Destroys: AX
-; ----------------------------------------------------------------------------
-sys_read_key:
-        mov al, [bp + FRAME_AX]
-        cmp al, KEY_POLL
-        je .poll
-        cmp al, KEY_WAIT
-        jne .invalid
-        call kbd_wait_key               ; AX = 0 if a restart came first
-        mov [bp + FRAME_AX], ax
-        ret
-.poll:
-        call kbd_get
-        mov [bp + FRAME_AX], ax
-        ret
-.invalid:
-        mov ax, E_INVAL
-        jmp sys_fail
-
-; ----------------------------------------------------------------------------
-; sys_wait - SYS_WAIT: sleep until one of the events asked for is there (a
-; key, the mouse's news, bytes from COM2), for CX ticks at most (0: no
-; limit), or until the program is to restart
+; sys_wait - SYS_WAIT: sleep until one of the events asked for is there
+; (bytes from COM2: the keys and the mouse are their drivers', whose news
+; the OS server looks for), for CX ticks at most (0: no limit), or until the
+; program is to restart
 ;   In:       BP = the frame (AL the WAIT_* events, CX the ticks); DS =
 ;             SEL_KDATA
 ;   Out:      the frame's AX = the events there (0: the time ran out, or a
@@ -289,14 +267,7 @@ sys_wait:
         mov al, 0
         jae .done
 .sleep:
-        test byte [bp + FRAME_AX], WAIT_KEY
-        jz .halt
-        mov byte [kbd_waiting], KBD_WAIT_FOREVER    ; what a test build types into
-        jcxz .halt
-        mov byte [kbd_waiting], KBD_WAIT_TIMED
-.halt:
         call kwait_unlocked             ; until an interrupt; other threads run
-        mov byte [kbd_waiting], 0
         jmp .check
 .done:
         xor ah, ah
@@ -316,14 +287,9 @@ wait_ready:
         push dx
         mov dl, al
         xor ah, ah
-        test dl, WAIT_KEY
-        jz .mouse
-        mov al, [kbd_head]
-        cmp al, [kbd_tail]
-        je .mouse
-        or ah, WAIT_KEY
-.mouse:                                 ; (the mouse is the mouse driver's: the
-.serial:                                ; OS server waits for it, l4.md L7)
+                                        ; (the keys and the mouse are their
+                                        ; drivers': the OS server waits for
+                                        ; them, l4.md L7, L8)
 %ifdef WITH_MODEM
         test dl, WAIT_SERIAL
         jz .done

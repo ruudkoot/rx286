@@ -79,7 +79,6 @@ program_reset:
         mov bx, [cur_thread]
         test byte [bx + T_FLAGS], TF_FOREGROUND
         jz .done
-        call kbd_clear
 %ifdef WITH_TEST_HOOKS
         call test_program_started
 %endif

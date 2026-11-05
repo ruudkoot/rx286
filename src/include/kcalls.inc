@@ -37,7 +37,8 @@ KCALL_TIMER         equ 11  ; DX notification; CX ticks: signalled once, CX tick
 KCALL_SEGMENT       equ 12  ; DX segment -> DL:AX its physical base, CX its limit
 KCALL_DELETE        equ 13  ; DX a slot of the caller's: emptied
 KCALL_SAVE_REPLY    equ 14  ; SI an empty slot: the reply owed, as a capability to send on
-KCALL_TEST          equ 16  ; test builds: AL TEST_*, the tests' hooks
+KCALL_TEST          equ 16  ; debug and test builds: AL TEST_*, the hooks of debugging and
+                            ;    tests (KE_NOSYS in release builds)
 KCALL_COUNT         equ 17
 
 IRQ_BIND            equ 0   ; KCALL_IRQ: SI a notification, which the line's interrupts
@@ -45,6 +46,15 @@ IRQ_BIND            equ 0   ; KCALL_IRQ: SI a notification, which the line's int
 IRQ_ACK             equ 1   ;    the driver has served an interrupt: the line unmasked
 TEST_MOUSE_BYTE     equ 0   ; KCALL_TEST: -> BL the next byte a key script gave the
                             ;    mouse (its IRQ4 signalled), or KE_EMPTY
+TEST_KEY_BYTE       equ 1   ;    -> BL the next key a script typed, where it cannot go
+                            ;    through the 8042 (MAME; IRQ1 signalled), or KE_EMPTY
+TEST_READER         equ 2   ;    BL TEST_READER_*: whether the OS server waits for a key,
+                            ;    having found none (the test hooks type then)
+TEST_DUMP           equ 3   ;    every thread, on the log (Sys Req; debug builds too)
+TEST_KEYS_READY     equ 4   ;    the keyboard driver has started: the script may begin
+TEST_READER_NONE    equ 0
+TEST_READER_TIMED   equ 1   ; a wait with a limit
+TEST_READER_FOREVER equ 2
 
 ; Capability types (a slot's shadow entry)
 CAP_EMPTY           equ 0
@@ -99,6 +109,7 @@ ROOT_SLOT_SPACE     equ 6   ; its own space
 ROOT_SLOT_THREAD    equ 7   ; its own thread
 ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2 (n - 1),
                             ;    and its data as assembled, read-only, in the next
+ROOT_SLOT_VIDEO     equ 111 ; the screen's text page, a segment of DPL 1 (l4.md L8)
 ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
                             ;    does not keep (its own are left empty)
 ROOT_SLOTS          equ 128 ; its space's slots

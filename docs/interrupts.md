@@ -102,7 +102,7 @@ slave's; there are `IRQ_LINES` (16).
 | Line | Rule |
 |---|---|
 | `IRQ_TIMER` (0) | the timer driver: 50 ticks a second |
-| `IRQ_KEYBOARD` (1) | the keyboard driver |
+| `IRQ_KEYBOARD` (1) | bound to the keyboard driver, outside the kernel (*docs/drivers.md*) |
 | `IRQ_CASCADE` (2) | the cascade: never masked, never delivered |
 | 3 | the modem's driver, in release builds: bytes from COM2 (in debug and test builds COM2 is the log, polled, and the line has no driver) |
 | `IRQ_MOUSE` (4) | bound to the mouse driver, outside the kernel (*docs/drivers.md*): bytes from COM1 |
@@ -167,8 +167,9 @@ stack (or the kernel's own, when it idles): handlers run with IF clear and
 never wait. After every IRQ, every thread waiting inside the kernel is made
 ready to look again at what it waits for (`wake_waiters`).
 
-A Ctrl+Break or a 287 error that arrives during a system call sets a flag
-of the thread it is for (the program the keys are for; the 287's owner),
-and that thread's return to ring 3 restarts its program instead; a disk
-call finishes its sector first. The flag is `restart_pending` while the
+A restart that arrives during a system call - the OS server's
+`THREAD_RESTART` for Ctrl+Break or an exit, which takes the OS server's
+thread for the program with it, or a 287 error - sets a flag of the thread
+it is for, and that thread's return to its ring restarts its program
+instead; a disk call finishes its sector first. The flag is `restart_pending` while the
 thread runs, and kept in its control block while another does.

@@ -238,7 +238,7 @@ def build(test):
     wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
         for name in ('kernel.bin', 'user.bin', 'root.bin', 'os.bin', 'counter.bin',
-                     'printer.bin', 'mouse.bin'):
+                     'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         with open(stamp, 'w', encoding='utf-8') as f:

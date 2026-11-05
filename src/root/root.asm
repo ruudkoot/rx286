@@ -55,7 +55,8 @@ P_STACK             equ 24                      ; copy of each, to put back)
 P_EP                equ 32                      ; a program's endpoint to the OS server,
 P_XFER              equ 40                      ; its transfer segment, and the OS
 P_SERVER            equ 48                      ; server's thread that serves it
-PROGRAMS_MAX        equ (ROOT_SLOT_IRQ - PROGRAM_SLOT) / 8   ; below the lines' slots
+CONTROL             equ SLOT(ROOT_SLOT_VIDEO - 1)  ; the OS server's control notification
+PROGRAMS_MAX        equ (ROOT_SLOT_VIDEO - 1 - PROGRAM_SLOT) / 8   ; below those slots
 
 ; A module's slots in its own space, as selectors (any RPL names a slot)
 W_CODE              equ 0x04
@@ -67,6 +68,10 @@ W_MODULES           equ 3 * 8 + 4       ; the OS server's: the module table
 W_DRV_EP            equ DRV_SLOT_EP * 8 + 4     ; a driver's
 W_DRV_NOTIFY        equ DRV_SLOT_NOTIFY * 8 + 4
 W_DRV_IRQ           equ DRV_SLOT_IRQ * 8 + 4
+W_DRV_DEVICE        equ DRV_SLOT_DEVICE * 8 + 4
+W_CONTROL           equ 8 * 8 + 4       ; the OS server's: its control notification,
+W_FOREGROUND        equ 9 * 8 + 4       ;    the foreground program's thread
+OS_CONTROL_N        equ 8               ; its control thread's part of its stack
 OS_SLOTS            equ 64              ; the OS server's space: 8n + k for program n
 OS_STACK            equ 512             ; each of its threads' part of its stack
 %ifdef TEST_CAPS
@@ -94,6 +99,7 @@ m_ring              db 0
 m_priority          db 0
 m_flags             db 0
 m_irq               db 0
+m_service           db 0
 s_code              dw 0                ; its slots of the root's (program_slots)
 s_template          dw 0
 s_space             dw 0
@@ -122,6 +128,11 @@ entry:
         mov dx, ARENA
         mov al, CAP_ENDPOINT
         mov si, FAULT_EP
+        kcall KCALL_RETYPE
+        must
+        mov dx, ARENA                   ; the OS server's control notification,
+        mov al, CAP_NOTIFY              ; which the keyboard driver signals
+        mov si, CONTROL
         kcall KCALL_RETYPE
         must
         mov ax, MODULES
@@ -283,6 +294,8 @@ build:
         mov [m_flags], al
         mov al, [es:di + M_IRQ]
         mov [m_irq], al
+        mov al, [es:di + M_SERVICE]
+        mov [m_service], al
         push ds
         pop es
         call program_slots
@@ -437,6 +450,7 @@ build_driver:
         mov si, [s_xfer]
         kcall KCALL_THREAD
         must
+        call driver_device
         mov bl, [m_irq]
         test bl, bl
         jz .done
@@ -463,6 +477,34 @@ build_driver:
         must
         mov dx, SCRATCH
         kcall KCALL_DELETE
+        must
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
+; the console's, the screen's text page; the keyboard's, the OS server's
+; control notification to signal Ctrl+Break with
+;   In:       the module's s_* and m_*
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+driver_device:
+        cmp byte [m_service], SERVICE_CONSOLE
+        jne .keyboard
+        mov si, SLOT(ROOT_SLOT_VIDEO)
+        mov di, W_DRV_DEVICE
+        jmp give
+.keyboard:
+        cmp byte [m_service], SERVICE_KEYBOARD
+        jne .done
+        mov dx, [s_space]
+        mov si, CONTROL
+        mov di, W_DRV_DEVICE
+        mov al, COPY_MINT
+        mov bx, CONTROL_BREAK
+        mov cl, RIGHT_SEND
+        kcall KCALL_COPY
         must
 .done:
         ret
@@ -497,6 +539,7 @@ build_server:
         mov al, COPY_COPY
         kcall KCALL_COPY
         must
+        call server_control
         mov bx, 1
 .program:
         cmp bx, [programs]
@@ -520,6 +563,61 @@ build_server:
 .next:
         inc bx
         jmp .program
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; server_control - the OS server's control thread, on the last part of its
+; stack, with the control notification and the foreground program's thread
+;   In:       m_entry, m_stack, m_priority the server's; server_space
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+server_control:
+        mov dx, [server_space]
+        mov si, CONTROL
+        mov di, W_CONTROL
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        mov bx, [foreground]
+        test bx, bx
+        jz .thread
+        call program_slots
+        mov dx, [server_space]
+        mov si, [s_thread]
+        mov di, W_FOREGROUND
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+.thread:
+        mov ax, OS_CONTROL_N * OS_STACK
+        cmp ax, [m_stack]
+        ja .done                        ; no room on its stack
+        mov bx, [server]
+        call program_slots              ; its thread: the server module's slot
+        mov dx, ARENA
+        mov al, CAP_THREAD
+        mov si, [s_thread]
+        kcall KCALL_RETYPE
+        must
+        mov si, FAULT_EP
+        mov dx, [server]
+        mov bx, [s_thread]
+        call fault_to
+        mov dx, [s_thread]
+        mov al, THREAD_CONFIGURE
+        mov si, [server_space]
+        mov bx, [m_entry]
+        mov cx, OS_CONTROL_N * OS_STACK
+        kcall KCALL_THREAD
+        must
+        mov dx, [s_thread]
+        mov al, THREAD_START
+        mov cl, [m_priority]
+        xor ch, ch
+        kcall KCALL_THREAD
+        must
 .done:
         ret
 

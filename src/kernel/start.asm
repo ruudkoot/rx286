@@ -62,7 +62,6 @@ pm_start:
         call con_set_attr
         TRACE "kernel: protected mode; GDT, IDT, TSS and LDTR loaded"
         call timer_init
-        call kbd_init
         call rtc_init
         call dma_init
 %ifdef WITH_MODEM
@@ -78,8 +77,5 @@ pm_start:
 .ready:
 %ifdef WITH_TEST_HOOKS
         call test_start
-%endif
-%ifdef TEST_KEYBOARD
-        jmp test_after_start
 %endif
         jmp threads_start

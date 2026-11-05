@@ -21,7 +21,7 @@ of the stub to the OS server:
 |---|---|---|---|
 | 0 | `SYS_EXIT` | | does not return: the kernel restarts the program |
 | 1 | `SYS_WRITE` | DS:SI buffer, CX length (at most `WRITE_MAX`, 4,096) | AX = bytes written; CF with `E_FAULT` for a buffer the program may not read, `E_INVAL` for CX above `WRITE_MAX` |
-| 2 | `SYS_READ_KEY` | AL = `KEY_WAIT` (0) to wait, `KEY_POLL` (1) to poll | AL = ASCII (0 for none), AH = scancode; AX = 0 if polling found no key; CF with `E_INVAL` for another AL. (A Ctrl+Break during the wait restarts the program: the call does not return.) |
+| 2 | `SYS_READ_KEY` | AL = `KEY_WAIT` (0) to wait, `KEY_POLL` (1) to poll | AL = ASCII (0 for none), AH = scancode; AX = 0 if polling found no key; CF with `E_INVAL` for another AL. (A Ctrl+Break during the wait restarts the program: the call does not return.) The keyboard driver's ring, which the OS server asks once a tick while it waits |
 | 3 | `SYS_TICKS` | | DX:AX = ticks since start, `SYS_TICKS_HZ` (50) a second |
 | 4 | `SYS_TIME` | | the RTC, in BCD: CH century, CL year, DH month, DL day, BH hours, BL minutes, AL seconds (roadmap D20) |
 | 5 | `SYS_DISK_READ` | AL = the drive, CX = the sector, ES:DI = `SECTOR_SIZE` bytes to fill | nothing: every register kept; CF with `E_INVAL` (no such drive, or the sector past its end), `E_FAULT` (a buffer the program may not write), `E_IO`, `E_TIMEOUT` |
@@ -129,15 +129,22 @@ it alone. `src/include/os.inc` holds the interface:
 - **`SYS_EXIT`:** the OS server restarts the program (the kernel's
   `THREAD_RESTART`, *docs/kernel-calls.md*), and its own thread for it with
   it, since that thread serves the program alone (`START_SESSION`). So does
-  Ctrl+Break, which the kernel still handles: a wait in the kernel on the
-  program's behalf is given up with it.
+  Ctrl+Break, which the keyboard driver signals to the OS server's control
+  thread: a wait in the kernel on the program's behalf is given up with it.
+- **The drivers:** `SYS_WRITE` is the kernel's write, which checks the
+  buffer and writes the log, then the console driver's, on the screen;
+  `SYS_READ_KEY`, `SYS_PRINT` and `SYS_MOUSE` go to their drivers, and
+  `SYS_WAIT` asks the keyboard's and the mouse's drivers once a tick while
+  the kernel waits for COM2's bytes (*docs/drivers.md*).
 - **Faults:** a program's fault comes to the OS server on the same
   endpoint, badged `FAULT_BADGE`; it reports it as the kernel did and
   restarts the program (*docs/kernel-calls.md*).
-- **What still calls the kernel itself:** the root and the OS server; the
-  counter; the test probe; threads a program makes, whose spaces hold no
-  endpoint to the OS server (the IPC test's workers); and the fuzzer's
-  random code. `INT 30h` stays until the drivers have left the kernel
+- **What still calls the kernel itself:** the root, the OS server and the
+  drivers; the counter; the test probe; threads a program makes, whose
+  spaces hold no endpoint to the OS server (the IPC test's workers); and the
+  fuzzer's random code. The kernel's `SYS_READ_KEY`, `SYS_PRINT` and
+  `SYS_MOUSE` answer `E_NOSYS` since their devices left it, and its
+  `SYS_WRITE` writes the log alone. `INT 30h` stays until the drivers have left the kernel
   (roadmap l4.md L10).
 
 ## How the kernel checks a buffer

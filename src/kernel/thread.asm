@@ -67,6 +67,7 @@ end_kdata
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 threads_start:
+        mov byte [con_off], 1           ; the screen: the console driver's from now
         call boot_root                  ; BX = its thread (cap.asm)
         call thread_init
         TRACE "kernel: the root ready"
@@ -235,8 +236,9 @@ schedule:
         jmp .done
 
 ; ----------------------------------------------------------------------------
-; preempt - the running thread gives way to the best ready one: to the tail
-; of its queue, and schedule
+; preempt - the running thread gives way to the best ready one, and
+; schedule: to the tail of its queue if its time slice is over, else to the
+; head, keeping its place, since a more urgent thread took the CPU from it
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      returns when the running thread runs again
 ;   Destroys: nothing
@@ -246,7 +248,13 @@ preempt:
         mov bx, [cur_thread]
         cmp bx, idle_tcb
         je .done
+        cmp byte [bx + T_SLICE], 0
+        je .slice_over
+        call ready_first
+        jmp .switch
+.slice_over:
         call ready_push
+.switch:
         call schedule
 .done:
         pop bx
@@ -386,12 +394,14 @@ thread_tick:
         inc word [bx + T_RUN_TICKS]
         dec byte [bx + T_SLICE]
         jnz .done
-        mov byte [bx + T_SLICE], SLICE_TICKS
         mov cl, [bx + T_PRIO]
         mov al, [ready_mask]
         shr al, cl                      ; queues of its priority and above
-        jz .done
-        mov byte [resched], 1
+        jz .again
+        mov byte [resched], 1           ; (its slice 0: to the back of its queue)
+        jmp .done
+.again:
+        mov byte [bx + T_SLICE], SLICE_TICKS    ; nobody to give way to
 .done:
         pop cx
         pop bx

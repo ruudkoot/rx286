@@ -1,5 +1,5 @@
 ; ============================================================================
-; rx286 - src/kernel/keymap.asm
+; rx286 - src/lib/keymap.asm
 ; Scancode set 1 to ASCII, for the US layout of the AT keyboard.
 ;
 ; A pure routine: tests/unit/test_keymap.py runs it on the host for every
@@ -8,7 +8,8 @@
 ; navigation keys) give 0; the program sees them by their scancode.
 ; ============================================================================
 
-; The modifier bits of kbd_mods (keyboard.asm) that the translation reads.
+; The modifier bits the keyboard driver keeps (src/drivers/keyboard.asm) that
+; the translation reads.
 KBD_SHIFT           equ 0x03            ; either Shift
 KBD_LSHIFT          equ 0x01
 KBD_RSHIFT          equ 0x02

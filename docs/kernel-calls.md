@@ -75,7 +75,7 @@ milestone.
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
 | 14 | `KCALL_SAVE_REPLY` | SI an empty slot of the caller's | the reply owed, as a `CAP_REPLY` there |
-| 16 | `KCALL_TEST` | test builds only: AL `TEST_MOUSE_BYTE` | BL the next byte a key script gave the mouse, or `KE_EMPTY` |
+| 16 | `KCALL_TEST` | debug and test builds: AL `TEST_*` (*In test builds*, below) | |
 
 ### Retype
 
@@ -239,6 +239,7 @@ has `ROOT_SLOTS` slots:
 | 6 | `ROOT_SLOT_SPACE` | its own space |
 | 7 | `ROOT_SLOT_THREAD` | its own thread |
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
+| 111 | `ROOT_SLOT_VIDEO` | the screen's text page, a segment of DPL 1, for the console driver |
 | 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
 
 The root (`src/root/root.asm`) builds a space for every other module: the
@@ -255,6 +256,17 @@ Then it handles the OS server's faults: it reports each as the kernel did
 replies with the module's entry.
 
 ## In test builds
+
+`KCALL_TEST` holds the hooks of debug and test builds; release builds
+answer `KE_NOSYS`:
+
+| AL | Constant | What |
+|---|---|---|
+| 0 | `TEST_MOUSE_BYTE` | test builds: BL the next byte a key script gave the mouse, its IRQ4 signalled; or `KE_EMPTY` |
+| 1 | `TEST_KEY_BYTE` | test builds: BL the next key a script typed where the 8042 cannot take it (MAME), IRQ1 signalled; or `KE_EMPTY` |
+| 2 | `TEST_READER` | test builds: BL `TEST_READER_NONE`, `TEST_READER_TIMED` or `TEST_READER_FOREVER`: whether the OS server waits for a key, having found none, and for how long. The script types while one waits, and ends once one waits for ever |
+| 3 | `TEST_DUMP` | debug and test builds: every thread on the log (the keyboard driver's Sys Req) |
+| 4 | `TEST_KEYS_READY` | test builds: the keyboard driver has started; the script waits for it |
 
 In `TEST_CAPS` builds the root gives the program, in slots 10-13 of a
 space of 64, the rest of the memory for segments and of the arena as

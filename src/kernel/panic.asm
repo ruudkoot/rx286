@@ -34,7 +34,8 @@ panic:
         mov ax, SEL_KDATA
         mov ds, ax
         mov es, ax
-        mov al, ATTR_PANIC
+        mov byte [con_off], 0           ; the screen is the kernel's again: the
+        mov al, ATTR_PANIC              ; panic writer's, whatever drivers run
         call con_set_attr
         call con_clear
         push si

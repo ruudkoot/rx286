@@ -58,6 +58,7 @@ program_main_fputhreads := tests/programs/fputhreads.asm
 program_main_caps := tests/programs/caps.asm
 program_main_ipc := tests/programs/ipc.asm
 program_main_rings := tests/programs/rings.asm
+program_main_keys := tests/programs/keys.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
@@ -75,10 +76,11 @@ PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
 # the OS server, the programs.
 MODULES := root=$(B)/root.bin:2:7 os=$(B)/os.bin:2:5:stack=4096 \
     printer=$(B)/printer.bin:1:6:driver:service=1 mouse=$(B)/mouse.bin:1:6:driver:irq=4:service=2 \
+    console=$(B)/console.bin:1:6:driver:service=3 kbd=$(B)/keyboard.bin:1:6:driver:irq=1:service=4 \
     program=$(B)/user.bin:$(PROGRAM_RING) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.bin:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc or rings, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings or keys, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
@@ -90,8 +92,8 @@ FLOPPY_SERIAL := 52583836
 
 IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.bin $(B)/os.bin \
-    $(B)/printer.bin $(B)/mouse.bin $(B)/user.bin $(B)/counter.bin $(B)/kernel.bin \
-    $(B)/image.bin
+    $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/user.bin \
+    $(B)/counter.bin $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
@@ -156,7 +158,7 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 # The boot image: the kernel, the module table and the modules. On the
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
 $(B)/image.bin: $(B)/kernel.bin $(B)/root.bin $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
-    $(B)/user.bin $(B)/counter.bin tools/mkimage \
+    $(B)/console.bin $(B)/keyboard.bin $(B)/user.bin $(B)/counter.bin tools/mkimage \
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 

@@ -11,7 +11,7 @@ L5):
 | kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 13 KB of code and data |
 | the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
 | the OS server | `src/os/` | a module of the image, ring 2, a thread for each program | about 1 KB of code |
-| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's | a few hundred bytes each |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's | a few hundred bytes each |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 5 KB of code, 5 KB of data |
 | the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
 
@@ -79,7 +79,6 @@ name nothing of the kernel's, and reaches it only through `INT 30h` and
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
 | `pic.asm` | the 8259As; the driver of each line, its binding to a driver outside the kernel, or the rule for none; spurious IRQ7 and IRQ15 |
 | `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
-| `keyboard.asm`, `keymap.asm` | the 8042, set-1 scancodes to US ASCII, the ring of keys, Ctrl+Break, Ctrl+Alt+Del |
 | `rtc.asm` | the MC146818: 24-hour BCD, read by polling |
 | `fpu.asm` | the 287: FNINIT, FSETPM; switched between threads lazily (TS, #NM); IRQ13, charged to its owner |
 | `dma.asm` | the 8237As: reset; channel 2 for a diskette sector |
@@ -89,7 +88,7 @@ name nothing of the kernel's, and reaches it only through `INT 30h` and
 | `speaker.asm` | `SYS_SOUND`: timer channel 2 through port B |
 | `gameport.asm` | `SYS_JOYSTICK`: the buttons, and the axes timed with channel 0 |
 | `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM2 in release builds, IRQ3, a ring of bytes |
-| `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to the log |
+| `console.asm` | 80x25 colour text on the EGA, the copy to the log; once the threads start, the log alone, and the screen again for a panic |
 | `serial.asm` | the log, polled: COM2, or COM3 when COM2 is the modem (debug and test builds) |
 | `print.asm` | strings, numbers, the kernel's messages, trace lines, register dumps |
 | `test.asm` | test builds only: typed keys, probes, faults on purpose, the end of a test |
@@ -187,7 +186,7 @@ and restarts it.
 ## The drivers
 
 Devices leave the kernel one at a time (roadmap l4.md L7-L10): so far the
-printers and the mouse. A driver is a module in ring 1 with IOPL 1, which
+printers, the mouse, the console and the keyboard. A driver is a module in ring 1 with IOPL 1, which
 the root builds with an endpoint it serves, a notification bound to its
 thread for its timer and its interrupt, and its interrupt line
 (*docs/drivers.md*). The OS server calls it for the system calls of its
@@ -201,8 +200,8 @@ and through them the system calls (*docs/syscalls.md*): the console, the
 keyboard, the clocks, the four drives a sector at a time and the two
 printers (*docs/storage.md*). It starts with its registers zero, IF on and
 IOPL 0; when it faults or exits, the OS server restarts it at its entry
-with a fresh stack, and when it is broken off with Ctrl+Break, the kernel
-does. Its data survives, so the shell keeps its last line and knows it was
+with a fresh stack, and so it does when it is broken off with Ctrl+Break,
+which the keyboard driver signals to it. Its data survives, so the shell keeps its last line and knows it was
 restarted.
 
 The shell (`src/userland/`, *docs/shell.md*) is `shell.asm` (the start, the

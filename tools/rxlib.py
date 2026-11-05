@@ -116,7 +116,8 @@ def symbol_offsets(path):
 # prefixes of their symbols.
 MODULE_BINARIES = {'root': ('root', 'r.'), 'os': ('os', 'o.'), 'program': ('user', 'u.'),
                    'counter': ('counter', 'c.'), 'printer': ('printer', 'p.'),
-                   'mouse': ('mouse', 'm.')}
+                   'mouse': ('mouse', 'm.'), 'console': ('console', 'v.'),
+                   'kbd': ('keyboard', 'k.')}
 
 
 def binary_bases(build_dir):

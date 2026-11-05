@@ -39,6 +39,12 @@ OS_STACK_SHIFT      equ 9
 OS_MODULES          equ 3 * 8 + 4 + RING    ; slot 3: the module table
 OS_PRINTER          equ (OS_SLOT_SERVICE + SERVICE_PRINTER) * 8 + 4 + RING
 OS_MOUSE            equ (OS_SLOT_SERVICE + SERVICE_MOUSE) * 8 + 4 + RING
+OS_CONSOLE          equ (OS_SLOT_SERVICE + SERVICE_CONSOLE) * 8 + 4 + RING
+OS_KEYBOARD         equ (OS_SLOT_SERVICE + SERVICE_KEYBOARD) * 8 + 4 + RING
+OS_CONTROL          equ 8 * 8 + 4 + RING    ; slot 8: the control notification
+OS_FOREGROUND       equ 9 * 8 + 4 + RING    ; slot 9: the foreground program's thread
+OS_CONTROL_N        equ 8               ; the control thread's part of the stack
+OS_DATA             equ 1 * 8 + 4 + RING    ; its own data, passed to the console
 WAIT_EVENTS         equ WAIT_KEY | WAIT_MOUSE | WAIT_SERIAL
 OS_K_EP             equ 0               ; a program's slots: 8n + k
 OS_K_THREAD         equ 1
@@ -57,16 +63,24 @@ VEC_GP              equ 13
 LINE_SIZE           equ 64
 
 begin_udata
+msg_ctrl_break      db "rx286: Ctrl+Break: the program starts again", CHAR_LF
+msg_ctrl_break_end:
 end_udata
 
 ; ----------------------------------------------------------------------------
-; entry - a thread's start: serve its program for ever
-;   In:       SP = its program's number * OS_STACK; DS = ES = the data
+; entry - a thread's start: serve its program for ever; or, on the last part
+; of the stack, the control thread
+;   In:       SP = its program's number * OS_STACK, or OS_CONTROL_N *
+;             OS_STACK; DS = ES = the data
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 entry:
         cld
+        mov ax, sp
+        shr ax, OS_STACK_SHIFT
+        cmp ax, OS_CONTROL_N
+        je control
         push ax                         ; (SP below its top: program_number works)
         ; falls through
 
@@ -99,6 +113,7 @@ serve:
         kcall KCALL_REPLY_RECV
         jmp .message
 .exit:
+        call keys_dropped
         mov ax, OS_K_THREAD             ; the program starts again, and this
         call program_slot               ; thread with it: its session
         mov dx, ax
@@ -110,8 +125,98 @@ serve:
         jnz .quiet
         call report
 .quiet:
+        call keys_dropped
         call restore                    ; BX = its entry
         jmp .reply
+
+; ----------------------------------------------------------------------------
+; control - the control thread: Ctrl+Break, which the keyboard driver
+; signals, restarts the foreground program (and its thread here with it)
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+control:
+        mov dx, OS_CONTROL
+        kcall KCALL_RECV
+        jc control
+        test bx, CONTROL_BREAK
+        jz control
+        mov si, msg_ctrl_break          ; the log, through the kernel's write
+        mov cx, msg_ctrl_break_end - msg_ctrl_break
+        mov ah, SYS_WRITE
+        int SYSCALL_VECTOR
+        mov si, msg_ctrl_break          ; and the screen
+        mov cx, msg_ctrl_break_end - msg_ctrl_break
+        mov bx, CON_MAIN
+        push bp
+        mov bp, OS_DATA
+        call console
+        pop bp
+        mov dx, OS_KEYBOARD
+        mov al, DRV_KBD_CLEAR
+        call driver
+        mov dx, OS_FOREGROUND
+        mov al, THREAD_RESTART
+        kcall KCALL_THREAD
+        jmp control
+
+; ----------------------------------------------------------------------------
+; keys_dropped - a program starting again: if it is the foreground's, the
+; keys it did not read are dropped
+;   In:       nothing (the thread's program)
+;   Out:      nothing
+;   Destroys: AX, DX, DI, ES
+; ----------------------------------------------------------------------------
+keys_dropped:
+        push bx
+        push cx
+        call module_entry
+        test byte [es:di + M_FLAGS], MF_FOREGROUND
+        push ds
+        pop es
+        jz .done
+        mov dx, OS_KEYBOARD
+        mov al, DRV_KBD_CLEAR
+        call driver
+.done:
+        pop cx
+        pop bx
+        ret
+
+; ----------------------------------------------------------------------------
+; driver - a call on a driver, with no capability passed
+;   In:       DX = its endpoint; AL = the label; BX CX SI DI the words
+;   Out:      CF and AL as KCALL_CALL; BX CX SI DI the reply
+;   Destroys: AH
+; ----------------------------------------------------------------------------
+driver:
+        push bp
+        xor bp, bp
+        kcall KCALL_CALL
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; console - bytes to the console driver
+;   In:       BP:SI = the bytes (BP a segment of the server's, passed); CX =
+;             how many; BX = CON_MAIN or CON_STATUS
+;   Out:      nothing
+;   Destroys: AX, DX
+; ----------------------------------------------------------------------------
+console:
+        push bx
+        push cx
+        push si
+        push di
+        mov dx, OS_CONSOLE
+        mov al, DRV_CON_WRITE
+        kcall KCALL_CALL
+        pop di
+        pop si
+        pop cx
+        pop bx
+        ret
 
 ; ----------------------------------------------------------------------------
 ; program_number - the program this thread serves: from where its stack is
@@ -166,11 +271,11 @@ forward:
         cmp al, SYS_MOUSE
         je .mouse
         cmp al, SYS_WAIT
-        jne .kernel
-        test byte [XFER_AX], WAIT_MOUSE
-        jz .kernel
-        test byte [XFER_AX], ~WAIT_EVENTS & 0xFF
-        jz .wait_mouse
+        je .wait
+        cmp al, SYS_READ_KEY
+        je .read_key
+        cmp al, SYS_WRITE
+        je .write
 .kernel:
         mov ah, al
         mov al, [XFER_AX]
@@ -253,47 +358,195 @@ forward:
         mov [XFER_DX], si
         mov word [XFER_FLAGS], 0
         jmp .done
-.wait_mouse:
-        ; SYS_WAIT with the mouse: the driver asked for its news, and the
-        ; kernel waited for the other events, a tick at a time
+.write:
+        ; SYS_WRITE: the kernel writes the log and checks as it did; then the
+        ; console driver writes the screen: the foreground program's, or the
+        ; status line for a program in the background
+        mov ah, al
+        mov al, [XFER_AX]
+        mov cx, [XFER_CX]
+        mov si, [XFER_SI]
+        int SYSCALL_VECTOR
+        mov [XFER_AX], ax
+        pushf
+        pop word [XFER_FLAGS]
+        jc .done
+        mov cx, ax
+        test cx, cx
+        jz .done
+        push es
+        call module_entry
+        mov bl, [es:di + M_FLAGS]
+        pop es
+        and bx, MF_FOREGROUND
+        xor bx, MF_FOREGROUND           ; CON_MAIN (0) for the foreground
+        push bp
+        mov bp, ds                      ; the transfer segment, passed
+        call console
+        pop bp
+        jmp .done
+.read_key:
+        ; SYS_READ_KEY: the keyboard driver's ring; a wait asks it once a tick
+        mov al, [XFER_AX]
+        cmp al, KEY_POLL
+        je .poll
+        cmp al, KEY_WAIT
+        mov ax, E_INVAL
+        jne .error
+.next_key:
+        call key_take
+        jnz .key
+        mov bl, TEST_READER_FOREVER     ; test builds type now
+        call reader
+        call tick                       ; until the next tick
+        jmp .next_key
+.poll:
+        call key_take                   ; AX = 0: none
+.key:
+        mov [XFER_AX], ax
+        mov word [XFER_FLAGS], 0
+        mov bl, TEST_READER_NONE
+        call reader
+        jmp .done
+.wait:
+        ; SYS_WAIT: each event's owner asked once a tick - the keyboard's
+        ; and the mouse's drivers, the kernel for COM2's bytes - for CX ticks
+        ; at most (0: no limit)
+        mov al, [XFER_AX]
+        test al, ~WAIT_EVENTS & 0xFF
+        jnz .refused                    ; the kernel refuses it (E_INVAL)
+        test al, al
+        jnz .events_asked
+        cmp word [XFER_CX], 0
+        jne .events_asked
+.refused:
+        mov al, SYS_WAIT                ; nothing, for ever: the kernel refuses it
+        jmp .kernel
+.events_asked:
         mov ah, SYS_TICKS
         int SYSCALL_VECTOR
-        mov di, ax                      ; DI = the start
+        push ax                         ; the start
 .look:
-        push bp
-        mov dx, OS_MOUSE
-        mov al, DRV_MOUSE_NEWS
-        xor bp, bp
-        kcall KCALL_CALL
-        pop bp
-        mov dl, 0
-        jc .others
-        test bx, bx
-        jz .others
-        mov dl, WAIT_MOUSE
-.others:
-        push dx
-        mov al, [XFER_AX]
-        and al, ~WAIT_MOUSE & 0xFF      ; (none: a tick's sleep)
+        call events_there               ; AL = the events there
+        test al, al
+        jnz .events
+        mov bl, TEST_READER_NONE
+        test byte [XFER_AX], WAIT_KEY
+        jz .readers
+        mov bl, TEST_READER_FOREVER
+        cmp word [XFER_CX], 0
+        je .readers
+        mov bl, TEST_READER_TIMED
+.readers:
+        call reader
+        mov al, [XFER_AX]               ; a tick's sleep, COM2's bytes looked for
+        and al, WAIT_SERIAL
         mov cx, 1
         mov ah, SYS_WAIT
         int SYSCALL_VECTOR
-        pop dx
-        or al, dl
+        test al, al
         jnz .events
         mov cx, [XFER_CX]
         jcxz .look                      ; no limit
         mov ah, SYS_TICKS
         int SYSCALL_VECTOR
-        sub ax, di
+        mov bx, sp
+        sub ax, [ss:bx]
         cmp ax, cx
         jb .look
         xor al, al                      ; the time ran out
 .events:
+        pop bx
         xor ah, ah
         mov [XFER_AX], ax
         mov word [XFER_FLAGS], 0
+        mov bl, TEST_READER_NONE
+        call reader
         jmp .done
+
+; ----------------------------------------------------------------------------
+; events_there - which of SYS_WAIT's events, but COM2's, are there: a key
+; waiting at the keyboard driver, the mouse's news at the mouse driver
+;   In:       DS = the transfer segment (XFER_AX's AL: the events asked for)
+;   Out:      AL = those there
+;   Destroys: AH, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+events_there:
+        xor ah, ah
+        test byte [XFER_AX], WAIT_KEY
+        jz .mouse
+        push ax
+        mov dx, OS_KEYBOARD
+        mov al, DRV_KBD_PEEK
+        call driver
+        pop ax
+        jc .mouse
+        test bx, bx
+        jz .mouse
+        or ah, WAIT_KEY
+.mouse:
+        test byte [XFER_AX], WAIT_MOUSE
+        jz .done
+        push ax
+        mov dx, OS_MOUSE
+        mov al, DRV_MOUSE_NEWS
+        call driver
+        pop ax
+        jc .done
+        test bx, bx
+        jz .done
+        or ah, WAIT_MOUSE
+.done:
+        mov al, ah
+        ret
+
+; ----------------------------------------------------------------------------
+; key_take - the next key from the keyboard driver's ring
+;   In:       nothing
+;   Out:      ZF clear and AX = the key (AL ASCII, AH scancode); or ZF set
+;             and AX = 0
+;   Destroys: BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+key_take:
+        mov dx, OS_KEYBOARD
+        mov al, DRV_KBD_GET
+        call driver
+        jc .none
+        test bx, bx
+        jz .none
+        mov ax, cx
+        or bx, bx                       ; ZF clear
+        ret
+.none:
+        xor ax, ax                      ; ZF set
+        ret
+
+; ----------------------------------------------------------------------------
+; tick - sleep until the next tick (the kernel's SYS_WAIT, nothing asked)
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: AX, CX
+; ----------------------------------------------------------------------------
+tick:
+        xor al, al
+        mov cx, 1
+        mov ah, SYS_WAIT
+        int SYSCALL_VECTOR
+        ret
+
+; ----------------------------------------------------------------------------
+; reader - test builds: tell the kernel's typing whether a key is awaited
+; (KCALL_TEST's TEST_READER; nothing in other builds)
+;   In:       BL = TEST_READER_*
+;   Out:      nothing
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+reader:
+%ifdef WITH_TEST_HOOKS
+        mov al, TEST_READER
+        kcall KCALL_TEST
+%endif
+        ret
 
 ; ----------------------------------------------------------------------------
 ; restore - after a fault: the program's segments, its endpoint and its
@@ -455,8 +708,27 @@ report:
         push ds
         push ss
         pop ds
-        sys SYS_WRITE
+        sys SYS_WRITE                   ; the log
         pop ds
+        push cx                         ; the screen: through the transfer
+        mov ax, OS_K_XFER               ; segment, idle while its program waits
+        call program_slot
+        mov es, ax
+        mov di, XFER_DATA
+        push ds
+        push ss
+        pop ds
+        rep movsb
+        pop ds
+        pop cx
+        mov si, XFER_DATA
+        mov bx, CON_MAIN
+        push bp
+        mov bp, es
+        call console
+        pop bp
+        push ds
+        pop es
         mov sp, bp
         pop bp
         ret
