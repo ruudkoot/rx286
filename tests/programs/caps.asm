@@ -2,9 +2,9 @@
 ; rx286 - tests/programs/caps.asm
 ; The kernel's calls on capabilities (roadmap l4.md L3), from ring 3.
 ;
-; In a TEST_CAPS build the root gives this program, in slots 8-11, the rest
-; of the memory for segments and of the arena as untyped, its own space and
-; its own thread (src/root). It retypes every kind of object, is refused every way
+; In a TEST_CAPS build the root gives this program, in slots 10-13, the
+; rest of the memory for segments and of the arena as untyped, its own space
+; and its own thread (src/root). It retypes every kind of object, is refused every way
 ; it can think of, builds a space for a new thread from what it made -
 ; code copied from its own, data and stack moved in, an endpoint minted
 ; with a badge - and starts that thread. Last, it loads a capability that is
@@ -26,12 +26,13 @@ MY_SLOT4            equ 0x27
 MY_SLOT5            equ 0x2F
 MY_SLOT6            equ 0x37
 MY_SLOT7            equ 0x3F
-UT_MEMORY           equ 0x47            ; slot 8: memory for segments
-UT_ARENA            equ 0x4F            ; slot 9: the rest of the arena
-MY_SPACE            equ 0x57            ; slot 10: its own space
-MY_THREAD           equ 0x5F            ; slot 11: its own thread
-MY_EMPTY            equ 0x67            ; slot 12: empty
-PAST_MY_SPACE       equ 0x107           ; slot 32: past its 32 slots
+UT_MEMORY           equ 0x57            ; slot 10: memory for segments
+UT_ARENA            equ 0x5F            ; slot 11: the rest of the arena
+MY_SPACE            equ 0x67            ; slot 12: its own space
+MY_THREAD           equ 0x6F            ; slot 13: its own thread
+MY_EMPTY            equ 0x77            ; slot 14: empty
+PAST_MY_SPACE       equ 0x207           ; slot 64: past its 64 slots
+; (slots 8 and 9: its endpoint to the OS server, its transfer segment)
 GDT_SELECTOR        equ 0x10            ; the kernel's data: no slot of anyone's
 ACC_DATA3           equ 0xF2            ; present, DPL 3, data, writable
 ACC_CODE3           equ 0xFA            ; present, DPL 3, code, readable
@@ -87,8 +88,8 @@ entry:
         mov bx, ax
         mov ax, dx
         report "its base, high byte (3)"
-        mov ax, bx                      ; past the root's data and stack, and its own
-        report "its base, low word (20480)"
+        mov ax, bx                      ; past the others' segments, and its own
+        report "its base, low word (34832)"
         mov ax, cx
         report "its limit (255)"
         mov dx, UT_ARENA
@@ -329,7 +330,8 @@ new_thread:
         mov byte [16], CHAR_LF
         xor si, si
         mov cx, 17
-        sys SYS_WRITE
+        mov ah, SYS_WRITE               ; the kernel's own call: this thread has
+        int SYSCALL_VECTOR              ; no endpoint to the OS server
 .spin:
         jmp .spin
 

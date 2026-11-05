@@ -65,9 +65,12 @@ THREAD_START        equ 1   ;    into the scheduler at a priority
 THREAD_BIND         equ 2   ;    SI a notification: bound to it, so a receive on an
                             ;    endpoint also returns its bits
 THREAD_FAULT        equ 3   ;    SI an endpoint: its faults go there, as calls (l4.md D18)
+THREAD_RESTART      equ 4   ;    its program starts again at its entry (l4.md L6)
 START_IOPL          equ 1   ; THREAD_START's CH: IOPL 1, for a ring-1 thread
 START_FOREGROUND    equ 2   ;    the program the keys are for; from rings 1-2 only, until
                             ;    the keyboard leaves the kernel (l4.md L8)
+START_SESSION       equ 4   ;    a server's thread that serves one client: restarted
+                            ;    with it (l4.md L6); from rings 1-2 only
 
 ; A fault, as the call its thread makes on its fault endpoint: the label is
 ; the vector, BX the error code (0 if none), CX:SI the CS:IP, DI FAULT_*,
@@ -77,7 +80,7 @@ FAULT_COUNTED       equ 1   ; DI: a test build counted it (the fuzzer): say noth
 
 PRIORITY_MAX        equ 7
 SPACE_SLOTS_MIN     equ 8   ; a space's slots: a power of two between these
-SPACE_SLOTS_MAX     equ 64
+SPACE_SLOTS_MAX     equ 128
 
 ; The root's slots at its start (roadmap l4.md L5): slots 0, 1 and 2 its
 ; code, data and stack, as every program's; then the kernel's gifts.
@@ -88,7 +91,7 @@ ROOT_SLOT_SPACE     equ 6   ; its own space
 ROOT_SLOT_THREAD    equ 7   ; its own thread
 ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2 (n - 1),
                             ;    and its data as assembled, read-only, in the next
-ROOT_SLOTS          equ 64  ; its space's slots
+ROOT_SLOTS          equ 128 ; its space's slots
 
 KE_OK               equ 0
 KE_CAP              equ 1   ; not a capability of the type the call needs

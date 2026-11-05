@@ -1,22 +1,28 @@
 ; ============================================================================
 ; rx286 - src/root/root.asm
-; The root task (roadmap l4.md L5): the first thread, in ring 2, which the
-; kernel builds from the image's first module and gives everything else.
+; The root task (roadmap l4.md L5, L6): the first thread, in ring 2, which
+; the kernel builds from the image's first module and gives everything else.
 ;
-; For each other module of the image the root builds a space and a thread:
-; the module's code, as the kernel gave it; a data segment of the module's
-; room, initialised from the module's data as assembled; a stack; and
-; itself as their fault handler (l4.md D18), through its fault endpoint
-; minted with the module's number as the badge. It starts each at the
-; priority the module table gives, the program the keys are for in the
-; foreground. Then it waits for faults: it reports each as the kernel did
-; ("rx286: program fault #GP(0000) at 0007:0123", the module's name for
-; "program"), puts back any of the program's three segments that is gone
-; from its slot, and restarts it at its entry.
+; For each other module of the image the root builds a space: the module's
+; code, as the kernel gave it; a data segment of the module's room,
+; initialised from the module's data as assembled; a stack. The OS server's
+; module ("os") gets a space of OS_SLOTS and, for each program, a thread
+; that serves that program alone (START_SESSION), on its own part of the
+; server's stack, with the program's capabilities in its slots (os.asm).
+; Every other module is a program: it gets a thread, an endpoint to the OS
+; server badged with its module's number (OS_SLOT_EP) and a transfer
+; segment it shares with the server (OS_SLOT_XFER; os.inc), and its faults
+; go to the OS server, on the same endpoint badged FAULT_BADGE (l4.md D18).
+; The root starts each at the priority the module table gives, the program
+; the keys are for in the foreground; then it handles the OS server's
+; faults (and a program's, if there is no OS server): it reports each as
+; the kernel did ("rx286: os fault #GP(0000) at 0006:0123"), puts back any
+; of the module's three segments that is gone from its slot, and restarts it
+; at its entry.
 ;
 ; Ring 2 gives it nothing that ring 3 lacks (l4.md D12): its capabilities
-; are its power. In TEST_CAPS builds it gives the program, in slots 8-11 of
-; a space of 32, the rest of the memory for segments and of the arena, its
+; are its power. In TEST_CAPS builds it gives the program, in slots 10-13 of
+; a space of 64, the rest of the memory for segments and of the arena, its
 ; own space and its own thread (tests/caps, tests/ipc). TEST_ROOT_REPORT
 ; builds say how each module was found: where its code is and sums of its
 ; code and data (tests/root).
@@ -24,9 +30,11 @@
 
 cpu 286
 bits 16
+%define RAW_SYSCALLS                    ; INT 30h itself: the root is not the OS server's
 %include "build.inc"
 %include "program.inc"
 %include "kcalls.inc"
+%include "os.inc"
 
 RING                equ 2
 %define SLOT(n) ((n) * 8 + 4 + RING)    ; a slot of the root's, as a selector
@@ -38,31 +46,41 @@ MODULES             equ SLOT(ROOT_SLOT_MODULES)
 FAULT_SLOT          equ ROOT_SLOT_MODULE + 2 * (MODULE_MAX - 1)  ; past every module's two
 FAULT_EP            equ SLOT(FAULT_SLOT)        ; the fault endpoint
 SCRATCH             equ SLOT(FAULT_SLOT + 1)    ; a badged copy on its way
-PROGRAM_SLOT        equ FAULT_SLOT + 2          ; then four slots a program it builds:
+PROGRAM_SLOT        equ FAULT_SLOT + 2          ; then eight slots a module it builds:
 P_SPACE             equ 0                       ; its space
 P_THREAD            equ 8                       ; its thread
 P_DATA              equ 16                      ; its data and stack (the root keeps a
 P_STACK             equ 24                      ; copy of each, to put back)
-PROGRAMS_MAX        equ (ROOT_SLOTS - PROGRAM_SLOT) / 4
+P_EP                equ 32                      ; a program's endpoint to the OS server,
+P_XFER              equ 40                      ; its transfer segment, and the OS
+P_SERVER            equ 48                      ; server's thread that serves it
+PROGRAMS_MAX        equ (ROOT_SLOTS - PROGRAM_SLOT) / 8
 
-; A program's slots in its own space, as selectors (any RPL names a slot)
+; A module's slots in its own space, as selectors (any RPL names a slot)
 W_CODE              equ 0x04
 W_DATA              equ 0x0C
 W_STACK             equ 0x14
-PROGRAM_SLOTS       equ SPACE_SLOTS_MIN
+W_EP                equ OS_SLOT_EP * 8 + 4
+W_XFER              equ OS_SLOT_XFER * 8 + 4
+W_MODULES           equ 3 * 8 + 4       ; the OS server's: the module table
+OS_SLOTS            equ 64              ; the OS server's space: 8n + k for program n
+OS_STACK            equ 512             ; each of its threads' part of its stack
 %ifdef TEST_CAPS
-CAPS_SLOTS          equ 32              ; the program's, with what TEST_CAPS gives it:
-CAPS_UNTYPED        equ 0x44            ; slot 8: the memory for segments
-CAPS_ARENA          equ 0x4C            ; slot 9: the arena
-CAPS_SPACE          equ 0x54            ; slot 10: its own space
-CAPS_THREAD         equ 0x5C            ; slot 11: its own thread
+CAPS_SLOTS          equ 64              ; the program's, with what TEST_CAPS gives it:
+CAPS_UNTYPED        equ 10 * 8 + 4      ; the memory for segments
+CAPS_ARENA          equ 11 * 8 + 4      ; the arena
+CAPS_SPACE          equ 12 * 8 + 4      ; its own space
+CAPS_THREAD         equ 13 * 8 + 4      ; its own thread
 %endif
 
 ACC_DATA            equ 0x92            ; present, data, writable: DPL to add
+ACC_XFER            equ 0xF2            ; the same, of DPL 3: a transfer segment
 
 begin_udata
 programs            dw 0                ; the modules it builds: 1 to programs
 foreground          dw 0                ; the one the keys are for
+server              dw 0                ; the OS server's module, or 0
+server_space        dw 0                ; its space, of the root's
 module              dw 0                ; build's: the module, and its entry's fields
 m_data_size         dw 0
 m_data_room         dw 0
@@ -77,6 +95,9 @@ s_space             dw 0
 s_thread            dw 0
 s_data              dw 0
 s_stack             dw 0
+s_ep                dw 0
+s_xfer              dw 0
+s_server            dw 0
 line                times 64 db 0       ; a fault's report
 end_udata
 
@@ -86,7 +107,7 @@ end_udata
 %endmacro
 
 ; ----------------------------------------------------------------------------
-; entry - build and start every module, then handle their faults for ever
+; entry - build and start every module, then handle faults for ever
 ;   In:       the kernel's start: DS = ES = its data, SS:SP its stack
 ;   Out:      does not return
 ;   Destroys: everything
@@ -101,14 +122,36 @@ entry:
         mov ax, MODULES
         mov es, ax
         mov cx, [es:MH_COUNT]
-        push ds
-        pop es
         dec cx                          ; but the root itself
         cmp cx, PROGRAMS_MAX
         jbe .count
         mov cx, PROGRAMS_MAX            ; more than its slots: the rest unbuilt
 .count:
         mov [programs], cx
+        mov bx, 1                       ; the OS server's module: named "os"
+.find:
+        cmp bx, cx
+        ja .found
+        call module_entry
+        cmp word [es:di + M_NAME], 'os'
+        jne .next
+        cmp byte [es:di + M_NAME + 2], 0
+        jne .next
+        mov [server], bx
+.next:
+        inc bx
+        jmp .find
+.found:
+        push ds
+        pop es
+        mov bx, 1                       ; the programs' endpoints and transfer segments
+.ends:
+        cmp bx, [programs]
+        ja .ended
+        call program_ends
+        inc bx
+        jmp .ends
+.ended:
         mov bx, 1
 .build:
         cmp bx, [programs]
@@ -119,6 +162,7 @@ entry:
         inc bx
         jmp .build
 .built:
+        call build_server
 %ifdef TEST_ROOT_REPORT
         call module_report
 %endif
@@ -173,7 +217,38 @@ failed:
         jmp .wait
 
 ; ----------------------------------------------------------------------------
-; build - a module's space and thread, configured and started
+; program_ends - a program's endpoint to the OS server and its transfer
+; segment, if there is an OS server and the module is not it
+;   In:       BX = the module's number
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+program_ends:
+        cmp word [server], 0
+        je .done
+        cmp bx, [server]
+        je .done
+        push bx
+        call program_slots
+        mov dx, ARENA
+        mov al, CAP_ENDPOINT
+        mov si, [s_ep]
+        kcall KCALL_RETYPE
+        must
+        mov dx, UNTYPED
+        mov al, CAP_SEGMENT
+        mov si, [s_xfer]
+        mov cx, XFER_SIZE
+        mov bl, ACC_XFER
+        kcall KCALL_RETYPE
+        must
+        pop bx
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; build - a module's space; and for a program, its thread, configured and
+; started
 ;   In:       BX = the module's number (1 or more)
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
@@ -198,7 +273,10 @@ build:
         push ds
         pop es
         call program_slots
-        ; its space and thread
+        ; its space; a program's thread
+        mov cx, OS_SLOTS
+        cmp bx, [server]
+        je .slots
         mov cx, PROGRAM_SLOTS
         test byte [m_flags], MF_FOREGROUND
         jz .slots
@@ -212,11 +290,14 @@ build:
         mov si, [s_space]
         kcall KCALL_RETYPE
         must
+        cmp bx, [server]
+        je .space_made
         mov dx, ARENA
         mov al, CAP_THREAD
         mov si, [s_thread]
         kcall KCALL_RETYPE
         must
+.space_made:
         ; its code, as the kernel gave it
         mov si, [s_code]
         mov di, W_CODE
@@ -249,23 +330,31 @@ build:
         mov si, [s_stack]
         mov di, W_STACK
         call give
-        ; its faults: to the root, badged with its number
-        mov dx, MY_SPACE
-        mov si, FAULT_EP
-        mov di, SCRATCH
-        mov al, COPY_MINT
         mov bx, [module]
-        xor cl, cl
+        cmp bx, [server]
+        je .done                        ; its threads come with build_server
+        ; the OS server's endpoint and transfer segment; its faults to the
+        ; OS server, or to the root if there is none
+        mov si, FAULT_EP
+        mov dx, bx                      ; the badge
+        cmp word [server], 0
+        je .faults
+        mov dx, [s_space]
+        mov si, [s_ep]
+        mov di, W_EP
+        mov al, COPY_MINT
+        mov cl, RIGHT_SEND
         kcall KCALL_COPY
         must
-        mov dx, [s_thread]
-        mov al, THREAD_FAULT
-        mov si, SCRATCH
-        kcall KCALL_THREAD
-        must
-        mov dx, SCRATCH
-        kcall KCALL_DELETE
-        must
+        mov si, [s_xfer]
+        mov di, W_XFER
+        call give
+        mov si, [s_ep]
+        mov dx, [module]
+        or dx, FAULT_BADGE
+.faults:
+        mov bx, [s_thread]
+        call fault_to
         ; configured, and started
         mov dx, [s_thread]
         mov al, THREAD_CONFIGURE
@@ -283,6 +372,152 @@ build:
         mov ch, START_FOREGROUND
 .start:
         kcall KCALL_THREAD
+        must
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; build_server - the OS server's threads: one for each program, which
+; serves it alone, on its own part of the server's stack, with the
+; program's capabilities in the server's slots 8n to 8n + 6
+;   In:       nothing
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+build_server:
+        mov bx, [server]
+        test bx, bx
+        jz .done
+        call program_slots
+        mov ax, [s_space]
+        mov [server_space], ax
+        call module_entry               ; its entry, its stack and priority
+        mov ax, [es:di + M_ENTRY]
+        mov [m_entry], ax
+        mov ax, [es:di + M_STACK]
+        mov [m_stack], ax
+        mov al, [es:di + M_PRIORITY]
+        mov [m_priority], al
+        push ds
+        pop es
+        mov dx, [server_space]          ; the module table
+        mov si, MODULES
+        mov di, W_MODULES
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        mov bx, 1
+.program:
+        cmp bx, [programs]
+        ja .done
+        cmp bx, [server]
+        je .next
+        push bx
+        call serve_program
+        pop bx
+.next:
+        inc bx
+        jmp .program
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; serve_program - the OS server's thread for one program, and the program's
+; capabilities in the server's slots for it
+;   In:       BX = the program's module number
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+serve_program:
+        mov ax, bx
+        shl ax, 9                       ; OS_STACK: its part's top
+        cmp ax, [m_stack]
+        ja .done                        ; no room on the server's stack: unserved
+        push ax
+        call program_slots
+        mov di, bx                      ; the server's slots 8n + k, as selectors
+        shl di, 6
+        add di, 4
+        mov si, [s_ep]
+        call give_server
+        mov si, [s_thread]
+        call give_server
+        mov si, [s_space]
+        call give_server
+        mov si, [s_code]
+        call give_server
+        mov si, [s_data]
+        call give_server
+        mov si, [s_stack]
+        call give_server
+        mov si, [s_xfer]
+        call give_server
+        mov dx, ARENA                   ; its thread
+        mov al, CAP_THREAD
+        mov si, [s_server]
+        kcall KCALL_RETYPE
+        must
+        mov si, FAULT_EP
+        mov dx, [server]
+        mov bx, [s_server]
+        call fault_to
+        mov dx, [s_server]
+        mov al, THREAD_CONFIGURE
+        mov si, [server_space]
+        mov bx, [m_entry]
+        pop cx                          ; its stack's top
+        kcall KCALL_THREAD
+        must
+        mov dx, [s_server]
+        mov al, THREAD_START
+        mov cl, [m_priority]
+        mov ch, START_SESSION
+        kcall KCALL_THREAD
+        must
+.done:
+        ret
+
+%if OS_STACK != 512
+  %error "root.asm: serve_program assumes OS_STACK = 512"
+%endif
+
+; ----------------------------------------------------------------------------
+; give_server - a capability of the root's copied into the OS server's next
+; slot
+;   In:       SI = the root's slot; DI = the server's slot
+;   Out:      DI the next slot (nothing else; stops on a failure)
+;   Destroys: AX, DX
+; ----------------------------------------------------------------------------
+give_server:
+        mov dx, [server_space]
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        add di, 8
+        ret
+
+; ----------------------------------------------------------------------------
+; fault_to - a thread's faults to an endpoint of the root's, with a badge
+;   In:       BX = the thread's slot; SI = the endpoint's; DX = the badge
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, BX, CX, DX, DI
+; ----------------------------------------------------------------------------
+fault_to:
+        push bx
+        mov bx, dx
+        mov dx, MY_SPACE
+        mov di, SCRATCH
+        mov al, COPY_MINT
+        xor cl, cl
+        kcall KCALL_COPY
+        must
+        pop dx
+        mov al, THREAD_FAULT
+        mov si, SCRATCH
+        kcall KCALL_THREAD
+        must
+        mov dx, SCRATCH
+        kcall KCALL_DELETE
         must
         ret
 
@@ -304,8 +539,8 @@ new_segment:
         ret
 
 ; ----------------------------------------------------------------------------
-; give - a copy of a capability of the root's into the program's space
-;   In:       SI = the root's slot; DI = the program's slot
+; give - a copy of a capability of the root's into the module's space
+;   In:       SI = the root's slot; DI = the module's slot
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, DX
 ; ----------------------------------------------------------------------------
@@ -336,9 +571,10 @@ module_entry:
 
 ; ----------------------------------------------------------------------------
 ; program_slots - a module's slots of the root's: its code and its data as
-; assembled (the kernel's gifts), and the four the root fills for it
+; assembled (the kernel's gifts), and the eight the root fills for it
 ;   In:       BX = the module's number (1 to PROGRAMS_MAX)
-;   Out:      s_code, s_template, s_space, s_thread, s_data, s_stack
+;   Out:      s_code, s_template, s_space, s_thread, s_data, s_stack, s_ep,
+;             s_xfer, s_server
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 program_slots:
@@ -351,7 +587,7 @@ program_slots:
         mov [s_template], ax
         mov ax, bx
         dec ax
-        shl ax, 5                       ; 4 slots a program
+        shl ax, 6                       ; 8 slots a module
         add ax, SLOT(PROGRAM_SLOT)
         mov [s_space], ax
         add ax, P_THREAD
@@ -360,10 +596,16 @@ program_slots:
         mov [s_data], ax
         add ax, P_STACK - P_DATA
         mov [s_stack], ax
+        add ax, P_EP - P_STACK
+        mov [s_ep], ax
+        add ax, P_XFER - P_EP
+        mov [s_xfer], ax
+        add ax, P_SERVER - P_XFER
+        mov [s_server], ax
         ret
 
 ; ----------------------------------------------------------------------------
-; restore - after a fault: the program's code, data and stack back in their
+; restore - after a fault: the module's code, data and stack back in their
 ; slots, for any it deleted (a full slot refuses the copy, which is right)
 ;   In:       BX = the module's number
 ;   Out:      BX = its entry
@@ -390,9 +632,9 @@ restore:
         ret
 
 ; ----------------------------------------------------------------------------
-; put_back - a capability of the root's copied into the program's slot, if
+; put_back - a capability of the root's copied into the module's slot, if
 ; the slot is empty
-;   In:       SI = the root's slot; DI = the program's slot
+;   In:       SI = the root's slot; DI = the module's slot
 ;   Out:      nothing
 ;   Destroys: AX, DX
 ; ----------------------------------------------------------------------------

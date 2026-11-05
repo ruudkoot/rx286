@@ -1,7 +1,7 @@
-# A fault of a module goes to its fault endpoint, the root's (roadmap l4.md
-# L5, D18): the counter faults once (TEST_COUNTER_FAULT) while the shell
-# waits for a key; the root reports it with the module's name, and restarts
-# it; the shell goes on.
+# A fault of a program goes to its fault endpoint (roadmap l4.md L5, L6,
+# D18), the OS server's, which the root gave it: the counter faults once
+# (TEST_COUNTER_FAULT) while the shell waits for a key; the OS server
+# reports it with the module's name, and restarts it; the shell goes on.
 program: shell
 define: TEST_COUNTER_FAULT
 keys: {wait 20}echo hi\n

@@ -357,14 +357,15 @@ ask_ati:
         ; falls through
 
 ; ----------------------------------------------------------------------------
-; settle - a second for the modem's answer to come
+; settle - two seconds for the modem's answer to come (the peer answers on
+; the host's time, which a loaded host stretches)
 ;   In:       nothing
 ;   Out:      nothing
 ;   Destroys: AX, CX
 ; ----------------------------------------------------------------------------
 settle:
         xor al, al
-        mov cx, 50
+        mov cx, 100
         sys SYS_WAIT
         ret
 

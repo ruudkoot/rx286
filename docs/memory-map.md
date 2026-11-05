@@ -92,7 +92,7 @@ an image whose end did not arrive, whose table does not give the file's
 length, whose first module is not the root, or whose table places a module
 outside it.
 
-**A module** is a program assembled on its own (the root, the shell or a
+**A module** is a program assembled on its own (the root, the OS server, the shell or a
 test program, the counter), with its code at `USER_TEXT_START` and its data
 at `USER_DATA_START` of its binary, in rooms of `UTEXT_ROOM` and
 `UDATA_ROOM`; it runs with a stack of `USTACK_SIZE`. The counter

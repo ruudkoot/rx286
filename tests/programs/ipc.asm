@@ -12,7 +12,8 @@
 ; one above it while a thread between them is busy, is refused every way it
 ; can think of, and last calls an endpoint nobody receives on, which only
 ; Ctrl+Break ends. Its own lines come through uprint; the workers build
-; each of theirs in their own data and write it with one SYS_WRITE.
+; each of theirs in their own data and write it with one SYS_WRITE, the
+; kernel's own (ksys: their spaces hold no endpoint to the OS server).
 ;
 ; TEST_IPC_TIMING (tests/timing) makes 10,000 calls instead, and says how
 ; many instructions a round trip took on Bochs.
@@ -24,7 +25,8 @@ bits 16
 %include "program.inc"
 %include "kcalls.inc"
 
-; Its slots, as selectors (slot n: n * 8 + 4 + 3)
+; Its slots, as selectors (slot n: n * 8 + 4 + 3); slots 8 and 9 are its
+; endpoint to the OS server and its transfer segment
 MY_CODE             equ 0x07
 MY_DATA             equ 0x0F
 LOW_SPACE           equ 0x1F            ; 3, 4: a server below this program
@@ -32,29 +34,29 @@ LOW_THREAD          equ 0x27
 BUSY_SPACE          equ 0x2F            ; 5, 6: a thread between the two servers
 BUSY_THREAD         equ 0x37
 EP_LOW              equ 0x3F            ; 7: the server below's endpoint
-UT_MEMORY           equ 0x47            ; given (TEST_CAPS): slot 8
-UT_ARENA            equ 0x4F            ; slot 9
-MY_SPACE            equ 0x57            ; slot 10
-EP                  equ 0x67            ; slot 12: the server's endpoint
-NTF_SLEEP           equ 0x6F            ; 13: its own timer's
-NTF_SIG             equ 0x77            ; 14: to signal three times
-NTF_SIG1            equ 0x7F            ; 15-17: copies badged 1, 2, 4
-NTF_SIG2            equ 0x87
-NTF_SIG4            equ 0x8F
-NTF_CTRL            equ 0x97            ; 18: wakes the server in the queue's test
-NTF_BOUND           equ 0x9F            ; 19: bound to the server
-EP_NOGRANT          equ 0xA7            ; 20: a send-only copy; later client D's thread
-SERVER_SPACE        equ 0xAF            ; 21, 22
-SERVER_THREAD       equ 0xB7
-A_SPACE             equ 0xBF            ; 23, 24
-A_THREAD            equ 0xC7
-B_SPACE             equ 0xCF            ; 25, 26
-B_THREAD            equ 0xD7
-C_SPACE             equ 0xDF            ; 27, 28
-C_THREAD            equ 0xE7
-SCRATCH             equ 0xEF            ; 29: segments on their way to a new space
-BUFFER              equ 0xF7            ; 30: a segment passed to the server
-D_SPACE             equ 0xFF            ; 31
+UT_MEMORY           equ 0x57            ; given (TEST_CAPS): slot 10
+UT_ARENA            equ 0x5F            ; slot 11
+MY_SPACE            equ 0x67            ; slot 12
+EP                  equ 0x77            ; slot 14: the server's endpoint
+NTF_SLEEP           equ 0x7F            ; 15: its own timer's
+NTF_SIG             equ 0x87            ; 16: to signal three times
+NTF_SIG1            equ 0x8F            ; 17-19: copies badged 1, 2, 4
+NTF_SIG2            equ 0x97
+NTF_SIG4            equ 0x9F
+NTF_CTRL            equ 0xA7            ; 20: wakes the server in the queue's test
+NTF_BOUND           equ 0xAF            ; 21: bound to the server
+EP_NOGRANT          equ 0xB7            ; 22: a send-only copy; later client D's thread
+SERVER_SPACE        equ 0xBF            ; 23, 24
+SERVER_THREAD       equ 0xC7
+A_SPACE             equ 0xCF            ; 25, 26
+A_THREAD            equ 0xD7
+B_SPACE             equ 0xDF            ; 27, 28
+B_THREAD            equ 0xE7
+C_SPACE             equ 0xEF            ; 29, 30
+C_THREAD            equ 0xF7
+SCRATCH             equ 0xFF            ; 31: segments on their way to a new space
+BUFFER              equ 0x107           ; 32: a segment passed to the server
+D_SPACE             equ 0x10F           ; 33
 D_THREAD            equ EP_NOGRANT
 
 ; A worker's space: the same slots in every one
@@ -96,6 +98,13 @@ end_udata
         PRINT "ipc: ", %1, ": "
         call print_dec
         call print_newline
+%endmacro
+
+; ksys function - the kernel's own system call, for the workers: their
+; spaces hold no endpoint to the OS server
+%macro ksys 1
+        mov ah, (%1)
+        int SYSCALL_VECTOR
 %endmacro
 
 ; must - stop the test if the last kernel call failed
@@ -791,10 +800,10 @@ client_queue:
 busy:
         mov dx, W_CTRL
         kcall KCALL_RECV
-        sys SYS_TICKS
+        ksys SYS_TICKS
         mov si, ax
 .spin:
-        sys SYS_TICKS
+        ksys SYS_TICKS
         sub ax, si
         cmp ax, BUSY_TICKS
         jb .spin
@@ -849,7 +858,7 @@ wline:
         mov cx, di
         mov si, W_LINE
         sub cx, si
-        sys SYS_WRITE
+        ksys SYS_WRITE
         ret
 
 line_badge          db "server: a call from badge ", 0

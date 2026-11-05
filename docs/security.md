@@ -15,9 +15,9 @@ No program can make the kernel:
   arrive.
 
 Every way out is a reported fault, after which the program starts again
-(roadmap D11): reported by the root, which handles the faults of what it
-started (roadmap l4.md L5, D18), or by the kernel for a thread without a
-handler.
+(roadmap D11): reported by the OS server, which handles its programs'
+faults (roadmap l4.md L6, D18), by the root for the OS server's, or by the
+kernel for a thread without a handler.
 
 ## What holds the program in
 
@@ -26,8 +26,15 @@ handler.
   LDT (*docs/protected-mode.md*). Every descriptor of the GDT has DPL 0, so
   the program cannot load any of them; the LDT's empty slots are all zeros,
   invisible to it. LDTR always holds the program's LDT, never Bochs' live
-  one at address 0 (roadmap X8). The GDT ends at 47h and the LDT at 3Fh, so
-  any selector past either faults.
+  one at address 0 (roadmap X8). The GDT ends at 14Fh and the program's LDT
+  at 7Fh, so any selector past either faults.
+- **The OS server** (roadmap l4.md L6) shares with each program only that
+  program's transfer segment; its thread for the program makes the call
+  with the program's buffer copied there, so the kernel's buffer checks see
+  only the transfer segment. The stub refuses for the program what the
+  kernel would have refused, by passing an offset past the segment's end;
+  a program that goes around the stub can name nothing but its own
+  transfer segment.
 - **The way back.** Every segment register the kernel's POPs and `IRET`
   load is checked for its own use first (*docs/interrupts.md*), so a
   descriptor changed during a call is the program's fault, never the

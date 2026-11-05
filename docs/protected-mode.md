@@ -51,8 +51,9 @@ space at its start, and the root makes every other program's
 LDT at every switch. Until the first switch LDTR is null: never Bochs' live
 LDT at address 0 (roadmap X8). A selector of the LDT has its table
 indicator set (`SEL_TI_LDT`). A program's space the root builds has
-`LDT_ENTRIES` slots (its limit `LDT_LIMIT`, 3Fh), 32 in `TEST_CAPS` builds;
-the root's own has 64. A program's first slots are the same in every space:
+`PROGRAM_SLOTS` slots (*docs/syscalls.md*), 64 in `TEST_CAPS` builds; the
+OS server's has 64 and the root's own 128. A program's first `LDT_ENTRIES`
+slots (`LDT_LIMIT`, 3Fh, of descriptors) are the same in every space:
 
 | Selector | Constant | Base | Limit | Access | What |
 |---|---|---|---|---|---|
@@ -61,6 +62,9 @@ the root's own has 64. A program's first slots are the same in every space:
 | 17h | `SEL_USTACK` | from the memory for programs | its stack's size | F3h | its stack |
 | 1Fh | `SEL_UFUZZ` | its data's | its data's | FBh | test builds with the fuzzer only: code over the program's data; empty in every other build |
 | 27h-3Fh | | | | 00h | empty |
+
+Then slot 8 holds its endpoint to the OS server (an all-zero descriptor,
+like an empty slot's) and slot 9 its transfer segment (F3h).
 
 A program of another ring has the same slots at its ring's RPL: the root's,
 in ring 2, are 06h, 0Eh and 16h. `make run`'s shell says where its own

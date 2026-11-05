@@ -1,5 +1,6 @@
 # The shell's segments: where the root put them (KCALL_SEGMENT): its code in
-# the image, its data and stack after the root's own; limits from the CPU (LSL).
+# the image, its data and stack after the root's own, the OS server's and
+# the transfer segments; limits from the CPU (LSL).
 program: shell
 keys: mem\n
 ---
@@ -7,7 +8,7 @@ rx286, test build
 rx286 shell: type help for the commands
 A:\>mem
 code:  selector 0007h, base {m:program.base}h, limit {m:program.limit}h
-data:  selector 000Fh, base 32800h, limit 1FFFh
-stack: selector 0017h, base 34800h, limit 07FFh
+data:  selector 000Fh, base 37020h, limit 1FFFh
+stack: selector 0017h, base 39020h, limit 07FFh
 Nothing else is reachable: the kernel's selectors fault here.
 A:\>

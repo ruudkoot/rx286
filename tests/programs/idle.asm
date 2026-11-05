@@ -21,3 +21,5 @@ entry:
         mov al, KEY_WAIT
         sys SYS_READ_KEY
         jmp entry
+
+%include "stub.asm"

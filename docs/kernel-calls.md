@@ -69,7 +69,7 @@ milestone.
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots | the object made, zeroed, its capability in the slot |
 | 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; BX a badge (mint) | the capability there |
-| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification) or `THREAD_FAULT` (SI an endpoint) | |
+| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint) or `THREAD_RESTART` | |
 | 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 or more | |
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
@@ -118,6 +118,12 @@ A thread made by retype is configured, then started:
   each, so binding again unbinds the old.
 - **Fault** gives it a fault endpoint, one it may send on, in any state
   (*Faults*, below).
+- **Restart** (`THREAD_RESTART`) starts a started thread's program again
+  at its entry, as Ctrl+Break does: the OS server's way to end a program
+  that calls `SYS_EXIT` (*docs/syscalls.md*). A thread waiting for the reply
+  of a server's thread started with `START_SESSION` - one that serves it
+  alone, from rings 1-2 only - takes that thread with it, so that a wait in
+  the kernel on its behalf is given up too.
 
 ## IPC
 
@@ -222,20 +228,23 @@ has `ROOT_SLOTS` slots:
 | 7 | `ROOT_SLOT_THREAD` | its own thread |
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
 
-The root (`src/root/root.asm`) builds a space and a thread for every other
-module: the module's code copied in as slot 0; a data segment of its room,
-initialised from its data, as slot 1; a stack as slot 2; itself as their
-fault handler, through an endpoint minted with the module's number as the
-badge. It starts each at the priority the table gives, the program the keys
-are for with `START_FOREGROUND`. Then it waits for faults: it reports each
-as the kernel did ("rx286: program fault #GP(0000) at 0007:0123", the
-module's name for "program"), copies back any of the three slots the
-program emptied, and replies with the module's entry.
+The root (`src/root/root.asm`) builds a space for every other module: the
+module's code copied in as slot 0; a data segment of its room, initialised
+from its data, as slot 1; a stack as slot 2. The OS server's module ("os")
+gets a thread for each program, which serves it alone (`START_SESSION`),
+and the program's capabilities (*docs/syscalls.md*). Every other module is
+a program: a thread, an endpoint to the OS server and a transfer segment,
+and its faults go to the OS server. The root starts each at the priority
+the table gives, the program the keys are for with `START_FOREGROUND`.
+Then it handles the OS server's faults: it reports each as the kernel did
+("rx286: os fault #GP(0000) at 0006:0123", the module's name for
+"program"), copies back any of the three slots the module emptied, and
+replies with the module's entry.
 
 ## In test builds
 
-In `TEST_CAPS` builds the root gives the program, in slots 8-11 of a space
-of 32, the rest of the memory for segments and of the arena as untyped, its
-own space and its own thread; `tests/caps/calls.test` and
+In `TEST_CAPS` builds the root gives the program, in slots 10-13 of a
+space of 64, the rest of the memory for segments and of the arena as
+untyped, its own space and its own thread; `tests/caps/calls.test` and
 `tests/ipc/ipc.test` use them (*docs/testing.md*). `tests/timing/ipc.test` counts a round trip's
 instructions on Bochs: 872 at L4.

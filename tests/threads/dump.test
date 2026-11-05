@@ -1,10 +1,14 @@
 # The thread dump of debug and test builds (roadmap l4.md L2), on the AT's
-# Sys Req key: both threads, their states and priorities, and how much of
-# their kernel stacks they have used. The key arrives while the shell waits
-# for it, so the counter runs.
+# Sys Req key: every thread, its state and priority, and how much of its
+# kernel stack it has used. The key arrives while the shell waits for it -
+# for the reply of the OS server's thread, which waits in the kernel for
+# the key (roadmap l4.md L6) - so the counter runs.
 program: shell
 keys: {sysrq}
 match: contains
 ---
-rx286: thread program waiting priority 3, kernel stack used
+rx286: thread root receiving priority 6, kernel stack used
+rx286: thread program awaiting its reply priority 3, kernel stack used
 rx286: thread counter running priority 1, kernel stack used
+rx286: thread os waiting priority 5, kernel stack used
+rx286: thread os receiving priority 5, kernel stack used

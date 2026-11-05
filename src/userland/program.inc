@@ -3,6 +3,10 @@
 ; What every program includes: its two sections, the system calls, and the
 ; macros to put data in its data segment and to print.
 ;
+; The sys macro calls the stub to the OS server (stub.asm, which uprint.asm
+; includes; roadmap l4.md L6), but in the root and the OS server themselves,
+; which define RAW_SYSCALLS and trap into the kernel with INT 30h.
+;
 ; A program is assembled on its own (roadmap D5): code at UCODE:0000 (its
 ; entry), data in UDATA, both at the offsets layout.inc gives. The kernel
 ; starts it with DS = ES = UDATA, SS:SP = USTACK:USTACK_SIZE, registers zero.
@@ -13,6 +17,21 @@
 
 %include "layout.inc"
 %include "syscalls.inc"
+
+%ifndef RAW_SYSCALLS
+; sys function - a system call, through the OS server (stub.asm); but the
+; test probe, which is about the caller's own descriptors, traps into the
+; kernel where it stands
+%unmacro sys 1
+%macro sys 1
+    mov ah, (%1)
+  %ifidn %1, SYS_TEST_PROBE
+    int SYSCALL_VECTOR
+  %else
+    call os_call
+  %endif
+%endmacro
+%endif
 
 section utext start=USER_TEXT_START vstart=0
 section udata start=USER_DATA_START vstart=0

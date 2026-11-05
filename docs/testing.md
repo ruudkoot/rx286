@@ -100,10 +100,10 @@ The suites:
 | Suite | What |
 |---|---|
 | `tests/boot` | the boot sector and loader: every word of `KERNEL.BIN` arrives (contiguous, fragmented, and past 64 KB), a missing, truncated or oversized one, a disk without a loader |
-| `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a module's fault reported by the root with the module's name; a boot image without a root, or with a module outside it, refused by the loader |
+| `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; a boot image without a root, or with a module outside it, refused by the loader |
 | `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break, Ctrl+Alt+Del, the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
-| `tests/syscalls` | every system call with good and bad arguments; `write`'s interrupt window |
+| `tests/syscalls` | every system call with good and bad arguments, through the OS server; `write`'s interrupt window; a call past the transfer segment's end |
 | `tests/storage` | the disk and printer calls: known sectors of every drive, a marked sector written to each and found on the host's image, bad arguments, a line on each printer, a diskette missing or write-protected, a fixed disk missing |
 | `tests/devices` | the speaker's tones measured by the kernel's probe (`TEST_SOUND`), the game port, the mouse's reset through IRQ4 and its packets, `SYS_WAIT`, and `term` talking to a modem |
 | `tests/drives` | the shell's drives: `dir` on every drive, `cd` in all its forms, `type` through a fragmented file and a file of four clusters, `print` checked byte for byte, every refusal, a drive without a diskette, a disk without a partition, a damaged FAT, paths of exactly 64 characters and of 66 |

@@ -998,7 +998,8 @@ kc_copy:
 ; a notification (one each: binding again unbinds the old) or give it a
 ; fault endpoint (l4.md D18). A space's slots 0, 1 and 2 are its program's
 ; code, data and stack; slot 0's DPL is the thread's ring, and IOPL 1 goes
-; to a thread of ring 1 that asks for it, to no other (l4.md D11)
+; to a thread of ring 1 that asks for it, to no other (l4.md D11). Restart
+; starts a started thread's program again, as Ctrl+Break does (l4.md L6)
 ;   In:       BP = the frame (DX thread, AL THREAD_*; configure: SI space,
 ;             BX IP, CX SP; start: CL priority, CH START_*; bind: SI a
 ;             notification it may receive on; fault: SI an endpoint it may
@@ -1017,6 +1018,8 @@ kc_thread:
         je .bind
         cmp al, THREAD_FAULT
         je .fault
+        cmp al, THREAD_RESTART
+        je .restart
         cmp byte [bx + T_STATE], TS_FREE
         jne kc_done.state                   ; started already
         cmp al, THREAD_CONFIGURE
@@ -1061,6 +1064,11 @@ kc_thread:
         mov ax, [si + SH_BADGE]
         mov [bx + T_FAULT_BADGE], ax
         jmp kc_done.ok
+.restart:
+        cmp byte [bx + T_STATE], TS_FREE
+        je kc_done.state                ; not started
+        call thread_restart
+        jmp kc_done.ok
 .configure:
         push bx
         mov ax, [bp + FRAME_SI]
@@ -1100,11 +1108,17 @@ kc_thread:
         cmp cl, PRIORITY_MAX
         ja kc_done.arg
         mov [bx + T_PRIO], cl
-        test ch, START_FOREGROUND
+        test ch, START_FOREGROUND | START_SESSION
         jz .iopl
-        mov si, [cur_thread]            ; the keys' program: chosen by ring 1 or 2
+        mov si, [cur_thread]            ; chosen by ring 1 or 2 only
         cmp byte [si + T_RING], RPL_USER
         je kc_done.arg
+        test ch, START_SESSION
+        jz .foreground
+        or byte [bx + T_FLAGS], TF_SESSION
+.foreground:
+        test ch, START_FOREGROUND
+        jz .iopl
         or byte [bx + T_FLAGS], TF_FOREGROUND
         mov [fg_thread], bx
 .iopl:

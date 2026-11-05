@@ -1,15 +1,17 @@
 # System calls
 
-A program reaches the kernel only through `INT 30h` (`SYSCALL_VECTOR`), an
-interrupt gate of DPL 3 (roadmap D9). The function goes in AH; results come
-back in registers. An error sets CF and puts its code in AX. A call preserves
-every register it does not return. `src/include/syscalls.inc` holds the
-numbers and the macro `sys`:
+A program's system calls go to the OS server, which makes them in the
+kernel through `INT 30h` (`SYSCALL_VECTOR`), an interrupt gate of DPL 3
+(roadmap D9; *Through the OS server*, below). The function goes in AH;
+results come back in registers. An error sets CF and puts its code in AX. A
+call preserves every register it does not return. `src/include/syscalls.inc`
+holds the numbers and the macro `sys`, which `program.inc` turns into a call
+of the stub to the OS server:
 
 ```nasm
         mov si, message
         mov cx, message_length
-        sys SYS_WRITE           ; mov ah, SYS_WRITE / int 30h
+        sys SYS_WRITE           ; mov ah, SYS_WRITE / call os_call
         jc .failed
 ```
 
@@ -97,6 +99,46 @@ the US layout gives it under Shift, Ctrl and Caps Lock. Keys without ASCII
 return AL = 0; a program looks at AH for them: `SC_ESC`, `SC_UP`, `SC_DOWN`,
 `SC_LEFT`, `SC_RIGHT`. Ctrl+Break and Ctrl+Alt+Del never reach the program:
 the kernel acts on them.
+
+## Through the OS server
+
+The OS server (`src/os/os.asm`; roadmap l4.md L6, D16) serves the calls of
+every program the root starts, with a thread for each program that serves
+it alone. `src/include/os.inc` holds the interface:
+
+- **What each program holds:** in its space of `PROGRAM_SLOTS` slots,
+  besides its code, data and stack, an endpoint to the OS server
+  (`OS_SLOT_EP`, selector `OS_EP`) badged with its module's number, and a
+  transfer segment of `XFER_SIZE` bytes it shares with the OS server
+  (`OS_SLOT_XFER`, selector `OS_XFER`).
+- **The stub** (`src/userland/stub.asm`, `os_call`), which the `sys` macro
+  calls, puts AX, BX, CX, DX, SI and DI in the transfer segment's block
+  (`XFER_AX`, `XFER_BX`, `XFER_CX`, `XFER_DX`, `XFER_SI`, `XFER_DI`) and a
+  buffer the call reads in its data
+  (`XFER_DATA`, `XFER_DATA_SIZE` bytes: as much as a write takes), and calls
+  the endpoint with the function as the label. The OS server's thread makes
+  the call with `INT 30h` on the transfer segment and puts the registers
+  and the flags (`XFER_FLAGS`) back; the stub copies a buffer the call
+  filled into the program's.
+- **A buffer the program may not use so** is checked by the stub as the
+  kernel would (below), at the program's own privilege, and passed on as
+  `XFER_BAD`, at the transfer segment's end: so the kernel refuses it with
+  `E_FAULT` after its other checks, in the order it always did. A call made
+  straight on the endpoint that names bytes past the transfer segment is
+  refused the same way (`tests/syscalls`).
+- **`SYS_EXIT`:** the OS server restarts the program (the kernel's
+  `THREAD_RESTART`, *docs/kernel-calls.md*), and its own thread for it with
+  it, since that thread serves the program alone (`START_SESSION`). So does
+  Ctrl+Break, which the kernel still handles: a wait in the kernel on the
+  program's behalf is given up with it.
+- **Faults:** a program's fault comes to the OS server on the same
+  endpoint, badged `FAULT_BADGE`; it reports it as the kernel did and
+  restarts the program (*docs/kernel-calls.md*).
+- **What still calls the kernel itself:** the root and the OS server; the
+  counter; the test probe; threads a program makes, whose spaces hold no
+  endpoint to the OS server (the IPC test's workers); and the fuzzer's
+  random code. `INT 30h` stays until the drivers have left the kernel
+  (roadmap l4.md L10).
 
 ## How the kernel checks a buffer
 

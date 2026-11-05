@@ -114,7 +114,7 @@ def symbol_offsets(path):
 
 # The modules' binaries, by their names in the module table, and the
 # prefixes of their symbols.
-MODULE_BINARIES = {'root': ('root', 'r.'), 'program': ('user', 'u.'),
+MODULE_BINARIES = {'root': ('root', 'r.'), 'os': ('os', 'o.'), 'program': ('user', 'u.'),
                    'counter': ('counter', 'c.')}
 
 

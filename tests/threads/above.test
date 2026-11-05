@@ -10,3 +10,5 @@ rx286, test build
 rx286: thread root ran
 rx286: thread program did not run
 rx286: thread counter ran
+rx286: thread os ran
+rx286: thread os ran

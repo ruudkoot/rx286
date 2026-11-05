@@ -165,3 +165,7 @@ print_newline:
         call print_char
         pop ax
         ret
+
+%ifndef RAW_SYSCALLS
+%include "stub.asm"                     ; what the sys macro calls
+%endif

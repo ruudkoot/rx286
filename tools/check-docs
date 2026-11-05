@@ -31,6 +31,7 @@ COVERED = {
     'vectors.inc': 'docs/interrupts.md',
     'syscalls.inc': 'docs/syscalls.md',
     'kcalls.inc': 'docs/kernel-calls.md',
+    'os.inc': 'docs/syscalls.md',
     'disks.inc': 'docs/storage.md',
 }
 

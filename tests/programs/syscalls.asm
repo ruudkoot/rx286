@@ -12,6 +12,8 @@ cpu 286
 bits 16
 %include "build.inc"
 %include "program.inc"
+%include "kcalls.inc"
+%include "os.inc"
 
 WINDOW_LINES        equ WRITE_MAX / 2   ; bytes a window write: what the data segment holds
 WINDOW_SLACK        equ 2               ; ticks either way the edges allow
@@ -168,9 +170,39 @@ check_others:
         cmp bp, 0x6666
         jne .changed
         PRINT "kept", CHAR_LF
-        jmp check_window
+        jmp check_transfer
 .changed:
         PRINT "CHANGED", CHAR_LF
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; check_transfer - the transfer segment's limit (roadmap l4.md L6): a write
+; asked of the OS server straight on its endpoint, of bytes past the
+; segment's end, which the stub never passes on: the kernel refuses it
+;   In:       DS = ES = the program's data
+;   Out:      falls through to the next check
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+check_transfer:
+        mov ax, OS_XFER
+        mov es, ax
+        mov word [es:XFER_CX], 16
+        mov word [es:XFER_SI], XFER_SIZE - 8
+        mov al, SYS_WRITE               ; the label: the function
+        mov dx, OS_EP
+        xor bp, bp
+        kcall KCALL_CALL
+        mov ax, OS_XFER                 ; its results, before the next call's
+        mov es, ax
+        push word [es:XFER_FLAGS]
+        push word [es:XFER_AX]
+        push ds
+        pop es
+        PRINT "transfer: a write past its end: "
+        pop ax
+        pop bx
+        shr bx, 1                       ; CF: the call's
+        call report_error
         ; falls through
 
 ; ----------------------------------------------------------------------------

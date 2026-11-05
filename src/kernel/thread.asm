@@ -400,7 +400,10 @@ thread_tick:
 
 ; ----------------------------------------------------------------------------
 ; thread_restart - ask for a thread's program to start again: at once if it
-; runs, else when it next does (its kept restart_pending)
+; runs, else when it next does (its kept restart_pending). A thread waiting
+; for a server's reply takes the server's thread with it if that thread
+; serves it alone (TF_SESSION: the OS server's, l4.md L6), whose wait in
+; the kernel on its behalf is then given up too.
 ;   In:       BX = the thread; DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -412,6 +415,16 @@ thread_restart:
         ret
 .other:
         mov byte [bx + T_RESTART], 1
+        cmp byte [bx + T_STATE], TS_REPLY
+        jne .cancel
+        push bx
+        mov bx, [bx + T_WAIT_OBJ]       ; the server
+        test byte [bx + T_FLAGS], TF_SESSION
+        jz .alone
+        call thread_restart
+.alone:
+        pop bx
+.cancel:
         jmp ipc_cancel                  ; waiting in IPC: it wakes, to restart
 
 ; ----------------------------------------------------------------------------

@@ -1,4 +1,6 @@
-# Every system call with good and bad arguments (tests/programs/syscalls.asm).
+# Every system call with good and bad arguments (tests/programs/syscalls.asm),
+# through the OS server (roadmap l4.md L6); and a call that names bytes past
+# the transfer segment's end, refused.
 program: syscalls
 keys: x
 timeout: 60
@@ -20,6 +22,7 @@ ticks: counting up
 time: a valid BCD date and time
 error 2
 registers: kept
+transfer: a write past its end: error 1
 window: ticks kept pace with the clock
 window: ticks kept pace with the clock
 [form feed]

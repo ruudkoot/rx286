@@ -237,7 +237,7 @@ def build(test):
     stamp = os.path.join(b, 'defines.txt')
     wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
-        for name in ('kernel.bin', 'user.bin', 'root.bin', 'counter.bin'):
+        for name in ('kernel.bin', 'user.bin', 'root.bin', 'os.bin', 'counter.bin'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         with open(stamp, 'w', encoding='utf-8') as f:
@@ -374,13 +374,13 @@ def substitute(test, line):
             if field == 'datasum':
                 return '%04X' % rxlib.fletcher(image[m['data']:m['data'] + m['data_size']])
             return '%04X' % (m['code_size'] - 1)
-        mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map'}.get(
+        mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map', 'o': 'os.map'}.get(
             which[:1], 'user.map')
         symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
-    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
 
 
 def relevant(lines):

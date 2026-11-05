@@ -45,7 +45,7 @@ it into features:
 | `boot-sector.bin` | sector 0 of the floppy |
 | `boot-loader.bin` | sectors 1-3 |
 | `kernel.bin` | the kernel: the boot image's first part |
-| `root.bin`, `user.bin`, `counter.bin` | the modules: the root, the program, the counter |
+| `root.bin`, `os.bin`, `user.bin`, `counter.bin` | the modules: the root, the OS server, the program, the counter |
 | `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules (*docs/memory-map.md*) |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |

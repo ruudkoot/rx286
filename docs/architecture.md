@@ -9,7 +9,8 @@ L5):
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
 | kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 13 KB of code and data |
-| the root | `src/root/` | a module of the image, ring 2 | about 1 KB of code |
+| the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
+| the OS server | `src/os/` | a module of the image, ring 2, a thread for each program | about 1 KB of code |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 5 KB of code, 5 KB of data |
 | the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
 
@@ -40,9 +41,11 @@ program.
 5. `cap.asm` builds the root from the image's first module and gives it
    every other capability there is; `thread.asm` starts it, and becomes the
    idle loop. The first switch starts the root in ring 2 with `IRET`.
-6. The root (`src/root/`) builds a space and a thread for every other
-   module - the shell, the counter beside it - and starts them, the shell
-   in the foreground; then it waits for their faults.
+6. The root (`src/root/`) builds a space for every other module: the OS
+   server, with a thread for each program; the shell and the counter beside
+   it, each with a thread, an endpoint to the OS server and a transfer
+   segment. It starts them, the shell in the foreground; then it waits for
+   the OS server's faults.
 
 ## The boot image
 
@@ -160,23 +163,39 @@ The root (`src/root/root.asm`; roadmap l4.md L5, D12) is the first thread,
 in ring 2, which the kernel builds from the image's first module and gives
 everything else: the untyped memory left, the module table, each other
 module's code and data. For each other module it builds a space - the
-module's code, a data segment initialised from the module, a stack - and a
-thread, makes itself the thread's fault handler (l4.md D18), and starts it
-at the priority the module table gives. Then it serves faults: it reports
-each with the kernel's old line, puts back any of the program's segments
-that is gone from its slot, and restarts it at its entry
+module's code, a data segment initialised from the module, a stack. The OS
+server gets a thread for each program; every other module is a program and
+gets a thread, an endpoint to the OS server and a transfer segment, and its
+faults go to the OS server (l4.md D18). The root starts them at the
+priorities the module table gives. Then it serves the OS server's faults:
+it reports each with the kernel's old line, puts back any of the server's
+segments that is gone from its slot, and restarts it at its entry
 (*docs/kernel-calls.md*).
+
+## The OS server
+
+The OS server (`src/os/os.asm`; roadmap l4.md L6, D16) serves the
+programs' system calls as messages, with a thread for each program that
+serves it alone, so that one program's wait holds up no other (l4.md X13).
+The `sys` macro calls a stub that puts the registers and a buffer in the
+program's transfer segment and calls the server; the server's thread makes
+today's `INT 30h` call on that segment and puts the results back
+(*docs/syscalls.md*). So far only the path has moved: the drivers are
+still the kernel's. The server also handles its programs' faults: it
+reports each with the kernel's old line, puts back what the program lost,
+and restarts it.
 
 ## The program
 
 The program sees three segments (code, data, stack: selectors 07h, 0Fh,
-17h) and `INT 30h` (*docs/syscalls.md*): the console, the keyboard, the
-clocks, the four drives a sector at a time and the two printers
-(*docs/storage.md*). It starts with its registers zero,
-IF on and IOPL 0; when it faults, the root reports it and restarts it at
-its entry with a fresh stack; when it exits or is broken off with
-Ctrl+Break, the kernel does. Its data survives, so the shell keeps its last
-line and knows it was restarted.
+17h), its endpoint to the OS server and its transfer segment (47h, 4Fh),
+and through them the system calls (*docs/syscalls.md*): the console, the
+keyboard, the clocks, the four drives a sector at a time and the two
+printers (*docs/storage.md*). It starts with its registers zero, IF on and
+IOPL 0; when it faults or exits, the OS server restarts it at its entry
+with a fresh stack, and when it is broken off with Ctrl+Break, the kernel
+does. Its data survives, so the shell keeps its last line and knows it was
+restarted.
 
 The shell (`src/userland/`, *docs/shell.md*) is `shell.asm` (the start, the
 line editor, the command table), `commands.asm`, `drives.asm` (the prompt,

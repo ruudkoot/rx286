@@ -128,6 +128,7 @@ TS_NOTIFY           equ 7       ; waiting on a notification
 TF_FOREGROUND       equ 0x01    ; T_FLAGS: the keys and Ctrl+Break are its
 TF_CONFIGURED       equ 0x02    ; its space, entry and stack are set
 TF_IOPL             equ 0x04    ; it runs with IOPL 1 (a ring-1 thread that asked)
+TF_SESSION          equ 0x08    ; it serves one client, and starts again with it
 
 PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
