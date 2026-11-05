@@ -8,19 +8,19 @@ L5):
 |---|---|---|---|
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
-| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 13 KB of code and data |
+| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 10 KB of code and data |
 | the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
-| the OS server | `src/os/` | a module of the image, ring 2, a thread for each program | about 1 KB of code |
-| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's | a few hundred bytes each |
-| the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 5 KB of code, 5 KB of data |
+| the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 3.5 KB of code |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes' and the fixed disks' | a few hundred bytes each, the diskettes' about 1 KB |
+| the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
 | the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
 descriptor macros and the build flavours. `src/lib/` holds pure routines
 more than one part assembles, each its own copy: `format.asm` (numbers as
-text) in the kernel and the program, `fat12.asm` in the loader and the
-program.
+text) in the kernel and the program, `fat12.asm` in the loader and the OS
+server.
 
 ## From power-on to the shell
 
@@ -36,17 +36,18 @@ program.
    to `pm_start`.
 4. `start.asm` zeroes the stacks, loads TR and a null LDTR, reprograms the
    8259As, initialises the 287, the log on COM2 (debug and test builds) and the
-   console, prints the banner, sets up the timer, keyboard, clock, DMA
-   controllers and printer ports, unmasks every IRQ line and enables NMI.
-   The diskette and fixed disk controllers are set up when first used.
+   console, prints the banner, sets up the timer, keyboard, clock and
+   printer ports, unmasks every IRQ line and enables NMI. The DMA
+   controllers and the diskette and fixed disk controllers are their
+   drivers' (*docs/drivers.md*).
 5. `cap.asm` builds the root from the image's first module and gives it
    every other capability there is; `thread.asm` starts it, and becomes the
    idle loop. The first switch starts the root in ring 2 with `IRET`.
-6. The root (`src/root/`) builds a space for every other module: the OS
-   server, with a thread for each program; the shell and the counter beside
-   it, each with a thread, an endpoint to the OS server and a transfer
-   segment. It starts them, the shell in the foreground; then it waits for
-   the OS server's faults.
+6. The root (`src/root/`) builds a space for every other module: the
+   drivers; the OS server, with a thread for each program; the shell and
+   the counter beside it, each with a thread, an endpoint to the OS server
+   and a transfer segment. It starts them, the shell in the foreground; then
+   it waits for the OS server's faults.
 
 ## The boot image
 
@@ -78,13 +79,9 @@ name nothing of the kernel's, and reaches it only through `INT 30h` and
 | `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
 | `pic.asm` | the 8259As; the driver of each line, its binding to a driver outside the kernel, or the rule for none; spurious IRQ7 and IRQ15 |
-| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
+| `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the kernel's drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
 | `rtc.asm` | the MC146818: 24-hour BCD, read by polling |
 | `fpu.asm` | the 287: FNINIT, FSETPM; switched between threads lazily (TS, #NM); IRQ13, charged to its owner |
-| `dma.asm` | the 8237As: reset; channel 2 for a diskette sector |
-| `disk.asm` | `SYS_DISK_READ`, `SYS_DISK_WRITE`: the drives' table, sector numbers to cylinders, heads and sectors, the disk buffer |
-| `diskette.asm` | the NEC 765: drives A and B, IRQ6 |
-| `fixeddisk.asm` | the fixed disk controller: drives C and D, IRQ14 |
 | `speaker.asm` | `SYS_SOUND`: timer channel 2 through port B |
 | `gameport.asm` | `SYS_JOYSTICK`: the buttons, and the axes timed with channel 0 |
 | `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM2 in release builds, IRQ3, a ring of bytes |
@@ -132,8 +129,8 @@ untyped memory and a space can make more with the kernel's calls.
   priority 3 and the counter at 1, so the counter runs only when the
   program waits. Preemption happens on the way back to ring 3 and at the
   kernel's interrupt windows (`kpreempt`), never in the middle of a handler.
-- **Waiting inside the kernel:** a system call that waits (for a key, a
-  disk, a sound, SYS_WAIT's events) waits until the next interrupt
+- **Waiting inside the kernel:** a system call that waits (for a sound,
+  SYS_WAIT's events) waits until the next interrupt
   (`kwait`), and other threads run meanwhile; every IRQ wakes every waiting
   thread, which looks again at what it waits for.
 - **One thread at a time inside the system calls** (`call_enter`): they were
@@ -178,15 +175,19 @@ serves it alone, so that one program's wait holds up no other (l4.md X13).
 The `sys` macro calls a stub that puts the registers and a buffer in the
 program's transfer segment and calls the server; the server's thread makes
 today's `INT 30h` call on that segment and puts the results back
-(*docs/syscalls.md*). So far only the path has moved: the drivers are
-still the kernel's. The server also handles its programs' faults: it
-reports each with the kernel's old line, puts back what the program lost,
-and restarts it.
+(*docs/syscalls.md*), or calls the driver of the device. The files are its
+own (`files.asm`, `fat.asm`; roadmap l4.md L9): each program's current
+drive and directories, and the FAT12 library, which reads a sector at a
+time from the disk drivers into a files segment the root gives the server
+for that program (*docs/storage.md*). The server also handles its
+programs' faults: it reports each with the kernel's old line, puts back
+what the program lost, and restarts it.
 
 ## The drivers
 
 Devices leave the kernel one at a time (roadmap l4.md L7-L10): so far the
-printers, the mouse, the console and the keyboard. A driver is a module in ring 1 with IOPL 1, which
+printers, the mouse, the console, the keyboard, the diskettes and the fixed
+disks. A driver is a module in ring 1 with IOPL 1, which
 the root builds with an endpoint it serves, a notification bound to its
 thread for its timer and its interrupt, and its interrupt line
 (*docs/drivers.md*). The OS server calls it for the system calls of its
@@ -197,8 +198,8 @@ device.
 The program sees three segments (code, data, stack: selectors 07h, 0Fh,
 17h), its endpoint to the OS server and its transfer segment (47h, 4Fh),
 and through them the system calls (*docs/syscalls.md*): the console, the
-keyboard, the clocks, the four drives a sector at a time and the two
-printers (*docs/storage.md*). It starts with its registers zero, IF on and
+keyboard, the clocks, the four drives a sector at a time or as files, and
+the two printers (*docs/storage.md*). It starts with its registers zero, IF on and
 IOPL 0; when it faults or exits, the OS server restarts it at its entry
 with a fresh stack, and so it does when it is broken off with Ctrl+Break,
 which the keyboard driver signals to it. Its data survives, so the shell keeps its last line and knows it was
@@ -206,12 +207,12 @@ restarted.
 
 The shell (`src/userland/`, *docs/shell.md*) is `shell.asm` (the start, the
 line editor, the command table), `commands.asm`, `drives.asm` (the prompt,
-the drive letters, `dir`, `cd`, `type`, `print`), `fat.asm` (its FAT12
-library), `crash.asm`, `parse.asm` (pure, tested on the host), `uprint.asm`
+the drive letters, `dir`, `cd`, `type`, `print`, on the OS server's file
+calls), `crash.asm`, `parse.asm` (pure, tested on the host), `uprint.asm`
 (output through `SYS_WRITE`) and `program.inc` (the sections and the
 `PRINT` macro every program uses). From `src/lib/` it takes `format.asm`,
-`fat12.asm` (the loader's FAT12 arithmetic) and `fatname.asm` (FAT names
-and time stamps as text), each pure and tested on the host.
+`fat12.asm` (a directory entry's fields) and `fatname.asm` (FAT names and
+time stamps as text), each pure and tested on the host.
 
 ## Builds
 

@@ -32,6 +32,7 @@ next_attack         dw 0
 scratch             times 8 db 0
 scratch_sector      times SECTOR_SIZE db 0
 bounds              dw 0, 5
+path_root           db '\', 0
 fpu_cw              dw FPU_CW_ZM
 end_udata
 
@@ -266,6 +267,60 @@ attacks:
         pop es
         call report_refusal
         jmp entry
+; The file calls (roadmap l4.md L9): the OS server's, refused as the
+; sectors' are: a buffer the stub checks, then the OS server's own checks
+.fnull: push ds                         ; a path through a null DS
+        xor ax, ax
+        mov ds, ax
+        xor si, si
+        mov di, scratch_sector
+        mov al, DRIVE_A
+        sys SYS_FIND
+        pop ds
+        call report_refusal
+        jmp entry
+.fcode: push es                         ; a record into the code: not writable
+        push cs
+        pop es
+        xor di, di
+        mov si, path_root
+        mov al, DRIVE_A
+        sys SYS_FIND
+        pop es
+        call report_refusal
+        jmp entry
+.flimit: mov di, UDATA_ROOM - PATH_MAX / 2  ; a directory's path across the limit
+        mov al, DRIVE_A
+        sys SYS_GETCWD
+        call report_refusal
+        jmp entry
+.fdrive: mov si, path_root              ; drive 80h: no such drive
+        mov di, scratch_sector
+        mov al, 0x80
+        sys SYS_FIND
+        call report_refusal
+        jmp entry
+.flong: mov di, scratch_sector          ; a path with no end in the bytes passed
+        mov cx, PATH_IN_MAX + 8
+        mov al, 'A'
+        rep stosb
+        mov si, scratch_sector
+        mov al, DRIVE_A
+        sys SYS_CHDIR
+        call report_refusal
+        jmp entry
+.fnone: mov di, scratch_sector          ; a file's sector, nothing found
+        sys SYS_FILE_NEXT
+        call report_refusal
+        jmp entry
+.fsect: push es                         ; a file's sector into the code
+        push cs
+        pop es
+        xor di, di
+        sys SYS_FILE_NEXT
+        pop es
+        call report_refusal
+        jmp entry
 .empty: mov ax, SEL_EMPTY_SLOT          ; an empty slot of the LDT: all zeros
 .empty_f: mov ds, ax
 .slots: mov bx, SEL_UCODE               ; what ring 3 learns of every LDT slot
@@ -471,6 +526,13 @@ attack_table:
         attack "print from a null selector", attacks.pnull
         attack "read drive 80h", attacks.drive
         attack "read sector FFFFh of A", attacks.sector
+        attack "find a path through a null DS", attacks.fnull
+        attack "find into the code", attacks.fcode
+        attack "a directory's path across the limit", attacks.flimit
+        attack "find on drive 80h", attacks.fdrive
+        attack "a path with no end", attacks.flong
+        attack "a file's sector, nothing found", attacks.fnone
+        attack "a file's sector into the code", attacks.fsect
         attack "an empty slot of the LDT", attacks.empty
         attack "every slot of the LDT", attacks.slots
         attack "probe: data not present", attacks.pds

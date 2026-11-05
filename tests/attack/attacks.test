@@ -128,6 +128,20 @@ attack: read drive 80h
 attack: refused, error 3
 attack: read sector FFFFh of A
 attack: refused, error 3
+attack: find a path through a null DS
+attack: refused, error 1
+attack: find into the code
+attack: refused, error 1
+attack: a directory's path across the limit
+attack: refused, error 1
+attack: find on drive 80h
+attack: refused, error 3
+attack: a path with no end
+attack: refused, error 19
+attack: a file's sector, nothing found
+attack: refused, error 3
+attack: a file's sector into the code
+attack: refused, error 1
 attack: an empty slot of the LDT
 rx286: program fault #GP(003C) at 0007:{attacks.empty_f}
 attack: every slot of the LDT

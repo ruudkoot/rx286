@@ -77,8 +77,10 @@ TI_CALLING          equ 0x01    ; T_IPC: a call, which waits for a reply
 TI_GRANT            equ 0x02    ;        it passes a capability (its frame's BP)
 
 ; A thread as an object of the arena (roadmap l4.md L3): its control block,
-; then its kernel stack, a segment of its own from the GDT's pool.
-TCB_OBJECT_SIZE     equ 1024
+; then its kernel stack, a segment of its own from the GDT's pool. The
+; stack's 352 bytes are more than three times the deepest the watermark
+; found in any test once the disks left the kernel (102: l4.md D3, L9).
+TCB_OBJECT_SIZE     equ 512
 TCB_STACK_OFF       equ TCB_SIZE
 TCB_STACK_SIZE      equ TCB_OBJECT_SIZE - TCB_SIZE
 

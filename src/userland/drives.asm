@@ -1,13 +1,14 @@
 ; ============================================================================
 ; rx286 - src/userland/drives.asm
 ; The shell's drives: the prompt, A: to D:, dir, cd, type and print, on the
-; FAT12 library (fat.asm; storage roadmap D8).
+; OS server's file calls (SYS_FIND to SYS_FREE; roadmap l4.md L9, storage
+; roadmap D8).
 ;
-; As DOS does, the shell keeps a current drive and, for each drive, a
-; current directory. A path may start with a drive (C:\DOCS, B:FRAG.TXT); it
-; goes from the root after a separator, else from that drive's current
-; directory. Every command mounts its drive afresh. The messages are DOS's
-; where DOS has one.
+; As DOS does, the OS server keeps the shell's current drive and, for each
+; drive, a current directory. A path may start with a drive (C:\DOCS,
+; B:FRAG.TXT), which the shell takes off; the rest goes from the root after
+; a separator, else from that drive's current directory. Every call mounts
+; its drive afresh. The messages are DOS's where DOS has one.
 ; ============================================================================
 
 DIR_TIME            equ 0x16            ; a directory entry's time and date
@@ -19,48 +20,26 @@ FREE_COLUMNS        equ COUNT_COLUMNS + 8 + TOTAL_COLUMNS  ; under the total: " 
 STAMP_CHARS         equ 10              ; YYYY-MM-DD, the longer stamp
 
 begin_udata
-current_drive       db DRIVE_A
-wheres              times DRIVES * WHERE_SIZE db 0  ; each drive's current directory
 path_drive          db 0                ; the drive of the command's path
+found               times FIND_SIZE db 0    ; what SYS_FIND found
+next_entry          times FIND_ENTRY_SIZE db 0  ; a directory's entry
+cwd_path            times PATH_MAX + 1 db 0     ; a drive's current directory
+file_sector         times SECTOR_SIZE db 0  ; a file's sector
 dir_files           dw 0
 dir_bytes           dd 0
 printed             dd 0
+no_label            db "NO NAME    "        ; FAT's label for a volume without one
 end_udata
 
 ; ----------------------------------------------------------------------------
-; drives_init - every drive at its root, A the current drive
-;   In:       DS = ES = the program's data
-;   Out:      nothing
-;   Destroys: AX, BX, CX
+; current_drive - the current drive (SYS_DRIVE)
+;   In:       nothing
+;   Out:      AL = the drive
+;   Destroys: AH
 ; ----------------------------------------------------------------------------
-drives_init:
-        mov byte [current_drive], DRIVE_A
-        xor al, al
-        mov cx, DRIVES
-.drive:
-        call where_of
-        mov word [bx + WHERE_CLUSTER], 0
-        mov word [bx + WHERE_PATH], CHAR_PATH_SEPARATOR    ; "\" and its zero
-        inc al
-        loop .drive
-        ret
-
-; ----------------------------------------------------------------------------
-; where_of - a drive's current directory
-;   In:       AL = the drive
-;   Out:      BX = its record in wheres
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-where_of:
-        push ax
-        push dx
-        xor ah, ah
-        mov bx, WHERE_SIZE
-        mul bx
-        mov bx, ax
-        add bx, wheres
-        pop dx
-        pop ax
+current_drive:
+        mov al, DRIVES                  ; none to make current
+        sys SYS_DRIVE
         ret
 
 ; ----------------------------------------------------------------------------
@@ -70,24 +49,30 @@ where_of:
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 print_prompt:
-        mov al, [current_drive]
+        call current_drive
         call print_where
         mov al, '>'
         jmp print_char
 
 ; ----------------------------------------------------------------------------
 ; print_where - a drive's letter, a colon and its current directory
-;   In:       AL = the drive
+;   In:       AL = the drive; DS = ES = the program's data
 ;   Out:      nothing
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 print_where:
-        call where_of
+        push di
+        mov di, cwd_path
+        mov byte [di], 0                ; (nothing, should the call fail)
+        push ax
+        sys SYS_GETCWD
+        pop ax
+        pop di
         add al, 'A'
         call print_char
         mov al, ':'
         call print_char
-        lea si, [bx + WHERE_PATH]
+        mov si, cwd_path
         jmp print_str
 
 ; ----------------------------------------------------------------------------
@@ -109,7 +94,7 @@ drive_line:
         call path_drive_letter
         jc .done                        ; reported
         mov al, [path_drive]
-        mov [current_drive], al
+        sys SYS_DRIVE
 .done:
         clc
         ret
@@ -138,52 +123,46 @@ path_drive_letter:
         ret
 
 ; ----------------------------------------------------------------------------
-; path_argument - a command's path: its drive, which is mounted
+; path_argument - a command's path: its drive
 ;   In:       SI = the rest of the line
-;   Out:      CF clear, SI at the path past any "X:", path_drive, and BX =
-;             the drive's current directory; or CF set (the trouble printed)
-;   Destroys: AX, CX, DX, DI
+;   Out:      CF clear, SI at the path past any "X:", AL = path_drive; or CF
+;             set (the trouble printed)
+;   Destroys: AH
 ; ----------------------------------------------------------------------------
 path_argument:
-        mov al, [current_drive]
+        call current_drive
         mov [path_drive], al
         cmp byte [si], ' '
-        jbe .mount                      ; no argument
+        jbe .done                       ; no argument
         cmp byte [si + 1], ':'
-        jne .mount
+        jne .done
         call path_drive_letter
         jc .out
         add si, 2
-.mount:
-        push si
+.done:
         mov al, [path_drive]
-        call fat_mount
-        pop si
-        jc report_failure
-        mov al, [path_drive]
-        call where_of
         clc
 .out:
         ret
 
 ; ----------------------------------------------------------------------------
-; path_find - path_argument, then the path followed (fat_find)
+; path_find - path_argument, then the path followed (SYS_FIND)
 ;   In:       SI = the rest of the line
-;   Out:      CF clear and `found`, found_dir, found_entry; or CF set (the
-;             trouble printed)
+;   Out:      CF clear and `found` (FIND_*); or CF set (the trouble printed)
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 path_find:
         call path_argument
         jc .out
-        call fat_find
+        mov di, found
+        sys SYS_FIND
         jc report_failure
 .out:
         ret
 
 ; ----------------------------------------------------------------------------
 ; report_failure - a command's error, as DOS words it
-;   In:       AX = the error (the kernel's or the library's); path_drive
+;   In:       AX = the error (the OS server's); path_drive
 ;   Out:      CF set
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
@@ -260,16 +239,16 @@ cmd_dir:
         mov al, [path_drive]
         add al, 'A'
         call print_char
-        mov si, vol_label
+        mov si, found + FIND_LABEL
         mov di, no_label
-        mov cx, DIR_NAME_LENGTH
+        mov cx, FIND_LABEL_SIZE
         repe cmpsb
         jne .label
         PRINT " has no label", CHAR_LF
         jmp .directory
 .label:
         PRINT " is "
-        mov si, vol_label
+        mov si, found + FIND_LABEL
         call print_name_part
         call print_newline
 .directory:
@@ -279,30 +258,29 @@ cmd_dir:
         call print_char
         mov al, ':'
         call print_char
-        cmp byte [found_dir], 0
+        cmp byte [found + FIND_DIR], 0
         jne .whole
         call cut_found_name             ; a file: its directory
 .whole:
-        mov si, found + WHERE_PATH
+        mov si, found + FIND_PATH
         call print_str
         call print_newline
         call print_newline
         mov word [dir_files], 0
         mov word [dir_bytes], 0
         mov word [dir_bytes + 2], 0
-        cmp byte [found_dir], 0
-        jne .walk
-        mov si, found_entry
+        cmp byte [found + FIND_DIR], 0
+        jne .entry
+        mov si, found + FIND_ENTRY
         call print_entry
         jmp .totals
-.walk:
-        mov ax, [found + WHERE_CLUSTER]
-        call dir_first
-        jc .failed
 .entry:
-        call dir_next
+        mov di, next_entry
+        sys SYS_DIR_NEXT
         jc .failed
+        test ax, ax
         jz .totals
+        mov si, next_entry
         call print_entry
         jmp .entry
 .totals:
@@ -316,7 +294,8 @@ cmd_dir:
         mov cx, TOTAL_COLUMNS
         call print_dec32_right
         PRINT " bytes", CHAR_LF
-        call fat_free
+        mov al, [path_drive]
+        sys SYS_FREE
         jc .failed
         mov cx, FREE_COLUMNS
         call print_dec32_right
@@ -333,7 +312,7 @@ cmd_dir:
 ;   Destroys: AL, CX, DI
 ; ----------------------------------------------------------------------------
 cut_found_name:
-        mov di, found + WHERE_PATH
+        mov di, found + FIND_PATH
         xor al, al
         mov cx, PATH_MAX + 1
         repne scasb
@@ -342,7 +321,7 @@ cut_found_name:
         dec di
         cmp byte [di], CHAR_PATH_SEPARATOR
         jne .back
-        cmp di, found + WHERE_PATH
+        cmp di, found + FIND_PATH
         jne .cut
         inc di                          ; the root keeps its separator
 .cut:
@@ -436,7 +415,7 @@ print_name_part:
 ;   Destroys: everything but DS, ES
 ; ----------------------------------------------------------------------------
 cmd_cd:
-        mov al, [current_drive]
+        call current_drive
         cmp byte [si], 0
         je .show
         cmp byte [si + 1], ':'
@@ -452,24 +431,15 @@ cmd_cd:
 .change:
         call path_argument
         jc .out
-        call fat_find
-        jnc .found
+        sys SYS_CHDIR
+        jnc .out
         cmp ax, E_NOT_FOUND             ; DOS says the same of all three
         je .invalid
-        cmp ax, E_NOT_DIR
+        cmp ax, E_NOT_DIR               ; (a file too)
         je .invalid
         cmp ax, E_BAD_NAME
         je .invalid
         jmp report_failure
-.found:
-        cmp byte [found_dir], 0
-        je .invalid
-        mov al, [path_drive]
-        call where_of
-        mov si, found
-        mov di, bx
-        mov cx, WHERE_SIZE
-        rep movsb
 .out:
         ret
 .invalid:
@@ -479,7 +449,7 @@ cmd_cd:
 ; ----------------------------------------------------------------------------
 ; file_argument - path_find for a command that needs a file
 ;   In:       SI = the rest of the line
-;   Out:      CF clear and the file ready to read (file_first); or CF set
+;   Out:      CF clear and the file ready to read (SYS_FILE_NEXT); or CF set
 ;             (the trouble printed)
 ;   Destroys: everything but DS, ES
 ; ----------------------------------------------------------------------------
@@ -488,10 +458,8 @@ file_argument:
         je .missing
         call path_find
         jc .out
-        cmp byte [found_dir], 0
+        cmp byte [found + FIND_DIR], 0
         jne .directory
-        call file_first
-        jc report_failure
 .out:
         ret
 .missing:
@@ -513,10 +481,11 @@ cmd_type:
         call file_argument
         jc .out
 .sector:
-        call file_next
+        mov di, file_sector
+        sys SYS_FILE_NEXT
         jc report_failure
-        jz .out
-        mov si, io_sector
+        jcxz .out                       ; the end
+        mov si, file_sector
         sys SYS_WRITE
         jmp .sector
 .out:
@@ -534,10 +503,11 @@ cmd_print:
         mov word [printed], 0
         mov word [printed + 2], 0
 .sector:
-        call file_next
+        mov di, file_sector
+        sys SYS_FILE_NEXT
         jc report_failure
-        jz .done
-        mov si, io_sector
+        jcxz .done                      ; the end
+        mov si, file_sector
         mov al, PRINTER_LPT1
         sys SYS_PRINT
         jc .printer

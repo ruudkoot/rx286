@@ -19,7 +19,8 @@ DRV_SLOT_NOTIFY     equ 4       ;    its notification, bound to its thread
 DRV_SLOT_IRQ        equ 5       ;    its interrupt line, if it has one
 DRV_SLOT_RECV       equ 6       ;    where a segment passed to it lands
 DRV_SLOT_DEVICE     equ 7       ;    the console's: the screen's text page; the keyboard's:
-                                ;    the OS server's control notification, to signal
+                                ;    the OS server's control notification, to signal; the
+                                ;    diskette's: its DMA buffer (512 bytes within 64 KB)
 DRV_TIMER_BIT       equ 1       ; the notification's bits: its timer (its own capability)
 DRV_IRQ_BIT         equ 2       ;    its interrupt (the root binds a copy badged so)
 
@@ -27,6 +28,8 @@ SERVICE_PRINTER     equ 1       ; M_SERVICE: what a driver serves; the OS server
 SERVICE_MOUSE       equ 2       ;    holds its endpoint in slot OS_SLOT_SERVICE + service
 SERVICE_CONSOLE     equ 3
 SERVICE_KEYBOARD    equ 4
+SERVICE_DISKETTE    equ 5
+SERVICE_FIXED_DISK  equ 6
 OS_SLOT_SERVICE     equ 3
 CONTROL_BREAK       equ 1       ; the control notification's bits: Ctrl+Break
 
@@ -46,5 +49,9 @@ CON_STATUS          equ 1       ;    the status line's right end: a background p
 DRV_KBD_GET         equ 1       ; -> BX 1 and CX the key (CL ASCII, CH scancode), or BX 0
 DRV_KBD_PEEK        equ 2       ; -> BX 1 if a key waits, not taken
 DRV_KBD_CLEAR       equ 3       ;    the keys waiting, dropped (a program started again)
+; The disk drivers: the diskettes (A, B) and the fixed disks (C, D)
+DRV_DISK_READ       equ 1       ; BX the drive (0 or 1 of the driver's), CX the sector, SI
+                                ;    the offset in the segment passed -> BX 0 or the error
+DRV_DISK_WRITE      equ 2       ;    the same, the sector from the segment
 
 %endif

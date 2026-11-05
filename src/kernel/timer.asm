@@ -47,7 +47,6 @@ timer_irq:
         adc word [ticks + 2], 0
         call thread_tick                ; the running thread's time slice
         call timers_tick                ; the kernel's timers (ipc.asm)
-        call fd_tick
 %ifdef WITH_MODEM
         call modem_irq                  ; bytes whose interrupt was lost (an edge
 %endif                                  ; can go, as on a shared line)

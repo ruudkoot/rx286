@@ -36,6 +36,11 @@ XFER_DATA_SIZE      equ 4096    ; as much as a write, a print or a serial transf
 XFER_SIZE           equ XFER_DATA + XFER_DATA_SIZE
 XFER_BAD            equ XFER_SIZE   ; a buffer refused: at the segment's end
 
+PATH_IN_MAX         equ 128     ; a path's bytes the stub passes (SYS_FIND, SYS_CHDIR),
+                                ;    its end among them
+FILES_SIZE          equ 2560    ; a program's files segment: the OS server's alone,
+                                ;    its file calls' state (src/os/files.asm; l4.md L9)
+
 FAULT_BADGE         equ 0x8000  ; a program's fault endpoint: its endpoint, badged so
 
 %endif

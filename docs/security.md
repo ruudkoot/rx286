@@ -137,6 +137,9 @@ that faulted:
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
 | `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
 | `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
+| `find` with a path through a null DS, or into the code; `getcwd` across the data's limit; `file_next` into the code | refused, `E_FAULT`, before the drive is touched |
+| `find` on drive 80h; `file_next` with nothing found | refused, `E_INVAL` |
+| `chdir` with a path whose end is past the 128 bytes the stub passes | refused, `E_BAD_NAME` |
 | `serial_read` into the code, across the data's limit, through a null ES; `serial_write` from a null selector | refused, `E_FAULT` (in `tests/devices/modem.test`, whose image has the modem; test builds' COM2 is the log, and refuses with `E_BUSY`) |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 | the kernel's calls with a GDT selector, its own data, an empty slot or a selector past its LDT as the untyped; its code as a space to copy into; its data as a thread to start | refused, `KE_CAP` (1) |

@@ -30,8 +30,9 @@ STUB_SI             equ 8
 STUB_DI             equ 10
 STUB_DS             equ 12
 STUB_ES             equ 14
-STUB_BUFFER         equ -2              ; the buffer's offset to pass: XFER_DATA or XFER_BAD
-STUB_FUNCTION       equ -4              ; the function (AH in)
+STUB_SOURCE         equ -2              ; the offsets to pass for a buffer the call
+STUB_DEST           equ -4              ; reads and one it fills: XFER_DATA or XFER_BAD
+STUB_FUNCTION       equ -6              ; the function (AH in)
 STUB_CARRY          equ 1               ; FLAGS: CF
 
 ; ----------------------------------------------------------------------------
@@ -51,7 +52,8 @@ os_call:
         push bx
         push ax
         mov bp, sp
-        push word XFER_DATA             ; [bp + STUB_BUFFER]
+        push word XFER_DATA             ; [bp + STUB_SOURCE]
+        push word XFER_DATA             ; [bp + STUB_DEST]
         mov al, ah
         push ax                         ; [bp + STUB_FUNCTION]
         cld
@@ -66,16 +68,14 @@ os_call:
         mov di, XFER_AX
         mov cx, 6
         rep movsw
-        call stub_buffer_call
-        jnc .registers
-        mov ax, [bp + STUB_BUFFER]
-        cmp byte [bp + STUB_FUNCTION], SYS_DISK_READ
-        je .dest
-        cmp byte [bp + STUB_FUNCTION], SYS_SERIAL_READ
-        je .dest
+        call stub_source_call
+        jnc .dest
+        mov ax, [bp + STUB_SOURCE]
         mov [es:XFER_SI], ax
-        jmp .registers
 .dest:
+        call stub_dest_call
+        jnc .registers
+        mov ax, [bp + STUB_DEST]
         mov [es:XFER_DI], ax
 .registers:
         mov al, [bp + STUB_FUNCTION]    ; the label
@@ -95,7 +95,9 @@ os_call:
         mov di, bp
         mov cx, 4
         rep movsw
-        call stub_buffer_call
+        call stub_source_call
+        jc .kept
+        call stub_dest_call
         jc .kept
         movsw
         movsw
@@ -107,7 +109,7 @@ os_call:
         mov word [bp + STUB_AX], E_NOSYS    ; no OS server to answer
         mov ax, STUB_CARRY
 .return:
-        add sp, 4
+        add sp, 6
         shr ax, 1                       ; CF: the result's
         pop ax
         pop bx
@@ -121,17 +123,15 @@ os_call:
         ret
 
 ; ----------------------------------------------------------------------------
-; stub_buffer_call - does the function take a buffer (SI or DI an offset)?
+; stub_source_call - does the function read a buffer at DS:SI?
 ;   In:       BP = os_call's frame
 ;   Out:      CF set if so
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
-stub_buffer_call:
+stub_source_call:
         push ax
         mov al, [bp + STUB_FUNCTION]
         cmp al, SYS_WRITE
-        je .yes
-        cmp al, SYS_DISK_READ
         je .yes
         cmp al, SYS_DISK_WRITE
         je .yes
@@ -139,7 +139,9 @@ stub_buffer_call:
         je .yes
         cmp al, SYS_SERIAL_WRITE
         je .yes
-        cmp al, SYS_SERIAL_READ
+        cmp al, SYS_FIND
+        je .yes
+        cmp al, SYS_CHDIR
         je .yes
         pop ax
         clc
@@ -150,14 +152,63 @@ stub_buffer_call:
         ret
 
 ; ----------------------------------------------------------------------------
+; stub_dest_call - does the function fill a buffer at ES:DI?
+;   In:       BP = os_call's frame
+;   Out:      CF set if so
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+stub_dest_call:
+        push ax
+        push cx
+        mov al, [bp + STUB_FUNCTION]
+        call stub_room
+        pop cx
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; stub_room - the room a function fills at ES:DI
+;   In:       AL = the function; BP = os_call's frame
+;   Out:      CF set and CX = the bytes, if it fills one; else CF clear
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+stub_room:
+        mov cx, SECTOR_SIZE
+        cmp al, SYS_DISK_READ
+        je .yes
+        cmp al, SYS_FILE_NEXT
+        je .yes
+        mov cx, FIND_SIZE
+        cmp al, SYS_FIND
+        je .yes
+        mov cx, PATH_MAX + 1
+        cmp al, SYS_GETCWD
+        je .yes
+        mov cx, FIND_ENTRY_SIZE
+        cmp al, SYS_DIR_NEXT
+        je .yes
+        mov cx, [bp + STUB_CX]
+        cmp al, SYS_SERIAL_READ
+        je .yes
+        clc
+        ret
+.yes:
+        stc
+        ret
+
+; ----------------------------------------------------------------------------
 ; stub_in - a buffer the call reads, copied into the transfer segment; one it
 ; fills, checked; one the program may not use so, marked XFER_BAD
 ;   In:       BP = os_call's frame
-;   Out:      [BP + STUB_BUFFER] = XFER_DATA or XFER_BAD
+;   Out:      [BP + STUB_SOURCE], [BP + STUB_DEST] = XFER_DATA or XFER_BAD
 ;   Destroys: AX, BX, CX, DX, SI, DI, DS, ES
 ; ----------------------------------------------------------------------------
 stub_in:
         mov al, [bp + STUB_FUNCTION]
+        cmp al, SYS_FIND
+        je .path
+        cmp al, SYS_CHDIR
+        je .path
         mov cx, SECTOR_SIZE
         cmp al, SYS_DISK_WRITE
         je .source
@@ -168,29 +219,33 @@ stub_in:
         je .source
         cmp al, SYS_SERIAL_WRITE
         je .source
-        cmp al, SYS_SERIAL_READ
-        je .dest
-        mov cx, SECTOR_SIZE
-        cmp al, SYS_DISK_READ
-        je .dest
-        ret
+        jmp .room
+.path:
+        call stub_path
+        jnc .room
+        mov word [bp + STUB_SOURCE], XFER_BAD
+        jmp .room
 .source:
-        jcxz .done                      ; the kernel's own checks decide
+        jcxz .room                      ; the kernel's own checks decide
         cmp cx, XFER_DATA_SIZE
-        ja .done
+        ja .room
         mov ax, [bp + STUB_DS]
         mov si, [bp + STUB_SI]
         mov dx, 0                       ; read
         call stub_check
-        jc .bad
+        jc .bad_source
         mov ds, ax
         mov ax, OS_XFER
         mov es, ax
         mov di, XFER_DATA
         rep movsb
-.done:
-        ret
-.dest:
+        jmp .room
+.bad_source:
+        mov word [bp + STUB_SOURCE], XFER_BAD
+.room:
+        mov al, [bp + STUB_FUNCTION]
+        call stub_room
+        jnc .done
         jcxz .done
         cmp cx, XFER_DATA_SIZE
         ja .done
@@ -199,8 +254,40 @@ stub_in:
         mov dx, 1                       ; written
         call stub_check
         jnc .done
-.bad:
-        mov word [bp + STUB_BUFFER], XFER_BAD
+        mov word [bp + STUB_DEST], XFER_BAD
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; stub_path - a path, at the program's DS:SI, into the transfer segment:
+; PATH_IN_MAX bytes, or as many as its segment holds, and a zero after them
+; (the OS server looks for its end among them)
+;   In:       BP = os_call's frame
+;   Out:      CF set if the program may not read there
+;   Destroys: AX, BX, CX, DX, SI, DI, DS, ES
+; ----------------------------------------------------------------------------
+stub_path:
+        mov ax, [bp + STUB_DS]
+        mov si, [bp + STUB_SI]
+        mov cx, 1
+        mov dx, 0                       ; read
+        call stub_check                 ; BX = the segment's limit
+        jc .out
+        mov cx, bx
+        sub cx, si                      ; the bytes after the first, to the limit
+        cmp cx, PATH_IN_MAX - 1
+        jb .fewer
+        mov cx, PATH_IN_MAX - 1
+.fewer:
+        inc cx
+        mov ds, ax
+        mov ax, OS_XFER
+        mov es, ax
+        mov di, XFER_DATA
+        rep movsb
+        mov byte [es:di], 0
+        clc
+.out:
         ret
 
 ; ----------------------------------------------------------------------------
@@ -250,23 +337,34 @@ ACC_EXPAND_DOWN_BIT equ 0x04            ; with data: expand-down; with code: con
 
 ; ----------------------------------------------------------------------------
 ; stub_out - what a call filled in the transfer segment, into the program's
-; buffer: a sector read, or the bytes a serial read returns
+; buffer: a sector read, the bytes a serial read returns, a file call's
+; record, entry, path or sector
 ;   In:       BP = os_call's frame, its saved registers the results; DS =
 ;             the transfer segment
 ;   Out:      nothing
 ;   Destroys: AX, CX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 stub_out:
-        cmp word [bp + STUB_BUFFER], XFER_DATA
-        jne .done                       ; nothing copied in either direction
+        cmp word [bp + STUB_DEST], XFER_DATA
+        jne .done                       ; nothing filled
         test word [XFER_FLAGS], STUB_CARRY
         jnz .done                       ; an error: nothing filled
-        mov cx, SECTOR_SIZE
-        cmp byte [bp + STUB_FUNCTION], SYS_DISK_READ
-        je .copy
+        mov al, [bp + STUB_FUNCTION]
+        call stub_room                  ; CX = the room
+        jnc .done
+        cmp al, SYS_SERIAL_READ
+        jne .file
         mov cx, [bp + STUB_AX]          ; the bytes read
-        cmp byte [bp + STUB_FUNCTION], SYS_SERIAL_READ
-        jne .done
+.file:
+        cmp al, SYS_FILE_NEXT
+        jne .entry
+        mov cx, [bp + STUB_CX]          ; the file's bytes in the sector
+.entry:
+        cmp al, SYS_DIR_NEXT
+        jne .copy
+        cmp word [bp + STUB_AX], 0
+        jne .copy
+        xor cx, cx                      ; the directory's end: no entry
 .copy:
         jcxz .done
         mov es, [bp + STUB_ES]

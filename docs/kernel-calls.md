@@ -179,8 +179,11 @@ A notification is a word of bits, for events and interrupts:
 `KCALL_TIMER` signals a notification once, CX ticks from now (50 a second,
 *docs/syscalls.md*), with the capability's badge. It is the kernel's answer
 to timeouts: a driver waits on one notification, bound or not, for its
-interrupt or its timer, whichever comes first. Eight timers can be armed at
-once across the system: `KE_POOL` after that.
+interrupt or its timer, whichever comes first. A notification has one
+timer at most: arming it again replaces the one armed, so a wait's timer
+left behind cannot use the kernel's up (roadmap l4.md L9). Eight
+notifications can have a timer armed at once across the system: `KE_POOL`
+after that.
 
 ### Faults
 
@@ -246,9 +249,12 @@ The root (`src/root/root.asm`) builds a space for every other module: the
 module's code copied in as slot 0; a data segment of its room, initialised
 from its data, as slot 1; a stack as slot 2. The OS server's module ("os")
 gets a thread for each program, which serves it alone (`START_SESSION`),
-and the program's capabilities (*docs/syscalls.md*). Every other module is
-a program: a thread, an endpoint to the OS server and a transfer segment,
-and its faults go to the OS server. The root starts each at the priority
+and the program's capabilities (*docs/syscalls.md*), and for each program
+a files segment of `FILES_SIZE` bytes that is the server's alone. A driver
+(`MF_DRIVER`) gets a thread with IOPL, an endpoint, a notification and its
+interrupt line (*docs/drivers.md*). Every other module is a program: a
+thread, an endpoint to the OS server and a transfer segment, and its
+faults go to the OS server. The root starts each at the priority
 the table gives, the program the keys are for with `START_FOREGROUND`.
 Then it handles the OS server's faults: it reports each as the kernel did
 ("rx286: os fault #GP(0000) at 0006:0123", the module's name for

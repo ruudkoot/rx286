@@ -33,6 +33,13 @@ of the stub to the OS server:
 | 11 | `SYS_SERIAL_WRITE` | DS:SI buffer, CX length (at most `SERIAL_MAX`, 4,096) | AX = bytes sent on COM2, the modem's line; CF with `E_INVAL`, `E_FAULT`, `E_BUSY` (COM2 is the log), or `E_TIMEOUT` with CX = the bytes sent before |
 | 12 | `SYS_SERIAL_READ` | ES:DI buffer, CX room (at most `SERIAL_MAX`) | AX = the bytes the modem's line has brought, up to CX, perhaps 0: it does not wait; CF with `E_INVAL`, `E_FAULT`, `E_BUSY` |
 | 13 | `SYS_WAIT` | AL = events (`WAIT_KEY`, `WAIT_MOUSE`, `WAIT_SERIAL`), CX = ticks at most (0: no limit) | AL = the events there, 0 if the time ran out or the program is to restart; CF with `E_INVAL` (an unknown event, or none and no limit) |
+| 14 | `SYS_FIND` | AL = the drive, DS:SI = a path, ES:DI = `FIND_SIZE` bytes to fill | the record of what the path names (*Files*, below); CF with `E_INVAL` (no such drive), `E_FAULT`, `E_BAD_NAME`, `E_NOT_FOUND`, `E_NOT_DIR`, `E_NOT_FAT12`, `E_BROKEN`, or the disk's `E_IO`, `E_TIMEOUT` |
+| 15 | `SYS_CHDIR` | AL = the drive, DS:SI = a path | nothing: the drive's current directory is the directory the path names; CF as `SYS_FIND`'s, and `E_NOT_DIR` for a file |
+| 16 | `SYS_DRIVE` | AL = a drive to make current, or `DRIVES` or more to leave it | AX = the current drive |
+| 17 | `SYS_GETCWD` | AL = the drive, ES:DI = `PATH_MAX` + 1 bytes to fill | its current directory's path, from the root ("\\DOCS"), zero-terminated; CF with `E_INVAL`, `E_FAULT` |
+| 18 | `SYS_DIR_NEXT` | ES:DI = `FIND_ENTRY_SIZE` bytes to fill | AX = 1 and the next entry of the directory `SYS_FIND` found, as FAT keeps it; AX = 0 at its end; CF with `E_INVAL` (nothing found), `E_NOT_DIR` (a file found), `E_FAULT`, `E_BROKEN`, the disk's errors |
+| 19 | `SYS_FILE_NEXT` | ES:DI = `SECTOR_SIZE` bytes to fill | CX = the bytes of the next sector of the file `SYS_FIND` found, which fill the buffer's start; CX = 0 at its end; CF with `E_INVAL` (nothing found, or a directory), `E_FAULT`, `E_BROKEN`, the disk's errors |
+| 20 | `SYS_FREE` | AL = the drive | DX:AX = the bytes free on its volume; CF with `E_INVAL`, `E_NOT_FAT12`, `E_BROKEN`, the disk's errors |
 | other | | | CF, AX = `E_NOSYS` |
 
 `SYSCALL_COUNT` is the number of calls.
@@ -68,6 +75,11 @@ program undoes the change.
 | 6 | `E_PROTECTED` | the diskette is write-protected |
 | 7 | `E_PAPER` | the printer is out of paper, or not there |
 | 8 | `E_BUSY` | the device is the kernel's: in debug and test builds COM2 carries the log, not the modem |
+| 16 | `E_NOT_FAT12` | no FAT12 volume on the drive: no partition of type 1, or no BPB rx286 can read |
+| 17 | `E_NOT_FOUND` | no such file or directory |
+| 18 | `E_NOT_DIR` | a path goes on through a file, or a directory was wanted |
+| 19 | `E_BAD_NAME` | a name DOS does not allow, or a path too long (`PATH_MAX`), or one whose end is not among the bytes passed |
+| 20 | `E_BROKEN` | a cluster outside the volume, or a chain that loops: a damaged disk |
 
 ### Drives and printers
 
@@ -82,8 +94,8 @@ The disk calls take a drive and a sector (*docs/storage.md*):
 
 `DRIVES` is their number. A sector is `SECTOR_SIZE` (512) bytes, numbered
 from 0 across the whole disk, a fixed disk's master boot record and
-partitions included: the kernel knows no partitions and no file systems.
-The calls are synchronous: the program waits in the call until the sector
+partitions included: the disk calls know no partitions and no file
+systems; the file calls do (below). The calls are synchronous: the program waits in the call until the sector
 is read or written, which may take a second (a diskette's motor) or more
 (retries).
 
@@ -91,6 +103,36 @@ is read or written, which may take a second (a diskette's motor) or more
 their number. The speaker, game port, mouse and modem are described in
 *docs/devices.md*. It returns when the last byte is out; it stops early, with the
 count so far, if the program is to restart (Ctrl+Break).
+
+### Files
+
+The file calls are DOS's services, in rx286's registers (roadmap l4.md L9,
+D16): the OS server's own, on FAT12 volumes (*docs/storage.md*). As DOS
+does, the server keeps for each program a current drive (`SYS_DRIVE`), A
+at first, and for each drive a current directory (`SYS_CHDIR`,
+`SYS_GETCWD`), its root at first; they last across the program's restarts.
+
+A path ends at a zero or a space. Its names are DOS's 8.3 names, in any
+case, between separators (`\` or `/`); "." and ".." are as in DOS. It goes
+from the drive's root if it starts with a separator, else from the drive's
+current directory; it names no drive, which AL does. A path found is at
+most `PATH_MAX` (64) bytes from the root; the stub passes `PATH_IN_MAX`
+(128) bytes of the program's path, and the path must end among them.
+
+`SYS_FIND`'s record (`FIND_SIZE` bytes):
+
+| Offset | Constant | What |
+|---|---|---|
+| 0 | `FIND_PATH` | the path of what it found, from the root, zero-terminated (`PATH_MAX` + 1 bytes) |
+| 65 | `FIND_DIR` | 1 if a directory (the root too), 0 if a file |
+| 66 | `FIND_ENTRY` | its directory entry (`FIND_ENTRY_SIZE`, 32 bytes, as FAT keeps it), unless it is the root |
+| 98 | `FIND_LABEL` | the volume's label (`FIND_LABEL_SIZE`, 11 bytes), space padded; "NO NAME" if it has none |
+
+After a `SYS_FIND`, `SYS_DIR_NEXT` reads a directory's entries, files and
+directories but neither deleted entries, labels nor long names, or
+`SYS_FILE_NEXT` reads a file's sectors, until the program's next
+`SYS_FIND`, `SYS_CHDIR` or `SYS_FREE`. Each call mounts its drive afresh,
+so a changed diskette is read as it is. Nothing is written.
 
 ### Keys
 
@@ -114,12 +156,13 @@ it alone. `src/include/os.inc` holds the interface:
 - **The stub** (`src/userland/stub.asm`, `os_call`), which the `sys` macro
   calls, puts AX, BX, CX, DX, SI and DI in the transfer segment's block
   (`XFER_AX`, `XFER_BX`, `XFER_CX`, `XFER_DX`, `XFER_SI`, `XFER_DI`) and a
-  buffer the call reads in its data
+  buffer the call reads (DS:SI, a path too) in its data
   (`XFER_DATA`, `XFER_DATA_SIZE` bytes: as much as a write takes), and calls
-  the endpoint with the function as the label. The OS server's thread makes
-  the call with `INT 30h` on the transfer segment and puts the registers
-  and the flags (`XFER_FLAGS`) back; the stub copies a buffer the call
-  filled into the program's.
+  the endpoint with the function as the label; `XFER_SI` and `XFER_DI` then
+  name the buffers in the transfer segment. The OS server's thread makes
+  the call with `INT 30h` on the transfer segment, or a driver's, or its
+  own, and puts the registers and the flags (`XFER_FLAGS`) back; the stub
+  copies what the call filled (ES:DI) into the program's buffer.
 - **A buffer the program may not use so** is checked by the stub as the
   kernel would (below), at the program's own privilege, and passed on as
   `XFER_BAD`, at the transfer segment's end: so the kernel refuses it with
@@ -133,17 +176,21 @@ it alone. `src/include/os.inc` holds the interface:
   thread: a wait in the kernel on the program's behalf is given up with it.
 - **The drivers:** `SYS_WRITE` is the kernel's write, which checks the
   buffer and writes the log, then the console driver's, on the screen;
-  `SYS_READ_KEY`, `SYS_PRINT` and `SYS_MOUSE` go to their drivers, and
-  `SYS_WAIT` asks the keyboard's and the mouse's drivers once a tick while
-  the kernel waits for COM2's bytes (*docs/drivers.md*).
+  `SYS_READ_KEY`, `SYS_PRINT`, `SYS_MOUSE`, `SYS_DISK_READ` and
+  `SYS_DISK_WRITE` go to their drivers, and `SYS_WAIT` asks the keyboard's
+  and the mouse's drivers once a tick while the kernel waits for COM2's
+  bytes (*docs/drivers.md*). The file calls are the server's own
+  (`src/os/files.asm`), each program's in a files segment of its own
+  (`FILES_SIZE` bytes), which the program never sees.
 - **Faults:** a program's fault comes to the OS server on the same
   endpoint, badged `FAULT_BADGE`; it reports it as the kernel did and
   restarts the program (*docs/kernel-calls.md*).
 - **What still calls the kernel itself:** the root, the OS server and the
   drivers; the counter; the test probe; threads a program makes, whose
   spaces hold no endpoint to the OS server (the IPC test's workers); and the
-  fuzzer's random code. The kernel's `SYS_READ_KEY`, `SYS_PRINT` and
-  `SYS_MOUSE` answer `E_NOSYS` since their devices left it, and its
+  fuzzer's random code. The kernel's `SYS_READ_KEY`, `SYS_DISK_READ`,
+  `SYS_DISK_WRITE`, `SYS_PRINT` and `SYS_MOUSE` answer `E_NOSYS` since their
+  devices left it, as do the file calls, which were never its; its
   `SYS_WRITE` writes the log alone. `INT 30h` stays until the drivers have left the kernel
   (roadmap l4.md L10).
 
@@ -160,16 +207,18 @@ caller's DS from the interrupt frame and:
    (CX = 0 writes nothing);
 5. loads it into ES and copies from it.
 
-For `SYS_DISK_READ` it does the same with the caller's ES:DI and `VERW`:
+For `SYS_DISK_READ` it did the same with the caller's ES:DI and `VERW`:
 the buffer must be writable at the caller's privilege, which no code
-segment is. Both checks come before any device is touched.
+segment is. Both checks come before any device is touched. The stub makes
+the same checks, with the same instructions at the program's privilege,
+for every buffer it passes: the disk calls' and the file calls', which
+the kernel no longer sees.
 
 It also refuses an expand-down segment (and a conforming code segment, whose
 bit is the same), for which 0..limit is not the valid range (`LAR`). A
 descriptor may change while interrupts are in (roadmap l4.md X2), so a call
 that lets them in checks the buffer again before it next touches it:
-`write`, `print` and `serial_write` before every byte, `disk_read` before it
-copies the sector out. No call keeps a program's segment loaded across an
+`write` and `serial_write` before every byte. No call keeps a program's segment loaded across an
 interrupt window. Any selector the program can name has DPL 3 or
 is refused, so the kernel never reads through a selector the program could
 not use itself. A buffer ending at FFFFh exactly is refused too: no program

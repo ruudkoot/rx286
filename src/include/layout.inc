@@ -89,8 +89,8 @@ ARENA_SIZE          equ 0x9C00
 ; Memory for programs' segments, given out as untyped (l4.md L3)
 UMEM_PHYS           equ 0x30000
 UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h
-SPACE_MAX           equ 16          ; LDT descriptors in the GDT's pool
-THREAD_MAX          equ 16          ; kernel stack descriptors in the GDT's pool
+SPACE_MAX           equ 24          ; LDT descriptors in the GDT's pool
+THREAD_MAX          equ 24          ; kernel stack descriptors in the GDT's pool
 
 ; Physical addresses, and offsets of SEL_KDATA.
 KTEXT_PHYS          equ KERNEL_PHYS + KTEXT_OFF

@@ -186,13 +186,13 @@ gives the rule for each line.
 | Channel | Device |
 |---|---|
 | 0, 1, 3 | free (8-bit) |
-| 2 | diskette: the kernel's driver (and the BIOS, in the boot code) |
+| 2 | diskette: the diskette driver (and the BIOS, in the boot code) |
 | 4 | cascade |
 | 5-7 | free (16-bit) |
 
-rx286 resets both controllers at start, cascades channel 4, and programs
-channel 2 for each diskette sector, into and out of `disk_buffer`
-(*docs/storage.md*).
+The diskette driver resets both controllers at its start, cascades
+channel 4, and programs channel 2 for each diskette sector, into and out
+of its DMA buffer (*docs/storage.md*).
 
 ## What Bochs differs in
 

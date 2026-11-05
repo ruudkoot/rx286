@@ -34,11 +34,11 @@ irq_drivers:
 %endif
         dw 0                            ; IRQ4: COM1, the mouse: its driver's
         dw 0                            ; IRQ5
-        dw fd_irq                       ; IRQ6
+        dw 0                            ; IRQ6: the diskette driver's (l4.md L9)
         dw 0                            ; IRQ7
         dw 0, 0, 0, 0, 0                ; IRQ8-12
         dw fpu_irq                      ; IRQ13
-        dw hd_irq                       ; IRQ14
+        dw 0                            ; IRQ14: the fixed disk driver's
         dw 0                            ; IRQ15
 irq_notify          times IRQ_LINES dw 0    ; a line's bound notification, or 0
 irq_bits            times IRQ_LINES dw 0    ; and the bits it signals

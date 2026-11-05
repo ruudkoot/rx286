@@ -12,6 +12,8 @@ root: module printer: code at {m:printer.base}h, sum ----, data sum {m:printer.d
 root: module mouse: code at {m:mouse.base}h, sum ----, data sum {m:mouse.datasum}
 root: module console: code at {m:console.base}h, sum ----, data sum {m:console.datasum}
 root: module kbd: code at {m:kbd.base}h, sum ----, data sum {m:kbd.datasum}
+root: module fd: code at {m:fd.base}h, sum ----, data sum {m:fd.datasum}
+root: module hd: code at {m:hd.base}h, sum ----, data sum {m:hd.datasum}
 root: module program: code at {m:program.base}h, sum {m:program.codesum}, data sum {m:program.datasum}
 root: module counter: code at {m:counter.base}h, sum {m:counter.codesum}, data sum {m:counter.datasum}
 rx286 shell: type help for the commands

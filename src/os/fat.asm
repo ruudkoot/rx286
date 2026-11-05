@@ -1,7 +1,8 @@
 ; ============================================================================
-; rx286 - src/userland/fat.asm
-; The shell's FAT12 library: a drive's volume, its directories and its
-; files, read a sector at a time through SYS_DISK_READ (storage roadmap D7).
+; rx286 - src/os/fat.asm
+; The OS server's FAT12 library (roadmap l4.md L9; storage roadmap D7): a
+; drive's volume, its directories and its files, read a sector at a time
+; from the disk drivers (fat_read: files.asm). The shell's until L9.
 ;
 ; fat_mount reads what a command needs to know of a drive: on a fixed disk,
 ; the master boot record's first FAT12 partition; then the volume's boot
@@ -12,17 +13,13 @@
 ; the FAT through a window of two sectors, enough for an entry that
 ; straddles them (fat12_next). Every cluster number is checked against the
 ; volume and every chain against looping, so a damaged disk gives an error
-; (E_BROKEN), never a hang. Nothing is written. The library's buffers are its
-; own, in the program's data: a sector for directories and files, two for
-; the FAT.
+; (E_BROKEN), never a hang. Nothing is written. The library's state and
+; buffers - a sector for directories and files, two for the FAT - are in
+; the files segment of the program it works for (files.asm): the layout
+; below, from its offset 0, with DS = ES = that segment.
 ; ============================================================================
 
-; Errors of the library's own, after the kernel's (syscalls.inc).
-E_NOT_FAT12         equ 16              ; no FAT12 volume: no partition, or no such BPB
-E_NOT_FOUND         equ 17              ; no such file or directory
-E_NOT_DIR           equ 18              ; a path goes on through a file
-E_BAD_NAME          equ 19              ; a name DOS does not allow, or a path too long
-E_BROKEN            equ 20              ; a cluster outside the volume, or a chain that loops
+; (Its errors, E_NOT_FAT12 to E_BROKEN, are the file calls': syscalls.inc.)
 
 MBR_SIGNATURE       equ 0x1FE           ; the word 0AA55h
 MBR_PARTITIONS      equ 0x1BE           ; four entries
@@ -32,51 +29,62 @@ PARTITION_TYPE      equ 4
 PARTITION_START     equ 8               ; dword: its first sector on the disk
 PARTITION_FAT12     equ 0x01
 BOOT_SIGNATURE      equ 0xAA55
-PATH_MAX            equ 64              ; DOS's longest path, the drive's letter not counted
 NAME_TEXT_MAX       equ FAT_BASE_LENGTH + 1 + FAT_EXT_LENGTH   ; NAME.EXT
 
-; A drive's current directory, kept by the shell: its first cluster (0 the
-; root) and its path ("\" the root), as fat_find takes and gives them.
+; A drive's current directory, kept for each program (files.asm): its first
+; cluster (0 the root) and its path ("\" the root), as fat_find takes and
+; gives them.
 WHERE_CLUSTER       equ 0
 WHERE_PATH          equ 2
 WHERE_SIZE          equ WHERE_PATH + PATH_MAX + 1
 
-begin_udata
-vol_drive           db 0
-vol_start           dw 0                ; the volume's first sector on the disk
-vol_cluster_sectors dw 0
-vol_fat             dw 0                ; the first FAT, from the volume's first sector
-vol_root            dw 0                ; the root directory
-vol_root_sectors    dw 0
-vol_data            dw 0                ; cluster 2
-vol_clusters        dw 0                ; clusters 2 to vol_clusters + 1 hold data
-vol_label           times DIR_NAME_LENGTH db 0
-fat_window          times 2 * SECTOR_SIZE db 0
-fat_window_first    dw 0                ; the FAT's sector in the window's first half
-fat_window_valid    db 0
-io_sector           times SECTOR_SIZE db 0   ; the sector of a directory or file being read
-walk_cluster        dw 0                ; the directory walk: its cluster, 0 the root
-walk_next           dw 0                ; the next sector to read
-walk_left           dw 0                ; sectors left in the cluster (or the root)
-walk_entry          dw 0                ; the next entry's offset in io_sector
-walk_steps          dw 0                ; clusters followed: more than the volume has is a loop
-file_next_sector    dw 0                ; the file read: as the walk's
-file_cluster        dw 0
-file_left_sectors   dw 0
-file_bytes          dd 0                ; bytes of the file not yet read
-file_steps          dw 0
-found               times WHERE_SIZE db 0   ; what fat_find found: its cluster and path
-found_dir           db 0                ; 1 if a directory (the root too)
-found_entry         times DIR_ENTRY_SIZE db 0   ; its entry, unless the root
-wanted              times DIR_NAME_LENGTH db 0
-name_text           times NAME_TEXT_MAX db 0
-path_rest           dw 0
-no_label            db "NO NAME    "
-end_udata
+[absolute 0]
+vol_drive           resb 1
+vol_start           resw 1              ; the volume's first sector on the disk
+vol_cluster_sectors resw 1
+vol_fat             resw 1              ; the first FAT, from the volume's first sector
+vol_root            resw 1              ; the root directory
+vol_root_sectors    resw 1
+vol_data            resw 1              ; cluster 2
+vol_clusters        resw 1              ; clusters 2 to vol_clusters + 1 hold data
+fat_window          resb 2 * SECTOR_SIZE
+fat_window_first    resw 1              ; the FAT's sector in the window's first half
+fat_window_valid    resb 1
+io_sector           resb SECTOR_SIZE    ; the sector of a directory or file being read
+walk_cluster        resw 1              ; the directory walk: its cluster, 0 the root
+walk_next           resw 1              ; the next sector to read
+walk_left           resw 1              ; sectors left in the cluster (or the root)
+walk_entry          resw 1              ; the next entry's offset in io_sector
+walk_steps          resw 1              ; clusters followed: more than the volume has is a loop
+file_next_sector    resw 1              ; the file read: as the walk's
+file_cluster        resw 1
+file_left_sectors   resw 1
+file_bytes          resd 1              ; bytes of the file not yet read
+file_steps          resw 1
+found               resb WHERE_SIZE     ; what fat_find found: its cluster and path,
+found_dir           resb 1              ; 1 if a directory (the root too),
+found_entry         resb DIR_ENTRY_SIZE ; its entry, unless the root,
+vol_label           resb DIR_NAME_LENGTH    ; and the volume's label: SYS_FIND's record
+wanted              resb DIR_NAME_LENGTH
+name_text           resb NAME_TEXT_MAX
+path_rest           resw 1
+FAT_STATE_SIZE      equ $
+__?SECT?__
+
+FOUND_RECORD        equ found + WHERE_PATH  ; SYS_FIND's record
+%if found_dir - FOUND_RECORD != FIND_DIR || found_entry - FOUND_RECORD != FIND_ENTRY
+  %error "fat.asm: found, found_dir, found_entry and vol_label must be SYS_FIND's record"
+%endif
+%if vol_label - FOUND_RECORD != FIND_LABEL
+  %error "fat.asm: found, found_dir, found_entry and vol_label must be SYS_FIND's record"
+%endif
+%if DIR_ENTRY_SIZE != FIND_ENTRY_SIZE || DIR_NAME_LENGTH != FIND_LABEL_SIZE
+  %error "fat.asm: SYS_FIND's record does not match FAT's entry"
+%endif
 
 ; ----------------------------------------------------------------------------
 ; fat_mount - a drive's FAT12 volume: where it starts, and its BPB
-;   In:       AL = the drive; DS = ES = the program's data
+;   In:       AL = the drive; DS = ES = the server's data
 ;   Out:      CF clear; or CF set and AX = the kernel's error or E_NOT_FAT12
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
@@ -173,15 +181,22 @@ fat_mount:
         ja .not_fat12                   ; a FAT too short for its clusters
 .fat_holds:
         mov si, io_sector + BPB_LABEL
-        cmp byte [io_sector + BPB_EXTENDED], BPB_EXTENDED_MARK
-        je .label
-        mov si, no_label
-.label:
         mov di, vol_label
         mov cx, DIR_NAME_LENGTH
+        cmp byte [io_sector + BPB_EXTENDED], BPB_EXTENDED_MARK
+        jne .no_label
         rep movsb
         clc
 .out:
+        ret
+.no_label:
+        mov si, no_label
+.no_label_char:
+        mov al, [cs:si]
+        stosb
+        inc si
+        loop .no_label_char
+        clc
         ret
 .not_fat12:
         mov ax, E_NOT_FAT12
@@ -191,7 +206,7 @@ fat_mount:
 ; ----------------------------------------------------------------------------
 ; vol_read - a sector of the volume
 ;   In:       AX = the sector, from the volume's first; DI = SECTOR_SIZE
-;             bytes for it; DS = ES = the program's data
+;             bytes for it; DS = ES = the server's data
 ;   Out:      CF and AX as SYS_DISK_READ returns them
 ;   Destroys: AX, CX
 ; ----------------------------------------------------------------------------
@@ -200,15 +215,14 @@ vol_read:
         add cx, [vol_start]
         jc .past                        ; past sector FFFFh: no drive has it
         mov al, [vol_drive]
-        sys SYS_DISK_READ
-        ret
+        jmp fat_read
 .past:
         mov ax, E_BROKEN
         ret                             ; CF set by the ADD
 
 ; ----------------------------------------------------------------------------
 ; fat_next - the cluster after a cluster, from the FAT
-;   In:       AX = a cluster of the volume (checked); DS = ES = the program's data
+;   In:       AX = a cluster of the volume (checked); DS = ES = the server's data
 ;   Out:      CF clear and AX = its FAT entry; or CF set and AX = the error
 ;   Destroys: nothing else
 ; ----------------------------------------------------------------------------
@@ -359,7 +373,7 @@ dir_first:
 ; ----------------------------------------------------------------------------
 ; dir_next - the directory's next entry for a file or directory (deleted
 ; entries, volume labels and long names passed over)
-;   In:       a walk dir_first began; DS = ES = the program's data
+;   In:       a walk dir_first began; DS = ES = the server's data
 ;   Out:      CF set and AX = an error; or CF clear and ZF set at the end; or
 ;             CF, ZF clear and SI = the entry, in io_sector
 ;   Destroys: AX, BX, CX, DI
@@ -418,7 +432,7 @@ dir_next:
 ;             separators (\ or /), from the root if it starts with one, else
 ;             from the directory BX names; "." and ".." as in DOS;
 ;             BX = a directory: WHERE_CLUSTER and WHERE_PATH; the volume
-;             mounted; DS = ES = the program's data
+;             mounted; DS = ES = the server's data
 ;   Out:      CF clear, SI past the path, and `found` = its first cluster and
 ;             path, found_dir, found_entry (unless it is the root); or CF set
 ;             and AX = an error
@@ -499,7 +513,7 @@ fat_find:
 ; ----------------------------------------------------------------------------
 ; found_path_add - the path in `found` after a step to `wanted`: ".." takes
 ;   its last name off, another name goes on the end
-;   In:       wanted; found_entry (its name); DS = ES = the program's data
+;   In:       wanted; found_entry (its name); DS = ES = the server's data
 ;   Out:      CF clear; or CF set: it would be longer than PATH_MAX (and is
 ;             unchanged)
 ;   Destroys: AX, CX, SI, DI
@@ -573,7 +587,7 @@ skip_separators:
 
 ; ----------------------------------------------------------------------------
 ; file_first - start reading the file found_entry names
-;   In:       found_entry; DS = ES = the program's data
+;   In:       found_entry; DS = ES = the server's data
 ;   Out:      CF clear; or CF set and AX = E_BROKEN
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
@@ -602,7 +616,7 @@ file_first:
 
 ; ----------------------------------------------------------------------------
 ; file_next - the file's next sector, into io_sector
-;   In:       a read file_first began; DS = ES = the program's data
+;   In:       a read file_first began; DS = ES = the server's data
 ;   Out:      CF set and AX = an error; or CF clear and ZF set at the end;
 ;             or CF, ZF clear and CX = the bytes of io_sector that are the
 ;             file's
@@ -654,8 +668,11 @@ file_next:
         ret
 
 ; ----------------------------------------------------------------------------
+no_label            db "NO NAME    "     ; a volume's label when its BPB has none
+
+; ----------------------------------------------------------------------------
 ; fat_free - the volume's free space: its clusters whose FAT entry is 0
-;   In:       the volume mounted; DS = ES = the program's data
+;   In:       the volume mounted; DS = ES = the server's data
 ;   Out:      CF clear and DX:AX = bytes; or CF set and AX = an error
 ;   Destroys: BX, CX
 ; ----------------------------------------------------------------------------

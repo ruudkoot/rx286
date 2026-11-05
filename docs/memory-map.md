@@ -126,19 +126,19 @@ root's but its own data and stack.
 
 | Object | Bytes | What |
 |---|---|---|
-| a thread | 1,024 | its control block (160), then its kernel stack (864): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from rings 1-3 |
+| a thread | 512 | its control block (160), then its kernel stack (352, more than three times the deepest any test reaches: 102 bytes, roadmap l4.md L9): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from rings 1-3 |
 | a space | 16 + 24 a slot, rounded up to a power of two | its header, its LDT (8 a slot), a shadow entry a slot (16) |
 | an endpoint, a notification | 16 | |
 
 An object lies at an address of the arena aligned to its size, zeroed. The
 GDT's pools hold `SPACE_MAX` LDT descriptors and `THREAD_MAX` kernel stacks.
 
-The kernel's data holds `disk_buffer`, the one sector every disk transfer
-passes through (*docs/storage.md*). DMA channel 2 writes and reads it by its
-physical address, which is fixed at assembly (`KDATA_PHYS` plus its
-offset); since the 8237's address counter has 16 bits, the build fails if
-the buffer crosses a 64 KB boundary, which in the kernel's data, 14100h to
-160FFh, it cannot.
+The kernel's data holds no disk buffer since the disks left it (roadmap
+l4.md L9). The diskette driver's DMA buffer is a segment the root retypes
+from the memory for programs and gives it; DMA channel 2 reads and writes
+it by its physical address, which the driver asks the kernel for
+(`KCALL_SEGMENT`). Since the 8237's address counter has 16 bits, the root
+takes another if one crosses a 64 KB boundary (*docs/storage.md*).
 
 `make sizes` prints how full each room is, and the boot image against
 `IMAGE_MAX`.

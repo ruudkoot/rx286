@@ -8,7 +8,7 @@ rx286, test build
 rx286 shell: type help for the commands
 A:\>mem
 code:  selector 0007h, base {m:program.base}h, limit {m:program.limit}h
-data:  selector 000Fh, base 41820h, limit 1FFFh
-stack: selector 0017h, base 43820h, limit 07FFh
+data:  selector 000Fh, base 48E20h, limit 1FFFh
+stack: selector 0017h, base 4AE20h, limit 07FFh
 Nothing else is reachable: the kernel's selectors fault here.
 A:\>

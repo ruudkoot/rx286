@@ -20,8 +20,8 @@ syscall_table:
         dw sys_gone                     ; SYS_READ_KEY: the keyboard driver's (l4.md L8)
         dw sys_ticks                    ; SYS_TICKS
         dw sys_time                     ; SYS_TIME
-        dw sys_disk_read                ; SYS_DISK_READ
-        dw sys_disk_write               ; SYS_DISK_WRITE
+        dw sys_gone                     ; SYS_DISK_READ: the disk drivers' (l4.md L9)
+        dw sys_gone                     ; SYS_DISK_WRITE
         dw sys_gone                     ; SYS_PRINT: the printer driver's (l4.md L7)
         dw sys_sound                    ; SYS_SOUND
         dw sys_joystick                 ; SYS_JOYSTICK
@@ -32,8 +32,9 @@ syscall_table:
 syscall_table_end:
 end_kdata
 
-%if SYSCALL_COUNT != 14
-  %error "syscall.asm: syscall_table does not match SYSCALL_COUNT"
+KERNEL_CALLS        equ SYS_FIND        ; the file calls, and on, are the OS server's alone
+%if KERNEL_CALLS != 14
+  %error "syscall.asm: syscall_table does not match KERNEL_CALLS"
 %endif
 
 ; ----------------------------------------------------------------------------
@@ -46,7 +47,7 @@ syscall:
         call call_enter                 ; one thread at a time (l4.md X15)
         and word [bp + FRAME_FLAGS], ~FLAGS_CF
         mov bl, [bp + FRAME_AX + 1]     ; the caller's AH
-        cmp bl, SYSCALL_COUNT
+        cmp bl, KERNEL_CALLS
         jae .nosys
         xor bh, bh
         shl bx, 1

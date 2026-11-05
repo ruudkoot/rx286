@@ -1,6 +1,7 @@
 ; ============================================================================
 ; rx286 - tests/programs/syscalls.asm
-; Every system call, with good and bad arguments (tests/syscalls).
+; Every system call, with good and bad arguments (tests/syscalls); in
+; TEST_FILES builds, the file calls on the boot diskette.
 ;
 ; Each check prints one line; tests/syscalls/calls.test holds the lines it
 ; must print. The run ends with SYS_EXIT: the program starts again, sees
@@ -18,8 +19,14 @@ bits 16
 WINDOW_LINES        equ WRITE_MAX / 2   ; bytes a window write: what the data segment holds
 WINDOW_SLACK        equ 2               ; ticks either way the edges allow
 
+ENTRY_FILE_SIZE     equ 0x1C            ; a directory entry's size (FAT's): a dword
+
 begin_udata
 runs                dw 0
+kernel_name         db "KERNEL.BIN", 0
+root_name           db "\", 0
+file_record         times FIND_SIZE db 0
+file_sector         times SECTOR_SIZE db 0
 hello               db "hello"
 hello_end:
 before              dd 0
@@ -203,6 +210,116 @@ check_transfer:
         pop bx
         shr bx, 1                       ; CF: the call's
         call report_error
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; check_files - TEST_FILES builds (tests/syscalls/files.test: not DOSBox-X,
+; whose diskette controller never interrupts): the file calls (roadmap
+; l4.md L9), on the boot diskette: the current drive and A's directory;
+; KERNEL.BIN found and read back; a file refused as a directory; the root's
+; entries; the free bytes; another drive made current, and A again
+;   In:       DS = ES = the program's data
+;   Out:      falls through to the next check
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+check_files:
+%ifdef TEST_FILES
+        mov al, DRIVES                  ; none made current: which is
+        sys SYS_DRIVE
+        PRINT "files: drive "
+        call print_dec
+        PRINT " current", CHAR_LF
+        mov al, DRIVE_A
+        mov di, file_record
+        sys SYS_GETCWD
+        jc .failed
+        PRINT "files: its directory "
+        mov si, file_record
+        call print_str
+        call print_newline
+        mov al, DRIVE_A
+        mov si, kernel_name
+        mov di, file_record
+        sys SYS_FIND
+        jc .failed
+        PRINT "files: "
+        mov si, file_record + FIND_PATH
+        call print_str
+        PRINT ", a "
+        cmp byte [file_record + FIND_DIR], 0
+        je .file
+        PRINT "directory"
+        jmp .size
+.file:
+        PRINT "file"
+.size:
+        PRINT " of "
+        mov ax, [file_record + FIND_ENTRY + ENTRY_FILE_SIZE]
+        mov dx, [file_record + FIND_ENTRY + ENTRY_FILE_SIZE + 2]
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        xor bx, bx                      ; DX:BX = the bytes read (sys takes AH)
+        xor dx, dx
+.sector:
+        mov di, file_sector
+        sys SYS_FILE_NEXT
+        jc .failed
+        jcxz .read
+        add bx, cx
+        adc dx, 0
+        jmp .sector
+.read:
+        PRINT "files: read back "
+        mov ax, bx
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        PRINT "files: a file's entries: "
+        mov di, file_sector
+        sys SYS_DIR_NEXT
+        call report_error
+        PRINT "files: a file as the directory: "
+        mov al, DRIVE_A
+        mov si, kernel_name
+        sys SYS_CHDIR
+        call report_error
+        mov al, DRIVE_A
+        mov si, root_name
+        mov di, file_record
+        sys SYS_FIND
+        jc .failed
+        xor bx, bx
+.entry:
+        mov di, file_sector
+        sys SYS_DIR_NEXT
+        jc .failed
+        add bx, ax                      ; AX: 1, or 0 at the end
+        test ax, ax
+        jnz .entry
+        PRINT "files: the root's entries "
+        mov ax, bx
+        call print_dec
+        call print_newline
+        mov al, DRIVE_A
+        sys SYS_FREE
+        jc .failed
+        PRINT "files: free "
+        call print_dec32
+        PRINT " bytes", CHAR_LF
+        mov al, DRIVE_B
+        sys SYS_DRIVE
+        PRINT "files: drive "
+        call print_dec
+        mov al, DRIVE_A
+        sys SYS_DRIVE
+        PRINT " current, then drive "
+        call print_dec
+        call print_newline
+        jmp check_window
+.failed:
+        PRINT "files: FAILED, error "
+        call print_dec
+        call print_newline
+%endif
         ; falls through
 
 ; ----------------------------------------------------------------------------

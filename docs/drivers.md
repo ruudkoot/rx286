@@ -12,6 +12,8 @@ descriptor it was not given, nor run the CPU's privileged instructions
 | the mouse driver | `src/drivers/mouse.asm` | a serial mouse on COM1, IRQ4 | `SERVICE_MOUSE` |
 | the console driver | `src/drivers/console.asm` | the EGA's text page and cursor | `SERVICE_CONSOLE` |
 | the keyboard driver ("kbd") | `src/drivers/keyboard.asm` | the 8042, IRQ1 | `SERVICE_KEYBOARD` |
+| the diskette driver ("fd") | `src/drivers/diskette.asm` | the NEC 765, IRQ6, DMA channel 2: drives A and B | `SERVICE_DISKETTE` |
+| the fixed disk driver ("hd") | `src/drivers/fixeddisk.asm` | the AT's fixed disk controller, IRQ14: drives C and D | `SERVICE_FIXED_DISK` |
 
 ## How the root builds one
 
@@ -25,7 +27,7 @@ line (`M_IRQ`) and a service (`M_SERVICE`; *docs/memory-map.md*). The root
 | 4 | `DRV_SLOT_NOTIFY` | a notification, bound to its thread: its timer signals `DRV_TIMER_BIT` |
 | 5 | `DRV_SLOT_IRQ` | its interrupt line, which the root bound to that notification with `DRV_IRQ_BIT` |
 | 6 | `DRV_SLOT_RECV` | empty: where a segment passed to it lands |
-| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` |
+| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK`; the diskettes', a 512-byte DMA buffer that crosses no 64 KB boundary |
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
@@ -46,6 +48,13 @@ interrupt that came meanwhile waits in the 8259A (*docs/interrupts.md*).
 
 A driver waits on the kernel's timer instead of the kernel's polling with
 a limit in ticks: `KCALL_TIMER` on its notification, then a receive on it.
+A notification has one timer: setting it again replaces it. The disk
+drivers share their waits (`src/drivers/dwait.asm`), which take the place of
+the kernel's `ksleep_until`, `ksleep` and `kpoll`: for the interrupt, for
+some ticks, or for a port's bits, each with a limit in ticks. Each sets a
+one-tick timer and receives on the notification, so it looks at the time
+(`SYS_TICKS`) once a tick, and takes and acknowledges the interrupt when its
+bit comes.
 
 ## The printer driver
 
@@ -95,3 +104,17 @@ Ctrl+Alt+Del: the driver says so on the log and resets the machine through
 the 8042. Sys Req asks the kernel for the thread dump (`TEST_DUMP`). In
 test builds it tells the kernel when it has started (`TEST_KEYS_READY`),
 and on MAME takes the script's keys from it (`TEST_KEY_BYTE`).
+
+## The disk drivers
+
+They took the kernel's disk code as it was (roadmap l4.md L9), and wait as
+above (*docs/storage.md*). The OS server asks them with `DRV_DISK_READ` and
+`DRV_DISK_WRITE`: BX the unit (0 or 1 on the driver's controller), CX the
+sector, SI its offset in the segment passed, which is the program's
+transfer segment for `SYS_DISK_READ` and `SYS_DISK_WRITE`, or the
+program's files segment for the file calls. The reply's BX is 0 or the
+error. The server has checked the drive and the sector, as the kernel did;
+the driver checks them again. The diskette driver moves the sector through
+its DMA buffer, and stops the motor two seconds after its last transfer on
+its timer; the fixed disk driver moves the words straight to or from the
+segment passed.

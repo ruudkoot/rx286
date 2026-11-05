@@ -63,7 +63,6 @@ pm_start:
         TRACE "kernel: protected mode; GDT, IDT, TSS and LDTR loaded"
         call timer_init
         call rtc_init
-        call dma_init
 %ifdef WITH_MODEM
         call modem_init
 %endif

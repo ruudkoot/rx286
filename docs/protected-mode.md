@@ -29,15 +29,15 @@ writes the GDT except for the TSS's busy bit.
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
 | 30h | `SEL_DFSTACK` | 07400h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
-| 40h-B8h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`) |
-| C0h-138h | `SEL_STACK_POOL` | in the arena | 35Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`): SS0 while it runs |
-| 140h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
-| 148h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
+| 40h-F8h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`, 24) |
+| 100h-1B8h | `SEL_STACK_POOL` | in the arena | 15Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`, 24): SS0 while it runs |
+| 1C0h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
+| 1C8h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
 
 Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
 be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
 levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
-`GDT_LIMIT`, 14Fh. A free descriptor of a pool is all zeros, which no one
+`GDT_LIMIT`, 1CFh. A free descriptor of a pool is all zeros, which no one
 can load. The kernel takes one when it makes a space or a thread
 (*docs/kernel-calls.md*). Any selector beyond the limit is a general protection
 fault.

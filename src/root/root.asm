@@ -11,8 +11,9 @@
 ; server's stack, with the program's capabilities in its slots (os.asm).
 ; Every other module is a program: it gets a thread, an endpoint to the OS
 ; server badged with its module's number (OS_SLOT_EP) and a transfer
-; segment it shares with the server (OS_SLOT_XFER; os.inc), and its faults
-; go to the OS server, on the same endpoint badged FAULT_BADGE (l4.md D18).
+; segment it shares with the server (OS_SLOT_XFER; os.inc); the server
+; alone gets the program's files segment (FILES_SIZE); and its faults go to
+; the OS server, on the same endpoint badged FAULT_BADGE (l4.md D18).
 ; The root starts each at the priority the module table gives, the program
 ; the keys are for in the foreground; then it handles the OS server's
 ; faults (and a program's, if there is no OS server): it reports each as
@@ -54,7 +55,8 @@ P_DATA              equ 16                      ; its data and stack (the root k
 P_STACK             equ 24                      ; copy of each, to put back)
 P_EP                equ 32                      ; a program's endpoint to the OS server,
 P_XFER              equ 40                      ; its transfer segment, and the OS
-P_SERVER            equ 48                      ; server's thread that serves it
+P_SERVER            equ 48                      ; server's thread that serves it,
+P_FILES             equ 56                      ; and its files segment, the server's
 CONTROL             equ SLOT(ROOT_SLOT_VIDEO - 1)  ; the OS server's control notification
 PROGRAMS_MAX        equ (ROOT_SLOT_VIDEO - 1 - PROGRAM_SLOT) / 8   ; below those slots
 
@@ -69,10 +71,10 @@ W_DRV_EP            equ DRV_SLOT_EP * 8 + 4     ; a driver's
 W_DRV_NOTIFY        equ DRV_SLOT_NOTIFY * 8 + 4
 W_DRV_IRQ           equ DRV_SLOT_IRQ * 8 + 4
 W_DRV_DEVICE        equ DRV_SLOT_DEVICE * 8 + 4
-W_CONTROL           equ 8 * 8 + 4       ; the OS server's: its control notification,
-W_FOREGROUND        equ 9 * 8 + 4       ;    the foreground program's thread
-OS_CONTROL_N        equ 8               ; its control thread's part of its stack
-OS_SLOTS            equ 64              ; the OS server's space: 8n + k for program n
+W_CONTROL           equ 14 * 8 + 4      ; the OS server's: its control notification,
+W_FOREGROUND        equ 15 * 8 + 4      ;    the foreground program's thread
+OS_CONTROL_N        equ 16              ; its control thread's part of its stack
+OS_SLOTS            equ 128             ; the OS server's space: 8n + k for program n
 OS_STACK            equ 512             ; each of its threads' part of its stack
 %ifdef TEST_CAPS
 CAPS_SLOTS          equ 64              ; the program's, with what TEST_CAPS gives it:
@@ -84,6 +86,7 @@ CAPS_THREAD         equ 13 * 8 + 4      ; its own thread
 
 ACC_DATA            equ 0x92            ; present, data, writable: DPL to add
 ACC_XFER            equ 0xF2            ; the same, of DPL 3: a transfer segment
+ACC_FILES           equ 0xD2            ; of DPL 2: the OS server's files segment
 
 begin_udata
 programs            dw 0                ; the modules it builds: 1 to programs
@@ -109,6 +112,7 @@ s_stack             dw 0
 s_ep                dw 0
 s_xfer              dw 0
 s_server            dw 0
+s_files             dw 0
 line                times 64 db 0       ; a fault's report
 end_udata
 
@@ -233,9 +237,9 @@ failed:
         jmp .wait
 
 ; ----------------------------------------------------------------------------
-; program_ends - a program's endpoint to the OS server and its transfer
-; segment, if there is an OS server and the module is neither it nor a
-; driver
+; program_ends - a program's endpoint to the OS server, its transfer
+; segment and its files segment, if there is an OS server and the module is
+; neither it nor a driver
 ;   In:       BX = the module's number
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, CX, DX, SI
@@ -262,6 +266,13 @@ program_ends:
         mov si, [s_xfer]
         mov cx, XFER_SIZE
         mov bl, ACC_XFER
+        kcall KCALL_RETYPE
+        must
+        mov dx, UNTYPED
+        mov al, CAP_SEGMENT
+        mov si, [s_files]
+        mov cx, FILES_SIZE
+        mov bl, ACC_FILES
         kcall KCALL_RETYPE
         must
         pop bx
@@ -484,7 +495,8 @@ build_driver:
 ; ----------------------------------------------------------------------------
 ; driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
 ; the console's, the screen's text page; the keyboard's, the OS server's
-; control notification to signal Ctrl+Break with
+; control notification to signal Ctrl+Break with; the diskette's, a DMA
+; buffer of a sector that does not cross 64 KB
 ;   In:       the module's s_* and m_*
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, BX, CX, DX, SI, DI
@@ -497,7 +509,7 @@ driver_device:
         jmp give
 .keyboard:
         cmp byte [m_service], SERVICE_KEYBOARD
-        jne .done
+        jne .diskette
         mov dx, [s_space]
         mov si, CONTROL
         mov di, W_DRV_DEVICE
@@ -506,6 +518,26 @@ driver_device:
         mov cl, RIGHT_SEND
         kcall KCALL_COPY
         must
+        ret
+.diskette:
+        cmp byte [m_service], SERVICE_DISKETTE
+        jne .done
+.dma:
+        mov si, [s_server]              ; (a driver has no OS thread: the slot is free)
+        mov cx, SECTOR_SIZE
+        mov al, 1                       ; DPL 1: the driver's
+        call new_segment
+        mov dx, [s_server]
+        kcall KCALL_SEGMENT             ; DL:AX = its physical address
+        cmp ax, 0x10000 - SECTOR_SIZE
+        jbe .within                     ; the 8237 does not carry past 64 KB
+        mov dx, [s_server]
+        kcall KCALL_DELETE              ; (its memory stays: the next is past it)
+        jmp .dma
+.within:
+        mov si, [s_server]
+        mov di, W_DRV_DEVICE
+        jmp give
 .done:
         ret
 
@@ -676,6 +708,8 @@ serve_program:
         call give_server
         mov si, [s_xfer]
         call give_server
+        mov si, [s_files]
+        call give_server
         mov dx, ARENA                   ; its thread
         mov al, CAP_THREAD
         mov si, [s_server]
@@ -798,7 +832,7 @@ module_entry:
 ; assembled (the kernel's gifts), and the eight the root fills for it
 ;   In:       BX = the module's number (1 to PROGRAMS_MAX)
 ;   Out:      s_code, s_template, s_space, s_thread, s_data, s_stack, s_ep,
-;             s_xfer, s_server
+;             s_xfer, s_server, s_files
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 program_slots:
@@ -826,6 +860,8 @@ program_slots:
         mov [s_xfer], ax
         add ax, P_SERVER - P_XFER
         mov [s_server], ax
+        add ax, P_FILES - P_SERVER
+        mov [s_files], ax
         ret
 
 ; ----------------------------------------------------------------------------

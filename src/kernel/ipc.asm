@@ -745,7 +745,8 @@ kc_signal:
 ; ----------------------------------------------------------------------------
 ; kc_timer - KCALL_TIMER: signal a notification once, CX ticks from now
 ; (with the capability's badge, or 1); the kernel's answer to timeouts
-; (l4.md D6)
+; (l4.md D6). A notification has one timer at most: arming it again
+; replaces the one armed before, so waits that end early leave none behind
 ;   In:       BP = the frame (DX the notification, CX ticks, 1 or more)
 ;   Out:      the frame's status (KE_POOL: TIMER_MAX armed already)
 ;   Destroys: AX, BX, CX, SI, DI
@@ -759,7 +760,15 @@ kc_timer:
         jz kc_done.cap
         cmp word [bp + FRAME_CX], 0
         je kc_done.arg
-        mov di, timers
+        mov ax, [si + SH_OBJECT]
+        mov di, timers                  ; its own timer, armed again
+        mov cx, TIMER_MAX
+.own:
+        cmp [di + TM_NOTIFY], ax
+        je .found
+        add di, TIMER_SIZE
+        loop .own
+        mov di, timers                  ; else a free one
         mov cx, TIMER_MAX
 .free:
         cmp word [di + TM_NOTIFY], 0

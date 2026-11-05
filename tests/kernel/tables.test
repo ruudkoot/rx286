@@ -7,11 +7,11 @@
 # the code, so they are left out; everything else is checked.
 emulators: bochs
 break: pm_start.ready
-debugger: info gdt 0 41
+debugger: info gdt 0 57
 debugger: info idt 0 0x31
 debugger: sreg
 ---
-Global Descriptor Table (base=0x0000000000014100, limit=335):
+Global Descriptor Table (base=0x0000000000014100, limit=463):
 GDT[0x0000]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x0008]=Code segment, base=0x00010100, limit=0x
 GDT[0x0010]=Data segment, base=0x00006300, limit=0x0000ffff, Read/Write, Accessed
@@ -21,11 +21,11 @@ GDT[0x0028]=16-Bit TSS (available) at 0x
 GDT[0x0030]=Data segment, base=0x00005a00, limit=0x000001ff, Read/Write, Accessed
 GDT[0x0038]=Data segment, base=0x000b8000, limit=0x00000f9f, Read/Write, Accessed
 GDT[0x0040]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x00b8]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x00c0]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x0138]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x0140]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x0148]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x00f8]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x0100]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x01b8]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x01c0]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x01c8]=??? descriptor hi=0x00000000, lo=0x00000000
 limit=399):
 IDT[0x00]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_0}, DPL=0
 IDT[0x07]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_7}, DPL=0
@@ -36,5 +36,5 @@ IDT[0x30]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_48}, DPL=3
 IDT[0x31]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_49}, DPL=3
 ldtr:0x0000, dh=0x00008200, dl=0x0000ffff, valid=0
 tr:0x0020
-gdtr:base=0x0000000000014100, limit=0x14f
+gdtr:base=0x0000000000014100, limit=0x1cf
 , limit=0x18f
