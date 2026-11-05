@@ -8,7 +8,7 @@ L5):
 |---|---|---|---|
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
-| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 8.6 KB of code, 2.6 KB of data |
+| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 8.9 KB of code, 2.6 KB of data |
 | the root | `src/root/` | a module of the image, ring 2 | about 2.9 KB of code |
 | the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 4.2 KB of code |
 | the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
