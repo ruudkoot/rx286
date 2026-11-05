@@ -13,8 +13,10 @@
 ; A system call comes from the program's stub (src/userland/stub.asm) with
 ; the function as the label and the registers in the transfer segment's
 ; block (os.inc). The thread makes the call itself, on the transfer
-; segment, with INT 30h, and puts the results back: so far only the path
-; has moved. SYS_EXIT restarts the program (KCALL_THREAD's THREAD_RESTART),
+; segment, with INT 30h, and puts the results back; but the printer's and
+; the mouse's calls go to their drivers, whose endpoints the root gave it
+; (drivers.inc; l4.md L7), and so does SYS_WAIT's look for the mouse's
+; news, once a tick. SYS_EXIT restarts the program (KCALL_THREAD's THREAD_RESTART),
 ; and this thread with it, since it serves that program alone (START_SESSION).
 ; A fault of the program comes on the same endpoint, badged FAULT_BADGE: the
 ; thread reports it as the kernel did, puts back any of the program's
@@ -29,11 +31,15 @@ bits 16
 %include "program.inc"
 %include "kcalls.inc"
 %include "os.inc"
+%include "drivers.inc"
 
 RING                equ 2
 OS_STACK            equ 512             ; each thread's part of the stack segment
 OS_STACK_SHIFT      equ 9
 OS_MODULES          equ 3 * 8 + 4 + RING    ; slot 3: the module table
+OS_PRINTER          equ (OS_SLOT_SERVICE + SERVICE_PRINTER) * 8 + 4 + RING
+OS_MOUSE            equ (OS_SLOT_SERVICE + SERVICE_MOUSE) * 8 + 4 + RING
+WAIT_EVENTS         equ WAIT_KEY | WAIT_MOUSE | WAIT_SERIAL
 OS_K_EP             equ 0               ; a program's slots: 8n + k
 OS_K_THREAD         equ 1
 OS_K_SPACE          equ 2
@@ -155,6 +161,17 @@ forward:
         pop ax
         cmp al, SYS_TEST_PROBE          ; the caller's own descriptors: never
         je .nosys                       ; the server's
+        cmp al, SYS_PRINT
+        je .print
+        cmp al, SYS_MOUSE
+        je .mouse
+        cmp al, SYS_WAIT
+        jne .kernel
+        test byte [XFER_AX], WAIT_MOUSE
+        jz .kernel
+        test byte [XFER_AX], ~WAIT_EVENTS & 0xFF
+        jz .wait_mouse
+.kernel:
         mov ah, al
         mov al, [XFER_AX]
         mov bx, [XFER_BX]
@@ -173,12 +190,110 @@ forward:
         pop word [XFER_FLAGS]
         jmp .done
 .nosys:
-        mov word [XFER_AX], E_NOSYS
+        mov ax, E_NOSYS
+.error:
+        mov [XFER_AX], ax
         mov word [XFER_FLAGS], 1        ; CF
 .done:
         pop es
         pop ds
         ret
+.print:
+        ; SYS_PRINT: the printer driver prints from the transfer segment,
+        ; after the kernel's checks in the kernel's order
+        mov bl, [XFER_AX]
+        xor bh, bh
+        mov ax, E_INVAL
+        cmp bx, PRINTERS
+        jae .error
+        mov cx, [XFER_CX]
+        cmp cx, PRINT_MAX
+        ja .error
+        mov word [XFER_AX], 0
+        mov word [XFER_FLAGS], 0
+        jcxz .done
+        mov si, [XFER_SI]
+        mov ax, si
+        add ax, cx
+        jc .fault
+        cmp ax, XFER_SIZE
+        ja .fault                       ; the stub's XFER_BAD
+        push bp
+        mov ax, OS_K_XFER
+        call program_slot
+        mov bp, ax                      ; the transfer segment, passed
+        mov dx, OS_PRINTER
+        mov al, DRV_PRINT
+        kcall KCALL_CALL
+        pop bp
+        jc .nosys
+        test bx, bx
+        jnz .printed_some
+        mov [XFER_AX], cx
+        jmp .done
+.printed_some:
+        mov [XFER_CX], cx               ; the bytes printed before the error
+        mov ax, bx
+        jmp .error
+.fault:
+        mov ax, E_FAULT
+        jmp .error
+.mouse:
+        ; SYS_MOUSE: the mouse driver's
+        push bp
+        mov dx, OS_MOUSE
+        mov al, DRV_MOUSE_GET
+        xor bp, bp
+        kcall KCALL_CALL
+        pop bp
+        jc .nosys
+        mov [XFER_AX], di
+        mov [XFER_BX], bx
+        mov [XFER_CX], cx
+        mov [XFER_DX], si
+        mov word [XFER_FLAGS], 0
+        jmp .done
+.wait_mouse:
+        ; SYS_WAIT with the mouse: the driver asked for its news, and the
+        ; kernel waited for the other events, a tick at a time
+        mov ah, SYS_TICKS
+        int SYSCALL_VECTOR
+        mov di, ax                      ; DI = the start
+.look:
+        push bp
+        mov dx, OS_MOUSE
+        mov al, DRV_MOUSE_NEWS
+        xor bp, bp
+        kcall KCALL_CALL
+        pop bp
+        mov dl, 0
+        jc .others
+        test bx, bx
+        jz .others
+        mov dl, WAIT_MOUSE
+.others:
+        push dx
+        mov al, [XFER_AX]
+        and al, ~WAIT_MOUSE & 0xFF      ; (none: a tick's sleep)
+        mov cx, 1
+        mov ah, SYS_WAIT
+        int SYSCALL_VECTOR
+        pop dx
+        or al, dl
+        jnz .events
+        mov cx, [XFER_CX]
+        jcxz .look                      ; no limit
+        mov ah, SYS_TICKS
+        int SYSCALL_VECTOR
+        sub ax, di
+        cmp ax, cx
+        jb .look
+        xor al, al                      ; the time ran out
+.events:
+        xor ah, ah
+        mov [XFER_AX], ax
+        mov word [XFER_FLAGS], 0
+        jmp .done
 
 ; ----------------------------------------------------------------------------
 ; restore - after a fault: the program's segments, its endpoint and its

@@ -7,7 +7,7 @@ program reaches them (*docs/syscalls.md*).
 
 | Port | Base | IRQ | What |
 |---|---|---|---|
-| COM1 | 3F8h | 4 | a Microsoft serial mouse, in every build (`mouse.asm`) |
+| COM1 | 3F8h | 4 | a Microsoft serial mouse, in every build (the mouse driver, `src/drivers/mouse.asm`) |
 | COM2 | 2F8h | 3 | the log of debug and test builds, polled, its interrupt off (`serial.asm`); the modem's line in release builds (`modem.asm`) |
 | COM3 | 3E8h | 4 | not used; kept quiet (`serial_quiet`) |
 | COM4 | 2E8h | 3 | not used; kept quiet |
@@ -20,8 +20,9 @@ image, whose COM2 is the modem's line.
 
 ## The mouse
 
-At start the kernel sets COM1 to 1200 baud, 7N1, and holds DTR and RTS
-low; 200 ms later at least (`mouse_tick`) it raises them, with OUT2 and the
+The mouse driver, in ring 1 since roadmap l4.md L7 (*docs/drivers.md*),
+sets COM1 to 1200 baud, 7N1, at its start and holds DTR and RTS low; 200
+ms later at least, on the kernel's timer, it raises them, with OUT2 and the
 receive interrupt. A Microsoft mouse resets on that and says "M". Each
 movement or button change is then a packet of three bytes, the first with
 bit 6 set:
@@ -30,9 +31,10 @@ bit 6 set:
 1 L R Y7 Y6 X7 X6     0 X5 X4 X3 X2 X1 X0     0 Y5 Y4 Y3 Y2 Y1 Y0
 ```
 
-The kernel adds the movement to a position it keeps, from 0 to `MOUSE_X_MAX`
+The driver adds the movement to a position it keeps, from 0 to `MOUSE_X_MAX`
 (639) and 0 to `MOUSE_Y_MAX` (199), eight to a character cell, starting in
-the middle; and keeps the buttons. `SYS_MOUSE` gives them, and whether the
+the middle; and keeps the buttons. `SYS_MOUSE`, through the OS server,
+gives them, and whether the
 mouse said "M" (`MOUSE_PRESENT`). A Logitech mouse's fourth byte is passed
 over, and so is a Plug and Play mouse's identity, which follows its "M"
 between parentheses. Nothing is drawn: the console is the program's.

@@ -89,7 +89,7 @@ entry:
         mov ax, dx
         report "its base, high byte (3)"
         mov ax, bx                      ; past the others' segments, and its own
-        report "its base, low word (34832)"
+        report "its base, low word (57360)"
         mov ax, cx
         report "its limit (255)"
         mov dx, UT_ARENA

@@ -50,6 +50,8 @@ TEST_OP_WHEN_WAITING equ 1
 TEST_OP_NOW         equ 2
 TEST_OP_WAIT        equ 3
 TEST_OP_MOUSE       equ 4               ; three bytes of a mouse packet follow
+TEST_MOUSE_PACKET   equ 3
+TEST_MOUSE_RING     equ 16              ; bytes the mouse's driver has not yet taken
 TEST_SOUND_SLACK    equ 2               ; changes of channel 2's output either way
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
@@ -72,6 +74,9 @@ test_keys           db TEST_OP_END
 %endif
 test_key_ptr        dw test_keys
 test_wait_left      db 0
+test_mouse_ring     times TEST_MOUSE_RING db 0
+test_mouse_head     db 0
+test_mouse_tail     db 0
 test_fpu_cw         dw TEST_FPU_CW_ZM
 msg_test_end        db "TEST END", CHAR_LF, 0
 msg_shutdown        db "Shutdown", 0
@@ -251,13 +256,15 @@ test_tick:
         mov al, [si + 1]
         jmp test_type
 .mouse:
-        add word [test_key_ptr], 1 + MOUSE_PACKET
+        add word [test_key_ptr], 1 + TEST_MOUSE_PACKET
         mov al, [si + 1]
-        call mouse_byte
+        call test_mouse_push
         mov al, [si + 2]
-        call mouse_byte
+        call test_mouse_push
         mov al, [si + 3]
-        jmp mouse_byte
+        call test_mouse_push
+        mov bx, IRQ_MOUSE               ; to the mouse's driver, as IRQ4 would
+        jmp irq_signal                  ; (it takes them with KCALL_TEST)
 .wait:
         cmp byte [test_wait_left], 0
         jne .count
@@ -525,6 +532,47 @@ test_ticks:
         je .same
         ret
 %endif
+
+; ----------------------------------------------------------------------------
+; test_mouse_push - a byte for the mouse's driver (l4.md L7), which takes it
+; with KCALL_TEST; a full ring drops it
+;   In:       AL = the byte; DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: BX
+; ----------------------------------------------------------------------------
+test_mouse_push:
+        mov bl, [test_mouse_tail]
+        mov bh, bl
+        inc bh
+        and bh, TEST_MOUSE_RING - 1
+        cmp bh, [test_mouse_head]
+        je .full
+        mov [test_mouse_tail], bh
+        xor bh, bh
+        mov [test_mouse_ring + bx], al
+.full:
+        ret
+
+; ----------------------------------------------------------------------------
+; test_mouse_pop - the next byte for the mouse's driver
+;   In:       DS = SEL_KDATA
+;   Out:      CF clear and AL = the byte; CF set if none
+;   Destroys: BX
+; ----------------------------------------------------------------------------
+test_mouse_pop:
+        mov bl, [test_mouse_head]
+        cmp bl, [test_mouse_tail]
+        je .none
+        xor bh, bh
+        mov al, [test_mouse_ring + bx]
+        inc bl
+        and bl, TEST_MOUSE_RING - 1
+        mov [test_mouse_head], bl
+        clc
+        ret
+.none:
+        stc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; test_program_started - every start of the program: in attack and fuzz

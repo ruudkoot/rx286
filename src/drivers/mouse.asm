@@ -1,25 +1,48 @@
 ; ============================================================================
-; rx286 - src/kernel/mouse.asm
-; A Microsoft serial mouse on COM1, IRQ4: SYS_MOUSE (devices roadmap D1).
+; rx286 - src/drivers/mouse.asm
+; The mouse driver (roadmap l4.md L7; devices roadmap D1): a Microsoft
+; serial mouse on COM1, IRQ4, in ring 1 with IOPL 1.
 ;
-; COM1 runs at 1200 baud, 7N1, and interrupts when a byte comes. At start the
-; kernel drops DTR and RTS, which resets the mouse, and raises them again
-; MOUSE_RESET_TICKS later (mouse_tick); the mouse then says "M". From then on
-; each movement or button change is a packet of three bytes, the first with
-; bit 6 set:
+; COM1 runs at 1200 baud, 7N1, and interrupts when a byte comes. At its
+; start the driver drops DTR and RTS, which resets the mouse, and raises
+; them again MOUSE_RESET_TICKS later, on the kernel's timer; the mouse then
+; says "M". From then on each movement or button change is a packet of
+; three bytes, the first with bit 6 set:
 ;   1 L R Y7 Y6 X7 X6     0 X5 X4 X3 X2 X1 X0     0 Y5 Y4 Y3 Y2 Y1 Y0
 ; X and Y are signed: right and down are positive. A Logitech mouse's fourth
 ; byte (its middle button) is passed over, and so is a Plug and Play mouse's
 ; identity, which follows its "M" between parentheses (its letters would
-; begin packets). The kernel adds each packet's
-; movement to a position it keeps as DOS's mouse driver does in text mode,
-; 0-MOUSE_X_MAX and 0-MOUSE_Y_MAX, eight to a character cell, starting in the
-; middle; and keeps the buttons. A mouse that never says "M" is reported
-; absent, but its packets still count: nothing is detected.
+; begin packets). The driver adds each packet's movement to a position it
+; keeps as DOS's mouse driver does in text mode, 0-MOUSE_X_MAX and
+; 0-MOUSE_Y_MAX, eight to a character cell, starting in the middle; and
+; keeps the buttons. A mouse that never says "M" is reported absent, but
+; its packets still count: nothing is detected.
+;
+; The bytes come at IRQ4, which the root bound to the driver's notification
+; (DRV_IRQ_BIT): the driver takes what COM1 has, then acknowledges the line.
+; It also looks every MOUSE_POLL_TICKS, on its timer (DRV_TIMER_BIT), for
+; bytes whose interrupt was lost (an edge can go, as on a shared line). In
+; test builds a key script's mouse bytes come from the kernel (KCALL_TEST),
+; with IRQ4's bits. The OS server asks it for SYS_MOUSE (DRV_MOUSE_GET) and,
+; for SYS_WAIT, whether the mouse has news (DRV_MOUSE_NEWS).
 ; ============================================================================
 
-MOUSE_RESET_TICKS   equ 12              ; DTR and RTS low 200 ms at least: the first
-                                        ; two ticks may come at once after start
+cpu 286
+bits 16
+%define RAW_SYSCALLS
+%include "build.inc"
+%include "program.inc"
+%include "ports.inc"
+%include "kcalls.inc"
+%include "drivers.inc"
+
+RING                equ 1
+%define SLOT(n) ((n) * 8 + 4 + RING)    ; a slot of the driver's, as a selector
+EP                  equ SLOT(DRV_SLOT_EP)
+NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
+IRQ                 equ SLOT(DRV_SLOT_IRQ)
+MOUSE_RESET_TICKS   equ 12              ; DTR and RTS low 200 ms at least
+MOUSE_POLL_TICKS    equ 5               ; a look for bytes whose interrupt was lost
 MOUSE_ID            equ 'M'
 MOUSE_SYNC          equ 0x40            ; a packet's first byte
 MOUSE_BYTE          equ 0x7F            ; seven bits a byte
@@ -28,25 +51,113 @@ MOUSE_PACKET_LEFT   equ 0x20
 MOUSE_PACKET_RIGHT  equ 0x10
 MOUSE_PACKET_Y_HIGH equ 0x0C
 MOUSE_PACKET_X_HIGH equ 0x03
-MOUSE_IRQ_BYTES     equ 16              ; bytes taken at most in one interrupt
+MOUSE_IRQ_BYTES     equ 16              ; bytes taken at most in one look
 MOUSE_PNP_BEGIN     equ '('             ; a Plug and Play identity's first byte
 MOUSE_PNP_END       equ ')'             ; and its last
 
-begin_kdata
-mouse_reset_left    db 0                ; ticks until DTR and RTS rise again
+begin_udata
 mouse_present       db 0                ; MOUSE_PRESENT once it said "M"
 mouse_index         db MOUSE_PACKET     ; the next byte's place in mouse_packet
 mouse_packet        times MOUSE_PACKET db 0
 mouse_x             dw (MOUSE_X_MAX + 1) / 2
 mouse_y             dw (MOUSE_Y_MAX + 1) / 2
 mouse_buttons       db 0
-mouse_changed       db 0                ; set by a packet, cleared by SYS_MOUSE
+mouse_changed       db 0                ; set by a packet, cleared by DRV_MOUSE_GET
 mouse_pnp           db 0                ; 1 inside a Plug and Play identity
-end_kdata
+end_udata
+
+; ----------------------------------------------------------------------------
+; entry - reset the mouse, let it talk, then serve
+;   In:       its start: DS = ES = its data, IOPL 1
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+entry:
+        cld
+        call mouse_init
+        mov cx, MOUSE_RESET_TICKS       ; the reset
+        call timer
+        mov dx, NOTIFY
+        kcall KCALL_RECV
+        mov dx, COM1_BASE + UART_RBR
+        in al, dx                       ; nothing stale
+        mov dx, COM1_BASE + UART_IER
+        mov al, UART_IER_RECEIVED
+        out dx, al
+        mov dx, COM1_BASE + UART_MCR
+        mov al, UART_MCR_RUN
+        out dx, al
+        mov cx, MOUSE_POLL_TICKS
+        call timer
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; serve - the mouse's bytes as they come, and the OS server's questions
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+serve:
+        mov dx, EP
+        xor bp, bp
+        kcall KCALL_RECV
+.message:
+        jc serve
+        cmp al, NOTIFY_LABEL
+        je .news
+        cmp al, DRV_MOUSE_GET
+        je .get
+        xor bx, bx
+        cmp al, DRV_MOUSE_NEWS
+        jne .reply
+        mov bl, [mouse_changed]
+        jmp .reply
+.get:
+        mov al, [mouse_present]
+        xor ah, ah
+        mov di, ax
+        mov bl, [mouse_buttons]
+        xor bh, bh
+        mov cx, [mouse_x]
+        mov si, [mouse_y]
+        mov byte [mouse_changed], 0
+.reply:
+        mov dx, EP
+        xor bp, bp
+        kcall KCALL_REPLY_RECV
+        jmp .message
+.news:
+        push bx                         ; the bits
+        call mouse_take
+        pop bx
+        test bx, DRV_IRQ_BIT
+        jz .timer
+        push bx
+        mov dx, IRQ
+        mov al, IRQ_ACK
+        kcall KCALL_IRQ                 ; the line on again
+        pop bx
+.timer:
+        test bx, DRV_TIMER_BIT
+        jz serve
+        mov cx, MOUSE_POLL_TICKS
+        call timer
+        jmp serve
+
+; ----------------------------------------------------------------------------
+; timer - the driver's timer, CX ticks from now
+;   In:       CX = ticks
+;   Out:      nothing
+;   Destroys: AX, DX
+; ----------------------------------------------------------------------------
+timer:
+        mov dx, NOTIFY
+        kcall KCALL_TIMER
+        ret
 
 ; ----------------------------------------------------------------------------
 ; mouse_init - COM1 at 1200 baud, 7N1, DTR and RTS low: the mouse resets
-;   In:       interrupts off; DS = SEL_KDATA
+;   In:       nothing
 ;   Out:      nothing
 ;   Destroys: AL, DX
 ; ----------------------------------------------------------------------------
@@ -69,57 +180,42 @@ mouse_init:
         mov dx, COM1_BASE + UART_MCR
         mov al, UART_MCR_OFF
         out dx, al
-        mov byte [mouse_reset_left], MOUSE_RESET_TICKS
         ret
 
 ; ----------------------------------------------------------------------------
-; mouse_tick - on every tick: once the reset has lasted, DTR, RTS and OUT2
-; up and the interrupt on, so the mouse's "M" comes in
-;   In:       DS = SEL_KDATA
+; mouse_take - the bytes COM1 has (and, in test builds, a key script's)
+;   In:       DS = its data
 ;   Out:      nothing
-;   Destroys: AL, DX
-; ----------------------------------------------------------------------------
-mouse_tick:
-        cmp byte [mouse_reset_left], 0
-        je .done
-        dec byte [mouse_reset_left]
-        jnz .done
-        mov dx, COM1_BASE + UART_RBR
-        in al, dx                       ; nothing stale
-        mov dx, COM1_BASE + UART_IER
-        mov al, UART_IER_RECEIVED
-        out dx, al
-        mov dx, COM1_BASE + UART_MCR
-        mov al, UART_MCR_RUN
-        out dx, al
-.done:
-        ret
-
-; ----------------------------------------------------------------------------
-; mouse_irq - IRQ4, and every tick: the bytes COM1 has
-;   In:       DS = SEL_KDATA
-;   Out:      nothing (the dispatcher sends EOI)
 ;   Destroys: AX, BX, CX, DX
 ; ----------------------------------------------------------------------------
-mouse_irq:
+mouse_take:
         mov cx, MOUSE_IRQ_BYTES
 .next:
         mov dx, COM1_BASE + UART_LSR
         in al, dx
         cmp al, UART_LSR_ABSENT
-        je .done                        ; no UART there
+        je .script                      ; no UART there
         test al, UART_LSR_DATA
-        jz .done
+        jz .script
         mov dx, COM1_BASE + UART_RBR
         in al, dx
         call mouse_byte
         loop .next
+.script:
+%ifdef WITH_TEST_HOOKS
+        mov al, TEST_MOUSE_BYTE
+        kcall KCALL_TEST
+        jc .done
+        mov al, bl
+        call mouse_byte
+        jmp .script
 .done:
+%endif
         ret
 
 ; ----------------------------------------------------------------------------
 ; mouse_byte - one byte from the mouse
-;   In:       AL = the byte; DS = SEL_KDATA
+;   In:       AL = the byte; DS = its data
 ;   Out:      nothing
 ;   Destroys: AX, BX
 ; ----------------------------------------------------------------------------
@@ -164,7 +260,7 @@ mouse_byte:
 
 ; ----------------------------------------------------------------------------
 ; mouse_move - a whole packet: the position moved, the buttons as they are
-;   In:       mouse_packet; DS = SEL_KDATA
+;   In:       mouse_packet; DS = its data
 ;   Out:      mouse_x, mouse_y, mouse_buttons, mouse_changed
 ;   Destroys: AX, BX
 ; ----------------------------------------------------------------------------
@@ -216,24 +312,4 @@ mouse_clamp:
         jle .done
         mov ax, bx
 .done:
-        ret
-
-; ----------------------------------------------------------------------------
-; sys_mouse - SYS_MOUSE: whether there is a mouse, its buttons and position
-;   In:       BP = the frame; DS = SEL_KDATA
-;   Out:      the frame's AX = MOUSE_PRESENT or 0, BX = the buttons
-;             (MOUSE_LEFT, MOUSE_RIGHT), CX = x, DX = y
-;   Destroys: AX
-; ----------------------------------------------------------------------------
-sys_mouse:
-        mov al, [mouse_present]
-        xor ah, ah
-        mov [bp + FRAME_AX], ax
-        mov al, [mouse_buttons]
-        mov [bp + FRAME_BX], ax
-        mov ax, [mouse_x]
-        mov [bp + FRAME_CX], ax
-        mov ax, [mouse_y]
-        mov [bp + FRAME_DX], ax
-        mov byte [mouse_changed], 0
         ret

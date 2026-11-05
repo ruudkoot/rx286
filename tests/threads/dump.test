@@ -2,12 +2,15 @@
 # Sys Req key: every thread, its state and priority, and how much of its
 # kernel stack it has used. The key arrives while the shell waits for it -
 # for the reply of the OS server's thread, which waits in the kernel for
-# the key (roadmap l4.md L6) - so the counter runs.
+# the key (roadmap l4.md L6) - so the counter runs. The mouse's driver is
+# still in the mouse's reset (roadmap l4.md L7).
 program: shell
 keys: {sysrq}
 match: contains
 ---
-rx286: thread root receiving priority 6, kernel stack used
+rx286: thread root receiving priority 7, kernel stack used
+rx286: thread printer receiving priority 6, kernel stack used
+rx286: thread mouse awaiting a notification priority 6, kernel stack used
 rx286: thread program awaiting its reply priority 3, kernel stack used
 rx286: thread counter running priority 1, kernel stack used
 rx286: thread os waiting priority 5, kernel stack used

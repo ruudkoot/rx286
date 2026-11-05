@@ -11,6 +11,7 @@ L5):
 | kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 13 KB of code and data |
 | the root | `src/root/` | a module of the image, ring 2 | about 1.5 KB of code |
 | the OS server | `src/os/` | a module of the image, ring 2, a thread for each program | about 1 KB of code |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's | a few hundred bytes each |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 5 KB of code, 5 KB of data |
 | the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell | a few bytes |
 
@@ -76,7 +77,7 @@ name nothing of the kernel's, and reaches it only through `INT 30h` and
 | `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*); the root, built at start from the image |
 | `ipc.asm` | IPC between threads: endpoints and their queues, calls and replies, a capability in a message, notifications, the kernel's timer, delete; a wait cancelled by a restart |
 | `syscall.asm` | `INT 30h`: dispatch, buffer checks, `write`, `read_key`, `ticks`, `time`, `wait` |
-| `pic.asm` | the 8259As; the driver of each line or the rule for none; spurious IRQ7 and IRQ15 |
+| `pic.asm` | the 8259As; the driver of each line, its binding to a driver outside the kernel, or the rule for none; spurious IRQ7 and IRQ15 |
 | `timer.asm` | the 8254's channel 0 at 50 Hz; the tick count; the drivers' waits (`ksleep_until`, `ksleep`, `kpoll`); channel 0's count (`pit_count`, `pit_elapsed`) |
 | `keyboard.asm`, `keymap.asm` | the 8042, set-1 scancodes to US ASCII, the ring of keys, Ctrl+Break, Ctrl+Alt+Del |
 | `rtc.asm` | the MC146818: 24-hour BCD, read by polling |
@@ -85,10 +86,8 @@ name nothing of the kernel's, and reaches it only through `INT 30h` and
 | `disk.asm` | `SYS_DISK_READ`, `SYS_DISK_WRITE`: the drives' table, sector numbers to cylinders, heads and sectors, the disk buffer |
 | `diskette.asm` | the NEC 765: drives A and B, IRQ6 |
 | `fixeddisk.asm` | the fixed disk controller: drives C and D, IRQ14 |
-| `printer.asm` | `SYS_PRINT`: LPT1 and LPT2, polled |
 | `speaker.asm` | `SYS_SOUND`: timer channel 2 through port B |
 | `gameport.asm` | `SYS_JOYSTICK`: the buttons, and the axes timed with channel 0 |
-| `mouse.asm` | `SYS_MOUSE`: a Microsoft serial mouse on COM1, IRQ4 |
 | `modem.asm` | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ`: COM2 in release builds, IRQ3, a ring of bytes |
 | `console.asm` | 80x25 colour text on the EGA; the cursor; the copy to the log |
 | `serial.asm` | the log, polled: COM2, or COM3 when COM2 is the modem (debug and test builds) |
@@ -184,6 +183,15 @@ today's `INT 30h` call on that segment and puts the results back
 still the kernel's. The server also handles its programs' faults: it
 reports each with the kernel's old line, puts back what the program lost,
 and restarts it.
+
+## The drivers
+
+Devices leave the kernel one at a time (roadmap l4.md L7-L10): so far the
+printers and the mouse. A driver is a module in ring 1 with IOPL 1, which
+the root builds with an endpoint it serves, a notification bound to its
+thread for its timer and its interrupt, and its interrupt line
+(*docs/drivers.md*). The OS server calls it for the system calls of its
+device.
 
 ## The program
 

@@ -14,11 +14,11 @@ debugger: sreg
 Global Descriptor Table (base=0x0000000000014100, limit=335):
 GDT[0x0000]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x0008]=Code segment, base=0x00010100, limit=0x
-GDT[0x0010]=Data segment, base=0x00007000, limit=0x0000ffff, Read/Write, Accessed
-GDT[0x0018]=Data segment, base=0x00007000, limit=0x000003ff, Read/Write, Accessed
+GDT[0x0010]=Data segment, base=0x00006300, limit=0x0000ffff, Read/Write, Accessed
+GDT[0x0018]=Data segment, base=0x00005c00, limit=0x000003ff, Read/Write, Accessed
 GDT[0x0020]=16-Bit TSS (Busy) at 0x
 GDT[0x0028]=16-Bit TSS (available) at 0x
-GDT[0x0030]=Data segment, base=0x00007400, limit=0x000001ff, Read/Write, Accessed
+GDT[0x0030]=Data segment, base=0x00005a00, limit=0x000001ff, Read/Write, Accessed
 GDT[0x0038]=Data segment, base=0x000b8000, limit=0x00000f9f, Read/Write, Accessed
 GDT[0x0040]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x00b8]=??? descriptor hi=0x00000000, lo=0x00000000

@@ -51,12 +51,13 @@ kcall_table:
         dw kc_retype                                ; KCALL_RETYPE
         dw kc_copy                                  ; KCALL_COPY
         dw kc_thread                                ; KCALL_THREAD
-        dw kc_done.nosys                            ; 10: interrupts (L7)
+        dw kc_irq                                   ; KCALL_IRQ
         dw kc_timer                                 ; KCALL_TIMER
         dw kc_segment                               ; KCALL_SEGMENT
         dw kc_delete                                ; KCALL_DELETE
         dw kc_save_reply                            ; KCALL_SAVE_REPLY
-        dw kc_done.nosys, kc_done.nosys             ; 15, 16: revoke (L12), test
+        dw kc_done.nosys                            ; 15: revoke (L12)
+        dw kc_test                                  ; KCALL_TEST
 kcall_table_end:
 msg_thread_made     db "thread", 0
 ; Temporaries of the calls: no kernel call waits, so none is ever two deep.
@@ -495,7 +496,8 @@ slot_put_descriptor:
 ; capabilities the root starts with (kcalls.inc, ROOT_SLOT_*): its code,
 ; its data (initialised from the module) and its stack; what is left of the
 ; memory for segments and of the arena, as untyped; the module table and
-; each other module's code and data, read-only; its own space and thread
+; each other module's code and data, read-only; its own space and thread;
+; every interrupt line the kernel does not keep
 ;   In:       DS = ES = SEL_KDATA
 ;   Out:      BX = the root's thread, configured, not started
 ;   Destroys: AX, CX, DX, SI, DI, ES
@@ -558,6 +560,25 @@ boot_root:
         mov byte [si + SH_TYPE], CAP_THREAD
         mov ax, [boot_thread]
         mov [si + SH_OBJECT], ax
+        ; every interrupt line the kernel does not keep
+        mov bx, [boot_space]
+        xor cx, cx
+.line:
+        cmp cx, IRQ_CASCADE
+        je .kept
+        mov di, cx
+        shl di, 1
+        cmp word [irq_drivers + di], 0
+        jne .kept
+        mov ax, ROOT_SLOT_IRQ
+        add ax, cx
+        call slot_at
+        mov byte [si + SH_TYPE], CAP_IRQ
+        mov [si + SH_OBJECT], cx
+.kept:
+        inc cx
+        cmp cx, IRQ_LINES
+        jb .line
         ; the other modules: each one's code and its data as assembled
         mov cx, [MODULE_TABLE_VOFF + MH_COUNT]
         dec cx
@@ -1160,6 +1181,67 @@ thread_module_name:
 .named:
         mov [bx + T_NAME], si
         ret
+
+; ----------------------------------------------------------------------------
+; kc_irq - KCALL_IRQ: an interrupt line bound to a notification, which its
+; interrupts signal while it is masked until the driver acknowledges; or
+; that acknowledgement (l4.md L7, D10)
+;   In:       BP = the frame (DX the line's capability; AL IRQ_*; bind: SI a
+;             notification it may send on)
+;   Out:      the frame's status; the line unmasked
+;   Destroys: AX, BX, CX, SI, DI
+; ----------------------------------------------------------------------------
+kc_irq:
+        mov ax, [bp + FRAME_DX]
+        mov cl, CAP_IRQ
+        call cap_get
+        jc kc_done.cap
+        mov bx, [si + SH_OBJECT]        ; the line
+        mov al, [bp + FRAME_AX]
+        cmp al, IRQ_ACK
+        je .unmask
+        cmp al, IRQ_BIND
+        jne kc_done.arg
+        push bx
+        mov ax, [bp + FRAME_SI]
+        mov cl, CAP_NOTIFY
+        call cap_get
+        pop bx
+        jc kc_done.cap
+        test byte [si + SH_RIGHTS], RIGHT_SEND
+        jz kc_done.cap
+        mov ax, [si + SH_BADGE]
+        test ax, ax
+        jnz .bits
+        mov ax, 1
+.bits:
+        mov di, bx
+        shl di, 1
+        mov [irq_bits + di], ax
+        mov ax, [si + SH_OBJECT]
+        mov [irq_notify + di], ax
+.unmask:
+        call pic_unmask
+        jmp kc_done.ok
+
+; ----------------------------------------------------------------------------
+; kc_test - KCALL_TEST: the tests' hooks, in test builds only (KE_NOSYS in
+; the others): TEST_MOUSE_BYTE, the next byte a key script gave the mouse
+;   In:       BP = the frame (AL TEST_*)
+;   Out:      the frame's BL = the byte; or KE_EMPTY
+;   Destroys: AX, BX
+; ----------------------------------------------------------------------------
+kc_test:
+%ifdef WITH_TEST_HOOKS
+        cmp byte [bp + FRAME_AX], TEST_MOUSE_BYTE
+        jne kc_done.arg
+        call test_mouse_pop
+        jc kc_done.empty
+        mov [bp + FRAME_BX], al
+        jmp kc_done.ok
+%else
+        jmp kc_done.nosys
+%endif
 
 ; ----------------------------------------------------------------------------
 ; kc_segment - KCALL_SEGMENT: a segment capability's physical base and

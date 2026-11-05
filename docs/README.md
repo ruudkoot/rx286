@@ -8,8 +8,9 @@
 | [hardware.md](hardware.md) | the machine: ports, IRQs, DMA |
 | [protected-mode.md](protected-mode.md) | the GDT, the TSSs, the way into protected mode |
 | [interrupts.md](interrupts.md) | every vector and IRQ line, and what handles it |
-| [syscalls.md](syscalls.md) | the system calls |
-| [kernel-calls.md](kernel-calls.md) | the kernel's calls on capabilities: retype, copy, threads |
+| [syscalls.md](syscalls.md) | the system calls, and the OS server that serves them |
+| [kernel-calls.md](kernel-calls.md) | the kernel's calls: capabilities, IPC, interrupt lines; the root's start |
+| [drivers.md](drivers.md) | the drivers outside the kernel: the printer's, the mouse's |
 | [storage.md](storage.md) | the drives, their drivers, the printers, the sample disks |
 | [devices.md](devices.md) | the speaker, the game port, the serial mouse, the modem, SYS_WAIT |
 | [shell.md](shell.md) | the shell: its commands, drives and paths, its FAT12 library |

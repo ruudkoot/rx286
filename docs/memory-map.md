@@ -84,7 +84,9 @@ an entry of `MODULE_ENTRY_SIZE` bytes for each module, at most
 | `M_ENTRY` | its IP at a start |
 | `M_RING` | 1-3: its code's DPL, the ring it runs in |
 | `M_PRIORITY` | 0-7 |
-| `M_FLAGS` | `MF_FOREGROUND`: the program the keys are for (until roadmap l4.md L8) |
+| `M_FLAGS` | `MF_FOREGROUND`: the program the keys are for (until roadmap l4.md L8); `MF_DRIVER`: a driver (*docs/drivers.md*); `MF_IOPL`: a program that asks for IOPL (the tests of rings 1 and 2) |
+| `M_IRQ` | a driver's interrupt line, plus one (0: none) |
+| `M_SERVICE` | what a driver serves (0: nothing) |
 
 Each module's code and its data each start on a paragraph. The image ends
 with a paragraph whose last word is `KERNEL_END_MARK`. The loader refuses

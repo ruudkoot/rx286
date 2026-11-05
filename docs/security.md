@@ -28,6 +28,12 @@ kernel for a thread without a handler.
   invisible to it. LDTR always holds the program's LDT, never Bochs' live
   one at address 0 (roadmap X8). The GDT ends at 14Fh and the program's LDT
   at 7Fh, so any selector past either faults.
+- **Rings 1 and 2.** Only a thread of ring 1 gets IOPL, and only if its
+  starter asks: the drivers (roadmap l4.md D11). A thread of ring 2 that
+  asks gets 0, and its `IN`, `OUT` and `CLI` fault; ring 1's privileged
+  instructions (`HLT`, `LGDT` and the others) fault as ring 3's do; neither
+  can load the kernel's data, and no capability names the kernel's own
+  interrupt lines (`tests/rings`).
 - **The OS server** (roadmap l4.md L6) shares with each program only that
   program's transfer segment; its thread for the program makes the call
   with the program's buffer copied there, so the kernel's buffer checks see

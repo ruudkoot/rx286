@@ -48,11 +48,9 @@ timer_irq:
         call thread_tick                ; the running thread's time slice
         call timers_tick                ; the kernel's timers (ipc.asm)
         call fd_tick
-        call mouse_tick
-        call mouse_irq                  ; bytes whose interrupt was lost (an edge
-%ifdef WITH_MODEM                       ; can go, as on a shared line)
-        call modem_irq
-%endif
+%ifdef WITH_MODEM
+        call modem_irq                  ; bytes whose interrupt was lost (an edge
+%endif                                  ; can go, as on a shared line)
 %ifdef WITH_TEST_HOOKS
         call test_tick
 %endif

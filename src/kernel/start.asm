@@ -65,8 +65,6 @@ pm_start:
         call kbd_init
         call rtc_init
         call dma_init
-        call printer_init
-        call mouse_init
 %ifdef WITH_MODEM
         call modem_init
 %endif

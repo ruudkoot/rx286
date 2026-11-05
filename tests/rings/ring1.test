@@ -1,0 +1,26 @@
+# Attacks from ring 1 (roadmap l4.md L7, The attacks): the program in ring
+# 1 with IOPL 1, as a driver: it may touch ports, never the CPU's tables,
+# its privileged instructions, or the kernel's data. tests/programs/rings.asm.
+program: rings
+define: TEST_RING1
+---
+rx286, test build
+rings: IOPL
+rings: its IOPL: 1
+rings: hlt
+rx286: program fault #GP(0000) at 0005:{attacks.hlt}
+rings: lgdt
+rx286: program fault #GP(0000) at 0005:{attacks.lgdt}
+rings: lidt
+rx286: program fault #GP(0000) at 0005:{attacks.lidt}
+rings: lmsw
+rx286: program fault #GP(0000) at 0005:{attacks.lmsw.load}
+rings: clts
+rx286: program fault #GP(0000) at 0005:{attacks.clts}
+rings: ltr
+rx286: program fault #GP(0000) at 0005:{attacks.ltr.load}
+rings: lldt
+rx286: program fault #GP(0000) at 0005:{attacks.lldt.load}
+rings: kernel data
+rx286: program fault #GP(0010) at 0005:{attacks.kdata.load}
+rings: done

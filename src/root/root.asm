@@ -35,6 +35,7 @@ bits 16
 %include "program.inc"
 %include "kcalls.inc"
 %include "os.inc"
+%include "drivers.inc"
 
 RING                equ 2
 %define SLOT(n) ((n) * 8 + 4 + RING)    ; a slot of the root's, as a selector
@@ -54,7 +55,7 @@ P_STACK             equ 24                      ; copy of each, to put back)
 P_EP                equ 32                      ; a program's endpoint to the OS server,
 P_XFER              equ 40                      ; its transfer segment, and the OS
 P_SERVER            equ 48                      ; server's thread that serves it
-PROGRAMS_MAX        equ (ROOT_SLOTS - PROGRAM_SLOT) / 8
+PROGRAMS_MAX        equ (ROOT_SLOT_IRQ - PROGRAM_SLOT) / 8   ; below the lines' slots
 
 ; A module's slots in its own space, as selectors (any RPL names a slot)
 W_CODE              equ 0x04
@@ -63,6 +64,9 @@ W_STACK             equ 0x14
 W_EP                equ OS_SLOT_EP * 8 + 4
 W_XFER              equ OS_SLOT_XFER * 8 + 4
 W_MODULES           equ 3 * 8 + 4       ; the OS server's: the module table
+W_DRV_EP            equ DRV_SLOT_EP * 8 + 4     ; a driver's
+W_DRV_NOTIFY        equ DRV_SLOT_NOTIFY * 8 + 4
+W_DRV_IRQ           equ DRV_SLOT_IRQ * 8 + 4
 OS_SLOTS            equ 64              ; the OS server's space: 8n + k for program n
 OS_STACK            equ 512             ; each of its threads' part of its stack
 %ifdef TEST_CAPS
@@ -89,6 +93,7 @@ m_entry             dw 0
 m_ring              db 0
 m_priority          db 0
 m_flags             db 0
+m_irq               db 0
 s_code              dw 0                ; its slots of the root's (program_slots)
 s_template          dw 0
 s_space             dw 0
@@ -218,7 +223,8 @@ failed:
 
 ; ----------------------------------------------------------------------------
 ; program_ends - a program's endpoint to the OS server and its transfer
-; segment, if there is an OS server and the module is not it
+; segment, if there is an OS server and the module is neither it nor a
+; driver
 ;   In:       BX = the module's number
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, CX, DX, SI
@@ -228,6 +234,11 @@ program_ends:
         je .done
         cmp bx, [server]
         je .done
+        call module_entry
+        test byte [es:di + M_FLAGS], MF_DRIVER
+        push ds
+        pop es
+        jnz .done                       ; a driver: its endpoint comes with build
         push bx
         call program_slots
         mov dx, ARENA
@@ -270,6 +281,8 @@ build:
         mov [m_priority], al
         mov al, [es:di + M_FLAGS]
         mov [m_flags], al
+        mov al, [es:di + M_IRQ]
+        mov [m_irq], al
         push ds
         pop es
         call program_slots
@@ -302,7 +315,13 @@ build:
         mov si, [s_code]
         mov di, W_CODE
         call give
-        ; its data: a segment of its room, initialised from the module
+        ; its data: a segment of its room, initialised from the module; of
+        ; the root's ring at the most, so that the root can fill it
+        mov al, [m_ring]
+        cmp al, RING
+        jae .data_ring
+        mov al, RING
+.data_ring:
         mov si, [s_data]
         mov cx, [m_data_room]
         call new_segment
@@ -323,7 +342,8 @@ build:
         mov si, [s_data]
         mov di, W_DATA
         call give
-        ; its stack
+        ; its stack, of its ring
+        mov al, [m_ring]
         mov si, [s_stack]
         mov cx, [m_stack]
         call new_segment
@@ -333,6 +353,13 @@ build:
         mov bx, [module]
         cmp bx, [server]
         je .done                        ; its threads come with build_server
+        test byte [m_flags], MF_DRIVER
+        jz .program
+        call build_driver
+        mov si, FAULT_EP                ; a driver's faults: the root's
+        mov dx, [module]
+        jmp .faults
+.program:
         ; the OS server's endpoint and transfer segment; its faults to the
         ; OS server, or to the root if there is none
         mov si, FAULT_EP
@@ -368,10 +395,74 @@ build:
         mov cl, [m_priority]
         xor ch, ch
         test byte [m_flags], MF_FOREGROUND
+        jz .iopl
+        or ch, START_FOREGROUND
+.iopl:
+        test byte [m_flags], MF_DRIVER | MF_IOPL
         jz .start
-        mov ch, START_FOREGROUND
+        or ch, START_IOPL               ; the kernel grants it to ring 1 only
 .start:
         kcall KCALL_THREAD
+        must
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; build_driver - a driver's endpoint, which it serves; its notification,
+; bound to its thread, which its timer signals and its interrupt line (if it
+; has one) too, with DRV_IRQ_BIT (drivers.inc; l4.md L7)
+;   In:       the module's s_* and m_*
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+build_driver:
+        mov dx, ARENA
+        mov al, CAP_ENDPOINT
+        mov si, [s_ep]
+        kcall KCALL_RETYPE
+        must
+        mov si, [s_ep]
+        mov di, W_DRV_EP
+        call give
+        mov dx, ARENA                   ; (in its transfer segment's slot: it has none)
+        mov al, CAP_NOTIFY
+        mov si, [s_xfer]
+        kcall KCALL_RETYPE
+        must
+        mov si, [s_xfer]
+        mov di, W_DRV_NOTIFY
+        call give
+        mov dx, [s_thread]
+        mov al, THREAD_BIND
+        mov si, [s_xfer]
+        kcall KCALL_THREAD
+        must
+        mov bl, [m_irq]
+        test bl, bl
+        jz .done
+        dec bl                          ; the line
+        xor bh, bh
+        shl bx, 3
+        add bx, SLOT(ROOT_SLOT_IRQ)
+        push bx
+        mov si, bx
+        mov di, W_DRV_IRQ
+        call give
+        mov dx, MY_SPACE                ; bound with a copy badged DRV_IRQ_BIT
+        mov si, [s_xfer]
+        mov di, SCRATCH
+        mov al, COPY_MINT
+        mov bx, DRV_IRQ_BIT
+        xor cl, cl
+        kcall KCALL_COPY
+        must
+        pop dx
+        mov al, IRQ_BIND
+        mov si, SCRATCH
+        kcall KCALL_IRQ
+        must
+        mov dx, SCRATCH
+        kcall KCALL_DELETE
         must
 .done:
         ret
@@ -413,11 +504,46 @@ build_server:
         cmp bx, [server]
         je .next
         push bx
+        call module_entry
+        mov al, [es:di + M_FLAGS]
+        mov cl, [es:di + M_SERVICE]
+        push ds
+        pop es
+        test al, MF_DRIVER
+        jz .serve
+        call give_service
+        jmp .served
+.serve:
         call serve_program
+.served:
         pop bx
 .next:
         inc bx
         jmp .program
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; give_service - a driver's endpoint to the OS server, in the slot its
+; service names (OS_SLOT_SERVICE + service; drivers.inc)
+;   In:       BX = the driver's module number; CL = its service (0: none)
+;   Out:      nothing (stops on a failure)
+;   Destroys: AX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+give_service:
+        test cl, cl
+        jz .done
+        call program_slots
+        mov di, OS_SLOT_SERVICE
+        add di, cx
+        and di, 0xFF
+        shl di, 3
+        add di, 4
+        mov si, [s_ep]
+        mov dx, [server_space]
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
 .done:
         ret
 
@@ -522,16 +648,16 @@ fault_to:
         ret
 
 ; ----------------------------------------------------------------------------
-; new_segment - a data segment of the module's ring, from the memory for
-; segments, into a slot of the root's
-;   In:       SI = the slot; CX = bytes
+; new_segment - a data segment, from the memory for segments, into a slot
+; of the root's
+;   In:       SI = the slot; CX = bytes; AL = its DPL
 ;   Out:      nothing (stops on a failure)
 ;   Destroys: AX, BX, DX
 ; ----------------------------------------------------------------------------
 new_segment:
         mov dx, UNTYPED
-        mov bl, [m_ring]
-        shl bl, 5                       ; its DPL
+        mov bl, al
+        shl bl, 5
         or bl, ACC_DATA
         mov al, CAP_SEGMENT
         kcall KCALL_RETYPE
@@ -720,8 +846,14 @@ module_report:
         PRINT "h, sum "
         pop cx
         mov dx, [s_code]
+        verr dx                         ; a ring-1 module's code: not the root's
+        jnz .unread                     ; to read
         call segment_sum
         call print_hex16
+        jmp .data
+.unread:
+        PRINT "----"
+.data:
         PRINT ", data sum "
         pop cx
         mov dx, [s_template]

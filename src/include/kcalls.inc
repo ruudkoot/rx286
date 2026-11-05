@@ -32,11 +32,19 @@ KCALL_COPY          equ 8   ; DX the destination's space; SI the caller's slot; 
                             ;    destination slot; AL COPY_*; BX a badge (mint)
 KCALL_THREAD        equ 9   ; DX thread; AL THREAD_*; configure: SI space, BX IP, CX SP;
                             ;    start: CL priority, CH START_*
+KCALL_IRQ           equ 10  ; DX an interrupt line; AL IRQ_* (l4.md L7, D10)
 KCALL_TIMER         equ 11  ; DX notification; CX ticks: signalled once, CX ticks from now
 KCALL_SEGMENT       equ 12  ; DX segment -> DL:AX its physical base, CX its limit
 KCALL_DELETE        equ 13  ; DX a slot of the caller's: emptied
 KCALL_SAVE_REPLY    equ 14  ; SI an empty slot: the reply owed, as a capability to send on
+KCALL_TEST          equ 16  ; test builds: AL TEST_*, the tests' hooks
 KCALL_COUNT         equ 17
+
+IRQ_BIND            equ 0   ; KCALL_IRQ: SI a notification, which the line's interrupts
+                            ;    signal (its badge, or 1); the line unmasked
+IRQ_ACK             equ 1   ;    the driver has served an interrupt: the line unmasked
+TEST_MOUSE_BYTE     equ 0   ; KCALL_TEST: -> BL the next byte a key script gave the
+                            ;    mouse (its IRQ4 signalled), or KE_EMPTY
 
 ; Capability types (a slot's shadow entry)
 CAP_EMPTY           equ 0
@@ -91,6 +99,8 @@ ROOT_SLOT_SPACE     equ 6   ; its own space
 ROOT_SLOT_THREAD    equ 7   ; its own thread
 ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2 (n - 1),
                             ;    and its data as assembled, read-only, in the next
+ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
+                            ;    does not keep (its own are left empty)
 ROOT_SLOTS          equ 128 ; its space's slots
 
 KE_OK               equ 0

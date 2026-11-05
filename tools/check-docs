@@ -32,6 +32,7 @@ COVERED = {
     'syscalls.inc': 'docs/syscalls.md',
     'kcalls.inc': 'docs/kernel-calls.md',
     'os.inc': 'docs/syscalls.md',
+    'drivers.inc': 'docs/drivers.md',
     'disks.inc': 'docs/storage.md',
 }
 

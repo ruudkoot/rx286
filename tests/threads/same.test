@@ -13,6 +13,8 @@ A:\>echo two
 two
 A:\>
 rx286: thread root ran
+rx286: thread printer ran
+rx286: thread mouse ran
 rx286: thread program ran
 rx286: thread counter ran
 rx286: thread os ran

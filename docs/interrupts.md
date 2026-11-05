@@ -103,13 +103,21 @@ slave's; there are `IRQ_LINES` (16).
 |---|---|
 | `IRQ_TIMER` (0) | the timer driver: 50 ticks a second |
 | `IRQ_KEYBOARD` (1) | the keyboard driver |
-| 2 | the cascade: never masked, never delivered |
+| `IRQ_CASCADE` (2) | the cascade: never masked, never delivered |
 | 3 | the modem's driver, in release builds: bytes from COM2 (in debug and test builds COM2 is the log, polled, and the line has no driver) |
-| 4 | the mouse's driver: bytes from COM1 |
+| `IRQ_MOUSE` (4) | bound to the mouse driver, outside the kernel (*docs/drivers.md*): bytes from COM1 |
 | 6 | the diskette driver: a command has ended |
 | `IRQ_FPU` (13) | the 287's error: a fault of the program |
 | 14 | the fixed disk driver: a sector is ready, or written |
 | `IRQ_RTC` (8) and every other line | no driver: the first interrupt is reported ("unhandled IRQ n"), acknowledged, and the line masked. The printer ports' lines (7 and 5) stay quiet: the printer driver polls, with the ports' interrupts off |
+
+**A line bound to a driver outside the kernel** (`KCALL_IRQ`; roadmap l4.md
+L7, D10): at each interrupt the kernel masks the line, sends EOI and
+signals the driver's notification; the driver's `IRQ_ACK` unmasks it, and
+an interrupt that came meanwhile waits in the 8259A. The kernel keeps the
+timer's line, the cascade, the keyboard's, the disks', the 287's and (in
+release builds) the modem's; it gives the root a capability for every
+other line.
 
 - **At start** every line is unmasked, IRQ2 too: masking the cascade would cut
   off IRQ8-15 and with them the 287's errors.
@@ -132,7 +140,7 @@ where it waits, and only where its state is whole:
   thread waits until the next interrupt while other threads run, or the
   kernel halts on its own stack (`sti; hlt; cli`) if none is ready
   (*docs/architecture.md*, *Threads*).
-- **`write` and `print`, after each byte**: `sti; nop; cli`. `STI` takes
+- **`write`, after each byte**: `sti; nop; cli`. `STI` takes
   effect after the next instruction, so `sti; cli` would open nothing. A
   byte's work is at most one scroll or one clear of the screen; without the
   window, a `write` of 4,096 newlines, spaces or form feeds would keep IF
@@ -142,10 +150,11 @@ where it waits, and only where its state is whole:
   `kpoll` reads a port with a window (`sti; nop; cli`) after every 64 reads,
   and `ksleep` sleeps for a number of ticks (a motor coming up, a sound).
   Every wait has a limit in ticks.
-- **`SYS_WAIT`**: `kwait` until a key, the mouse's news or the modem's
-  bytes, or its limit (*docs/devices.md*).
+- **`SYS_WAIT`**: `kwait` until a key or the modem's bytes, or its limit
+  (*docs/devices.md*); the mouse's news is its driver's, which the OS
+  server asks once a tick (*docs/drivers.md*).
 
-After a window of `write`, `print`, `serial_write` or `kpoll`, a thread more
+After a window of `write`, `serial_write` or `kpoll`, a thread more
 urgent than the running one may run (`kpreempt`): the running thread's
 kernel context waits on its own kernel stack.
 

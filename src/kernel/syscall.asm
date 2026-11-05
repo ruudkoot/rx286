@@ -22,10 +22,10 @@ syscall_table:
         dw sys_time                     ; SYS_TIME
         dw sys_disk_read                ; SYS_DISK_READ
         dw sys_disk_write               ; SYS_DISK_WRITE
-        dw sys_print                    ; SYS_PRINT
+        dw sys_gone                     ; SYS_PRINT: the printer driver's (l4.md L7)
         dw sys_sound                    ; SYS_SOUND
         dw sys_joystick                 ; SYS_JOYSTICK
-        dw sys_mouse                    ; SYS_MOUSE
+        dw sys_gone                     ; SYS_MOUSE: the mouse driver's
         dw sys_serial_write             ; SYS_SERIAL_WRITE
         dw sys_serial_read              ; SYS_SERIAL_READ
         dw sys_wait                     ; SYS_WAIT
@@ -74,6 +74,17 @@ sys_fail:
         mov [bp + FRAME_AX], ax
         or word [bp + FRAME_FLAGS], FLAGS_CF
         ret
+
+; ----------------------------------------------------------------------------
+; sys_gone - a call whose device has left the kernel for a driver (roadmap
+; l4.md L7): the OS server makes it there
+;   In:       BP = the frame
+;   Out:      the frame's CF, AX = E_NOSYS
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+sys_gone:
+        mov ax, E_NOSYS
+        jmp sys_fail
 
 ; ----------------------------------------------------------------------------
 ; sys_exit - SYS_EXIT: the program starts again
@@ -311,13 +322,8 @@ wait_ready:
         cmp al, [kbd_tail]
         je .mouse
         or ah, WAIT_KEY
-.mouse:
-        test dl, WAIT_MOUSE
-        jz .serial
-        cmp byte [mouse_changed], 0
-        je .serial
-        or ah, WAIT_MOUSE
-.serial:
+.mouse:                                 ; (the mouse is the mouse driver's: the
+.serial:                                ; OS server waits for it, l4.md L7)
 %ifdef WITH_MODEM
         test dl, WAIT_SERIAL
         jz .done

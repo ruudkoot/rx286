@@ -43,6 +43,8 @@ IRQ_LINES           equ 16          ; two 8259As
 ; The IRQ lines with a driver.
 IRQ_TIMER           equ 0
 IRQ_KEYBOARD        equ 1
+IRQ_CASCADE         equ 2           ; never masked
+IRQ_MOUSE           equ 4           ; COM1: the mouse driver's (l4.md L7)
 IRQ_RTC             equ 8
 IRQ_FPU             equ 13
 

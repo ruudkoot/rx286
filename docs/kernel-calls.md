@@ -70,10 +70,12 @@ milestone.
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots | the object made, zeroed, its capability in the slot |
 | 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; BX a badge (mint) | the capability there |
 | 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint) or `THREAD_RESTART` | |
+| 10 | `KCALL_IRQ` | DX an interrupt line; AL `IRQ_BIND` (SI a notification) or `IRQ_ACK` | the line unmasked |
 | 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 or more | |
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
 | 14 | `KCALL_SAVE_REPLY` | SI an empty slot of the caller's | the reply owed, as a `CAP_REPLY` there |
+| 16 | `KCALL_TEST` | test builds only: AL `TEST_MOUSE_BYTE` | BL the next byte a key script gave the mouse, or `KE_EMPTY` |
 
 ### Retype
 
@@ -192,6 +194,16 @@ for the reply, and the reply restarts it at the IP in its BX, with fresh
 registers and a fresh stack; until one comes it waits. A thread without a
 fault endpoint is reported and restarted by the kernel, as before.
 
+### Interrupt lines
+
+A `CAP_IRQ` names an interrupt line (roadmap l4.md L7, D10). `IRQ_BIND`
+binds it to a notification the caller may send on: from then on each
+interrupt of the line masks it, is acknowledged at the 8259A, and signals
+the notification with that capability's badge (1 if none). `IRQ_ACK`, once
+the driver has served the device, unmasks the line; an interrupt that came
+meanwhile waits in the 8259A. *docs/drivers.md* shows how the drivers use
+them.
+
 ### Delete
 
 `KCALL_DELETE` empties a slot of the caller's. What it named lives on:
@@ -227,6 +239,7 @@ has `ROOT_SLOTS` slots:
 | 6 | `ROOT_SLOT_SPACE` | its own space |
 | 7 | `ROOT_SLOT_THREAD` | its own thread |
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
+| 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
 
 The root (`src/root/root.asm`) builds a space for every other module: the
 module's code copied in as slot 0; a data segment of its room, initialised

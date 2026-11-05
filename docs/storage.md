@@ -83,7 +83,9 @@ the disk. A sector is tried twice; a drive that does not answer fails with
 
 ## The printers
 
-LPT1 at 378h and LPT2 at 278h (`printer.asm`), both reset (-INIT) at start.
+LPT1 at 378h and LPT2 at 278h, driven by the printer driver in ring 1
+(`src/drivers/printer.asm`, *docs/drivers.md*; roadmap l4.md L7), which
+resets both (-INIT) at its start and looks at BUSY once a tick.
 For each byte, as IBM's BIOS does: wait while BUSY, put the byte on the data
 lines, pulse STROBE. The port's interrupt stays off. A printer that stays
 busy for two seconds ends the call: `E_PAPER` if it says it is out of paper

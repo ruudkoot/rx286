@@ -65,22 +65,27 @@ M_RING              equ 22          ; 1-3: its code's DPL
 M_PRIORITY          equ 23          ; 0-7
 M_FLAGS             equ 24
 MF_FOREGROUND       equ 1           ; the program the keys are for (until l4.md L8)
+MF_DRIVER           equ 2           ; a driver: IOPL 1, an endpoint, a notification (L7)
+MF_IOPL             equ 4           ; a program that asks for IOPL (tests of rings 1 and 2)
+M_IRQ               equ 25          ; a driver's interrupt line, plus one (0: none)
+M_SERVICE           equ 26          ; what a driver serves (drivers.inc; 0: nothing)
 ROOT_NAME           equ 'ro'        ; the first module's name starts "root"
 ROOT_NAME_2         equ 'ot'
 
 ; Below the image: the boot code's memory, free once the kernel runs. The
 ; kernel's data segment, SEL_KDATA, starts at KDATA_BASE: its 64 KB reach
-; the arena, the kernel's variables and the module table.
-KDATA_BASE          equ 0x07000
-KSTACK_PHYS         equ 0x07000     ; the kernel's own stack: the start's, then the idle loop's
-KSTACK_SIZE         equ 0x0400
-DFSTACK_PHYS        equ 0x07400     ; the double-fault task's stack
+; the arena, the kernel's variables and the module table, just.
+DFSTACK_PHYS        equ 0x05A00     ; the double-fault task's stack
 DFSTACK_SIZE        equ 0x0200
+KSTACK_PHYS         equ 0x05C00     ; the kernel's own stack: the start's, then the idle loop's
+KSTACK_SIZE         equ 0x0400
+KDATA_BASE          equ 0x06300
 ; The arena (roadmap l4.md D7, L3): the kernel's objects - spaces, threads,
-; endpoints, notifications - reached with DS = SEL_KDATA. Only the kernel
-; maps it: it is given out as untyped memory, never as a segment.
-ARENA_PHYS          equ 0x08000
-ARENA_SIZE          equ 0x8000
+; endpoints, notifications - reached with DS = SEL_KDATA, never at its
+; offset 0 (an object's address 0 means none). Only the kernel maps it: it
+; is given out as untyped memory, never as a segment.
+ARENA_PHYS          equ 0x06400
+ARENA_SIZE          equ 0x9C00
 ; Memory for programs' segments, given out as untyped (l4.md L3)
 UMEM_PHYS           equ 0x30000
 UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h
@@ -98,8 +103,11 @@ ARENA_OFF           equ ARENA_PHYS - KDATA_BASE         ; the arena
 %if KERNEL_PHYS + IMAGE_MAX > UMEM_PHYS
   %error "layout.inc: the image's room overlaps the memory for programs"
 %endif
-%if DFSTACK_PHYS + DFSTACK_SIZE > ARENA_PHYS || ARENA_PHYS + ARENA_SIZE > KERNEL_PHYS
-  %error "layout.inc: the kernel's stacks, the arena and the image overlap"
+%if DFSTACK_PHYS + DFSTACK_SIZE > KSTACK_PHYS || KSTACK_PHYS + KSTACK_SIZE > ARENA_PHYS
+  %error "layout.inc: the kernel's stacks and the arena overlap"
+%endif
+%if ARENA_PHYS + ARENA_SIZE > KERNEL_PHYS || ARENA_PHYS <= KDATA_BASE
+  %error "layout.inc: the arena must lie between KDATA_BASE and the image"
 %endif
 %if MODULE_TABLE_VOFF + MODULE_TABLE_SIZE > 0x10000
   %error "layout.inc: the module table must lie within the kernel data segment's 64 KB"
