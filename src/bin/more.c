@@ -14,8 +14,9 @@
 static char buf[512];
 static int lines, tty = -1;
 
-/* page - a descriptor's bytes, stopping at each page: 0, or 1 if quit */
-static int page(int fd)
+/* page - a descriptor's bytes, stopping at each page: 0, 1 if quit, or -1
+ * on an error, said with the file's name */
+static int page(int fd, const char *name)
 {
     char key;
     int n, k, start;
@@ -38,24 +39,32 @@ static int page(int fd)
         }
         write(1, buf + start, (size_t)(n - start));     /* the rest of what was read */
     }
+    if (n < 0) {
+        perror(name);
+        return -1;
+    }
     return 0;
 }
 
 /* main - each file, or the standard input */
 int main(int argc, char **argv)
 {
-    int k, fd;
+    int k, fd, got, status = 0;
 
     if (argc < 2)
-        return page(0) ? 0 : 0;
+        return page(0, "more") < 0;
     for (k = 1; k < argc; k++) {
         if ((fd = open(argv[k], O_RDONLY)) < 0) {
             perror(argv[k]);
+            status = 1;
             continue;
         }
-        if (page(fd))
-            break;
+        got = page(fd, argv[k]);
         close(fd);
+        if (got > 0)
+            break;
+        if (got < 0)
+            status = 1;
     }
-    return 0;
+    return status;
 }

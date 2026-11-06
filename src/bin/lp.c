@@ -11,16 +11,21 @@
 
 static char buf[512];
 
-/* print - a descriptor's bytes to the printer: 0, or 1 on an error */
-static int print(int fd, int printer, const char *what)
+/* print - a descriptor's bytes to the printer: 0, or 1 on an error, said
+ * with the printer's name or the file's */
+static int print(int fd, const char *name, int printer, const char *device)
 {
     int n;
 
     while ((n = read(fd, buf, sizeof buf)) > 0)
         if (write(printer, buf, (size_t)n) != n) {
-            perror(what);
+            perror(device);
             return 1;
         }
+    if (n < 0) {
+        perror(name);
+        return 1;
+    }
     return 0;
 }
 
@@ -39,14 +44,14 @@ int main(int argc, char **argv)
         return 1;
     }
     if (k == argc)
-        return print(0, printer, device);
+        return print(0, "lp", printer, device);
     for (; k < argc; k++) {
         if ((fd = open(argv[k], O_RDONLY)) < 0) {
             perror(argv[k]);
             status = 1;
             continue;
         }
-        status |= print(fd, printer, device);
+        status |= print(fd, argv[k], printer, device);
         close(fd);
     }
     return status;

@@ -1,0 +1,18 @@
+# What the drives refuse, in strerror's words (roadmap os-server.md P9): a
+# missing name, a directory read as a file, a file as a directory, a name
+# FAT cannot hold, one past 8.3, a drive that is not there.
+program: sh
+emulators: bochs mame
+keys: ls nothing; cat c:/docs; ls c:/readme.txt/x\n
+keys: cat a:bad*name; cat a:toolongname.txt; ls /q\n
+---
+rx286, test build
+/a$ ls nothing; cat c:/docs; ls c:/readme.txt/x
+nothing: no such file or directory
+c:/docs: is a directory
+c:/readme.txt/x: not a directory
+/a$ cat a:bad*name; cat a:toolongname.txt; ls /q
+a:bad*name: invalid argument
+a:toolongname.txt: name too long
+/q: no such file or directory
+/a$

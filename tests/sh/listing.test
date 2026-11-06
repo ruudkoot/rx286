@@ -1,0 +1,90 @@
+# ls -l on every drive (roadmap os-server.md P9): the root, a subdirectory,
+# one file, and a directory of two clusters (B:\MANY: 42 entries of 32
+# bytes, 1 KB clusters); the server's own /, /dev and /z.
+program: sh
+emulators: bochs mame
+keys: ls -l /a; ls -l b:/; ls -l c:/docs C:/DOCS/HELLO.TXT; ls -l /d\n
+keys: ls -l b:/many\nls / /dev /z\n
+---
+rx286, test build
+/a$ ls -l /a; ls -l b:/; ls -l c:/docs C:/DOCS/HELLO.TXT; ls -l /d
+-rw-r--r--   {image_size} KERNEL.BIN
+-rw-r--r--       79 README.TXT
+-rw-r--r--     3136 FRAG.TXT
+-rw-r--r--       50 PAD.TXT
+drwxr-xr-x        0 MANY
+c:/docs:
+-rw-r--r--       21 HELLO.TXT
+-rw-r--r--      161 PRINTME.TXT
+-rw-r--r--       21 C:/DOCS/HELLO.TXT
+-rw-r--r--      142 README.TXT
+drwxr-xr-x        0 GAMES
+/a$ ls -l b:/many
+-rw-r--r--       29 FILE01.TXT
+-rw-r--r--       29 FILE02.TXT
+-rw-r--r--       29 FILE03.TXT
+-rw-r--r--       29 FILE04.TXT
+-rw-r--r--       29 FILE05.TXT
+-rw-r--r--       29 FILE06.TXT
+-rw-r--r--       29 FILE07.TXT
+-rw-r--r--       29 FILE08.TXT
+-rw-r--r--       29 FILE09.TXT
+-rw-r--r--       29 FILE10.TXT
+-rw-r--r--       29 FILE11.TXT
+-rw-r--r--       29 FILE12.TXT
+-rw-r--r--       29 FILE13.TXT
+-rw-r--r--       29 FILE14.TXT
+-rw-r--r--       29 FILE15.TXT
+-rw-r--r--       29 FILE16.TXT
+-rw-r--r--       29 FILE17.TXT
+-rw-r--r--       29 FILE18.TXT
+-rw-r--r--       29 FILE19.TXT
+-rw-r--r--       29 FILE20.TXT
+-rw-r--r--       29 FILE21.TXT
+-rw-r--r--       29 FILE22.TXT
+-rw-r--r--       29 FILE23.TXT
+-rw-r--r--       29 FILE24.TXT
+-rw-r--r--       29 FILE25.TXT
+-rw-r--r--       29 FILE26.TXT
+-rw-r--r--       29 FILE27.TXT
+-rw-r--r--       29 FILE28.TXT
+-rw-r--r--       29 FILE29.TXT
+-rw-r--r--       29 FILE30.TXT
+-rw-r--r--       29 FILE31.TXT
+-rw-r--r--       29 FILE32.TXT
+-rw-r--r--       29 FILE33.TXT
+-rw-r--r--       29 FILE34.TXT
+-rw-r--r--       29 FILE35.TXT
+-rw-r--r--       29 FILE36.TXT
+-rw-r--r--       29 FILE37.TXT
+-rw-r--r--       29 FILE38.TXT
+-rw-r--r--       29 FILE39.TXT
+-rw-r--r--       29 FILE40.TXT
+/a$ ls / /dev /z
+/:
+a
+b
+c
+d
+dev
+z
+/dev:
+null
+tty
+lpt1
+lpt2
+/z:
+init
+sh
+echo
+cat
+ls
+cp
+mv
+rm
+mkdir
+rmdir
+wc
+lp
+more
+/a$

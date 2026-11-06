@@ -30,7 +30,7 @@ files: appended to (18): 18
 files: mkdir /b/dir (0): 0
 files: mkdir it again (-1, EEXIST 17): -1, errno 17
 files: chdir to it (0): 0
-files: getcwd: /b/dir
+files: getcwd: /b/DIR
 files: . holds: . .. INNER.TXT
 files: rmdir it, not empty (-1, ENOTEMPTY 39): -1, errno 39
 files: rename the file out of it (0): 0

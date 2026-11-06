@@ -4,6 +4,7 @@
  * (roadmap os-server.md P9).
  * ============================================================================ */
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include "fcntl.h"
@@ -21,14 +22,14 @@ static const char *target(const char *from, const char *to, char *room)
 
     if (stat(to, &st) < 0 || !S_ISDIR(st.st_mode))
         return to;
-    snprintf(room, 64, "%s/%s", to, name ? name + 1 : from);
+    snprintf(room, PATH_MAX, "%s/%s", to, name ? name + 1 : from);
     return room;
 }
 
 /* main - cp FROM TO */
 int main(int argc, char **argv)
 {
-    char room[64];
+    char room[PATH_MAX];
     int in, out, n;
 
     if (argc != 3) {
@@ -49,10 +50,14 @@ int main(int argc, char **argv)
             perror(argv[2]);
             return 1;
         }
+    if (n < 0) {
+        perror(argv[1]);
+        return 1;
+    }
     close(in);
     if (close(out) < 0) {
         perror(argv[2]);
         return 1;
     }
-    return n < 0;
+    return 0;
 }

@@ -1,0 +1,25 @@
+# The line editor (roadmap os-server.md P9): Backspace, Up for the last
+# line, a line of blanks, a command not found, and a line longer than the
+# editor takes (127 characters). On all three emulators: DOSBox-X cannot
+# read the drives (docs/emulators.md), so its shell starts in / and finds
+# C's /c/bin an input/output error along PATH.
+program: sh
+keys: cd /\necho abX\b\n{up}\n   \nfoo bar\n
+keys: echo 1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890\n
+---
+rx286, test build
+@bochs /a$ cd /
+@mame /a$ cd /
+@dosbox-x /$ cd /
+/$ echo ab
+ab
+/$ echo ab
+ab
+/$
+/$ foo bar
+@bochs sh: foo: no such file or directory
+@mame sh: foo: no such file or directory
+@dosbox-x sh: foo: input/output error
+/$ echo 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+/$

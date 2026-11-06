@@ -1,0 +1,14 @@
+# A drive without a diskette, a fixed disk without a partition (roadmap
+# os-server.md P9): errors, never a hang.
+program: sh
+media: B ejected
+media: D blank
+emulators: bochs mame
+keys: ls /b; ls /d; echo x > /b/x.txt\n
+---
+rx286, test build
+/a$ ls /b; ls /d; echo x > /b/x.txt
+/b: input/output error
+/d: input/output error
+sh: /b/x.txt: input/output error
+/a$

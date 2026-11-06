@@ -135,6 +135,6 @@ DE_NAME             equ 2       ; NAME.EXT and its zero
 DE_NAME_SIZE        equ 14
 DE_SIZE             equ 16
 PX_ARG_MAX          equ 4096    ; ARG_MAX: argv's and environ's bytes, and their pointers
-PX_PATH_MAX         equ 64      ; a path's bytes for execve and posix_spawn, its zero too
+PX_PATH_MAX         equ 80      ; a path's bytes, its zero too: DOS's 64 behind "/b" fit
 
 %endif

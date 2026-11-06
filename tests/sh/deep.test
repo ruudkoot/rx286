@@ -1,0 +1,20 @@
+# Deep paths (roadmap os-server.md P9; rxlib.DEEP_PATH): every path DOS
+# reaches, its 64 characters behind "/b", and the one of 66 beyond DOS's
+# reach; a path of PX_PATH_MAX (80) bytes, its zero too, is one too long.
+program: sh
+media: B deep
+emulators: bochs mame
+keys: cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd\n
+keys: cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..\n
+keys: ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy\n
+---
+rx286, test build
+/a$ cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/ABCDEFG.X
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/ABCDEFGH.XY
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy
+fits
+./././././././abcdefgh.xy: name too long
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$

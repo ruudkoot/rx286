@@ -1,0 +1,14 @@
+# A FAT whose chain leaves the volume (roadmap os-server.md P9): B:\MANY's
+# first cluster points to a reserved value. ls lists the first cluster,
+# then stops with an error.
+program: sh
+media: B damaged
+emulators: bochs mame
+keys: ls b:/many\n
+match: contains
+---
+/a$ ls b:/many
+FILE01.TXT
+FILE30.TXT
+b:/many: input/output error
+/a$

@@ -47,7 +47,9 @@ no transfer segment.
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
 
 The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts
-them all. A path has `PX_PATH_MAX` bytes at most, its zero too; a program's
+them all. A path has `PX_PATH_MAX` (80) bytes at most, its zero too, so
+that every path DOS reaches, its 64 characters, fits behind its drive's
+`/b`; `limits.h` calls it `PATH_MAX`. A program's
 names a file of `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and
 `environ` together, their pointers too, have `PX_ARG_MAX` bytes at most
 (`E2BIG`).
@@ -89,7 +91,9 @@ programs and `/dev` the devices (`null`, `tty`, the console, and `lpt1`,
 path is made absolute against the process's current directory,
 which starts at its parent's (`/` for init), and its "." and ".." taken out
 before it is followed; within a volume a name is 8.3, matched in any case
-and kept upper case. A process has `OPEN_MAX` (20) descriptors, each naming
+and kept upper case. The current directory keeps each name in its own
+case, as the server or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A
+process has `OPEN_MAX` (20) descriptors, each naming
 an open file description of the server's (32 in all): its kind, its flags,
 its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 `FD_CLOEXEC`. init's descriptors 0 to 2 are `/dev/tty`.
@@ -150,7 +154,7 @@ its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
 `dup`, `dup2`, `unlink`, `rmdir`, `chdir`, `getcwd`, `fsync`, `brk`,
 `sbrk`), `fcntl.h` (`open`, `fcntl`), `sys/stat.h` (`stat`, `fstat`,
 `mkdir`), `dirent.h`, `stdio.h`'s `rename`, `sys/wait.h`, `spawn.h`,
-`signal.h` and `errno.h`; `stdio.h`'s `printf`,
+`signal.h`, `errno.h` and `limits.h`; `stdio.h`'s `printf`,
 `puts` and `putchar`, unbuffered, on descriptor 1, and `perror`;
 `string.h`'s `strerror`; `stdlib.h`'s `malloc` and `free` on `sbrk`,
 `exit`, `getenv` and `atoi`; `execvp` and `posix_spawnp` (P8). `environ` is the crt's (`src/lib/crt/start.c`).
@@ -218,7 +222,7 @@ The commands are programs of `/z`, in C (`src/bin/`):
 |---|---|
 | `echo` | its arguments, a space between, then a new line |
 | `cat` | each file, or descriptor 0, to descriptor 1 |
-| `ls` | a directory's names, or a file's own, one a line; names that start with "." left out; a header before each when there are several |
+| `ls` | a directory's names, or a file's own, one a line; names that start with "." left out; a header before each directory when there are several; `-l` with each its kind and permissions and its bytes (`drwxr-xr-x        0 DOCS`); a damaged directory's names up to the damage, then its error |
 | `cp` | a file to a file, or into a directory |
 | `mv` | `rename`: within a drive (across drives: "across drives") |
 | `rm`, `mkdir`, `rmdir` | each path |
@@ -226,5 +230,5 @@ The commands are programs of `/z`, in C (`src/bin/`):
 | `lp` | each file, or descriptor 0, to `/dev/lpt1`; `-d lpt2` to the other |
 | `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, `q` to stop |
 
-A command's error is its name, the path and `strerror`'s text, on
-descriptor 2, and status 1.
+A command's error is the path and `strerror`'s text, on descriptor 2
+("c:/docs: is a directory"), and status 1; a read's error too.

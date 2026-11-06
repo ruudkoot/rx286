@@ -15,6 +15,7 @@
  * Paths may name a drive DOS's way: "c:/docs" is "/c/docs".
  * ============================================================================ */
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -354,7 +355,7 @@ static int redirect(struct command *c)
 /* builtin - a built-in command, run: its status; -1 if it is none */
 static int builtin(struct command *c)
 {
-    static char cwd[64];
+    static char cwd[PATH_MAX];
     char line[96];
     const char *name = c->argv[0], *path;
     int k;
@@ -651,7 +652,7 @@ static void erase(unsigned n)
  * end */
 static int line_read(char *line)
 {
-    char in[8], cwd[64];
+    char in[8], cwd[PATH_MAX];
     unsigned n = 0, at = (unsigned)history_count;
     int got, k;
 

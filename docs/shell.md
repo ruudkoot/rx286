@@ -1,5 +1,9 @@
 # The shell
 
+This is the shell in assembly, today's. The shell in C, a process, is in
+*docs/processes.md* (roadmap os-server.md P9). This one stays, and is the
+program of `make run`, until its commands are programs too (P12).
+
 rx286's one program (`src/userland/`): a line editor, a table of commands,
 and DOS's look for drives and files (`roadmaps/storage.md` D8). It reaches
 the kernel only through the system calls (*docs/syscalls.md*), like any

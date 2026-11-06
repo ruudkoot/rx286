@@ -4,6 +4,7 @@
  * directory under its own name. Across drives the server refuses it.
  * ============================================================================ */
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include "unistd.h"
@@ -13,7 +14,7 @@
 int main(int argc, char **argv)
 {
     struct stat st;
-    char room[64];
+    char room[PATH_MAX];
     const char *name, *to;
 
     if (argc != 3) {

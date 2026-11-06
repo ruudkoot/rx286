@@ -156,12 +156,27 @@ static char lower(char c)
     return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
 }
 
+/* path_text - a path's text from its parts: "/", then a part a "/" */
+static void path_text(struct path *p)
+{
+    unsigned k, n;
+
+    p->text[0] = '/';
+    p->text[1] = 0;
+    for (k = 0, n = 1; k < p->parts; k++) {
+        if (k)
+            p->text[n++] = '/';
+        strcpy(p->text + n, p->part[k]);
+        n += strlen(p->part[k]);
+    }
+}
+
 /* path_make - a path made absolute against a directory, "." and ".." taken
  * out: 0 or the error */
 static int path_make(const char *cwd, const char *in, struct path *p)
 {
     char *s, *e;
-    unsigned k, n;
+    unsigned n;
 
     if (in[0] == 0)
         return ENOENT;
@@ -203,14 +218,7 @@ split:
             return ENAMETOOLONG;
         p->part[p->parts++] = s;
     }
-    p->text[0] = '/';
-    p->text[1] = 0;
-    for (k = 0, n = 1; k < p->parts; k++) {     /* "/a/docs": "/", then a part a "/" */
-        if (k)
-            p->text[n++] = '/';
-        strcpy(p->text + n, p->part[k]);
-        n += strlen(p->part[k]);
-    }
+    path_text(p);
     return 0;
 }
 
@@ -317,7 +325,8 @@ static int archive_entry(const char *name)
 }
 
 /* lookup - the node a path names; on a volume the node may be absent, its
- * directory there (exists 0): 0 or the error */
+ * directory there (exists 0): 0 or the error. Each name found is written in
+ * its own case, as the root or FAT has it (path_text puts them together) */
 static int lookup(struct path *p, struct node *n)
 {
     rx_u16 error;
@@ -331,11 +340,13 @@ static int lookup(struct path *p, struct node *n)
         return 0;
     }
     if (same(p->part[0], "dev")) {
+        strcpy(p->part[0], "dev");
         n->kind = K_DEVDIR;
         if (p->parts == 1)
             return 0;
         for (k = 0; k < 4; k++)
             if (p->parts == 2 && same(p->part[1], dev_names[k])) {
+                strcpy(p->part[1], dev_names[k]);
                 n->kind = k == 0 ? K_NULL : k == 1 ? K_TTY : K_LPT;
                 n->unit = (rx_u16)(k - 2);
                 return 0;
@@ -343,6 +354,7 @@ static int lookup(struct path *p, struct node *n)
         return ENOENT;
     }
     if (same(p->part[0], "z")) {
+        p->part[0][0] = 'z';
         n->kind = K_ZDIR;
         if (p->parts == 1)
             return 0;
@@ -354,6 +366,7 @@ static int lookup(struct path *p, struct node *n)
     }
     if (strlen(p->part[0]) != 1 || (d = lower(p->part[0][0]) - 'a') < 0 || d >= DRIVES)
         return ENOENT;
+    p->part[0][0] = (char)('a' + d);
     n->kind = K_DIR;
     n->drive = (rx_u8)d;
     if ((error = vol_mount(&vols[d], (unsigned)d)) != 0)
@@ -373,6 +386,7 @@ static int lookup(struct path *p, struct node *n)
         }
         if (error)
             return errno_of(error);
+        name_text(n->entry, p->part[k]);        /* as FAT keeps it: never longer */
         n->kind = n->entry[DIR_ATTRIBUTES] & DIR_ATTR_DIRECTORY ? K_DIR : K_FILE;
         n->first = w16(n->entry + DIR_FIRST_CLUSTER);
     }
@@ -1594,6 +1608,7 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = n.exists ? ENOTDIR : ENOENT;
             return -1;
         }
+        path_text(&p);                  /* each name in its own case: "/c/DOCS" */
         strcpy(files_of[i].cwd, p.text);
         return 0;
     case PX_GETCWD:

@@ -127,7 +127,7 @@ What it rests on:
 | P6 | Processes: fork, exec, exit, wait | done (2026-11-06, branch `os-server`) |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
-| P9 | Pipes and the shell in C | steps 1 and 2 of 3 done (2026-11-06, branch `os-server`) |
+| P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | not started |
 | P11 | Terminals, the eight virtual terminals, job control | not started |
 | P12 | The commands and the devices | not started |
@@ -2299,6 +2299,29 @@ The largest change to the kernel since l4.md, in three steps, each with every su
     that reads the drives runs there. That is also true of today's `tests/drives`.
   - **Left for step 3:** today's 34 tests of the assembly shell rewritten for this one,
     `PROGRAM=shell` made this shell, and the assembly shell deleted.
+* **Step 3 done (2026-11-06): the drives through the shell in C; the old shell stays.**
+  - **The old shell stays until P12.** 23 of its 34 tests need it as it is. 17 use
+    commands that P12 makes programs: `ps`, `kill`, `start`, `crash`, `fpu`, `keys`, `mem`,
+    `spin`, `uptime`, `date`, `clear`, `help` and the devices'. 6 use its place as the
+    program the root builds (`tests/threads`, `tests/root`'s fault and modules tests).
+    Deleting it now would drop those tests until P12. So it stays,
+    and stays `make run`'s program, until its commands are programs. Its deletion, and the
+    move of its remaining tests to the shell in C, are P12's now.
+  - **The tests:** `tests/drives` and `tests/shell`'s editor and exit tests have their
+    counterparts for the shell in C in `tests/sh`: `cd`, `ls -l` on every drive, `cat`
+    through the FAT, every path DOS reaches, a damaged FAT, missing media, the refusals, the
+    editor, `exit`. They pass on Bochs and MAME, and the editor's on DOSBox-X, which cannot
+    read the drives. The old tests stay with the old shell, so the old calls
+    (`SYS_FIND` to `SYS_FREE`) keep their tests until P14 deletes them.
+  - **What the counterparts found:**
+    - `PX_PATH_MAX` was 64, its zero too. That was DOS's limit without the drive, so a path
+      DOS reaches at 64 characters, 66 behind `/b`, was refused. It is 80 now, and
+      `limits.h` calls it `PATH_MAX`.
+    - The current directory kept each name as typed: `/D`, `/c/docs`. `lookup` now writes
+      each name it finds in its own case, as the server or FAT has it: `/d`, `/c/DOCS`.
+    - The commands left a read's error unsaid: `cat c:/docs` printed nothing. `ls` stopped
+      at a damaged FAT as at a directory's end. Each now says the error (`EISDIR`, `EIO`).
+  - **`ls -l`:** each name with its kind and permissions and its bytes.
 
 ### P10. Signals (M, about 1,500)
 
@@ -2339,8 +2362,14 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - **The daemons:** the clock and the counter as daemons on `/dev/status`.
   - **`poll`,** for `term`.
   - **The tests:** `tests/devices` rewritten.
+  - **The old shell goes** (moved here from P9): the assembly shell deleted, `PROGRAM=shell`
+    made the shell in C, and the tests that still run the old shell (`tests/shell`,
+    `tests/drives`, `tests/devices`, `tests/threads`, `tests/demo`, `tests/kernel`'s stretch
+    tests, `tests/root`'s fault and modules tests) rewritten for it or deleted where
+    `tests/sh` already has their counterparts.
 * **Done when:** every one of today's 24 commands has its program or built-in (`help` a
-  built-in), with its test. `start` goes: a daemon is run again by name.
+  built-in), with its test. `start` goes: a daemon is run again by name. No test runs the
+  assembly shell, and it is gone.
 * **Decisions:** D13, D14.
 
 ### P13. POSIX threads (M, about 1,200)
