@@ -5,32 +5,37 @@ processes, fork and exec, files that can be written, pipes, signals, terminals a
 the manner of POSIX.** The kernel and the drivers stay in assembly. The division of labour is
 the owner's:
 
-- **the kernel (ring 0)** switches threads and knows little of them. It gains six small
-  changes and no notion of a process:
+- **the kernel (ring 0)** switches threads and knows little of them. It gains no notion of a
+  process, but more than small changes, since the owner chose room over thrift (D4, D9):
   - a call that turns a data segment into code;
   - calls that stop a thread with its registers kept, and read and write them;
-  - larger pools of spaces and threads;
+  - larger pools of spaces;
   - a retype that zeroes in pieces;
-  - a faster delete;
+  - a list of each capability's children, for a delete that no longer looks everywhere;
+  - one kernel stack instead of one a thread;
+  - its objects anywhere in memory, extended memory included, instead of a 45 KB arena;
   - a panic screen that shows itself on any terminal.
 - **the root (ring 2), now in C,** keeps the memory, the spaces and the threads. It builds,
   copies and destroys them when the OS server asks.
 - **the OS server (ring 2), now in C,** knows the processes, process groups and sessions,
-  the files on writable FAT12, the pipes, the signals and the terminals. It has four virtual
-  terminals on the EGA's text pages, Alt+F1 to Alt+F4, each with its own shell.
+  the files on writable FAT12, the pipes, the signals and the terminals. It has a thread for
+  each process, as today. It has eight virtual terminals on the EGA's text pages, Alt+F1 to
+  Alt+F8, each with its own shell.
 - **programs (ring 3)** are C, built against rx286's own crt and libc. They come from disk or
   from the boot image, and reach the OS server through `lib/os`, a POSIX-first library. The
-  kernel's own calls are in `lib/rx286`. The shell becomes POSIX-like, with drive letters,
-  redirection, pipes and jobs. Today's commands become programs of their own.
+  kernel's own calls are in `lib/rx286`. The shell becomes POSIX-like, with one tree of
+  files (`/c/docs`, the drives under `/`), redirection, pipes and jobs. Today's commands
+  become programs of their own.
 
-The plan has fourteen milestones (P1-P14). They change the system in place, and today's system
+The plan has fifteen milestones (P1-P15). They change the system in place, and today's system
 calls keep working until the last of them, so every suite stays green throughout:
-- **The tools and the base (P1-P4):** the C toolchain and the crt; the kernel's additions; the
-  root in C; the OS server in C, still serving today's calls.
-- **POSIX, a part at a time (P5-P12):** processes; files; programs from disk; pipes and the
+- **The tools and the base (P1-P5):** the C toolchain and the crt; the kernel's additions; the
+  kernel's memory (one kernel stack, objects anywhere, extended memory); the root in C; the OS
+  server in C, still serving today's calls.
+- **POSIX, a part at a time (P6-P13):** processes; files; programs from disk; pipes and the
   shell; signals; terminals and job control; the commands and the devices; threads.
-- **The old calls deleted, the demonstration (P13),** then the documents and the release
-  (P14).
+- **The old calls deleted, the demonstration (P14),** then the documents and the release
+  (P15).
 
 **Writing it found:**
 - **Both compilers work, and neither needs its own library.** Open Watcom v2 and gcc-ia16,
@@ -71,9 +76,10 @@ calls keep working until the last of them, so every suite stays green throughout
   - The prototype took 4.4 ms a signal on MAME's AT, in 18 kernel calls.
 - **The kernel's memory, not the CPU, limits the processes** (E10). Today eleven more fit
   before the pool of kernel stacks runs out (in a test build without the clock and the
-  counter; about nine in the demonstration's system). With larger pools, fifteen fit before the 45 KB
-  arena does, at about 1 KB a process. A thread per process in the OS server would cost a
-  third of that. About twenty processes in all is below POSIX's minimum of 25.
+  counter; about nine in the demonstration's system). With larger pools, fifteen fit before
+  the 45 KB arena does, at about 1 KB a process. A thread per process in the OS server would
+  cost a third of that. About twenty processes in all would be below POSIX's minimum of 25,
+  which is why the owner chose to move the kernel's objects to any memory (D9).
 - **The root needs a real allocator** (E10). Today's untyped memory is handed out by a
   watermark. A fork/exec/exit workload of four shells was refused 29% of its requests. A buddy
   allocator over untyped, which today's kernel calls already allow, was refused 3.4%, close to
@@ -114,22 +120,38 @@ What it rests on:
 |---|---|---|
 | M0 | This roadmap | done (2026-11-06) |
 | P1 | The C toolchain, the crt, the first C modules | not started |
-| P2 | The kernel's additions | not started |
-| P3 | The root in C; its allocator and its services | not started |
-| P4 | The OS server in C, serving today's calls | not started |
-| P5 | Processes: fork, exec, exit, wait | not started |
-| P6 | Files: descriptors, writable FAT12, the cache, `/dev` | not started |
-| P7 | Programs from disk | not started |
-| P8 | Pipes and the shell in C | not started |
-| P9 | Signals | not started |
-| P10 | Terminals, the four virtual terminals, job control | not started |
-| P11 | The commands and the devices | not started |
-| P12 | POSIX threads | not started |
-| P13 | The old calls deleted; the demonstration | not started |
-| P14 | The documents, a review, the release | not started |
+| P2 | The kernel's additions; the list of children | not started |
+| P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | not started |
+| P4 | The root in C; its allocator and its services | not started |
+| P5 | The OS server in C, serving today's calls | not started |
+| P6 | Processes: fork, exec, exit, wait | not started |
+| P7 | Files: descriptors, writable FAT12, the cache, `/dev` | not started |
+| P8 | Programs from disk | not started |
+| P9 | Pipes and the shell in C | not started |
+| P10 | Signals | not started |
+| P11 | Terminals, the eight virtual terminals, job control | not started |
+| P12 | The commands and the devices | not started |
+| P13 | POSIX threads | not started |
+| P14 | The old calls deleted; the demonstration | not started |
+| P15 | The documents, a review, the release | not started |
 
-Every decision (*Decisions*, D1-D22) is undecided. Each has a recommendation, and the
-milestones follow the recommendations.
+**Decided (2026-11-06):** every decision as recommended, except these, and D5 with a
+condition (*Decisions*):
+- **D4 A:** a thread of the OS server for each process, as today. It needs l4.md's D7 B
+  (kernel objects in any memory, through windows) and D14 B (extended memory), which D9 and
+  D18 bring.
+- **D5 B,** as recommended, "as long as it is secure"; C where a call needs it, decided case
+  by case.
+- **D9:** all of it. A (pools of 64, retype in pieces), B (one kernel stack), C (the kernel's
+  objects above 1 MB too), and a list of each capability's children.
+- **D13 C:** one tree, with the drives under `/` (`/a`, `/c`).
+- **D15 C:** eight terminals on Alt+F1-F8, which needs an EGA of 128 KB or more. A 64 KB EGA
+  has four.
+- **D18 B:** extended memory for the kernel's objects and for programs.
+
+The architecture and the milestones below follow the decisions. Where the owner chose
+otherwise than recommended, the text that follows says so (D4, D9, D13, D15, D18). The
+experiments, and the W, A and X items, are as they were found.
 
 ## The request
 
@@ -190,7 +212,7 @@ replaces:
   None of the four teaches the kernel what a process, a file or a signal is.
 - **W2. "file system stays fat12 for now".** FAT12 stays, but today it is read-only: the
   OS server can find, list and read, and writes nothing (`docs/shell.md`, *The files*).
-  Redirection, `cp`, `mkdir` and every editor need writes, so writing comes first (P6, E9).
+  Redirection, `cp`, `mkdir` and every editor need writes, so writing comes first (P7, E9).
   FAT12 also lacks what POSIX's files assume, which the roadmap must fake or refuse:
   - inode numbers;
   - links, hard or symbolic;
@@ -322,7 +344,7 @@ replaces:
   later (D18).
 - **A13. What becomes of today's calls and suites.** The draft does not say. D19 recommends
   the strangler: the C server first serves today's calls, so every suite stays green, and the
-  old calls go last (P13).
+  old calls go last (P14).
 
 ### Dangerous
 
@@ -358,7 +380,7 @@ replaces:
   a copy into a killed process would go on through a null ES and fault in ring 2 (E11). So:
   - the server checks a process's segment again after every wait, as the drivers do since
     l4.md L13;
-  - a process that exits waits until the workers have handed back its calls;
+  - a process that exits waits until the server's threads are out of any copy into it;
   - a `brk` replaces the server's copy of the data segment in the same move.
 - **X6. Writes and the diskette.** A diskette taken out while the server holds part of a
   write corrupts it. The AT's drive has a change line, which the diskette driver does not yet
@@ -423,21 +445,22 @@ replaces:
 
 | Part | Becomes | Milestone |
 |---|---|---|
-| `src/kernel/` | the same, with a seal, stopped threads' registers, larger pools, retype in pieces, a faster delete, a panic on page 0 | P2, P10 |
-| `src/root/root.asm` | `src/root/*.c`: the same work first, then an allocator and services for the OS server | P3 |
-| `src/os/*.asm` | `src/os/*.c`: today's calls first, then processes, files, pipes, signals, terminals | P4-P12 |
-| `src/userland/stub.asm` | the call path of `src/lib/os/` (NASM), a new message layout | P4, P5 |
-| `src/userland/shell.asm` and its parts | `src/bin/sh/*.c`, a POSIX-like shell | P8 |
-| the shell's commands | programs of their own in `src/bin/` (`ls`, `cat`, `lp`, `beep`, ...) | P8, P11 |
-| `clock.asm`, `counter.asm` | C daemons | P1 (as modules), P11 |
-| `src/drivers/console.asm` | four terminals on four pages, a cursor and a status line each, some ANSI escapes | P10 |
-| `src/drivers/keyboard.asm` | signals each key; Alt+F1-F4 to the server | P4, P10 |
-| `src/drivers/diskette.asm` | several sectors a call (a track), the change line | P6 |
+| `src/kernel/` | the same, with a seal, stopped threads' registers, larger pools, retype in pieces, a faster delete, a panic on page 0 | P2, P11 |
+| `src/root/root.asm` | `src/root/*.c`: the same work first, then an allocator and services for the OS server | P4 |
+| `src/os/*.asm` | `src/os/*.c`: today's calls first, then processes, files, pipes, signals, terminals | P5-P13 |
+| `src/userland/stub.asm` | the call path of `src/lib/os/` (NASM), a new message layout | P5, P6 |
+| `src/userland/shell.asm` and its parts | `src/bin/sh/*.c`, a POSIX-like shell | P9 |
+| the shell's commands | programs of their own in `src/bin/` (`ls`, `cat`, `lp`, `beep`, ...) | P9, P12 |
+| `clock.asm`, `counter.asm` | C daemons | P1 (as modules), P12 |
+| `src/drivers/console.asm` | eight terminals on eight pages (four on a 64 KB EGA), a cursor and a status line each, some ANSI escapes | P11 |
+| `src/drivers/keyboard.asm` | signals each key; Alt+F1-F8 to the server | P5, P11 |
+| `src/boot-loader/` | A20 on through the 8042, for extended memory | P3 |
+| `src/drivers/diskette.asm` | several sectors a call (a track), the change line | P7 |
 | other drivers | unchanged | |
-| `tests/programs/attack.asm`, `fuzz.asm`, `caps`, `ipc`, `revoke`, `rings` | stay assembly, moved onto the new calls where they use the OS server | P13 |
-| `tests/programs/syscalls`, `storage`, `devices`, `keys` | rewritten in C against `lib/os` | P5-P13 |
+| `tests/programs/attack.asm`, `fuzz.asm`, `caps`, `ipc`, `revoke`, `rings` | stay assembly, moved onto the new calls where they use the OS server | P14 |
+| `tests/programs/syscalls`, `storage`, `devices`, `keys` | rewritten in C against `lib/os` | P6-P14 |
 | `tools/mkimage` | takes modules linked from C | P1 |
-| new: `tools/mkexe` | makes rx286's executable files | P5 |
+| new: `tools/mkexe` | makes rx286's executable files | P6 |
 | `tools/check-286` | also reads C's disassembly; flags `LOCK` in ring-3 code | P1 |
 | `tools/lint` | also C: the banner, no assembly inside C, no compiler keywords outside `compiler.h` | P1 |
 | `tools/doctor` | also the compilers, at the commits the roadmap pins | P1 |
@@ -512,7 +535,7 @@ small model only (Usenet, 1990; not verified).
 **Without paging,** the 286 changes what each call costs:
 - **fork:** no copy-on-write, so a fork copies the whole data segment. That costs 30 ms for
   64 KB and 7 ms for a shell's 16 KB on an AT (E4). `posix_spawn` avoids the copy, and is
-  native here (P5).
+  native here (P6).
 - **exec:** no demand loading, so exec reads the whole program (E5).
 - **brk:** grows the data segment by making a larger one and moving it into the same LDT slot.
   Every near pointer stays valid, and the old memory comes back (E7).
@@ -856,7 +879,7 @@ fixed in this roadmap. The three experiments gave the same results on Bochs and 
 - **An exit:** it waits for the workers.
 - **The server's capabilities:** it gets a copy of every thread.
 - **`argv`:** it goes above `.bss`.
-- **P4's transcripts:** it rewrites the ones that show the server's threads.
+- **P5's transcripts:** it rewrites the ones that show the server's threads.
 - **The image's programs:** they go in one archive module.
 - **Priorities:** the drivers run above the root.
 - **Slots:** the arithmetic is given.
@@ -865,10 +888,11 @@ fixed in this roadmap. The three experiments gave the same results on Bochs and 
 - **A fault's handler:** it cannot return.
 - **The delivery cases:** they are all listed.
 - **Ownership:** each table of the server's has one owner.
-- **Workers:** there is one a device, and one for the log.
+- **Workers:** there is one a device, and one for the log. (The owner's D4 A then replaced the
+  workers with a thread a process: *Status*.)
 - **P2's limit:** it is measured at the real process count.
-- **^C:** it is defined before P10.
-- **Descriptors:** they arrive in P5.
+- **^C:** it is defined before P11.
+- **Descriptors:** they arrive in P6.
 - **The badge:** its layout is given.
 - **fork with threads:** the other threads are stopped first.
 - **`help` and `start`:** `help` becomes a built-in, and `start` goes.
@@ -883,13 +907,17 @@ fixed in this roadmap. The three experiments gave the same results on Bochs and 
   - MAME has no 287;
   - Bochs gives no times.
 - **The kernel and the drivers stay NASM.** The kernel's code room is 12 KB, of which 8.9 KB
-  is used: its additions (P2) must fit in about 3 KB.
+  is used: P2's additions must fit in about 3 KB. P3's changes may need more, which the
+  arena's move out of the low memory frees (`layout.inc`).
 - **The boot image is at most 128 KB** (`IMAGE_MAX`; 41 KB used) and holds at most 15
   modules (`MODULE_MAX`). The root, the OS server and nine drivers leave four, so the image's
   programs travel as one module, an archive (D11).
-- **Kernel objects live in the 45 KB arena**, inside the kernel's data segment. They cannot
-  move to extended memory without a different kernel (l4.md D7).
-- **Programs have 448 KB** (30000h-9FFFFh) unless extended memory is added (D18).
+- **Kernel objects live in the 45 KB arena** today, inside the kernel's data segment, reached
+  by near offsets (l4.md D7 A). Moving them to any memory (D9 C, l4.md D7 B) changes how the
+  kernel reaches every object: that is P3.
+- **Programs have 448 KB** (30000h-9FFFFh) below 1 MB, and extended memory beyond it where the
+  machine has some (D18 B). MAME's AT has 1 MB of it by default; Bochs gets it from its
+  configuration (`megs`); an AT without it runs as today.
 - **The disks are an AT's:** a 1.2 MB diskette at 190-220 ms a sector call today (E5, E9), a
   20 MB fixed disk about twenty times faster.
 - **No users and no permissions** (the draft): the follow-up roadmap adds them. Nothing here
@@ -908,15 +936,17 @@ fixed in this roadmap. The three experiments gave the same results on Bochs and 
 
 | Layer | Ring | Language | Holds | Knows |
 |---|---|---|---|---|
-| kernel | 0 | NASM | the arena's objects, the GDT, the IDT | threads, spaces, capabilities, IPC; no processes |
+| kernel | 0 | NASM | its objects, in any memory; the GDT, the IDT | threads, spaces, capabilities, IPC; no processes |
 | drivers | 1, IOPL 1 | NASM | their ports and interrupt lines | their device |
 | root | 2 | C | all untyped memory; a copy of every space, thread and segment it made | memory: who has which block; spaces and threads by request |
-| OS server | 2 | C | one endpoint, of which each process holds a badged copy; each process's data segment and threads (copies); the drivers' endpoints; the cache | processes, groups, sessions; files, pipes, terminals; signals; policy and limits |
+| OS server | 2 | C | for each process an endpoint and a thread of its own, and copies of the process's data segment and threads; the drivers' endpoints; the cache | processes, groups, sessions; files, pipes, terminals; signals; policy and limits |
 | init and programs | 3 | C (and the kernel's test programs in NASM) | their segments and an endpoint to the OS server | POSIX, through `lib/os` |
 
-### The kernel's additions (P2, P10)
+### The kernel's additions (P2, P3, P11)
 
-Six small changes. None names a process, a file or a signal:
+Nine changes. None names a process, a file or a signal. The first five and the ninth are
+small. The sixth to eighth, the owner's choice of room (D9, D18), are not: they change how
+the kernel reaches its own objects (P3).
 1. **`KCALL_SEAL`** (E5). A data segment becomes readable code of ring 3, if:
    - it is of DPL 3 and expand-up;
    - no copy of it remains: it was never copied from, or its copies were revoked;
@@ -941,21 +971,40 @@ Six small changes. None names a process, a file or a signal:
    - **`THREAD_START`** resumes a suspended thread where it was.
 
    Today's `THREAD_STOP`, which starts a thread again at its entry, stays for the drivers.
-3. **Larger pools:** `SPACE_MAX` and `THREAD_MAX` of 64 (8 bytes of the GDT each).
+3. **Larger pools:** `SPACE_MAX` of 64 or more (8 bytes of the GDT each). Once there is one
+   kernel stack (6), a thread needs no descriptor of its own, and `THREAD_MAX`'s pool goes.
 4. **Retype in pieces:** the zeroing of a segment opens an interrupt window every 2 KB (about
    0.8 ms on an AT), as a revoke already does after each pass (E4, X7).
-5. **A faster delete** (D9): a smaller space for the OS server (128 slots instead of 256, in
-   P4), then, if the passes still reach half a tick, a list of each capability's children in
-   its shadow entry, as seL4 keeps (l4.md *What is open*).
-
-   **Slots:**
-   - **The root** keeps 256 slots: its allocator takes up to 89 (E10), and each process about
-     four more (a space, its untyped, a thread, a data segment). That is about 210 at thirty
-     processes.
-   - **The OS server** needs about three a process: the data segment's copy, the thread's,
-     and a saved reply. 32 processes, the drivers' endpoints and its own slots fit in 128; a
-     process's further threads take two slots each.
-6. **The panic on any terminal** (E8, P10): the panic sets the CRTC's start address to page 0
+5. **A list of each capability's children** (D9), in its shadow entry, as seL4 keeps (l4.md
+   *What is open*). A delete or a revoke then follows the list instead of looking through every
+   slot of every space (6.2 ms and more today, E4), so its time no longer grows with the
+   number of processes.
+   - **The OS server keeps its 256 slots,** and could have more. With a thread a process
+     (D4 A) it holds about six a process: its endpoint, its thread, the process's thread, a
+     copy of its data segment, its notification to sleep on, and one for a capability passed.
+     That is room for about forty processes. Once no pass looks through every slot,
+     `SPACE_SLOTS_MAX` can grow past 256.
+   - **The root keeps 256 slots:** its allocator takes up to 89 (E10), and each process about
+     four more.
+6. **One kernel stack** (D9 B, l4.md D3 B). A thread's object shrinks from 512 bytes to its
+   control block's 160, rounded to 256. No path of the kernel's waits on a thread's own stack
+   any more:
+   - a wait in IPC already leaves its state in the control block;
+   - the log's turn (`call_enter`) and the revoke's windows must do the same, or restart
+     their call when the thread runs again, as seL4's calls do.
+7. **The kernel's objects in any memory** (D9 C; l4.md D7 B). The root may retype any untyped
+   into kernel objects, below 1 MB or above it. The kernel reaches them through a few windows
+   of the GDT, each a descriptor it points at an object's 64 KB before it uses it, instead of
+   by near offsets in its data segment. Untyped for objects is never also a segment: the tree
+   of capabilities, which records every object's parent since l4.md L12, shows it.
+8. **Extended memory** (D18 B; l4.md D14 B):
+   - the loader turns A20 on through the 8042 (IBM 1-40 to 1-44), and the kernel never
+     turns it off;
+   - the kernel reads the extended memory's size from the CMOS;
+   - the kernel gives it to the root as untyped, beside today's 448 KB, for kernel objects
+     and for programs' segments alike (a descriptor's base has 24 bits: 16 MB; l4.md E8 found
+     descriptors above 1 MB work on Bochs and MAME).
+9. **The panic on any terminal** (E8, P11): the panic sets the CRTC's start address to page 0
    and puts the cursor there before it writes; the root's video capability covers all 32 KB of
    text pages for the console driver.
 
@@ -970,7 +1019,7 @@ A process is a space of 16 slots (D2: the small model):
 | 2 | 17h | a copy of slot 1, as the stack (the kernel loads SS from slot 2): SS and DS are the same memory |
 | 3-7 | | free: later, a medium model's further code segments, at the selectors its file names |
 | 8 | 47h | its endpoint to the OS server, send only (as the root mints it today), badged with its process's number and its thread's |
-| 9-15 | | its other threads' endpoints, badged each (P12) |
+| 9-15 | | its other threads' endpoints, badged each (P13) |
 
 The data segment grows by `brk` up to 64 KB:
 - the root retypes a larger segment, copies the old one in, deletes the old slot and moves the
@@ -994,7 +1043,7 @@ apart.
 
 Programs run with interrupts on and IOPL 0, as today.
 
-### The root: memory, spaces and threads (P3)
+### The root: memory, spaces and threads (P4)
 
 The root is C. It keeps all untyped memory and builds everything:
 - **Memory for segments:** a buddy allocator over untyped capabilities (E10, D10). Blocks run
@@ -1005,9 +1054,12 @@ The root is C. It keeps all untyped memory and builds everything:
   from it, in every space. The code's blocks belong to a table of the root's, keyed by the
   file (the drive, the first cluster, the size, the time), with a count. `ROOT_EXIT` and exec
   lower the count, and the last one revokes the block.
-- **Kernel objects:** spaces, threads and endpoints come from the arena's untyped. A process
-  gets an untyped of exactly its objects' size, cut from the arena's (untyped from untyped, in
-  paragraphs), so no buddy rounding wastes the scarcest memory.
+- **Memory:** the 448 KB below 640 KB and the extended memory above 1 MB (D18 B), both as
+  untyped.
+- **Kernel objects:** spaces, threads and endpoints come from any untyped once the kernel
+  reaches its objects through windows (P3). Until then they come from the arena. A process
+  gets an untyped of exactly its objects' size (untyped from untyped, in paragraphs), so its
+  exit frees them whole and no buddy rounding wastes them.
 - **Its priority:** the root runs below the drivers (the drivers at 7, the root at 6, the OS
   server at 5). A fork's copy of 64 KB takes 30 ms (E4), and at 9,600 baud a byte comes every
   millisecond into a UART that holds one. Today the root is above the drivers.
@@ -1020,7 +1072,7 @@ Its services, on its endpoint, are for the OS server alone (badged `ROOT_BADGE_O
 | `ROOT_LOAD` | a data segment of the size asked, and a copy for the OS server to read a program's code into |
 | `ROOT_SEAL` | the OS server's copy revoked, then the segment sealed into code and entered in the code table |
 | `ROOT_FORK` | a new space with the same code (copies), a copy of the data segment (copied in ring 2, with interrupts on: E4), a thread configured at the address and stack pointer given (libc's return path for the child), its endpoint; the OS server's copies of the child's endpoint, data segment and thread |
-| `ROOT_THREAD` | another thread in a process's space, at an entry and a stack pointer, with an endpoint of its own; the OS server's copy of the thread (P12) |
+| `ROOT_THREAD` | another thread in a process's space, at an entry and a stack pointer, with an endpoint of its own; the OS server's copy of the thread (P13) |
 | `ROOT_BRK` | the data segment grown or shrunk (E7), and the OS server's copy of it replaced: the server never writes through a copy of the old segment |
 | `ROOT_EXIT` | everything of a process revoked, its memory free again; its code's count lowered |
 | `ROOT_INFO` | as today, for `ps` |
@@ -1028,63 +1080,69 @@ Its services, on its endpoint, are for the OS server alone (badged `ROOT_BADGE_O
 The root's own faults stop the system. A driver's fault is reported, and the driver restarted
 at its entry, as today (D8).
 
-### The OS server (P4-P12)
+### The OS server (P5-P13)
 
-The OS server is C, in the small model. Its caches lie in segments of their own, reached
-through far pointers.
+The OS server is C, in the small model. Its tables and caches lie in segments of their own,
+reached through far pointers, so that its data segment holds little but its threads' stacks.
 
-**Its threads** (D4):
-- **the main thread** receives every message on one endpoint: the system calls, the faults,
-  the keyboard's and the timer's notifications. It does every call that can be answered at
-  once. A call that must wait, such as a read from an empty pipe or a terminal, a `wait`, a
-  `pause`, or a lock that is held, is not answered. Its reply is saved
-  (`KCALL_SAVE_REPLY`) in the process's slot, to be sent when the call can finish, or with
-  `EINTR` when a signal comes. This is Minix's suspend and revive.
-- **one worker for the files:** it owns the cache and the FAT12 code, and calls the disk
-  drivers synchronously. The main thread hands it file calls, and it replies to the caller
-  through the saved reply. A diskette's half-second spin-up then stops only the files, never
-  the pipes and terminals (X9).
-- **a worker for each slow device:** the printer, the modem, the sound. As today, a call that
-  waits for a device waits for that device alone: a ten-second tune holds up no print.
-- **in debug and test builds, a worker for the log:** a 4 KB write to the log takes about
-  0.36 s at 115,200 baud (`KCALL_LOG`), which the main thread must not wait for. realtime.md's
-  R3 would make it shorter.
+**Its threads** (D4 A, decided):
+- **a thread for each process,** as today: started with `START_SESSION`, it serves that
+  process alone, on the process's own endpoint. It may wait for anything the call needs:
+  - a driver, as for a sector or a printer;
+  - a pipe or a terminal, on its own notification, which another thread signals;
+  - a child, or a lock.
 
-**Who owns what** (no table is shared between two threads that preempt each other):
-- the main thread owns the processes, the descriptor tables, the open file descriptions
-  (offsets included), the pipes, the terminals and the signals;
-- the file worker owns the cache, the FATs and the directories. It gets a request with the
-  offset and the open file's cluster position, and returns the new ones, which the main
-  thread stores;
-- the device workers own their device.
+  One process's wait holds up no other's (l4.md X13). A restart or a stop of the process takes
+  its server thread with it, as today.
+- **with threads, one a thread** (P13): a process's further threads each get an endpoint and
+  a server thread of their own.
+- **the control thread,** as today: the keyboard's notification, Ctrl+Break and the
+  terminals' keys, the server's timer.
 
-**Priorities:** the workers run above the main thread, so a worker's reply is never held up
-by the loop. A process that exits while a worker serves one of its calls waits until the
-worker hands the call back (E11). Only then does the server revoke it, so no worker's ES
-loses its segment in the middle of a copy.
+**Its lock.** Every thread of the server may read and change every table: processes,
+descriptors, open file descriptions, pipes, terminals, the cache. So one lock guards them all:
+- **taking it:** `XCHG` in the common case, a wait on a notification otherwise (D17);
+- **holding it:** a thread holds it while it works, and gives it up before any wait, for a
+  driver, a pipe, a key or a child. When it wakes, it looks at the state again;
+- **the cache:** the file code keeps its own lock, held across a driver's call, so that a
+  diskette's half-second spin-up stops only other file calls, never the pipes and terminals
+  (X9).
 
-**Messages** (D5). A system call is a call on the process's endpoint:
+A server of one CPU gains nothing from finer locks.
+
+**Its stacks.** In the small model every thread's stack lies in the server's data segment: 64
+KB in all. At 1 KB a stack, which P5 measures (today's assembly threads have 512 bytes), that
+is room for about forty threads beside the server's own data. That makes forty processes in
+all, a limit with the slots' (the kernel's fifth addition). If more are ever wanted, each
+stack can be a segment of its own. Then the server is compiled with Watcom's `-zu`, and C may
+take no near pointer to a local.
+
+**Messages** (D5 B, decided). A system call is a call on the process's endpoint:
 - the label is the call's number;
-- the badge says which process and which thread;
+- the badge says which thread, and whether it is a fault;
 - BX, CX, SI and DI are its arguments, and the reply's.
 
 Buffers stay in the program's data segment. The server holds a copy of every process's data
 segment, so it copies straight from a writer's segment into a pipe or the cache, and from
 there into a reader's. It checks every buffer against the segment's limit (`LSL`) first, and
 again after every wait (X5). No transfer segment is needed: one copy fewer per byte (E9), and
-a thread needs no 4 KB of its own (P12).
+a thread needs no 4 KB of its own (P13). Where a third party must reach a process's buffer
+itself, a segment granted with the call (D5 C) is decided case by case; the server copies
+through its cache where it can.
 
 **Its tables:** processes, open file descriptions, pipes, terminals and timers. One kernel
 timer, armed for the earliest of the server's own, serves `alarm`, `sleep`, `VTIME` and
 `poll`'s timeouts.
 
-**How many processes:** the table has 32 entries, but the arena binds first. Fifteen
-processes fit with pools of 64 (E10); the OS server's smaller space gives 4 KB more, about
-four processes. So about twenty in all, `init`, the shells and the daemons
-included. That is below POSIX's `_POSIX_CHILD_MAX` of 25: a departure, reported as the true
-`CHILD_MAX` by `sysconf`, until one kernel stack (D9 B) halves a thread's cost.
+**How many processes:**
+- **today's limit goes:** with the kernel's objects in any memory (P3) the arena no longer
+  binds, and one kernel stack halves a thread's cost;
+- **the limits that remain:** the LDT pool (64 spaces, more if wanted), the server's slots and
+  stacks (about forty), and memory;
+- **POSIX's minimum is met:** `CHILD_MAX` (`_POSIX_CHILD_MAX` is 25), with room for the eight
+  shells, `init`, the daemons and pipelines.
 
-### Processes (P5)
+### Processes (P6)
 
 - **fork:**
   - libc saves the registers, and the 287's state if the program has used it, on its own
@@ -1134,10 +1192,10 @@ included. That is below POSIX's `_POSIX_CHILD_MAX` of 25: a departure, reported 
   0007:0123") and the pid and name. A handler gets the signal, but cannot return to the
   fault: the kernel has put the fault's message into the thread's registers before it waits
   (`ipc_fault`). POSIX leaves a return from such a handler undefined. The handler may exit or
-  `longjmp`. P2 and P9 test it.
+  `longjmp`. P2 and P10 test it.
 - **Nothing restarts a program any more** (W3).
 
-### rx286's executable files (P5, P7; D12)
+### rx286's executable files (P6, P8; D12)
 
 | Offset | Field |
 |---|---|
@@ -1156,24 +1214,28 @@ every selector is fixed by its slot, as Xenix's x.out named each segment's selec
 `tools/mkexe` makes the file from the linker's raw output and its map, as E3 did. Files have
 no extension; an executable is a file with this header.
 
-### Files (P6)
+### Files (P7)
 
-- **Paths** (D13):
-  - a drive's letter is optional (`C:/DOCS/HELLO.TXT`); without one, the current drive;
-  - `/` or `\` separates, and `/` alone is the current drive's root;
-  - names are 8.3, matched in any case and stored upper case; a longer one is
-    `ENAMETOOLONG`.
-- **Drives:** A-D as today. **Z:** is read-only: an archive of rx286 executables that travels
-  in the boot image as one module, `bin`, made by `tools/mkimage`. The server reads it as a
-  file system of one directory, `Z:/BIN` (D11). One module, since the image has room for only
-  four more.
-- **`/dev` on every drive**, as DOS 2's `\DEV\` (ref: MS-DOS 2.0 source):
+- **Paths** (D13 C, decided): one tree, as POSIX's.
+  - **The root** `/` is the server's own, read-only. It holds a directory for each drive,
+    `/a`, `/b`, `/c` and `/d`, each the root of that drive's FAT12 volume; `/z`, the archive
+    of programs; and `/dev`.
+  - **The separator:** `/` alone. FAT forbids `\` in a name anyway.
+  - **The current directory:** one a process, as POSIX's (DOS kept one a drive). It starts
+    where its parent's was.
+  - **Names:** 8.3 within a volume, matched in any case and stored upper case; a longer one is
+    `ENAMETOOLONG`. `/c/docs/hello.txt` and `/C/DOCS/HELLO.TXT` name the same file.
+  - **Between volumes:** a `rename` from one drive's directory to another's is `EXDEV`.
+- **`/z`** is read-only: an archive of rx286 executables that travels in the boot image as one
+  module, `bin`, made by `tools/mkimage`. The server reads it as a file system of one
+  directory, `/z/bin` (D11). One module, since the image has room for only four more.
+- **`/dev`**, once, at the root:
 
   | Name | What |
   |---|---|
   | `null` | |
   | `tty` | the controlling terminal |
-  | `tty1`-`tty4` | the four terminals |
+  | `tty1`-`tty8` | the eight terminals (four on a 64 KB EGA) |
   | `com2` | the modem |
   | `lpt1`, `lpt2` | the printers |
   | `mouse` | |
@@ -1204,28 +1266,28 @@ no extension; an executable is a file with this header.
   at a time, and reports the change line. A changed diskette empties the cache, and its
   open files fail with `EIO`.
 
-### Pipes (P8)
+### Pipes (P9)
 
 - **The buffer:** 1 KB each in a segment of the server's; `PIPE_BUF` is 512, so a write of up
   to 512 bytes is never interleaved (XSH `write`).
-- **Blocking:** a read of an empty pipe waits on a saved reply; with no writer left it returns
+- **Blocking:** a read of an empty pipe waits in the reader's server thread, on its
+  notification, which a writer's thread signals; with no writer left it returns
   0. A write with no reader is `EPIPE` and SIGPIPE.
 - **The copies:** the server copies a writer's bytes straight into the buffer and out into
   the waiting reader's segment (D5): two copies, where E9's estimate counted four.
 
-### Signals (P9)
+### Signals (P10)
 
 - **The server's tables:** a process's dispositions, mask and pending set; SIGKILL and SIGSTOP
   cannot be caught or blocked (XSH 2.4).
 - **Delivery depends on where the process's thread is:**
-  - **waiting in a call to the server** (its reply saved): the server answers that call with
-    `EINTR`, or does it again if `SA_RESTART` is set. Then it delivers as below, before the
-    thread runs again.
-  - **queued to call,** the main thread being busy: the signal is delivered when the server
-    receives the call, before it does it.
-  - **in a call the file worker or a device worker holds:** the call finishes first (a disk's
-    sector is never left half done), and the signal is delivered as the worker replies. A
-    worker's reply to a process stopped meanwhile waits for SIGCONT.
+  - **in a call to the server** (its server thread at work, or waiting for a pipe, a terminal,
+    a child or a lock): the sender's thread marks the signal and signals the waiting thread's
+    notification. The waiting thread answers its call with `EINTR`, or does it again if
+    `SA_RESTART` is set, then delivers as below before the process runs again.
+  - **in a call that waits for a driver:** the call finishes first (a disk's sector is never
+    left half done), and the signal is delivered as the server thread replies. A reply to a
+    process stopped meanwhile waits for SIGCONT.
   - **ready, or running in its own code:** the server suspends the thread (`THREAD_SUSPEND`,
     which takes effect on its way back to its ring), reads its frame (`THREAD_FRAME`), and
     checks that the frame fits below its SP in the data segment, else SIGSEGV (X4). It writes
@@ -1240,7 +1302,7 @@ no extension; an executable is a file with this header.
 - **The calls:** `kill`, `killpg`, `raise`, `sigaction`, `sigprocmask`, `sigpending`,
   `sigsuspend`, `pause`, `alarm`, `sleep`, `nanosleep`.
 
-### Terminals, sessions and job control (P10)
+### Terminals, sessions and job control (P11)
 
 - **A terminal** is a tty of the server's:
   - **input:** a line of at most 255 bytes (`MAX_CANON`);
@@ -1248,33 +1310,36 @@ no extension; an executable is a file with this header.
     `VTIME`, and the special characters INTR (^C), QUIT (^\), SUSP (^Z), EOF (^D), ERASE
     (BS), KILL (^U) (XBD 11);
   - **groups:** its foreground process group and its session.
-- **Four terminals,** `/dev/tty1`-`tty4`, on the EGA's pages 0-3 (D15, E8):
-  - **switching:** Alt+F1-F4 shows one;
+- **Eight terminals** (D15 C, decided), `/dev/tty1`-`tty8`, on the EGA's pages 0-7 (E8):
+  - **the EGA's memory:** eight pages need an EGA of 128 KB or more; with 64 KB, mode 3 has
+    four (IBM's EGA reference), and terminals 5-8 are not offered. The loader asks the EGA's
+    BIOS for its memory (INT 10h, AH 12h, BL 10h) and passes it on;
+  - **switching:** Alt+F1-F8 shows one;
   - **the console driver** keeps, for each terminal, a cursor and the main area's 24 lines.
     It writes the status line on every page, so it shows on all four;
   - **escapes:** it learns a small set of ANSI's: cursor moves, erasing, colours. The kernel's
     console never needed them, and full-screen programs do.
-- **Keys:** the keyboard driver signals the server at every key (from P4), and the server
-  takes it. No more polling once a tick, which with four shells would be 200 calls a second.
+- **Keys:** the keyboard driver signals the server at every key (from P5), and the server
+  takes it. No more polling once a tick, which with eight shells would be 400 calls a second.
   The key goes to the shown terminal's tty:
-  - Alt+F1-F4 switch;
+  - Alt+F1-F8 switch;
   - Ctrl+Break is INTR, as ^C;
   - Ctrl+Alt+Del and Sys Req stay the driver's.
 
-  Until P10, Ctrl+Break sends SIGINT to the program the keys are for, whose default action
-  ends it (P5).
+  Until P11, Ctrl+Break sends SIGINT to the program the keys are for, whose default action
+  ends it (P6).
 - **Sessions and groups:** `setsid`, `setpgid`, `getpgrp`, `tcgetpgrp`, `tcsetpgrp`.
   - A background group's read gets SIGTTIN; its write gets SIGTTOU if `TOSTOP` is set
     (XBD 11.1.4).
   - The INTR, QUIT and SUSP characters signal the foreground group.
 
-### POSIX threads (P12)
+### POSIX threads (P13)
 
 - **The kernel's part:** a thread is a kernel thread in the process's space, made by
   `ROOT_THREAD`.
 - **Its stack:** malloc'd from the data segment, aligned to its size, without a guard (W4).
 - **Its endpoint:** an endpoint of its own, badged with the thread's number, in one of slots
-  9-15, which its start routine is given.
+  9-15, which its start routine is given, and a thread of the OS server's to serve it (D4 A).
 - **Its own data:** `errno` and the thread's own data lie at its stack's base, found from SP.
 - **The calls:** `pthread_create`, `join`, `exit`, `detach`, `self`, `equal`, `once`, keys,
   mutexes, condition variables (D17).
@@ -1308,23 +1373,23 @@ no extension; an executable is a file with this header.
 - **The second 16-bit compiler:** `make check-ia16` compiles everything with gcc-ia16
   (D1).
 
-### The shell (P8)
+### The shell (P9)
 
 A POSIX-like shell (`src/bin/sh/`), as far as XCU 2 goes for interactive use:
 - **Commands:** simple commands, pipelines, lists (`;`, `&&`, `||`, `&`).
 - **Quoting:** `'...'`, `"..."`, `\`.
 - **Parameters:** `$VAR`, `$?`, `$$`, `$!`, `$#`, `$1` and on.
 - **Redirection:** `<`, `>`, `>>`, `2>`, `2>&1`, `<>`.
-- **Finding programs:** `PATH` (`Z:/BIN;C:/BIN`, with `;` since `:` follows a drive).
+- **Finding programs:** `PATH`, POSIX's colon-separated list (`/z/bin:/c/bin`).
 - **Built-ins:** `cd` (with a drive), `pwd`, `exit`, `export`, `unset`, `set`, `alias`,
-  `jobs`, `fg`, `bg`, `wait`, `true`, `false`, `help`, `A:` to `D:` and `Z:`.
+  `jobs`, `fg`, `bg`, `wait`, `true`, `false`, `help`.
 - **Job control** (XCU 2.11).
 
 DOS's names stay as aliases set at the start: `dir`, `type`, `print`, `cls` (D14). Its prompt
-is DOS's `$p$g` by default (`C:/DOCS> `), set in `PS1`. Scripts with `if`, `while` and `for`
-come later.
+shows the current directory by default (`/c/docs> `), set in `PS1`. Scripts with `if`, `while`
+and `for` come later.
 
-### The programs, and where they live (P7, P8, P11; D11, D14)
+### The programs, and where they live (P8, P9, P12; D11, D14)
 
 Today's commands become programs of their own, under POSIX's names, one at a time:
 
@@ -1339,17 +1404,17 @@ Today's commands become programs of their own, under POSIX's names, one at a tim
 `help` is a built-in. `start` goes: a killed daemon is run again by name (`clock &`).
 
 Where they live:
-- **In the boot image,** in the archive that is Z:: `init`, `sh` and the programs every test
+- **In the boot image,** in the archive that is `/z`: `init`, `sh` and the programs every test
   needs. No disk is read: the server copies a program's code out of the archive's module
   (which the root gives it, read-only) and seals it, as for a file.
-- **The rest in `C:/BIN`,** which `tools/mkdisks` fills. A program loads from C in a fifth of
+- **The rest in `/c/bin`,** which `tools/mkdisks` fills. A program loads from C in a fifth of
   a second (E5).
-- **`A:/BIN`** only once the diskette has its cache and track reads (P6).
+- **`/a/bin`** only once the diskette has its cache and track reads (P7).
 
-### The boot (P5)
+### The boot (P6)
 
 The boot is today's as far as the OS server: the kernel builds the root, and the root builds
-the drivers and the OS server from the image. Then the OS server execs `Z:/BIN/INIT` as
+the drivers and the OS server from the image. Then the OS server execs `/z/bin/init` as
 process 1. `init`:
 - starts the daemons;
 - starts each terminal: a session (`setsid`), `/dev/ttyN` as its controlling terminal on
@@ -1453,16 +1518,16 @@ the OS server checks its tables' invariants in test builds.
   | `tests/posix/thread` | threads |
 
   Each checks its results and prints them. The test runner types into the terminal shown,
-  and Alt+F1-F4 switch it.
+  and Alt+F1-F8 switch it.
 - **The emulators:**
   - **Bochs** runs everything;
   - **MAME** runs everything but the 287;
-  - **DOSBox-X** runs what needs no diskette and no protection: programs from Z: and C, but
+  - **DOSBox-X** runs what needs no diskette and no protection: programs from `/z` and `/c`, but
     not the attacks.
 - **Timing:** `tests/timing` gains a POSIX call's round trip, a fork of a 16 KB process, an
   exec from C and a signal's delivery, counted in instructions on Bochs against budgets.
 - **The stretches:** the stretch tests (`realtime.md`, R0) gain a fork of 64 KB and a kill of
-  every process that fits (about twenty). Neither may keep interrupts off for half a tick (X7).
+  every process that fits (about forty). Neither may keep interrupts off for half a tick (X7).
 
 ## Debugging
 
@@ -1475,35 +1540,38 @@ the OS server checks its tables' invariants in test builds.
 
 ## Decisions
 
-Every decision is the owner's, and none is taken. Each lists its options, what favours each,
-and a recommendation, which the milestones follow.
+Every decision is the owner's. Each lists its options, what favours each, and a
+recommendation. The owner decided on 2026-11-06 (*Status*), and the milestones follow the
+decisions.
 
-| | Decision | Recommended |
-|---|---|---|
-| D1 | The C compiler | A: Open Watcom v2, with gcc-ia16 kept compiling (`make check-ia16`) |
-| D2 | The memory model | A: small, separate code and data; the format ready for medium |
-| D3 | The root's language | A: C |
-| D4 | The OS server's threads | C: an event loop with saved replies, a worker for the files and one for each slow device |
-| D5 | How data passes between programs and the server | B: the server holds each process's data segment; no transfer segment |
-| D6 | Code from disk | A: seal, the copies revoked first; the image's archive as the read-only drive Z |
-| D7 | How a signal reaches a running thread | A: the kernel lends the registers (a suspend that takes effect on the way back, the frame in one call, resume); the server writes the frame |
-| D8 | Exit and faults | A: programs end; drivers restart; a fault of the root, the OS server or init stops the system |
-| D9 | Room in the kernel | A: pools of 64, a smaller space for the OS server, retype in pieces; a list of children if a pass still reaches half a tick |
-| D10 | The root's allocator | A: buddy over untyped |
-| D11 | Where programs live | D: an archive in the image (Z) for `init`, `sh` and the tests' programs; `C:/BIN` for the rest |
-| D12 | The executable format | A: rx286's own header, fixed selectors, no relocations |
-| D13 | Paths and devices | A: POSIX's `/` with DOS's drives; `/dev` on every drive |
-| D14 | The commands' names | C: POSIX's names, DOS's as aliases |
-| D15 | Terminals | A: a `termios` subset in the server; four terminals on Alt+F1-F4; some ANSI escapes |
-| D16 | Writes and the cache | A: the FAT and directories written through, data at `close`/`fsync`; track transfers; the change line |
-| D17 | Thread synchronisation | A: `XCHG` in user space, a futex-like wait in the server |
-| D18 | Extended memory | A: not in this roadmap |
-| D19 | How the system gets there | A: the strangler: today's calls kept until P13 |
-| D20 | The demonstration | A: four terminals with shells, a pipeline, a job stopped and resumed, the daemons on the status line |
-| D21 | The test programs | A: the kernel's tests stay NASM; the system calls' tests become C |
-| D22 | Portability, kept how | A: one header; no assembly in C; the host's gcc at every check |
+| | Decision | Recommended | Decided (2026-11-06) |
+|---|---|---|---|
+| D1 | The C compiler | A: Open Watcom v2, with gcc-ia16 kept compiling (`make check-ia16`) | as recommended |
+| D2 | The memory model | A: small, separate code and data; the format ready for medium | as recommended |
+| D3 | The root's language | A: C | as recommended |
+| D4 | The OS server's threads | C: an event loop with saved replies, a worker for the files and one for each slow device | **A** (the owner): a thread a process, as today |
+| D5 | How data passes between programs and the server | B: the server holds each process's data segment; no transfer segment | **B**, and C case by case |
+| D6 | Code from disk | A: seal, the copies revoked first; the image's archive as the read-only drive Z | as recommended |
+| D7 | How a signal reaches a running thread | A: the kernel lends the registers (a suspend that takes effect on the way back, the frame in one call, resume); the server writes the frame | as recommended |
+| D8 | Exit and faults | A: programs end; drivers restart; a fault of the root, the OS server or init stops the system | as recommended |
+| D9 | Room in the kernel | A: pools of 64, a smaller space for the OS server, retype in pieces; a list of children if a pass still reaches half a tick | **A, B and C**, and the list of children |
+| D10 | The root's allocator | A: buddy over untyped | as recommended |
+| D11 | Where programs live | D: an archive in the image (Z) for `init`, `sh` and the tests' programs; `C:/BIN` for the rest | as recommended |
+| D12 | The executable format | A: rx286's own header, fixed selectors, no relocations | as recommended |
+| D13 | Paths and devices | A: POSIX's `/` with DOS's drives; `/dev` on every drive | **C**: one tree |
+| D14 | The commands' names | C: POSIX's names, DOS's as aliases | as recommended |
+| D15 | Terminals | A: a `termios` subset in the server; four terminals on Alt+F1-F4; some ANSI escapes | **C**: eight terminals, an EGA of 128 KB+ |
+| D16 | Writes and the cache | A: the FAT and directories written through, data at `close`/`fsync`; track transfers; the change line | as recommended |
+| D17 | Thread synchronisation | A: `XCHG` in user space, a futex-like wait in the server | as recommended |
+| D18 | Extended memory | A: not in this roadmap | **B**: the kernel's objects and programs |
+| D19 | How the system gets there | A: the strangler: today's calls kept until P14 | as recommended |
+| D20 | The demonstration | A: four terminals with shells, a pipeline, a job stopped and resumed, the daemons on the status line | as recommended |
+| D21 | The test programs | A: the kernel's tests stay NASM; the system calls' tests become C | as recommended |
+| D22 | Portability, kept how | A: one header; no assembly in C; the host's gcc at every check | as recommended |
 
 ### D1. The C compiler
+
+**Decided: A** (2026-11-06), as recommended.
 
 - **A. Open Watcom v2** (E1-E3):
   - decades of 16-bit protected-mode targets (OS/2 1.x, Windows 3.x);
@@ -1528,6 +1596,8 @@ mistake would hurt.
 
 ### D2. The memory model
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A. Small:** 64 KB of code and 64 KB of data, stack and heap. SS = DS (slot 2 a copy of
   slot 1). Near pointers only: the fastest code, and the simplest fork and signals. Every
   rx286 program fits.
@@ -1541,6 +1611,8 @@ small model.
 
 ### D3. The root's language
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A. C:** the root's work grows from building once to allocating, copying and freeing on
   request. The buddy allocator and the services are tested on the host.
 - **B. NASM, as today:** 1,519 lines now; the new work would roughly double it.
@@ -1548,6 +1620,11 @@ small model.
 **Recommended: A.**
 
 ### D4. The OS server's threads
+
+**Decided: A** (2026-11-06): a thread of the OS server for each process, as today. "Which means
+we'll now also need D7 = B and D14 = B from the l4 roadmap": kernel objects in any memory, and
+extended memory, which D9 C and D18 B bring. The arena's third (E10) is then paid from extended
+memory.
 
 - **A. A thread per process, as today:**
   - the simplest code: every call may wait;
@@ -1565,6 +1642,12 @@ small model.
 
 ### D5. How data passes between programs and the server
 
+**Decided: B** (2026-11-06), "as long as it is secure, may need C in some situations". B is as
+safe as the server, which is in the trusted base already: it checks every buffer against the
+process's segment (`LSL`), again after every wait, and gets a fresh copy at every `brk` (E11).
+C, a segment granted with a call, is kept for a call where a third party must reach a process's
+memory, decided when one comes. The server copies through its cache where it can.
+
 - **A. A transfer segment a thread, as today:** 4 KB of memory each, and two copies per byte.
 - **B. The server holds a copy of each process's data segment:**
   - the registers carry offsets, and the server checks them against the segment;
@@ -1575,6 +1658,8 @@ small model.
 **Recommended: B.**
 
 ### D6. Code from disk
+
+**Decided: A** (2026-11-06), as recommended.
 
 - **A. Seal** (E5): one kernel call, an O(1) check, and no writable alias left. The root
   revokes the segment's copies first, since a deleted copy still marks it (E11): one pass
@@ -1587,6 +1672,8 @@ small model.
 whose programs are sealed as a file's are.
 
 ### D7. How a signal reaches a running thread
+
+**Decided: A** (2026-11-06), as recommended.
 
 - **A. The kernel lends the registers** (E6): suspend, read and write the frame in one call,
   resume. The server writes the frame, and the kernel knows nothing of signals. The suspend
@@ -1602,6 +1689,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D8. Exit and faults
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A.**
   - A program ends: an exit status, a zombie, `wait`.
   - A driver's fault is reported and the driver restarted, as today.
@@ -1611,6 +1700,10 @@ for the whole frame would bring it near 1 ms.
 **Recommended: A.**
 
 ### D9. Room in the kernel
+
+**Decided: A, B and C, and a list of each capability's children** (2026-11-06): all of it, in
+P2 and P3. With a thread a process (D4 A), the OS server keeps its space of 256 slots; the list
+of children makes a pass's length no reason to shrink it.
 
 - **A. Pools of 64, a smaller space for the OS server, and retype in pieces:**
   - pools of 64: 640 bytes of the kernel's data;
@@ -1630,6 +1723,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D10. The root's allocator
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A. Buddy over untyped** (E10): today's calls suffice. It was refused 3.4% of a heavy
   workload, used at most 89 of the root's slots, and wastes up to half a block, which the heap
   can use.
@@ -1640,6 +1735,8 @@ for the whole frame would bring it near 1 ms.
 **Recommended: A.**
 
 ### D11. Where programs live
+
+**Decided: D** (2026-11-06), as recommended.
 
 - **A. `A:/BIN`:** the boot diskette carries the system. But it is slow: 7 s for 16 KB until a
   cache and track reads (E5).
@@ -1653,6 +1750,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D12. The executable format
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A. rx286's own:** a 32-byte header, then the code, then the data. Selectors are fixed by
   slot, so there are no relocations. `tools/mkexe` writes it.
 - **B. OS/2's NE:** existing tools read it, but it has relocations to resolve, and far more
@@ -1663,6 +1762,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D13. Paths and devices
 
+**Decided: C** (2026-11-06): one tree, the drives under `/`.
+
 - **A. POSIX's `/`, DOS's drives and `\`; `/dev` on every drive,** as DOS 2's `\DEV\`.
 - **B. DOS's device names** (`NUL`, `CON`, `LPT1`) in every directory: familiar, but a file
   can never be called `con.txt`, and POSIX programs expect `/dev/null`.
@@ -1672,6 +1773,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D14. The commands' names
 
+**Decided: C** (2026-11-06), as recommended.
+
 - **A. POSIX's:** `ls`, `cat`, `lp`.
 - **B. DOS's:** `dir`, `type`, `print`.
 - **C. POSIX's, with DOS's as the shell's aliases.**
@@ -1679,6 +1782,10 @@ for the whole frame would bring it near 1 ms.
 **Recommended: C.** The tests of `dir` keep their transcripts while the alias exists.
 
 ### D15. Terminals
+
+**Decided: C** (2026-11-06): eight terminals on Alt+F1-F8, A's `termios` and escapes with them.
+Eight pages need an EGA of 128 KB or more (IBM's EGA reference); a 64 KB EGA has four, and
+terminals 5-8 are then not offered.
 
 - **A.** A `termios` subset in the server: canonical and raw input, echo, the signal
   characters, `VMIN` and `VTIME`. Four terminals on Alt+F1-F4, as Minix switched its consoles.
@@ -1691,6 +1798,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D16. Writes and the cache
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A.** The FAT and directories written through; a file's data at `close`, `fsync` or
   eviction. 32 sectors cached. Track transfers in the diskette driver; the change line read.
 - **B. Everything written through:** the safest, and 190 ms a sector on a diskette.
@@ -1700,6 +1809,8 @@ for the whole frame would bring it near 1 ms.
 **Recommended: A.**
 
 ### D17. Thread synchronisation
+
+**Decided: A** (2026-11-06), as recommended.
 
 - **A.** `XCHG` with memory in user space; a contended lock or a condition waits in the
   server, which keeps a queue for each (process, address).
@@ -1711,6 +1822,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D18. Extended memory
 
+**Decided: B** (2026-11-06): extended memory for the kernel's objects (D9 C) and for programs.
+
 - **A. Not in this roadmap:** 448 KB holds four shells and their commands (E10).
 - **B. Extended memory for programs:** the loader turns A20 on; the kernel gives the root an
   untyped above 1 MB (l4.md E8 found descriptors there work on Bochs and MAME). Programs could
@@ -1720,13 +1833,17 @@ for the whole frame would bring it near 1 ms.
 
 ### D19. How the system gets there
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A. The strangler, as l4.md D1:** the C server serves today's calls first. POSIX's calls
-  are added beside them, and the old ones go last (P13). Every suite stays green.
+  are added beside them, and the old ones go last (P14). Every suite stays green.
 - **B. A flag day:** the new server and the new programs at once.
 
 **Recommended: A.**
 
 ### D20. The demonstration
+
+**Decided: A** (2026-11-06), as recommended, with eight terminals (D15).
 
 - **A.** `make run` boots to four terminals, each with a shell. The test types:
   - on terminal 1, `ls c:/docs | wc -l` and a redirect into a file;
@@ -1741,6 +1858,8 @@ for the whole frame would bring it near 1 ms.
 
 ### D21. The test programs
 
+**Decided: A** (2026-11-06), as recommended.
+
 - **A.** The attack program, the fuzzer, and the kernel's tests (`caps`, `ipc`, `revoke`,
   `rings`) stay NASM, with a NASM binding to the new calls. The system calls' tests become C.
 - **B. All of them C:** impossible for the attacks (W6).
@@ -1748,6 +1867,8 @@ for the whole frame would bring it near 1 ms.
 **Recommended: A.**
 
 ### D22. Portability, kept how
+
+**Decided: A** (2026-11-06), as recommended.
 
 - **A.**
   - one header for every compiler difference;
@@ -1786,7 +1907,7 @@ NASM together, tests included. Each needs the decisions it names.
   - `make check-ia16` builds the same modules with gcc-ia16 and they pass the same tests.
 * **Decisions:** D1, D2, D21, D22.
 
-### P2. The kernel's additions (M, about 900)
+### P2. The kernel's additions; the list of children (L, about 1,800)
 
 * **What:**
   - **`KCALL_SEAL`**, and conforming code refused by `THREAD_CONFIGURE`.
@@ -1796,23 +1917,54 @@ NASM together, tests included. Each needs the decisions it names.
     window and in `call_enter`'s wait (E11), and with a fault's handler that does not
     return.
   - **Room:** pools of 64; retype zeroing in pieces.
-  - **The tests:** `tests/caps` and `tests/attack` for each, the stretch tests with 22 spaces
+  - **The list of children** (D9): each shadow entry links its capability's children, and
+    delete and revoke follow the links instead of passing over every slot. Every test of
+    `tests/revoke` and `tests/caps` passes unchanged.
+  - **The tests:** `tests/caps` and `tests/attack` for each, the stretch tests with 40 spaces
     and a 64 KB retype, and `docs/kernel-calls.md`.
-  - The OS server's space shrinks to 128 slots in P4. P2 measures what that gives.
 * **Done when:**
   - every new call has its tests and its refusals;
   - the attack suite has the seal's attacks;
-  - no stretch reaches 10 ms with 22 spaces and a 64 KB retype, on MAME's AT. If one does,
-    the list of children is added here (D9).
+  - no stretch reaches 10 ms with 40 spaces and a 64 KB retype, on MAME's AT, and a delete's
+    time no longer grows with the number of spaces.
 * **Decisions:** D6, D7, D9.
 
-### P3. The root in C; its allocator and its services (L, about 2,000)
+### P3. The kernel's memory: one kernel stack, objects anywhere, extended memory (XL, about 3,000)
+
+The largest change to the kernel since l4.md, in three steps, each with every suite green:
+* **What:**
+  1. **One kernel stack** (D9 B):
+     - the kernel's waits (the log's turn, a revoke's windows) keep their state in the
+       control block or restart their call;
+     - a thread's object shrinks to 256 bytes;
+     - the GDT's pool of kernel stacks goes.
+
+     `tests/threads` measures the deepest kernel stack again.
+  2. **Objects anywhere** (D9 C, l4.md D7 B): the kernel reaches every object through GDT
+     windows instead of near offsets in its data segment. The root may retype any untyped into
+     objects. The arena below the image becomes ordinary untyped, and its room goes back to
+     the kernel's code (`layout.inc`).
+  3. **Extended memory** (D18 B, l4.md D14 B):
+     - the loader turns A20 on;
+     - the kernel reads the size from the CMOS and gives it to the root as untyped;
+     - Bochs' test configuration gets extended memory (`megs`), as MAME's AT has;
+     - DOSBox-X's is checked, and the tests say where it is missing.
+* **Done when:**
+  - every suite passes with the kernel's objects and programs' segments above 1 MB, on Bochs
+    and MAME;
+  - a test builds 64 spaces and 128 threads;
+  - an AT without extended memory still boots and passes the suites that fit;
+  - the stretch tests stay under 10 ms, `tests/timing`'s IPC round trip within its budget.
+* **Decisions:** D9, D18.
+
+### P4. The root in C; its allocator and its services (L, about 2,000)
 
 * **What:**
   - **The port first:** `src/root/` in C, doing what `root.asm` does, with every suite green.
   - **Then the new work:**
-    - the buddy allocator (host-tested, as E10's simulation); the code table, with its
-      counts; an untyped of exactly its objects' size for each process's kernel objects;
+    - the buddy allocator over all memory, extended memory included (host-tested, as E10's
+      simulation); the code table, with its counts; an untyped of exactly its objects' size
+      for each process's kernel objects;
     - the services `ROOT_SPAWN`, `ROOT_LOAD`, `ROOT_SEAL`, `ROOT_FORK`, `ROOT_THREAD`,
       `ROOT_BRK`, `ROOT_EXIT`, tested by a C test program that holds the OS server's
       capability in a TEST_CAPS build;
@@ -1825,39 +1977,35 @@ NASM together, tests included. Each needs the decisions it names.
   - a thousand spawns and exits leave the memory as it began.
 * **Decisions:** D3, D8, D10.
 
-### P4. The OS server in C, serving today's calls (XL, about 3,500)
+### P5. The OS server in C, serving today's calls (XL, about 3,500)
 
 * **What:**
-  - **The port:** `src/os/` in C, with a main thread, a file worker and a device worker (D4).
+  - **The port:** `src/os/` in C, with today's structure (D4 A): a thread for each program,
+    started with `START_SESSION`, and the control thread; one lock over the server's tables.
   - **The calls:** today's 24, through the same stub and transfer segments, with the same
     answers. The FAT12 reader is ported from `fat.asm` and `files.asm`.
   - **The keyboard:** the driver signals every key, and the server stops polling.
-  - **Restarts until P5:** a program restarted by Ctrl+Break or a fault no longer takes a
-    session thread with it, since the server has none. The main thread restarts it and drops
-    its saved reply; the kernel already ends the program's wait.
-  - **The old server goes:** the assembly server is deleted; its space has 128 slots.
-* **Done when:**
-  - every suite passes, the attack suite and the fuzzer included, on all three emulators;
-  - the transcripts that show the server's own threads are rewritten on purpose, and nothing
-    else changes: `tests/threads/dump.test` (the thread dump), `tests/demo/demo.test` (`ps`'s
-    "os" line).
+  - **The stacks:** each thread's measured, with a guard word, in the server's data segment.
+  - **The old server goes:** the assembly server is deleted.
+* **Done when:** every suite passes unchanged, the attack suite and the fuzzer included, on
+  all three emulators. With today's threads kept, the transcripts that show them hold too.
 * **Decisions:** D4, D19.
 
-### P5. Processes (L, about 2,500)
+### P6. Processes (L, about 2,500)
 
 * **What:**
   - **The calls, beside today's:** `fork`, `_Fork`, `execve`, `posix_spawn`, `_exit`,
     `waitpid`, `getpid`, `getppid`, `kill` with default actions only, `brk`/`sbrk`. The data
     path is the processes' data segments (D5).
   - **The format:** `tools/mkexe` and the executable format; the archive module and drive
-    Z: (`tools/mkimage`); exec from Z: only.
+    `/z` (`tools/mkimage`); exec from `/z` only.
   - **The processes:** `init`, process 1; termination instead of restart for C programs;
     shared code for the same file.
   - **The libraries:** `src/lib/os/` (the call path, `unistd.h`); `src/lib/c/`'s `malloc` and
     `stdio`.
   - **The descriptor table:** each process's, with the console as its only file on 0-2, so
-    that fork copies it and exec keeps it; other files come in P6.
-  - **Ctrl+Break:** SIGINT to the program the keys are for, ending it, until P10's INTR.
+    that fork copies it and exec keeps it; other files come in P7.
+  - **Ctrl+Break:** SIGINT to the program the keys are for, ending it, until P11's INTR.
   - **The tests:** `tests/posix/proc`.
   - **The boot:** `make run` boots to `init`, which runs today's shell.
 * **Done when:**
@@ -1866,7 +2014,7 @@ NASM together, tests included. Each needs the decisions it names.
   - the old suites pass.
 * **Decisions:** D2, D5, D8, D11, D12.
 
-### P6. Files (L, about 3,000)
+### P7. Files (L, about 3,000)
 
 * **What:**
   - **The file system:** descriptors and open file descriptions; FAT12 written (E9); the
@@ -1883,24 +2031,24 @@ NASM together, tests included. Each needs the decisions it names.
   - reading 16 KB from A takes under a second on MAME's AT.
 * **Decisions:** D13, D16.
 
-### P7. Programs from disk (M, about 800)
+### P8. Programs from disk (M, about 800)
 
 * **What:**
   - **Loading:** exec from C and A through `ROOT_LOAD` and `ROOT_SEAL`.
   - **Finding:** `PATH`; `ENOEXEC`.
-  - **The disks:** `tools/mkdisks` puts the programs in `C:/BIN`.
+  - **The disks:** `tools/mkdisks` puts the programs in `/c/bin`.
   - **The tests:** the attack suite's exec attacks; `tests/timing` for an exec from C.
 * **Done when:**
   - a program on C runs, and is refused at every corruption of its file;
   - two copies share their code.
 * **Decisions:** D6, D11, D12.
 
-### P8. Pipes and the shell in C (L, about 3,000)
+### P9. Pipes and the shell in C (L, about 3,000)
 
 * **What:**
   - **Pipes:** `pipe`, `dup2`.
   - **The shell in C** (`src/bin/sh/`): pipelines, lists, redirection, quoting, variables,
-    `PATH`, the built-ins, the aliases. Job control comes in P10.
+    `PATH`, the built-ins, the aliases. Job control comes in P11.
   - **The first commands as programs:** `ls`, `cat`, `echo`, `cp`, `mv`, `rm`, `mkdir`,
     `rmdir`, `wc`, `lp`, `more`.
   - **The old shell goes:** the assembly shell is deleted.
@@ -1911,7 +2059,7 @@ NASM together, tests included. Each needs the decisions it names.
   - the rewritten suites pass on all three emulators.
 * **Decisions:** D13, D14.
 
-### P9. Signals (M, about 1,500)
+### P10. Signals (M, about 1,500)
 
 * **What:**
   - **The calls:** `sigaction`, `sigprocmask`, `sigpending`, `sigsuspend`, `pause`, `alarm`,
@@ -1923,24 +2071,25 @@ NASM together, tests included. Each needs the decisions it names.
   blocked read, and nested; a bad frame killed; the 287 kept around a handler (Bochs).
 * **Decisions:** D7.
 
-### P10. Terminals, the four virtual terminals, job control (L, about 2,500)
+### P11. Terminals, the four virtual terminals, job control (L, about 2,500)
 
 * **What:**
   - **The tty:** its line discipline and `termios` in the server.
   - **The console driver:** four pages, a cursor and status line each, ANSI's subset.
-  - **The keys:** Alt+F1-F4.
+  - **The keys:** Alt+F1-F8, and the EGA's memory found at the start: eight terminals, or four
+    on a 64 KB EGA. MAME's and Bochs' video memory both checked.
   - **Job control:** sessions, groups, `tcsetpgrp`, SIGTTIN, SIGTTOU, SIGTSTP, SIGCONT,
     SIGHUP; the shell's `jobs`, `fg`, `bg`, ^Z.
   - **`init`** starts a shell on each terminal.
   - **The kernel's panic** on page 0 (P2's sixth addition).
   - **The tests:** `tests/posix/tty`; the runner typing on any terminal.
 * **Done when:**
-  - four shells run at once;
+  - eight shells run at once (four on a 64 KB EGA);
   - ^C, ^Z, `fg` and `bg` behave as XCU 2.11 says;
   - a panic test shows its screen while terminal 3 is shown (MAME's snapshot).
 * **Decisions:** D15.
 
-### P11. The commands and the devices (M, about 1,500)
+### P12. The commands and the devices (M, about 1,500)
 
 * **What:**
   - **The rest as programs:** `ps`, `kill`, `sleep`, `env`, `date`, `uptime`, `clear`,
@@ -1953,7 +2102,7 @@ NASM together, tests included. Each needs the decisions it names.
   built-in), with its test. `start` goes: a daemon is run again by name.
 * **Decisions:** D13, D14.
 
-### P12. POSIX threads (M, about 1,200)
+### P13. POSIX threads (M, about 1,200)
 
 * **What:**
   - **Threads:** `ROOT_THREAD`; `pthread.h`.
@@ -1966,7 +2115,7 @@ NASM together, tests included. Each needs the decisions it names.
   counter under a mutex; a condition; join; a thread's fault ending the process.
 * **Decisions:** D17.
 
-### P13. The old calls deleted; the demonstration (M, about 1,000)
+### P14. The old calls deleted; the demonstration (M, about 1,000)
 
 * **What:**
   - **The old calls go:** today's 24 calls, the stub and the transfer segments. The NASM
@@ -1978,7 +2127,7 @@ NASM together, tests included. Each needs the decisions it names.
   - the demonstration's test passes on all three emulators.
 * **Decisions:** D19, D20, D21.
 
-### P14. The documents, a review, the release (M, about 1,000 of documents)
+### P15. The documents, a review, the release (M, about 1,000 of documents)
 
 * **What:**
   - **New documents:** `docs/posix.md` (the subset, a table of every call and its
@@ -1995,9 +2144,8 @@ NASM together, tests included. Each needs the decisions it names.
 Each needs a roadmap of its own when the time comes:
 - **Users and permissions** (the owner's follow-up): owners on files, which FAT12 cannot keep,
   so perhaps another file system first; `login` on the terminals; `setuid`.
-- **Extended memory for programs** (D18 B).
 - **The medium model,** for programs past 64 KB of code (D2 B).
-- **One kernel stack,** halving a thread's cost (D9 B).
+- **The OS server's stacks in segments of their own,** past forty processes (*The OS server*).
 - **The shell's scripts:** `if`, `while`, `for`, functions, here-documents.
 - **A file system of rx286's own,** with long names, links and owners.
 - **A terminal on COM2,** for a second user at a real terminal.
@@ -2008,50 +2156,56 @@ Each needs a roadmap of its own when the time comes:
 
 - **The compiler first (P1).** It is the most uncertain new tool, so it is proven on two small
   programs before anything depends on it.
-- **The kernel next (P2).** Its changes are small, and everything after needs them.
-- **The root and the OS server in C before any new behaviour (P3, P4).** Each port is checked
+- **The kernel next (P2, P3).** P2's changes are small, and everything after needs them. P3
+  is large, so it comes while nothing in C depends on the kernel's insides yet, and before the
+  thread a process (D4 A) and fork need its room.
+- **The root and the OS server in C before any new behaviour (P4, P5).** Each port is checked
   against every existing suite, unchanged: a bug in the port shows as a suite failing, not as
   a POSIX question.
-- **Processes before files (P5, P6).** fork and exec are where the 286 differs most, and they
+- **Processes before files (P6, P7).** fork and exec are where the 286 differs most, and they
   need only the image.
-- **Files before programs from disk and before the shell (P6-P8).** Redirection needs writes.
+- **Files before programs from disk and before the shell (P7-P9).** Redirection needs writes.
   Exec from disk needs the cache to be bearable.
-- **Signals after the shell (P9).** ^C's default action (termination) needs no handler, so the
+- **Signals after the shell (P10).** ^C's default action (termination) needs no handler, so the
   shell works before handlers do.
-- **Terminals after signals (P10).** Job control is signals.
-- **The commands as the need comes (P8, P11):** the first with the shell, the rest after the
+- **Terminals after signals (P11).** Job control is signals.
+- **The commands as the need comes (P9, P12):** the first with the shell, the rest after the
   devices have their names.
-- **Threads last (P12).** Nothing else needs them, and they touch the server's every wait.
-- **The old calls last (P13).** Until then they keep the old suites as a net under every step.
+- **Threads last (P13).** Nothing else needs them, and they touch the server's every wait.
+- **The old calls last (P14).** Until then they keep the old suites as a net under every step.
 
 ## Risks
 
 | Risk | What it would do | What reduces it |
 |---|---|---|
-| The C in ring 2 has a memory bug (X8) | a corrupted process table, file or pipe; the system stopped (D8) | host builds with the sanitizers; the server's messages fuzzed on the host; `-we` with both compilers; the ports checked against every old suite (P3, P4) |
-| The arena runs out before the workload does (E10) | `EAGAIN` at fork with memory free | pools of 64, a smaller space for the OS server (P2, P4); a process limit below the kernel's; one kernel stack *Later* |
-| A delete's pass or a retype keeps interrupts off past half a tick (X7) | lost ticks, a modem's byte lost | retype in pieces; the stretch tests with 30 processes (P2); the list of children if needed |
-| The diskette is too slow for programs and files (E5, E9) | seconds per command | programs on Z and C (D11); the cache and track transfers (P6) |
+| The C in ring 2 has a memory bug (X8) | a corrupted process table, file or pipe; the system stopped (D8) | host builds with the sanitizers; the server's messages fuzzed on the host; `-we` with both compilers; the ports checked against every old suite (P4, P5) |
+| The kernel's memory work (P3) breaks what l4.md built | a kernel that panics or leaks objects | three steps, each with every suite, the attack suite and the fuzzer green; one kernel stack first, then the windows, then extended memory |
+| A delete or a retype keeps interrupts off past half a tick (X7) | lost ticks, a modem's byte lost | retype in pieces; the list of children (P2); the stretch tests with 40 spaces |
+| The OS server's stacks fill its data segment (D4 A) | no more processes past about forty | the stacks measured with guard words (P5); its tables in segments of their own; stacks in segments of their own *Later* |
+| One lock over the server's tables is held across a wait | a deadlock, or one process stopping all | the rule that the lock is given up before every wait, checked in debug builds |
+| The diskette is too slow for programs and files (E5, E9) | seconds per command | programs in `/z` and `/c` (D11); the cache and track transfers (P7) |
+| An AT without extended memory, or with a 64 KB EGA | less room; four terminals | both found at the start; the suites run with and without (P3, P11) |
 | A diskette changed under the cache (X6) | a corrupted volume | the change line; FAT and directories written through (D16) |
 | Watcom's switch tables in code meet a future execute-only seal | a program faults reading its own table | seal makes readable code (E5); a test with a switch in every program's suite |
 | gcc-ia16 and Watcom drift apart in the C they accept | the second compiler stops building | `make check-ia16`; `compiler.h` the only place for differences |
 | `LOCK` from a compiler's built-in reaches ring 3 (X10) | a #GP on a real 286 that Bochs hides | check-286 flags F0h (P1); libc's atomics in NASM with `XCHG` |
-| Signals' frames: NT, IF, SS games (E6, X4) | a #TS or a stuck process | NT cleared, bounds checked, the attack suite's frame attacks (P9) |
-| The port of the shell changes its transcripts (P8) | every shell test rewritten at once | DOS's aliases (D14); the rewrite in its own commit, reviewed line by line |
+| Signals' frames: NT, IF, SS games (E6, X4) | a #TS or a stuck process | NT cleared, bounds checked, the attack suite's frame attacks (P10) |
+| The port of the shell changes its transcripts (P9) | every shell test rewritten at once | DOS's aliases (D14); the rewrite in its own commit, reviewed line by line |
 | fork's cost in memory (E4, E10) | a 16 KB shell copied for each command | `posix_spawn` in the shell; shared code; the buddy allocator |
-| MAME's diskette image not saved at a run's end (E9) | a write test that passes in the run and finds nothing after | read back inside the run; check images on Bochs; look into MAME's save at P6 |
-| Fewer processes than POSIX's 25 (E10) | a program that forks many children fails | `sysconf` reports the true `CHILD_MAX`; one kernel stack *Later* (D9 B) |
-| A copy of a segment outlives the segment (E11) | the server writes into freed memory, or faults in ring 2 | `brk` replaces the server's copy; an exit waits for the workers; shared code in a counted table |
+| MAME's diskette image not saved at a run's end (E9) | a write test that passes in the run and finds nothing after | read back inside the run; check images on Bochs; look into MAME's save at P7 |
+| A copy of a segment outlives the segment (E11) | the server writes into freed memory, or faults in ring 2 | `brk` replaces the server's copy; an exit waits until no server thread copies into the process; shared code in a counted table |
 | A suspend caught inside a kernel call (E11) | a call's result lost, the log's turn held | the suspend takes effect on the way back to the ring (P2), tested inside `KCALL_LOG` and a revoke |
 | The work is larger than the estimates | a long road | each milestone ends in a working system; the strangler (D19) |
 
 ## Left open for the owner
 
-1. **The decisions,** D1-D22.
-2. **How much POSIX is enough.** A3: the roadmap's subset is its architecture's list; the
+1. **How much POSIX is enough.** A3: the roadmap's subset is its architecture's list; the
    owner may want more (`select`, scripts) or less (threads later).
-3. **A real AT,** as before: E4-E6's times are MAME's.
-4. **Whether a machine without a fixed disk matters.** D11 puts most programs on C.
+2. **A real AT,** as before: E4-E6's times are MAME's.
+3. **Whether a machine without a fixed disk matters.** D11 puts most programs on C.
+
+Answered on 2026-11-06: the decisions (*Status*): every one as recommended but D4, D5, D9,
+D13, D15 and D18.
 
 ## References
 
