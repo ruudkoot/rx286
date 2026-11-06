@@ -1115,7 +1115,8 @@ KB in all. At 1 KB a stack, which P5 measures (today's assembly threads have 512
 is room for about forty threads beside the server's own data. That makes forty processes in
 all, a limit with the slots' (the kernel's fifth addition). If more are ever wanted, each
 stack can be a segment of its own. Then the server is compiled with Watcom's `-zu`, and C may
-take no near pointer to a local.
+take no near pointer to a local. D4 records these costs for that later choice; this roadmap
+keeps the small model (D2 A).
 
 **Messages** (D5 B, decided). A system call is a call on the process's endpoint:
 - the label is the call's number;
@@ -1625,6 +1626,24 @@ small model.
 we'll now also need D7 = B and D14 = B from the l4 roadmap": kernel objects in any memory, and
 extended memory, which D9 C and D18 B bring. The arena's third (E10) is then paid from extended
 memory.
+
+**What D4 A costs, recorded for a later choice of the server's memory model** (2026-11-06).
+The owner keeps the small model for this roadmap (D2 A) and may move the OS server to another
+model later. These costs are what that choice would weigh. The numbers are estimates until P5
+measures them.
+
+| Cost | Of what | How much | What a non-small model would change |
+|---|---|---|---|
+| The server's stacks | every thread of the server: one a process, one a further thread of a process (P13), the control thread | in the small model all lie in the server's one data segment, 64 KB with its own data: at 1 KB a stack about forty threads, at 2 KB about twenty. A stack's size is fixed when its thread starts, and an overflow runs into its neighbour, unguarded but by a guard word | each thread's stack a segment of its own (Watcom's `-zu`, or the compact or large model): no 64 KB sum, and an overflow faults at the segment's limit. But C may then take no near pointer to a local (`-zu`), or every data pointer is far (compact, large): code some 10-30% larger and slower (not measured) |
+| The kernel's objects | a thread of the server's a process | one thread object: 512 bytes today, 256 with one kernel stack (D9 B), from any memory once P3 is done | none: this cost is the model's no more than the kernel's |
+| The server's slots | about six a process (its endpoint, its thread, the process's thread, the data segment's copy, a notification, a spare) | 256 slots: about forty processes, the same bound as the stacks' at 1 KB | none: `SPACE_SLOTS_MAX` grows instead, once the list of children is there (P2) |
+| One lock over the tables | every server thread | each table is shared by forty threads that preempt each other. The rule is to give the lock up before every wait and look again after: a mistake deadlocks, or stops every process behind one | none: this is D4's, not the model's. D4 C would have none |
+| Copies into a dying process | a server thread copying while its process is killed | the exit waits until no server thread copies into the process (E11) | none |
+| Threads in a process | a thread of the server's each (P13) | each takes a stack, a thread object and two slots: a process of eight threads costs as eight processes | the same, less the 64 KB sum |
+
+So a non-small model for the server lifts only the first limit, the stacks' 64 KB. It is worth
+it once a machine is meant for more than about forty processes and threads in all. D4 C, an
+event loop, lifts the first and the fourth at once, at the cost of every waiting call saved.
 
 - **A. A thread per process, as today:**
   - the simplest code: every call may wait;
@@ -2145,7 +2164,8 @@ Each needs a roadmap of its own when the time comes:
 - **Users and permissions** (the owner's follow-up): owners on files, which FAT12 cannot keep,
   so perhaps another file system first; `login` on the terminals; `setuid`.
 - **The medium model,** for programs past 64 KB of code (D2 B).
-- **The OS server's stacks in segments of their own,** past forty processes (*The OS server*).
+- **A non-small model for the OS server,** its stacks in segments of their own, past forty
+  processes and threads (D4's costs, *The OS server*).
 - **The shell's scripts:** `if`, `while`, `for`, functions, here-documents.
 - **A file system of rx286's own,** with long names, links and owners.
 - **A terminal on COM2,** for a second user at a real terminal.
