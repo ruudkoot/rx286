@@ -21,8 +21,8 @@ types and the macro `kcall`:
 
 A thread holds capabilities in the slots of its space, and names each by
 its selector: slot n is n × 8 + 4 + its ring. A space is an LDT and a shadow
-entry for each slot, which the kernel keeps in the arena
-(*docs/memory-map.md*), where no program can reach it.
+entry for each slot, an object of the kernel's (*docs/memory-map.md*),
+which no program can reach.
 
 - **A segment capability is its descriptor.** The program loads it into DS
   or ES, and the CPU checks every access to it.
@@ -34,7 +34,7 @@ entry for each slot, which the kernel keeps in the arena
 |---|---|---|
 | 0 | `CAP_EMPTY` | nothing: an empty slot |
 | 1 | `CAP_SEGMENT` | memory, as a segment (data; code only from the kernel's image) |
-| 2 | `CAP_UNTYPED` | memory not yet made into anything: the arena's, or the memory for segments |
+| 2 | `CAP_UNTYPED` | memory not yet made into anything: the arena's, or the memory for segments; either makes objects and segments alike |
 | 3 | `CAP_THREAD` | a thread |
 | 4 | `CAP_SPACE` | a space: an LDT and its slots |
 | 5 | `CAP_ENDPOINT` | an endpoint, with a badge and rights (*IPC*, below) |
@@ -95,13 +95,15 @@ os-server.md P2): a 64 KB retype no longer keeps interrupts off for 27 ms,
 and the call checks afterwards that its slot, its untyped and its space
 are still as they were (`KE_STATE` if not).
 
-- **Kernel objects** - spaces, threads, endpoints, notifications - only from
-  the arena's untyped. A space takes an LDT descriptor from the GDT's pool
-  of 64 (`SPACE_MAX`), and the kernel lists 128 threads at most
-  (`THREAD_MAX`): `KE_POOL` past either.
-- **Segments** only from untyped outside the arena, and only data: present,
-  of DPL 1-3. Code comes from the boot image, or from data sealed
-  (`KCALL_SEAL`, below), never otherwise (roadmap l4.md X14).
+- **Kernel objects** - spaces, threads, endpoints, notifications - from any
+  untyped (roadmap os-server.md P3). Each takes a descriptor of the GDT's
+  pool, and a space a second for its LDT; the kernel lists 128 spaces
+  (`SPACE_MAX`) and 192 threads (`THREAD_MAX`) at most: `KE_POOL` past any
+  of these.
+- **Segments** from any untyped, and only data: present, of DPL 1-3. Code
+  comes from the boot image, or from data sealed (`KCALL_SEAL`, below),
+  never otherwise (roadmap l4.md X14). An untyped's watermark gives no
+  memory twice, so a segment never lies over an object.
 - **Untyped** from untyped, of so many paragraphs: memory of its own, which
   a revoke of it gives back whole (roadmap l4.md L12). The root makes each
   background program's of it, so that killing the program frees its memory.

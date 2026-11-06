@@ -81,12 +81,14 @@ kernel for a thread without a handler.
   name only the slots of its own space; a GDT selector, a slot past the
   space, an empty slot or one of the wrong type is refused (`KE_CAP`). A
   capability that is not a segment is invisible to ring 3. The kernel's
-  objects live in the arena, which no program can load; retype zeroes what
-  it makes, and makes only data segments, never code. A segment moved or
+  objects are reached only through descriptors of DPL 0, which no program
+  can load, and never lie under a segment: an untyped's watermark gives no
+  memory twice (roadmap os-server.md P3); retype zeroes what it makes, and
+  makes only data segments, never code. A segment moved or
   given away is gone at once: the way back nulls a DS or ES that still held
   it.
 - **IPC** (roadmap l4.md L4) copies only registers, from frame to frame in
-  the arena: no program names memory of another's through it. A badge is
+  the kernel's memory: no program names memory of another's through it. A badge is
   set once, by whoever mints the capability, so a server knows who calls;
   a capability passes only through an endpoint with the grant right, and
   only into a slot the receiver named and left empty. A reply goes once,
@@ -125,7 +127,7 @@ that faulted:
 |---|---|
 | `CLI`, `STI`, `IN`, `OUT`, `INSB`, `OUTSB`, `HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT` | #GP(0000) |
 | the kernel's data, the kernel's stack, the screen (DS, SS, ES) | #GP(selector) |
-| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(0250), #GP(0084), #GP(007C), #GP(0000) |
+| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(2000), #GP(0084), #GP(007C), #GP(0000) |
 | every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments and its transfer segment as they are; its endpoint and every empty slot refused by all four |
 | the test probe (`KCALL_TEST`'s `TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
 | the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |

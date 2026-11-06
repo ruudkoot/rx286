@@ -35,7 +35,7 @@ rx286: program fault #GP(0018) at 0007:{attacks.kstack_f}
 attack: video
 rx286: program fault #GP(0038) at 0007:{attacks.video_f}
 attack: beyond the GDT
-rx286: program fault #GP(0250) at 0007:{attacks.beyond_f}
+rx286: program fault #GP(2000) at 0007:{attacks.beyond_f}
 attack: a selector past the LDT
 rx286: program fault #GP(0084) at 0007:{attacks.ldt_f}
 attack: call the kernel

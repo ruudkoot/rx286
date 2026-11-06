@@ -27,11 +27,11 @@
 ; ----------------------------------------------------------------------------
 kc_log:
         call call_enter                 ; one thread's bytes at a time
-        mov di, [cur_thread]
+        mov es, [cur_thread]
         xor bx, bx                      ; BX = bytes written
-        cmp byte [di + T_CONT], CONT_RESUMED
+        cmp byte [es:T_CONT], CONT_RESUMED
         jne .fresh
-        mov bx, [di + T_LOG_DONE]       ; it gave way after these
+        mov bx, [es:T_LOG_DONE]         ; it gave way after these
 .fresh:
         mov cx, [bp + FRAME_CX]
         cmp cx, LOG_MAX
@@ -54,17 +54,19 @@ kc_log:
         ; not with the caller's segment in ES, which a switch would reload
         ; in ring 0 after its slot may have gone (l4.md X2): recheck_buffer
         ; loads it again. Stop early if the thread is to restart.
+        mov es, [cur_thread]
+        mov [es:T_LOG_DONE], bx         ; where it resumes, if it gives way
         push ds
         pop es
-        mov di, [cur_thread]
-        mov [di + T_LOG_DONE], bx       ; where it resumes, if it gives way
         KWINDOW (VEC_KCALL << 8) | KCALL_LOG
         cmp byte [restart_pending], 0
         jne .written
         loop .next
 .written:
-        mov di, [cur_thread]
-        mov word [di + T_LOG_DONE], 0
+        mov es, [cur_thread]
+        mov word [es:T_LOG_DONE], 0
+        push ds
+        pop es
         call con_cursor
         mov [bp + FRAME_AX], bx
         and word [bp + FRAME_FLAGS], ~FLAGS_CF

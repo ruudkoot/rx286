@@ -52,7 +52,7 @@ fpu_switch:
 ; (or the 287 reset for its first use); Intel 11.4, roadmap l4.md D17
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      the running thread owns the 287; TS clear
-;   Destroys: AX, BX
+;   Destroys: AX, BX, ES
 ; ----------------------------------------------------------------------------
 fpu_nm:
         clts
@@ -67,13 +67,15 @@ fpu_nm:
         ; the saved state, and comes back with it.
         xor al, al
         out FPU_CLEAR_BUSY, al
-        fnsave [bx + T_FPU]
-        mov byte [bx + T_FPU_VALID], 1
+        mov es, bx
+        fnsave [es:T_FPU]
+        mov byte [es:T_FPU_VALID], 1
 .load:
         mov bx, [cur_thread]
-        cmp byte [bx + T_FPU_VALID], 0
+        mov es, bx
+        cmp byte [es:T_FPU_VALID], 0
         je .fresh
-        frstor [bx + T_FPU]
+        frstor [es:T_FPU]
         jmp .own
 .fresh:
         fninit
@@ -91,8 +93,11 @@ fpu_nm:
 ; ----------------------------------------------------------------------------
 fpu_reset_thread:
         push bx
+        push es
         mov bx, [cur_thread]
-        mov byte [bx + T_FPU_VALID], 0
+        mov es, bx
+        mov byte [es:T_FPU_VALID], 0
+        pop es
         cmp bx, [fpu_owner]
         jne .done
         clts                            ; it owns the 287: TS is clear anyway

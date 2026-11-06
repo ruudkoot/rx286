@@ -1,32 +1,34 @@
 # The prefilled tables as the CPU sees them once loaded (Bochs' debugger at
-# the end of pm_start). Every descriptor of the GDT has DPL 0; its pool of
-# LDT descriptors and its two scratch windows are still empty, and no LDT
-# is loaded: the root's space is made after this point (roadmap l4.md L3,
-# L5). Of the IDT's gates only 31h, the kernel's calls, has DPL 3: 30h, the
-# system call until l4.md L10, has DPL 0. The kernel's data segment starts
-# below the image, at KDATA_BASE, above the double fault's stack; the
-# kernel's one stack (18h) is the same memory, expand-down from its bottom
-# (roadmap os-server.md P3). Code and data limits change with the code, so they are left out;
+# the end of pm_start). The GDT is gdt_init's, at GDT_PHYS, 1,024
+# descriptors (roadmap os-server.md P3). Every descriptor has DPL 0; its two
+# scratch windows and its pool of the kernel's objects' descriptors are
+# still empty, and no LDT is loaded: the root's space is made after this
+# point (roadmap l4.md L3, L5). 50h is the idle loop's thread. Of the IDT's
+# gates only 31h, the kernel's calls, has DPL 3: 30h, the system call until
+# l4.md L10, has DPL 0. The kernel's data segment starts below the image, at
+# KDATA_BASE, above the arena; the kernel's one stack (18h) is the same
+# memory, expand-down from its bottom. Code and data limits change with the code, so they are left out;
 # everything else is checked.
 emulators: bochs
 break: pm_start.ready
-debugger: info gdt 0 73
+debugger: info gdt 0 13
 debugger: info idt 0 0x31
 debugger: sreg
 ---
-Global Descriptor Table (base=0x0000000000013100, limit=591):
+Global Descriptor Table (base=0x000000000000c800, limit=8191):
 GDT[0x0000]=??? descriptor hi=0x00000000, lo=0x00000000
 GDT[0x0008]=Code segment, base=0x00010100, limit=0x
-GDT[0x0010]=Data segment, base=0x00004b00, limit=0x0000ffff, Read/Write, Accessed
-GDT[0x0018]=Data segment, base=0x00004b00, limit=0x000000ff, Read/Write, Expand-down, Accessed
+GDT[0x0010]=Data segment, base=0x0000c000, limit=0x0000ffff, Read/Write, Accessed
+GDT[0x0018]=Data segment, base=0x0000c000, limit=0x000000ff, Read/Write, Expand-down, Accessed
 GDT[0x0020]=16-Bit TSS (Busy) at 0x
 GDT[0x0028]=16-Bit TSS (available) at 0x
 GDT[0x0030]=Data segment, base=0x00004400, limit=0x000001ff, Read/Write, Accessed
 GDT[0x0038]=Data segment, base=0x000b8000, limit=0x00000f9f, Read/Write, Accessed
 GDT[0x0040]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x0238]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x0240]=??? descriptor hi=0x00000000, lo=0x00000000
-GDT[0x0248]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x0048]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x0050]=Data segment, base=0x000
+GDT[0x0058]=??? descriptor hi=0x00000000, lo=0x00000000
+GDT[0x0068]=??? descriptor hi=0x00000000, lo=0x00000000
 limit=399):
 IDT[0x00]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_0}, DPL=0
 IDT[0x07]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_7}, DPL=0
@@ -37,5 +39,5 @@ IDT[0x30]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_48}, DPL=0
 IDT[0x31]=16-Bit Interrupt Gate target=0x0008:0x{kx:isr_stub_49}, DPL=3
 ldtr:0x0000, dh=0x00008200, dl=0x0000ffff, valid=0
 tr:0x0020
-gdtr:base=0x0000000000013100, limit=0x24f
+gdtr:base=0x000000000000c800, limit=0x1fff
 , limit=0x18f

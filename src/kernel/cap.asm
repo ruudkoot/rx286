@@ -5,20 +5,23 @@
 ; kernel's calls on INT 31h (roadmap l4.md L3; D4, D7, D8, D20).
 ;
 ; The kernel allocates nothing of its own after its start. Its objects -
-; spaces, threads, endpoints, notifications - live in the arena, within its
-; data segment's 64 KB, and are made by retyping untyped memory that a
-; program holds as a capability; memory for programs' segments is
-; retyped likewise, from untyped memory outside the arena, and zeroed
-; (l4.md X14). A space is an LDT and a shadow entry for each of its slots:
-; a slot's selector is the capability's name. A segment capability is the
-; descriptor itself, checked by the CPU on every use; every other capability
-; is an all-zero descriptor, invisible to the program (l4.md E2), and its
-; shadow entry says what it is. The GDT gives each space an LDT descriptor
-; and each thread a kernel stack from two pools, and holds nothing else a
-; program could load. These calls run with interrupts off from start to
-; end, but for a revocation's windows (revoke.asm). At its start the kernel
-; makes one space and one thread, the root's, from the image's first
-; module, and gives the root everything else (l4.md L5).
+; spaces, threads, endpoints, notifications - are made by retyping untyped
+; memory that a program holds as a capability, anywhere in memory; each has
+; a descriptor of its own from the GDT's pool, DPL 0, whose selector is its
+; name, and the kernel reaches it with ES (os-server.md P3, D9 C). Memory
+; for programs' segments is retyped from any untyped likewise, and zeroed
+; (l4.md X14); a watermark never gives the same memory twice, so a segment
+; never lies over an object. A space is an LDT and a shadow entry for each
+; of its slots: a slot's selector is the capability's name. A segment
+; capability is the descriptor itself, checked by the CPU on every use;
+; every other capability is an all-zero descriptor, invisible to the program
+; (l4.md E2), and its shadow entry says what it is. The GDT gives each
+; space a second descriptor for its LDT, and holds nothing a program could
+; load. These calls run with interrupts off from start to end, but for
+; their windows (a revocation's, a retype's zeroing), where they may give
+; way and resume (thread.asm). At its start the kernel makes one space and
+; one thread, the root's, from the image's first module, and gives the root
+; everything else (l4.md L5).
 ; ============================================================================
 
 ARENA_PARA          equ ARENA_PHYS >> 4
@@ -41,6 +44,7 @@ memory_untyped:
         times SHADOW_SIZE - 12 db 0
 thread_list         times THREAD_MAX dw 0   ; every thread, in the order made
 thread_count        dw 0
+obj_free_count      dw 0                ; the GDT pool's free descriptors (OBJ_FREE_OFF)
 kcall_table:
         dw kc_done.nosys                            ; 0
         dw kc_call                                  ; KCALL_CALL (ipc.asm)
@@ -68,6 +72,7 @@ msg_thread_made     db "thread", 0
 copy_shadow         dw 0
 copy_descriptor     dw 0
 copy_slot           dw 0
+copy_source_space   dw 0
 retype_paragraphs   dw 0
 retype_base         dw 0
 retype_base_low     dw 0
@@ -91,7 +96,7 @@ end_kdata
 ;   In:       BP = the frame; DS = ES = SEL_KDATA
 ;   Out:      the frame's AL = the status (CF with an error), and what the
 ;             call returns
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kcall_handler:
         mov bl, [bp + FRAME_AX + 1]
@@ -148,18 +153,17 @@ kc_done:
 ; ----------------------------------------------------------------------------
 ; slot_at - a space's slot: its shadow entry and its LDT descriptor
 ;   In:       BX = the space; AX = the slot (below its SP_SLOTS)
-;   Out:      SI = the shadow entry, DI = the descriptor
+;   Out:      ES = the space; SI = the shadow entry, DI = the descriptor
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 slot_at:
         push dx
+        mov es, bx
         mov di, ax
         shl di, 3
-        add di, bx
         add di, SP_LDT                  ; the descriptor
-        mov si, [bx + SP_SLOTS]
+        mov si, [es:SP_SLOTS]
         shl si, 3
-        add si, bx
         add si, SP_LDT                  ; past the LDT: the shadow entries
         mov dx, SHADOW_SIZE
         mul dx
@@ -170,13 +174,15 @@ slot_at:
 ; ----------------------------------------------------------------------------
 ; slot_of - the slot a selector names in a space
 ;   In:       BX = the space; AX = the selector
-;   Out:      CF clear, AX = the slot, SI = its shadow entry, DI = its
-;             descriptor; CF set if the selector names no slot of the space
+;   Out:      ES = the space; CF clear, AX = the slot, SI = its shadow
+;             entry, DI = its descriptor; CF set if the selector names no
+;             slot of the space
 ;   Destroys: nothing else
 ; ----------------------------------------------------------------------------
 slot_of:
         push cx
-        mov cx, [bx + SP_SLOTS]
+        mov es, bx
+        mov cx, [es:SP_SLOTS]
         call selector_slot
         pop cx
         jc .done
@@ -190,21 +196,33 @@ slot_of:
 ; ----------------------------------------------------------------------------
 ; cap_get - a capability of the running thread's, of one type
 ;   In:       AX = its selector; CL = the type (CAP_*)
-;   Out:      CF clear, SI = the shadow entry, DI = the descriptor, AX = the
-;             slot; CF set if the selector names no capability of that type
+;   Out:      ES = its space; CF clear, SI = the shadow entry, DI = the
+;             descriptor, AX = the slot; CF set if the selector names no
+;             capability of that type
 ;   Destroys: nothing else
 ; ----------------------------------------------------------------------------
 cap_get:
-        push bx
-        mov bx, [cur_thread]
-        mov bx, [bx + T_SPACE]
-        call slot_of
-        pop bx
+        call cap_lookup
         jc .done
-        cmp [si + SH_TYPE], cl
+        cmp [es:si + SH_TYPE], cl
         je .done
         stc
 .done:
+        ret
+
+; ----------------------------------------------------------------------------
+; cap_lookup - a slot of the running thread's, whatever it holds
+;   In:       AX = its selector
+;   Out:      ES = its space; CF clear, SI = the shadow entry, DI = the
+;             descriptor, AX = the slot; CF set if the selector names no slot
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+cap_lookup:
+        push bx
+        mov es, [cur_thread]
+        mov bx, [es:T_SPACE]
+        call slot_of
+        pop bx
         ret
 
 ; ----------------------------------------------------------------------------
@@ -213,8 +231,8 @@ cap_get:
 ; objects of 16, 512 and 4,096 bytes left a quarter of it in holes); else at
 ; the watermark, which moves, and the room skipped to align it becomes the
 ; hole if it is larger than the one kept
-;   In:       SI = the untyped's shadow entry; CX = the object's paragraphs;
-;             DX = its alignment in paragraphs (a power of two)
+;   In:       ES:SI = the untyped's shadow entry; CX = the object's
+;             paragraphs; DX = its alignment in paragraphs (a power of two)
 ;   Out:      CF clear and AX = its base in paragraphs; CF set if no room
 ;   Destroys: nothing else
 ; ----------------------------------------------------------------------------
@@ -222,32 +240,32 @@ untyped_carve:
         push bx
         push cx
         push dx
-        mov ax, [si + SH_HOLE]
-        mov bx, [si + SH_HOLE_END]
+        mov ax, [es:si + SH_HOLE]
+        mov bx, [es:si + SH_HOLE_END]
         call retype_place               ; within the hole?
         jc .watermark
-        mov [si + SH_HOLE], dx          ; the hole now starts past it
+        mov [es:si + SH_HOLE], dx       ; the hole now starts past it
         jmp .placed
 .watermark:
         pop dx
         push dx
-        mov ax, [si + SH_WATERMARK]
-        mov bx, [si + SH_SIZE]
+        mov ax, [es:si + SH_WATERMARK]
+        mov bx, [es:si + SH_SIZE]
         call retype_place               ; AX = its place, DX = the new watermark
         jc .done
         mov bx, ax
-        sub bx, [si + SH_WATERMARK]     ; BX = the room skipped
-        mov cx, [si + SH_HOLE_END]
-        sub cx, [si + SH_HOLE]          ; CX = the hole kept
+        sub bx, [es:si + SH_WATERMARK]  ; BX = the room skipped
+        mov cx, [es:si + SH_HOLE_END]
+        sub cx, [es:si + SH_HOLE]       ; CX = the hole kept
         cmp bx, cx
         jbe .kept
-        mov bx, [si + SH_WATERMARK]
-        mov [si + SH_HOLE], bx
-        mov [si + SH_HOLE_END], ax
+        mov bx, [es:si + SH_WATERMARK]
+        mov [es:si + SH_HOLE], bx
+        mov [es:si + SH_HOLE_END], ax
 .kept:
-        mov [si + SH_WATERMARK], dx
+        mov [es:si + SH_WATERMARK], dx
 .placed:
-        add ax, [si + SH_OBJECT]
+        add ax, [es:si + SH_OBJECT]
         clc
 .done:
         pop dx
@@ -256,58 +274,121 @@ untyped_carve:
         ret
 
 ; ----------------------------------------------------------------------------
-; arena_object - a kernel object of the arena, zeroed: from the arena's
-; untyped only (l4.md D7)
-;   In:       SI = the untyped's shadow entry; CX = the object's bytes (a
-;             power of two, at least 16): it is aligned to its size
-;   Out:      CF clear and BX = the object (an offset of kdata); CF set and
-;             AL = KE_CAP (not the arena's) or KE_MEM (no room)
-;   Destroys: AX, CX, DX, DI, ES
+; obj_take - a descriptor of the GDT's pool, for an object or a space's LDT
+; (os-server.md P3)
+;   In:       DS = SEL_KDATA
+;   Out:      CF clear and BX = its selector; CF set if none is left
+;   Destroys: nothing
 ; ----------------------------------------------------------------------------
-arena_object:
-        mov dx, cx
-        shr dx, 4                       ; aligned to its size
-        ; falls through
-
-; ----------------------------------------------------------------------------
-; arena_aligned - as arena_object, of any size, at an alignment given
-;   In:       SI = the untyped's shadow entry; CX = the object's bytes (a
-;             multiple of 16); DX = its alignment in paragraphs (a power of
-;             two)
-;   Out:      as arena_object's
-;   Destroys: AX, CX, DX, DI, ES
-; ----------------------------------------------------------------------------
-arena_aligned:
-        mov al, KE_CAP
-        call untyped_in_arena
-        jc .refuse
-        push cx                         ; its bytes
-        shr cx, 4
-        call untyped_carve              ; AX = its place, in paragraphs
-        pop cx
-        jc .full
-        sub ax, ARENA_PARA
-        shl ax, 4
-        add ax, ARENA_OFF
-        mov bx, ax                      ; BX = the object
-        push ds                         ; zeroed (l4.md X14): exactly its bytes
-        pop es
-        mov di, bx
-        shr cx, 1
-        xor ax, ax
-        cld
-        rep stosw
+obj_take:
+        cmp word [obj_free_count], 0
+        je .none
+        push di
+        dec word [obj_free_count]
+        mov di, [obj_free_count]
+        shl di, 1
+        mov bx, [OBJ_FREE_OFF + di]
+        pop di
         clc
         ret
-.full:
-        mov al, KE_MEM
-.refuse:
+.none:
         stc
         ret
 
 ; ----------------------------------------------------------------------------
+; obj_free - a descriptor back to the pool, an object's that died or a dead
+; space's LDT's. It keeps what it described until it is taken again, so
+; that a segment register that still holds it, popped, loads harmlessly
+;   In:       BX = the selector; DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+obj_free:
+        push di
+%ifdef WITH_CHECKS
+ %ifndef TEST_STRETCH                   ; (it would lengthen what that measures)
+        push cx                         ; never freed twice: once in the stack
+        push ax
+        mov cx, [obj_free_count]
+        mov di, OBJ_FREE_OFF
+        jcxz .unique
+.scan:
+        cmp [di], bx
+        jne .next
+        mov ax, sp
+        mov di, ax
+        mov ax, [ss:di + 6]             ; the caller
+        LOG_NUMBER "obj_free: freed twice, from ", ax
+        LOG_NUMBER "obj_free: the selector ", bx
+        ASSERT z, "obj_free: a descriptor freed twice"
+.next:
+        add di, 2
+        loop .scan
+.unique:
+        pop ax
+        pop cx
+ %endif
+%endif
+        mov di, [obj_free_count]
+        shl di, 1
+        mov [OBJ_FREE_OFF + di], bx
+        inc word [obj_free_count]
+        pop di
+        ret
+
+; ----------------------------------------------------------------------------
+; object_make - a kernel object, zeroed, from untyped memory anywhere
+; (os-server.md P3): its memory carved at a paragraph, its own descriptor
+; from the GDT's pool, its selector its name
+;   In:       ES:SI = the untyped's shadow entry; CX = the object's bytes (a
+;             multiple of 16)
+;   Out:      CF clear and BX = the object; CF set and AL = KE_POOL (no
+;             descriptor) or KE_MEM (no room)
+;   Destroys: AX, CX, DX, DI
+; ----------------------------------------------------------------------------
+object_make:
+        call obj_take                   ; a descriptor first: nothing to undo after
+        jc .pool
+        push cx
+        shr cx, 4
+        mov dx, 1
+        call untyped_carve              ; AX = its place, in paragraphs
+        pop cx
+        jc .full
+        mov di, bx
+        add di, GDT_OFF
+        dec cx
+        mov [di], cx                    ; its limit
+        inc cx
+        mov dx, ax
+        shl ax, 4
+        shr dx, 12                      ; DL:AX = its base
+        mov [di + 2], ax
+        mov [di + 4], dl
+        mov byte [di + 5], ACC_KDATA
+        mov word [di + 6], 0
+        push es                         ; zeroed (l4.md X14): exactly its bytes
+        mov es, bx
+        xor di, di
+        shr cx, 1
+        xor ax, ax
+        cld
+        rep stosw
+        pop es
+        clc
+        ret
+.full:
+        call obj_free
+        mov al, KE_MEM
+        stc
+        ret
+.pool:
+        mov al, KE_POOL
+        ret
+
+; ----------------------------------------------------------------------------
 ; scratch_window - one of the kernel's windows on memory, set to some
-;   In:       DI = its descriptor (gdt + SEL_SCRATCH or SEL_SCRATCH2); DL:AX =
+;   In:       DI = its descriptor (GDT_OFF + SEL_SCRATCH or SEL_SCRATCH2); DL:AX =
 ;             the base; CX = bytes (0 for 64 KB)
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -327,10 +408,10 @@ scratch_window:
 ; phys_zero - zero memory by its physical address, through SEL_SCRATCH
 ;   In:       DL:AX = the base; CX = bytes (even, up to 64 KB; 0 for 64 KB)
 ;   Out:      nothing
-;   Destroys: AX, CX, DI, ES
+;   Destroys: AX, CX, DI, ES (SEL_KDATA)
 ; ----------------------------------------------------------------------------
 phys_zero:
-        mov di, gdt + SEL_SCRATCH
+        mov di, GDT_OFF + SEL_SCRATCH
         call scratch_window
         mov ax, SEL_SCRATCH
         mov es, ax
@@ -362,49 +443,49 @@ phys_zero:
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 retype_zero:
-        mov bx, [cur_thread]
-        mov cx, [bx + T_ZERO_PARAS]
-        sub cx, [bx + T_ZERO_DONE]      ; CX = paragraphs left
+        mov es, [cur_thread]
+        mov cx, [es:T_ZERO_PARAS]
+        sub cx, [es:T_ZERO_DONE]        ; CX = paragraphs left
         jz .zeroed
         cmp cx, RETYPE_PIECE / 16
         jbe .piece
         mov cx, RETYPE_PIECE / 16
 .piece:
-        mov ax, [bx + T_ZERO_BASE]
-        add ax, [bx + T_ZERO_DONE]
-        add [bx + T_ZERO_DONE], cx
+        mov ax, [es:T_ZERO_BASE]
+        add ax, [es:T_ZERO_DONE]
+        add [es:T_ZERO_DONE], cx
         mov dx, ax
         shl ax, 4
         shr dx, 12                      ; DL:AX = the piece
         shl cx, 4                       ; its bytes
         call phys_zero
-        mov bx, [cur_thread]
-        mov ax, [bx + T_ZERO_DONE]
-        cmp ax, [bx + T_ZERO_PARAS]
+        mov es, [cur_thread]
+        mov ax, [es:T_ZERO_DONE]
+        cmp ax, [es:T_ZERO_PARAS]
         jae .zeroed
         KWINDOW (VEC_KCALL << 8) | KCALL_RETYPE
         jmp retype_zero
 .zeroed:
-        mov ax, [bx + T_SPACE]          ; everything as it was?
+        mov ax, [es:T_SPACE]            ; everything as it was?
         test ax, ax
         jz .changed
-        mov dx, [bx + T_ZERO_BASE]
-        add dx, [bx + T_ZERO_PARAS]     ; DX = the carved end
+        mov dx, [es:T_ZERO_BASE]
+        add dx, [es:T_ZERO_PARAS]       ; DX = the carved end
         mov bx, ax
         call space_alive
         jc .changed
         mov ax, [bp + FRAME_SI]
         call slot_of
         jc .changed
-        cmp byte [si + SH_TYPE], CAP_EMPTY
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
         jne .changed
         mov ax, [bp + FRAME_DX]
         call slot_of
         jc .changed
-        cmp byte [si + SH_TYPE], CAP_UNTYPED
+        cmp byte [es:si + SH_TYPE], CAP_UNTYPED
         jne .changed
-        sub dx, [si + SH_OBJECT]        ; the carved end, from the untyped's start
-        cmp dx, [si + SH_WATERMARK]
+        sub dx, [es:si + SH_OBJECT]     ; the carved end, from the untyped's start
+        cmp dx, [es:si + SH_WATERMARK]
         ja .changed                     ; revoked and given out again
         clc
         ret
@@ -421,11 +502,11 @@ retype_zero:
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 phys_copy:
-        mov di, gdt + SEL_SCRATCH
+        mov di, GDT_OFF + SEL_SCRATCH
         call scratch_window
         mov ax, bx
         mov dl, dh
-        mov di, gdt + SEL_SCRATCH2
+        mov di, GDT_OFF + SEL_SCRATCH2
         call scratch_window
         push ds
         mov ax, SEL_SCRATCH
@@ -443,84 +524,70 @@ phys_copy:
         ret
 
 ; ----------------------------------------------------------------------------
-; pool_take - a free descriptor of one of the GDT's pools: all zeros
-;   In:       AX = the pool's first selector; CX = its descriptors
-;   Out:      CF clear and AX = the free one's selector; CF set if none
-;   Destroys: CX, DI
-; ----------------------------------------------------------------------------
-pool_take:
-        mov di, gdt
-        add di, ax
-.slot:
-        cmp byte [di + 5], 0            ; the access byte: 0 is free
-        je .found
-        add di, 8
-        add ax, 8
-        loop .slot
-        stc
-        ret
-.found:
-        clc
-        ret
-
-; ----------------------------------------------------------------------------
-; space_make - a space of so many slots, from untyped memory: its LDT's
-; descriptor from the pool, every slot empty
-;   In:       SI = the untyped's shadow entry; CX = slots (a power of two,
+; space_make - a space of so many slots, from untyped memory: an object, an
+; LDT descriptor of the pool for its LDT, every slot empty
+;   In:       ES:SI = the untyped's shadow entry; CX = slots (a power of two,
 ;             SPACE_SLOTS_MIN to SPACE_SLOTS_MAX)
 ;   Out:      CF clear and BX = the space; CF set and AL = KE_*
-;   Destroys: AX, CX, DX, DI, ES
+;   Destroys: AX, CX, DX, DI
 ; ----------------------------------------------------------------------------
 space_make:
-        push cx
-        mov ax, SEL_LDT_POOL            ; a descriptor first: nothing to undo after
-        mov cx, SPACE_MAX
-        call pool_take
-        pop cx
-        jnc .pooled
+        call obj_take                   ; BX = the LDT's descriptor
         mov al, KE_POOL
-        ret
-.pooled:
-        push ax                         ; the LDT's selector
+        jc .done
+        push bx
         push cx                         ; the slots
         mov ax, cx                      ; bytes: the header, then a descriptor
         mov dx, SLOT_SIZE               ; and a shadow entry a slot, aligned
         mul dx                          ; to a paragraph (os-server.md P2)
         add ax, SP_HEADER_SIZE
         mov cx, ax
-        mov dx, 1
-        call arena_aligned              ; BX = the space, zeroed
+        call object_make                ; BX = the space, zeroed
         pop cx
         pop dx                          ; DX = the LDT's selector
-        jc .done
-        mov [bx + SP_SLOTS], cx
-        mov [bx + SP_GDT_SELECTOR], dx
-        mov di, gdt
-        add di, dx
+        jc .undo
+        push es
+        mov es, bx
+        mov [es:SP_SLOTS], cx
+        mov [es:SP_GDT_SELECTOR], dx
+        pop es
+        mov di, bx                      ; its LDT: the object's base, plus SP_LDT
+        add di, GDT_OFF
+        mov ax, [di + 2]
+        mov dl, [di + 4]
+        add ax, SP_LDT
+        adc dl, 0
+        push es
+        mov es, bx
+        mov di, [es:SP_GDT_SELECTOR]
+        pop es
+        add di, GDT_OFF
+        mov [di + 2], ax
+        mov [di + 4], dl
         shl cx, 3
         dec cx
         mov [di], cx                    ; the LDT's limit
-        mov ax, bx
-        add ax, SP_LDT
-        add ax, KDATA_BASE & 0xFFFF     ; its base: kdata's, plus the offset
-        mov [di + 2], ax
-        mov al, KDATA_BASE >> 16
-        adc al, 0
-        mov [di + 4], al
         mov byte [di + 5], ACC_LDT
         mov word [di + 6], 0
         call space_list_add
         clc
 .done:
         ret
+.undo:
+        push bx
+        mov bx, dx
+        call obj_free
+        pop bx
+        stc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; tcb_make - a thread, from untyped memory: its control block (its frame at
 ; its end: no kernel stack of its own, os-server.md P3), in the list of
 ; threads; not yet started
-;   In:       SI = the untyped's shadow entry
+;   In:       ES:SI = the untyped's shadow entry
 ;   Out:      CF clear and BX = the thread; CF set and AL = KE_*
-;   Destroys: AX, CX, DX, DI, ES
+;   Destroys: AX, CX, DX, DI
 ; ----------------------------------------------------------------------------
 tcb_make:
         mov al, KE_POOL
@@ -528,10 +595,13 @@ tcb_make:
         cmp cx, THREAD_MAX
         jae .refuse
         mov cx, TCB_OBJECT_SIZE
-        call arena_object               ; BX = the control block, zeroed
+        call object_make                ; BX = the control block, zeroed
         jc .done
-        mov word [bx + T_NAME], msg_thread_made
-        mov byte [bx + T_SLICE], SLICE_TICKS
+        push es
+        mov es, bx
+        mov word [es:T_NAME], msg_thread_made
+        mov byte [es:T_SLICE], SLICE_TICKS
+        pop es
         mov di, [thread_count]
         shl di, 1
         mov [thread_list + di], bx
@@ -546,36 +616,36 @@ tcb_make:
 ; ----------------------------------------------------------------------------
 ; slot_put_descriptor - a segment capability into an empty slot: a copy of a
 ; descriptor, and a shadow entry with its memory
-;   In:       SI = the shadow entry, DI = the slot's descriptor; DS:BX = the
-;             descriptor to copy
+;   In:       ES:SI = the shadow entry, ES:DI = the slot's descriptor;
+;             DS:BX = the descriptor to copy
 ;   Out:      nothing
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 slot_put_descriptor:
         mov ax, [bx]
-        mov [di], ax
+        mov [es:di], ax
         mov ax, [bx + 2]
-        mov [di + 2], ax
+        mov [es:di + 2], ax
         mov ax, [bx + 4]
-        mov [di + 4], ax
-        mov word [di + 6], 0
-        test byte [di + 5], ACC_PRESENT
+        mov [es:di + 4], ax
+        mov word [es:di + 6], 0
+        test byte [es:di + 5], ACC_PRESENT
         jz .empty                       ; an empty descriptor: an empty slot
-        mov byte [si + SH_TYPE], CAP_SEGMENT
+        mov byte [es:si + SH_TYPE], CAP_SEGMENT
         push cx
         push dx
-        mov ax, [di + 2]                ; the base in paragraphs: 24 bits, shifted 4
+        mov ax, [es:di + 2]             ; the base in paragraphs: 24 bits, shifted 4
         shr ax, 4
-        mov dl, [di + 4]
+        mov dl, [es:di + 4]
         xor dh, dh
         shl dx, 12
         or ax, dx
-        mov [si + SH_OBJECT], ax
-        mov ax, [di]                    ; the size in paragraphs: (limit + 16) / 16
+        mov [es:si + SH_OBJECT], ax
+        mov ax, [es:di]                 ; the size in paragraphs: (limit + 16) / 16
         add ax, 16
         rcr ax, 1
         shr ax, 3
-        mov [si + SH_SIZE], ax
+        mov [es:si + SH_SIZE], ax
         pop dx
         pop cx
 .empty:
@@ -594,32 +664,40 @@ slot_put_descriptor:
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 boot_root:
+        push ds
+        pop es
         mov si, boot_untyped
         mov cx, ROOT_SLOTS
         call space_make                 ; BX = the space
         ASSERT nc, "boot_root: no room for a space"
         mov [boot_space], bx
+        push ds
+        pop es
         mov si, boot_untyped
         call tcb_make                   ; BX = the thread
         ASSERT nc, "boot_root: no room for a thread"
         mov [boot_thread], bx
+        mov es, bx
         mov si, ROOT_MODULE
-        mov [bx + T_NAME], si           ; (M_NAME: zero-terminated)
+        mov [es:T_NAME], si             ; (M_NAME: zero-terminated)
         mov al, [si + M_RING]
-        mov [bx + T_RING], al
+        mov [es:T_RING], al
         mov al, [si + M_PRIORITY]
-        mov [bx + T_PRIO], al
+        mov [es:T_PRIO], al
         mov ax, [si + M_ENTRY]
-        mov [bx + T_ENTRY], ax
+        mov [es:T_ENTRY], ax
         mov ax, [si + M_STACK]
-        mov [bx + T_USTACK_TOP], ax
+        mov [es:T_USTACK_TOP], ax
         mov di, [boot_space]
-        mov [bx + T_SPACE], di
-        mov ax, [di + SP_GDT_SELECTOR]
-        mov [bx + T_LDT], ax
-        lea ax, [di + SP_LDT]
-        mov [bx + T_LDT_LIVE], ax
-        or byte [bx + T_FLAGS], TF_CONFIGURED
+        mov [es:T_SPACE], di
+        push es
+        mov es, di
+        mov ax, [es:SP_GDT_SELECTOR]
+        pop es
+        mov [es:T_LDT], ax
+        or byte [es:T_FLAGS], TF_CONFIGURED
+        push ds
+        pop es
         ; slots 0, 1, 2: its code; its data and stack, from the memory for
         ; segments
         mov si, ROOT_MODULE
@@ -643,17 +721,17 @@ boot_root:
         ; slots 6, 7: its own space and thread
         mov bx, [boot_space]
         mov ax, ROOT_SLOT_SPACE
-        call slot_at
-        mov byte [si + SH_TYPE], CAP_SPACE
-        mov [si + SH_OBJECT], bx
-        mov word [bx + SP_REFS], 1
+        call slot_at                    ; ES = the space
+        mov byte [es:si + SH_TYPE], CAP_SPACE
+        mov [es:si + SH_OBJECT], bx
+        mov word [es:SP_REFS], 1
         mov ax, ROOT_SLOT_THREAD
         call slot_at
-        mov byte [si + SH_TYPE], CAP_THREAD
+        mov byte [es:si + SH_TYPE], CAP_THREAD
         mov ax, [boot_thread]
-        mov [si + SH_OBJECT], ax
-        mov di, ax
-        mov word [di + T_REFS], 1
+        mov [es:si + SH_OBJECT], ax
+        mov es, ax
+        mov word [es:T_REFS], 1
         ; the screen's text page, for the console driver (l4.md L8)
         mov ax, VIDEO_PHYS & 0xFFFF
         mov dl, VIDEO_PHYS >> 16
@@ -674,8 +752,8 @@ boot_root:
         mov ax, ROOT_SLOT_IRQ
         add ax, cx
         call slot_at
-        mov byte [si + SH_TYPE], CAP_IRQ
-        mov [si + SH_OBJECT], cx
+        mov byte [es:si + SH_TYPE], CAP_IRQ
+        mov [es:si + SH_OBJECT], cx
         mov di, cx
         shl di, 1
         mov word [irq_refs + di], 1
@@ -820,6 +898,8 @@ boot_carve:
         push cx
         add cx, 15
         shr cx, 4
+        push ds
+        pop es
         mov si, memory_untyped
         mov dx, 1
         call untyped_carve              ; AX = its base in paragraphs
@@ -863,9 +943,11 @@ boot_slot_segment:
         mov [boot_descriptor + 5], dh
         mov ax, bx
         mov bx, [boot_space]
-        call slot_at                    ; SI, DI = the slot
+        call slot_at                    ; ES:SI, ES:DI = the slot
         mov bx, boot_descriptor
         call slot_put_descriptor
+        push ds
+        pop es
         pop si
         ret
 
@@ -879,22 +961,22 @@ boot_slot_segment:
 ; ----------------------------------------------------------------------------
 boot_slot_shadow:
         mov bx, [boot_space]
-        call slot_at
+        call slot_at                    ; ES:SI = the slot's shadow entry
         mov di, si
         mov si, dx
-        push ds
-        pop es
         mov cx, SHADOW_SIZE / 2
         cld
         rep movsw
         sub di, SHADOW_SIZE             ; the copy: from the watermark on
-        mov ax, [di + SH_WATERMARK]
-        add [di + SH_OBJECT], ax
-        sub [di + SH_SIZE], ax
+        mov ax, [es:di + SH_WATERMARK]
+        add [es:di + SH_OBJECT], ax
+        sub [es:di + SH_SIZE], ax
         xor ax, ax
-        mov [di + SH_WATERMARK], ax
-        mov [di + SH_HOLE], ax
-        mov [di + SH_HOLE_END], ax
+        mov [es:di + SH_WATERMARK], ax
+        mov [es:di + SH_HOLE], ax
+        mov [es:di + SH_HOLE_END], ax
+        push ds
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
@@ -906,29 +988,23 @@ boot_slot_shadow:
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_retype:
-        mov bx, [cur_thread]
-        cmp byte [bx + T_CONT], CONT_RESUMED
+        mov es, [cur_thread]
+        cmp byte [es:T_CONT], CONT_RESUMED
         jne .fresh
-        cmp word [bx + T_ZERO_PARAS], 0
+        cmp word [es:T_ZERO_PARAS], 0
         jne retype_segment              ; it gave way while its segment was zeroed
 .fresh:
+        mov bx, [es:T_SPACE]            ; the destination: an empty slot
+        mov ax, [bp + FRAME_SI]
+        call slot_of
+        jc kc_done.cap
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
+        jne kc_done.slot
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_UNTYPED
-        call cap_get                    ; SI = the untyped, AX its slot
+        call cap_get                    ; ES:SI = the untyped, AX its slot
         jc kc_done.cap
         mov [retype_parent_slot], ax
-        push si
-        mov ax, [bp + FRAME_SI]
-        mov bx, [cur_thread]
-        mov bx, [bx + T_SPACE]
-        call slot_of                    ; SI, DI = the destination
-        mov bx, si
-        pop si
-        jc kc_done.cap
-        cmp byte [bx + SH_TYPE], CAP_EMPTY
-        jne kc_done.slot
-        push bx                         ; the destination's shadow
-        push di                         ; and descriptor
         mov al, [bp + FRAME_AX]
         cmp al, CAP_SEGMENT
         je .segment
@@ -944,92 +1020,93 @@ kc_retype:
         je .object
         cmp al, CAP_NOTIFY
         je .object
-        jmp .arg
+        jmp kc_done.arg
 .space:
         mov cx, [bp + FRAME_CX]         ; a power of two, within the bounds
         cmp cx, SPACE_SLOTS_MIN
-        jb .arg
+        jb kc_done.arg
         cmp cx, SPACE_SLOTS_MAX
-        ja .arg
+        ja kc_done.arg
         mov ax, cx
         dec ax
         test ax, cx
-        jnz .arg
+        jnz kc_done.arg
         call space_make
-        jc .error
+        jc kc_done
         jmp .made
 .object:
         cmp al, CAP_THREAD
         jne .small
         call tcb_make
-        jc .error
+        jc kc_done
         jmp .made
 .small:
-        call arena_object
-        jc .error
+        call object_make
+        jc kc_done
 .made:
-        pop di
-        pop si                          ; the destination
+        call retype_destination         ; ES:SI = the destination
         mov al, [bp + FRAME_AX]
-        mov [si + SH_TYPE], al
-        mov [si + SH_OBJECT], bx
-        mov byte [si + SH_RIGHTS], RIGHTS_ALL
+        mov [es:si + SH_TYPE], al
+        mov [es:si + SH_OBJECT], bx
+        mov byte [es:si + SH_RIGHTS], RIGHTS_ALL
         jmp retype_parent
 .untyped:
         ; Untyped from untyped (l4.md L12): CX paragraphs, which a revoke of
         ; the new one gives back to it whole
         mov cx, [bp + FRAME_CX]
         test cx, cx
-        jz .arg
+        jz kc_done.arg
         mov dx, 1
         call untyped_carve              ; AX = its base in paragraphs
-        jc .mem
-        pop di
-        pop si
-        mov byte [si + SH_TYPE], CAP_UNTYPED
-        mov [si + SH_OBJECT], ax
+        jc kc_done.mem
+        call retype_destination
+        mov byte [es:si + SH_TYPE], CAP_UNTYPED
+        mov [es:si + SH_OBJECT], ax
         mov ax, [bp + FRAME_CX]
-        mov [si + SH_SIZE], ax
+        mov [es:si + SH_SIZE], ax
         jmp retype_parent
 .segment:
-        ; Only data, present, of DPL 1-3, and never from the arena (l4.md X14)
+        ; Only data, present, of DPL 1-3; from any untyped, as objects are
+        ; (os-server.md P3): a watermark never gives the same memory twice
         mov al, [bp + FRAME_BX]
         and al, ACC_PRESENT | ACC_SEGMENT | ACC_CODE | ACC_EXPAND_DOWN
         cmp al, ACC_PRESENT | ACC_SEGMENT
-        jne .arg
+        jne kc_done.arg
         test byte [bp + FRAME_BX], ACC_DPL_MASK
-        jz .arg
-        call untyped_in_arena
-        jnc .cap
+        jz kc_done.arg
         mov cx, [bp + FRAME_CX]
-        jcxz .arg
+        test cx, cx
+        jz kc_done.arg
         add cx, 15
         rcr cx, 1                       ; (a carry is bit 16: up to 64 KB)
         shr cx, 3                       ; CX = paragraphs
         mov dx, 1
         call untyped_carve              ; AX = its base in paragraphs
-        jc .mem
-        pop di
-        pop si
-        mov bx, [cur_thread]            ; zeroed in pieces: what a resumed call
-        mov [bx + T_ZERO_BASE], ax      ; finds again (retype_zero)
-        mov [bx + T_ZERO_PARAS], cx
-        mov word [bx + T_ZERO_DONE], 0
+        jc kc_done.mem
+        mov es, [cur_thread]            ; zeroed in pieces: what a resumed call
+        mov [es:T_ZERO_BASE], ax        ; finds again (retype_zero)
+        mov [es:T_ZERO_PARAS], cx
+        mov word [es:T_ZERO_DONE], 0
         mov ax, [retype_parent_slot]
-        mov [bx + T_ZERO_SLOT], ax
+        mov [es:T_ZERO_SLOT], ax
         jmp retype_segment
-.cap:
-        mov al, KE_CAP
-        jmp .error
-.mem:
-        mov al, KE_MEM
-        jmp .error
-.arg:
-        mov al, KE_ARG
-.error:
-        pop di
-        pop si
-        jmp kc_done
+
+; ----------------------------------------------------------------------------
+; retype_destination - the retype's destination slot, in the caller's space
+;   In:       BP = the frame (SI the slot's selector, checked already)
+;   Out:      ES:SI = its shadow entry, ES:DI = its descriptor
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+retype_destination:
+        push ax
+        push bx
+        mov es, [cur_thread]
+        mov bx, [es:T_SPACE]
+        mov ax, [bp + FRAME_SI]
+        call slot_of
+        pop bx
+        pop ax
+        ret
 
 ; ----------------------------------------------------------------------------
 ; retype_segment - the rest of a segment's retype: its memory zeroed, then
@@ -1040,11 +1117,11 @@ kc_retype:
 ; ----------------------------------------------------------------------------
 retype_segment:
         call retype_zero
-        mov bx, [cur_thread]
-        mov ax, [bx + T_ZERO_BASE]
-        mov cx, [bx + T_ZERO_PARAS]
-        mov dx, [bx + T_ZERO_SLOT]
-        mov word [bx + T_ZERO_PARAS], 0
+        mov es, [cur_thread]
+        mov ax, [es:T_ZERO_BASE]
+        mov cx, [es:T_ZERO_PARAS]
+        mov dx, [es:T_ZERO_SLOT]
+        mov word [es:T_ZERO_PARAS], 0
         jc .changed
         mov [retype_base], ax
         mov [retype_paragraphs], cx
@@ -1054,25 +1131,23 @@ retype_segment:
         shr dx, 12
         mov [retype_base_low], ax
         mov [retype_base_high], dl
-        mov ax, [bp + FRAME_SI]         ; the destination
-        mov bx, [bx + T_SPACE]
-        call slot_of                    ; SI = its shadow entry, DI its descriptor
+        call retype_destination         ; ES:SI, ES:DI
         mov ax, [bp + FRAME_CX]
         dec ax
-        mov [di], ax                    ; the limit
+        mov [es:di], ax                 ; the limit
         mov ax, [retype_base_low]
-        mov [di + 2], ax
+        mov [es:di + 2], ax
         mov al, [retype_base_high]
-        mov [di + 4], al
+        mov [es:di + 4], al
         mov al, [bp + FRAME_BX]
         or al, ACC_ACCESSED             ; preset, as every descriptor of rx286's
-        mov [di + 5], al
-        mov word [di + 6], 0
-        mov byte [si + SH_TYPE], CAP_SEGMENT
+        mov [es:di + 5], al
+        mov word [es:di + 6], 0
+        mov byte [es:si + SH_TYPE], CAP_SEGMENT
         mov ax, [retype_base]
-        mov [si + SH_OBJECT], ax
+        mov [es:si + SH_OBJECT], ax
         mov ax, [retype_paragraphs]
-        mov [si + SH_SIZE], ax
+        mov [es:si + SH_SIZE], ax
         jmp retype_parent
 .changed:
         mov al, KE_STATE                ; changed during the zeroing's windows
@@ -1082,40 +1157,21 @@ retype_segment:
 ; retype_parent - the end of a retype: the new capability is a child of the
 ; untyped it came from, so a revoke of the untyped deletes it (l4.md L12);
 ; a new object's first capability
-;   In:       SI = the new capability's shadow entry; BP = the frame
+;   In:       ES:SI = the new capability's shadow entry; BP = the frame
 ;   Out:      the frame's status, KE_OK
 ;   Destroys: AX, BX, CX, DX
 ; ----------------------------------------------------------------------------
 retype_parent:
-        mov bx, [cur_thread]
-        mov bx, [bx + T_SPACE]
+        mov bx, es                      ; (the caller's space)
         mov ax, [retype_parent_slot]
         mov dx, bx
         mov cx, [bp + FRAME_SI]
         shr cx, 3                       ; the new one's slot
         call child_link
-        mov al, [si + SH_TYPE]
-        mov dx, [si + SH_OBJECT]
+        mov al, [es:si + SH_TYPE]
+        mov dx, [es:si + SH_OBJECT]
         call obj_ref
         jmp kc_done.ok
-
-; ----------------------------------------------------------------------------
-; untyped_in_arena - does untyped memory lie in the arena? (kernel objects
-; come from there only, segments never: l4.md X14)
-;   In:       SI = the untyped's shadow entry
-;   Out:      CF clear if so
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-untyped_in_arena:
-        cmp word [si + SH_OBJECT], ARENA_PARA
-        jb .no
-        cmp word [si + SH_OBJECT], ARENA_PARA + (ARENA_SIZE >> 4)
-        jae .no
-        clc
-        ret
-.no:
-        stc
-        ret
 
 ; ----------------------------------------------------------------------------
 ; kc_copy - KCALL_COPY: a capability of the caller's into an empty slot of a
@@ -1132,11 +1188,11 @@ kc_copy:
         mov cl, CAP_SPACE
         call cap_get
         jc kc_done.cap
-        mov bx, [si + SH_OBJECT]
+        mov bx, [es:si + SH_OBJECT]
         mov ax, [bp + FRAME_DI]
-        call slot_of
+        call slot_of                    ; ES = the destination's space
         jc kc_done.cap
-        cmp byte [si + SH_TYPE], CAP_EMPTY
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
         jne kc_done.slot
         mov [copy_shadow], si
         mov [copy_descriptor], di
@@ -1144,89 +1200,91 @@ kc_copy:
         mov [copy_dest_slot], ax
         ; the source: a slot of the caller's that holds something
         mov ax, [bp + FRAME_SI]
-        mov bx, [cur_thread]
-        mov bx, [bx + T_SPACE]
-        call slot_of                    ; AX = its slot; SI, DI
+        mov es, [cur_thread]
+        mov bx, [es:T_SPACE]
+        mov [copy_source_space], bx
+        call slot_of                    ; ES = the caller's space; AX its slot
         jc kc_done.cap
-        cmp byte [si + SH_TYPE], CAP_EMPTY
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
         je kc_done.cap
-        cmp di, [copy_descriptor]
-        je kc_done.cap                      ; the same slot
+        cmp bx, [copy_dest_space]
+        jne .other
+        cmp ax, [copy_dest_slot]
+        je kc_done.cap                  ; the same slot
+.other:
         mov [copy_slot], ax
         mov al, [bp + FRAME_AX]
         cmp al, COPY_MOVE
         je .copy
-        cmp byte [si + SH_TYPE], CAP_UNTYPED
-        je kc_done.arg                      ; untyped is moved, never shared
-        cmp byte [si + SH_TYPE], CAP_REPLY
-        je kc_done.arg                      ; nor a reply, answered once
+        cmp byte [es:si + SH_TYPE], CAP_UNTYPED
+        je kc_done.arg                  ; untyped is moved, never shared
+        cmp byte [es:si + SH_TYPE], CAP_REPLY
+        je kc_done.arg                  ; nor a reply, answered once
         cmp al, COPY_COPY
         je .copy
         cmp al, COPY_MINT
         jne kc_done.arg
-        cmp byte [si + SH_TYPE], CAP_ENDPOINT
+        cmp byte [es:si + SH_TYPE], CAP_ENDPOINT
         je .mintable
-        cmp byte [si + SH_TYPE], CAP_NOTIFY
+        cmp byte [es:si + SH_TYPE], CAP_NOTIFY
         jne kc_done.arg
 .mintable:
-        cmp word [si + SH_BADGE], 0     ; badged once, badged for good
+        cmp word [es:si + SH_BADGE], 0  ; badged once, badged for good
         jne kc_done.arg
         cmp word [bp + FRAME_BX], 0
         je kc_done.arg
 .copy:
+        ; from the caller's space (DS, for the copy) to the destination's
+        mov ax, [copy_dest_space]
+        mov bx, [copy_descriptor]
+        mov dx, [copy_shadow]
+        push si
+        push di
         push ds
-        pop es
+        push es
+        pop ds
+        mov es, ax
         cld
         push si
-        push di
         mov si, di                      ; the descriptor
-        mov di, [copy_descriptor]
+        mov di, bx
         mov cx, 4
         rep movsw
-        pop di
         pop si
-        push si
-        push di
-        mov di, [copy_shadow]           ; the shadow entry
+        mov di, dx                      ; the shadow entry
         mov cx, SHADOW_SIZE / 2
         rep movsw
+        pop ds
         pop di
         pop si
-        mov bx, [copy_shadow]
         cmp byte [bp + FRAME_AX], COPY_MOVE
         je .move
-        mov bx, [cur_thread]            ; a copy: the source's child
-        mov bx, [bx + T_SPACE]
+        mov bx, [copy_source_space]     ; a copy: the source's child
         mov ax, [copy_slot]
         mov dx, [copy_dest_space]
         mov cx, [copy_dest_slot]
         call child_link
+        mov es, dx
         mov bx, [copy_shadow]
-        mov al, [bx + SH_TYPE]
-        mov dx, [bx + SH_OBJECT]
+        mov al, [es:bx + SH_TYPE]
+        mov dx, [es:bx + SH_OBJECT]
         call obj_ref
         cmp byte [bp + FRAME_AX], COPY_MINT
         jne kc_done.ok
         mov ax, [bp + FRAME_BX]
-        mov [bx + SH_BADGE], ax
+        mov [es:bx + SH_BADGE], ax
         mov al, [bp + FRAME_CX]         ; fewer rights, if CL names them
         test al, al
         jz kc_done.ok
-        and [bx + SH_RIGHTS], al
+        and [es:bx + SH_RIGHTS], al
         jmp kc_done.ok
 .move:
-        xor ax, ax                      ; the source slot empties: ES:DI its descriptor
-        mov cx, 4
-        rep stosw
-        mov di, si
-        mov cx, SHADOW_SIZE / 2
-        rep stosw
-        mov bx, [cur_thread]            ; its place in the tree, and its
-        mov bx, [bx + T_SPACE]          ; children, go with it (l4.md L12)
-        mov ax, [copy_slot]
+        mov es, [copy_source_space]     ; the source slot empties
+        call slot_clear
+        mov bx, [copy_source_space]     ; its place in the tree, and its
+        mov ax, [copy_slot]             ; children, go with it (l4.md L12)
         mov dx, [copy_dest_space]
         mov cx, [copy_dest_slot]
-        mov si, [copy_shadow]
         call cap_moved
         jmp kc_done.ok
 
@@ -1243,14 +1301,15 @@ kc_copy:
 ;             notification it may receive on; fault: SI an endpoint it may
 ;             send on)
 ;   Out:      the frame's status
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_thread:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_THREAD
         call cap_get
         jc kc_done.cap
-        mov bx, [si + SH_OBJECT]        ; the thread
+        mov bx, [es:si + SH_OBJECT]     ; the thread
+        mov es, bx
         mov al, [bp + FRAME_AX]
         cmp al, THREAD_BIND
         je .bind
@@ -1266,71 +1325,74 @@ kc_thread:
         je .suspend
         cmp al, THREAD_FRAME
         je .frame
-        cmp byte [bx + T_STATE], TS_STOPPED
+        cmp byte [es:T_STATE], TS_STOPPED
         je .stopped
-        cmp byte [bx + T_STATE], TS_FREE
-        jne kc_done.state                   ; started already
+        cmp byte [es:T_STATE], TS_FREE
+        jne kc_done.state               ; started already
         cmp al, THREAD_CONFIGURE
         je .configure
         cmp al, THREAD_START
         je .start
         jmp kc_done.arg
 .bind:
-        push bx                         ; its notification, bound both ways
-        mov ax, [bp + FRAME_SI]
+        mov ax, [bp + FRAME_SI]         ; its notification, bound both ways
         mov cl, CAP_NOTIFY
         call cap_get
-        pop bx
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_RECV
+        test byte [es:si + SH_RIGHTS], RIGHT_RECV
         jz kc_done.cap
-        mov si, [si + SH_OBJECT]
-        mov di, [bx + T_BOUND]          ; one each: the thread's old notification...
+        mov si, [es:si + SH_OBJECT]
+        mov es, bx
+        mov di, [es:T_BOUND]            ; one each: the thread's old notification...
         test di, di
         jz .unbound
-        mov word [di + N_BOUND], 0
+        mov es, di
+        mov word [es:N_BOUND], 0
 .unbound:
-        mov di, [si + N_BOUND]          ; ...and the notification's old thread, unbound
+        mov es, si
+        mov di, [es:N_BOUND]            ; ...and the notification's old thread, unbound
         test di, di
         jz .bound
-        mov word [di + T_BOUND], 0
+        mov es, di
+        mov word [es:T_BOUND], 0
 .bound:
-        mov [bx + T_BOUND], si
-        mov [si + N_BOUND], bx
+        mov es, bx
+        mov [es:T_BOUND], si
+        mov es, si
+        mov [es:N_BOUND], bx
         jmp kc_done.ok
 .fault:
-        push bx                         ; its fault endpoint, and the badge
-        mov ax, [bp + FRAME_SI]
+        mov ax, [bp + FRAME_SI]         ; its fault endpoint, and the badge
         mov cl, CAP_ENDPOINT
         call cap_get
-        pop bx
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_SEND
+        test byte [es:si + SH_RIGHTS], RIGHT_SEND
         jz kc_done.cap
-        mov ax, [si + SH_OBJECT]
-        mov [bx + T_FAULT], ax
-        mov ax, [si + SH_BADGE]
-        mov [bx + T_FAULT_BADGE], ax
+        mov ax, [es:si + SH_OBJECT]
+        mov dx, [es:si + SH_BADGE]
+        mov es, bx
+        mov [es:T_FAULT], ax
+        mov [es:T_FAULT_BADGE], dx
         jmp kc_done.ok
 .restart:
-        cmp byte [bx + T_STATE], TS_FREE
+        cmp byte [es:T_STATE], TS_FREE
         je kc_done.state                ; not started
         call thread_restart
         jmp kc_done.ok
 .stop:
-        cmp byte [bx + T_STATE], TS_FREE
+        cmp byte [es:T_STATE], TS_FREE
         je kc_done.state                ; not started
-        cmp byte [bx + T_STATE], TS_STOPPED
+        cmp byte [es:T_STATE], TS_STOPPED
         je kc_done.state
         cmp bx, [cur_thread]
         je kc_done.arg                  ; a thread does not stop itself
         call thread_stop
         jmp kc_done.ok
 .info:
-        mov al, [bx + T_STATE]
-        mov ah, [bx + T_PRIO]
+        mov al, [es:T_STATE]
+        mov ah, [es:T_PRIO]
         mov [bp + FRAME_BX], ax
-        mov ax, [bx + T_RUNS]
+        mov ax, [es:T_RUNS]
         mov [bp + FRAME_CX], ax
         jmp kc_done.ok
 .stopped:
@@ -1339,8 +1401,8 @@ kc_thread:
         mov cx, [bp + FRAME_CX]         ; suspended one where it was
         cmp cl, PRIORITY_MAX
         ja kc_done.arg
-        mov [bx + T_PRIO], cl
-        and byte [bx + T_FLAGS], ~TF_SUSPENDED & 0xFF
+        mov [es:T_PRIO], cl
+        and byte [es:T_FLAGS], ~TF_SUSPENDED & 0xFF
         call ready_push
         jmp kc_done.ok
 .suspend:
@@ -1350,46 +1412,46 @@ kc_thread:
         ; caller, not stopped
         cmp bx, [cur_thread]
         je kc_done.arg
-        cmp byte [bx + T_RING], RPL_USER
+        cmp byte [es:T_RING], RPL_USER
         jne kc_done.arg
-        cmp byte [bx + T_STATE], TS_FREE
+        cmp byte [es:T_STATE], TS_FREE
         je kc_done.state
-        cmp byte [bx + T_STATE], TS_STOPPED
+        cmp byte [es:T_STATE], TS_STOPPED
         je kc_done.state
-        test byte [bx + T_FLAGS], TF_SUSPEND
+        test byte [es:T_FLAGS], TF_SUSPEND
         jnz kc_done.state
         xor dx, dx                      ; DX:CX = the notification and badge, or 0
         xor cx, cx
         mov ax, [bp + FRAME_SI]
         test ax, ax
         jz .suspend_set
-        push bx
         mov cl, CAP_NOTIFY
         call cap_get
-        pop bx
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_SEND
+        test byte [es:si + SH_RIGHTS], RIGHT_SEND
         jz kc_done.cap
-        mov dx, [si + SH_OBJECT]
-        mov cx, [si + SH_BADGE]
+        mov dx, [es:si + SH_OBJECT]
+        mov cx, [es:si + SH_BADGE]
 .suspend_set:
-        mov [bx + T_SUSPEND_NOTIFY], dx
-        mov [bx + T_SUSPEND_BADGE], cx
-        or byte [bx + T_FLAGS], TF_SUSPEND
-        test byte [bx + T_IPC], TI_FAULT
+        mov es, bx
+        mov [es:T_SUSPEND_NOTIFY], dx
+        mov [es:T_SUSPEND_BADGE], cx
+        or byte [es:T_FLAGS], TF_SUSPEND
+        test byte [es:T_IPC], TI_FAULT
         jz kc_done.ok
-        cmp byte [bx + T_STATE], TS_SEND
+        cmp byte [es:T_STATE], TS_SEND
         je .fault_wait
-        cmp byte [bx + T_STATE], TS_REPLY
+        cmp byte [es:T_STATE], TS_REPLY
         jne kc_done.ok
 .fault_wait:
         mov al, KE_SUSPENDED            ; waiting for its fault's reply: it
         call ipc_fail                   ; stops at once, at the fault
         jmp kc_done.ok
 .frame:
-        ; the frame of a suspended thread to or from the caller's bytes,
-        ; checked as the log's are (check_buffer): TFR_SIZE of them at SI:DI
-        test byte [bx + T_FLAGS], TF_SUSPENDED
+        ; the frame of a suspended thread - in its control block, since it
+        ; does not run - to or from the caller's bytes, checked as the log's
+        ; are (check_buffer): TFR_SIZE of them at SI:DI
+        test byte [es:T_FLAGS], TF_SUSPENDED
         jz kc_done.state
         mov [frame_thread], bx
         mov ax, [bp + FRAME_SI]
@@ -1401,24 +1463,25 @@ kc_thread:
         jne kc_done.arg
         call check_buffer_writable      ; ES = the caller's segment
         jc kc_done.cap
-        mov bx, [frame_thread]
-        call thread_frame               ; DI = the frame, in kdata
-        xchg si, di                     ; DS:SI the frame, ES:DI the caller's
+        mov di, si                      ; ES:DI the caller's, DS:SI the frame
+        push ds
+        mov ds, bx
+        mov si, T_FRAME
         cld
         mov cx, TFR_SIZE / 2
         rep movsw
+        pop ds
         push ds
         pop es
         jmp kc_done.ok
 .frame_write:
         call check_buffer               ; ES = the caller's segment
         jc kc_done.cap
-        mov bx, [frame_thread]
-        call thread_frame               ; DI = the frame, in kdata
         push ds
         push es
         pop ds                          ; DS:SI the caller's, ES:DI the frame
-        pop es
+        mov es, bx
+        mov di, T_FRAME
         cld
         mov cx, TFR_VECTOR / 2          ; the registers before the kernel's words
         rep movsw
@@ -1426,24 +1489,21 @@ kc_thread:
         add di, TFR_IP - TFR_VECTOR
         mov cx, (TFR_SIZE - TFR_IP) / 2 ; IP, CS, FLAGS, SP, SS
         rep movsw
-        push es
         pop ds
-        mov bx, [frame_thread]
-        call thread_frame
         call thread_flags               ; IF on and the thread's IOPL, whatever was
-        and word [di + FRAME_FLAGS], FLAGS_USER_KEEP   ; written; NT never (E6)
-        or [di + FRAME_FLAGS], ax
+        and word [es:T_FRAME + FRAME_FLAGS], FLAGS_USER_KEEP   ; written; NT never (E6)
+        or [es:T_FRAME + FRAME_FLAGS], ax
+        push ds
+        pop es
         jmp kc_done.ok
 .configure:
-        push bx
         mov ax, [bp + FRAME_SI]
         mov cl, CAP_SPACE
         call cap_get
-        pop bx
         jc kc_done.cap
-        mov dx, [si + SH_OBJECT]        ; the space
-        mov di, dx
-        mov al, [di + SP_LDT + 5]       ; slot 0: present code, its DPL the ring
+        mov dx, [es:si + SH_OBJECT]     ; the space
+        mov es, dx
+        mov al, [es:SP_LDT + 5]         ; slot 0: present code, its DPL the ring
         mov ah, al
         and ah, ACC_PRESENT | ACC_SEGMENT | ACC_CODE | ACC_EXPAND_DOWN
         cmp ah, ACC_PRESENT | ACC_SEGMENT | ACC_CODE
@@ -1452,46 +1512,47 @@ kc_thread:
         mov cl, ACC_DPL_SHIFT
         shr al, cl
         test al, al
-        jz kc_done.arg                      ; never ring 0
-        mov [bx + T_RING], al
-        mov [bx + T_SPACE], dx
-        mov ax, [di + SP_GDT_SELECTOR]
-        mov [bx + T_LDT], ax
-        add di, SP_LDT
-        mov [bx + T_LDT_LIVE], di
-        call thread_module_name
+        jz kc_done.arg                  ; never ring 0
+        mov cx, [es:SP_GDT_SELECTOR]
+        call thread_module_name         ; (ES = the space)
+        mov es, bx
+        mov [es:T_RING], al
+        mov [es:T_SPACE], dx
+        mov [es:T_LDT], cx
         mov ax, [bp + FRAME_BX]
-        mov [bx + T_ENTRY], ax
+        mov [es:T_ENTRY], ax
         mov ax, [bp + FRAME_CX]
-        mov [bx + T_USTACK_TOP], ax
-        or byte [bx + T_FLAGS], TF_CONFIGURED
+        mov [es:T_USTACK_TOP], ax
+        or byte [es:T_FLAGS], TF_CONFIGURED
         jmp kc_done.ok
 .start:
-        test byte [bx + T_FLAGS], TF_CONFIGURED
+        test byte [es:T_FLAGS], TF_CONFIGURED
         jz kc_done.state
         mov cx, [bp + FRAME_CX]
         cmp cl, PRIORITY_MAX
         ja kc_done.arg
-        mov [bx + T_PRIO], cl
+        mov [es:T_PRIO], cl
         test ch, START_FOREGROUND | START_SESSION
         jz .iopl
-        mov si, [cur_thread]            ; chosen by ring 1 or 2 only
-        cmp byte [si + T_RING], RPL_USER
+        push es
+        mov es, [cur_thread]            ; chosen by ring 1 or 2 only
+        cmp byte [es:T_RING], RPL_USER
+        pop es
         je kc_done.arg
         test ch, START_SESSION
         jz .foreground
-        or byte [bx + T_FLAGS], TF_SESSION
+        or byte [es:T_FLAGS], TF_SESSION
 .foreground:
         test ch, START_FOREGROUND
         jz .iopl
-        or byte [bx + T_FLAGS], TF_FOREGROUND
+        or byte [es:T_FLAGS], TF_FOREGROUND
         mov [fg_thread], bx
 .iopl:
         test ch, START_IOPL
         jz .go
-        cmp byte [bx + T_RING], 1       ; IOPL only for a ring-1 thread
+        cmp byte [es:T_RING], 1         ; IOPL only for a ring-1 thread
         jne .go
-        or byte [bx + T_FLAGS], TF_IOPL
+        or byte [es:T_FLAGS], TF_IOPL
 .go:
         call thread_init                ; into its ready queue
 %ifdef TEST_FUZZ
@@ -1513,37 +1574,43 @@ kc_thread:
 kc_seal:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_SEGMENT
-        call cap_get                    ; SI the shadow entry, DI the descriptor
+        call cap_get                    ; ES:SI the shadow entry, ES:DI the descriptor
         jc kc_done.cap
-        mov al, [di + 5]
+        mov al, [es:di + 5]
         and al, ACC_PRESENT | ACC_DPL_MASK | ACC_SEGMENT | ACC_CODE | ACC_EXPAND_DOWN
         cmp al, ACC_PRESENT | ACC_DPL3 | ACC_SEGMENT
         jne kc_done.arg                 ; data of DPL 3, expand-up
-        cmp word [si + SH_CHILD], 0
+        cmp word [es:si + SH_CHILD], 0
         jne kc_done.state               ; a copy of it lives
-        mov bx, [si + SH_PARENT]
+        mov bx, [es:si + SH_PARENT]
         test bx, bx
         jz kc_done.state
+        push es
         push di
-        mov ax, [si + SH_PARENT_SLOT]
+        mov ax, [es:si + SH_PARENT_SLOT]
         call slot_at
+        cmp byte [es:si + SH_TYPE], CAP_UNTYPED
         pop di
-        cmp byte [si + SH_TYPE], CAP_UNTYPED
+        pop es
         jne kc_done.state               ; its parent must be the untyped it came from
-        mov byte [di + 5], ACC_UCODE    ; present, DPL 3, code, readable, accessed
+        mov byte [es:di + 5], ACC_UCODE ; present, DPL 3, code, readable, accessed
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
 ; thread_module_name - a thread named after the module whose code its space's
 ; slot 0 holds, if any (the dump, the tests' reports)
-;   In:       BX = the thread; DI = its space's LDT
+;   In:       BX = the thread; ES = its space
 ;   Out:      its T_NAME
-;   Destroys: AX, CX, DX, SI
+;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 thread_module_name:
-        mov ax, [di + 2]                ; slot 0's base, in paragraphs
+        push ax
+        push cx
+        push dx
+        push si
+        mov ax, [es:SP_LDT + 2]         ; slot 0's base, in paragraphs
         shr ax, 4
-        mov dl, [di + 4]
+        mov dl, [es:SP_LDT + 4]
         xor dh, dh
         shl dx, 12
         or dx, ax
@@ -1555,9 +1622,17 @@ thread_module_name:
         je .named
         add si, MODULE_ENTRY_SIZE
         loop .module
-        ret
+        jmp .done
 .named:
-        mov [bx + T_NAME], si
+        push es
+        mov es, bx
+        mov [es:T_NAME], si
+        pop es
+.done:
+        pop si
+        pop dx
+        pop cx
+        pop ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -1574,21 +1649,19 @@ kc_irq:
         mov cl, CAP_IRQ
         call cap_get
         jc kc_done.cap
-        mov bx, [si + SH_OBJECT]        ; the line
+        mov bx, [es:si + SH_OBJECT]     ; the line
         mov al, [bp + FRAME_AX]
         cmp al, IRQ_ACK
         je .unmask
         cmp al, IRQ_BIND
         jne kc_done.arg
-        push bx
         mov ax, [bp + FRAME_SI]
         mov cl, CAP_NOTIFY
         call cap_get
-        pop bx
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_SEND
+        test byte [es:si + SH_RIGHTS], RIGHT_SEND
         jz kc_done.cap
-        mov ax, [si + SH_BADGE]
+        mov ax, [es:si + SH_BADGE]
         test ax, ax
         jnz .bits
         mov ax, 1
@@ -1596,7 +1669,7 @@ kc_irq:
         mov di, bx
         shl di, 1
         mov [irq_bits + di], ax
-        mov ax, [si + SH_OBJECT]
+        mov ax, [es:si + SH_OBJECT]
         mov [irq_notify + di], ax
 .unmask:
         call pic_unmask
@@ -1688,12 +1761,12 @@ kc_segment:
         mov cl, CAP_SEGMENT
         call cap_get
         jc .refuse
-        mov ax, [di + 2]
+        mov ax, [es:di + 2]
         mov [bp + FRAME_AX], ax
-        mov al, [di + 4]
+        mov al, [es:di + 4]
         mov [bp + FRAME_DX], al
         mov byte [bp + FRAME_DX + 1], 0
-        mov ax, [di]
+        mov ax, [es:di]
         mov [bp + FRAME_CX], ax
         and word [bp + FRAME_FLAGS], ~FLAGS_CF
         ret

@@ -95,9 +95,9 @@ quiet at its start.
 ## Interrupts
 
 Every interrupt enters through its stub and `isr_common`, which builds a frame
-(*kernel.inc*) - from rings 1-3 at the end of the running thread's control
-block, where SP0 points, from ring 0 on the kernel's one stack - and calls
-the vector's handler with BP at the frame, on that stack. A handler changes the frame to change what the interrupted code
+(*kernel.inc*) on the kernel's one stack - from rings 1-3 at its top, where
+SP0 points (`KFRAME`) - and calls the vector's handler with BP at the frame,
+on that stack. A handler changes the frame to change what the interrupted code
 gets back: a kernel call's results, or the program's entry for a restart.
 Every gate but the double fault's is an interrupt gate, so the kernel runs
 with IF clear, except after each byte of its log and while it idles
@@ -113,19 +113,21 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
 the root, the drivers, the OS server's, the program in the foreground (the
-shell, or a test program), and the clock and the counter beside the shell. A thread is an object of the arena
-(*docs/memory-map.md*): a control block, at whose end the CPU puts the frame
-of every interrupt from rings 1-3. The kernel has one stack for all of them
-(roadmap os-server.md P3): nothing of a thread's lies on it while the thread
-does not run. It runs in a space: an LDT and its slots, which
+shell, or a test program), and the clock and the counter beside the shell. A thread is a kernel object, anywhere in
+memory, named by its own descriptor's selector (*docs/memory-map.md*;
+roadmap os-server.md P3): a control block, at whose end it keeps its frame
+while it does not run. The kernel has one stack for all of them, at whose
+top the running thread's frame lies: nothing else of a thread's lies on it
+while the thread does not run. It runs in a space: an LDT and its slots, which
 hold its capabilities (`cap.asm`, *docs/kernel-calls.md*; roadmap l4.md L3).
 The kernel makes the root's space and thread at its start from its own
 untyped memory; the root makes every other, and a program that holds
 untyped memory and a space can make more with the kernel's calls.
 
 - **The switch** is in software, through the one TSS (l4.md D2), and never
-  returns to its caller (`schedule`, `dispatch`): the next thread's SP0 and
-  LDT are taken up, the 287's TS set unless the 287 holds its state, the
+  returns to its caller (`schedule`, `dispatch`): the running thread's frame
+  goes into its control block, the next one's to the stack's top, its LDT
+  is taken up, the 287's TS set unless the 287 holds its state, the
   kernel's stack emptied, and the thread does what it still has to do in
   the kernel (`T_CONT`): nothing but its way back, its program's first
   start, the rest of its fault's call, or the rest of a kernel call that

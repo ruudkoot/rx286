@@ -2006,6 +2006,22 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - `TEST_GIVE_WAY` makes every window give way; `tests/caps/resume.test` resumes a line of
     the log, a 64 KB retype over written memory, a revoke and a delete that empties a space.
     The deepest the kernel's stack has been in the dump's test is 50 bytes.
+* **Step 2 done (2026-11-06):**
+  - Every kernel object has a descriptor of its own in the GDT's pool (1,013 of them;
+    `gdt_init` builds the GDT of 1,024 at the start), DPL 0, whose selector is its name; the
+    kernel reaches an object with ES, its own data with DS. A descriptor given back keeps
+    what it described until it is taken again, so a segment register still holding it loads
+    harmlessly. This is l4.md D7 B's "windows" with one window an object: nothing is
+    re-pointed on a use.
+  - The running thread's frame lies at the top of the kernel's stack; a switch copies it to
+    and from the control block. Any untyped makes objects and segments alike: the arena below
+    the image is the root's untyped, and the kernel's code has 16 KB again.
+  - `tests/caps/pools.test` makes 128 threads and 64 spaces of the memory for segments and
+    revokes them at once: 5.9 ms at most with interrupts off on MAME's AT. The IPC round trip
+    is 960 instructions on Bochs (896 at step 1; the budget is 1,000), once a call looks its
+    capability up once and `deliver` copies frame to frame.
+  - Found on the way: a dead space taken off the list before it was emptied, lost if the
+    call gave way (now `SP_FLUSH`); checking builds panic on a descriptor freed twice.
 
 ### P4. The root in C; its allocator and its services (L, about 2,000)
 

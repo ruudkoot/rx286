@@ -23,11 +23,11 @@
 ;                     and resume (os-server.md P3): a line of the log, a
 ;                     64 KB retype over memory that was written, a revoke, a
 ;                     delete that empties a space
-;   TEST_ADD_POOLS    threads made until the arena, not a pool, refuses
-;                     (pools of 64); 40 spaces more, holding copies that a
-;                     revoke deletes, then deleted; a 64 KB segment retyped,
-;                     its zeroing in pieces (TEST_STRETCH measures them: no
-;                     delete looks through every slot, os-server.md D9)
+;   TEST_ADD_POOLS    128 threads and 64 spaces more, objects of the memory for
+;                     segments (os-server.md P3), the spaces holding copies
+;                     that a revoke deletes, then all revoked; a 64 KB
+;                     segment retyped, its zeroing in pieces (TEST_STRETCH
+;                     measures them: no delete looks through every slot, D9)
 ; Its lines come through uprint; the workers' through KCALL_LOG.
 ; ============================================================================
 
@@ -57,16 +57,16 @@ X_SPACE             equ 0xD7            ; 26: the sealed program's space
 X_THREAD            equ 0xDF            ; 27
 NTF_STOP            equ 0xE7            ; 28: signalled when the worker has stopped
 BIG                 equ 0xEF            ; 29: the 64 KB segment
-THREAD_FIRST        equ 0x127           ; 36 on: the pools' threads
 S_EPF               equ 0xF7            ; 30: the worker's fault endpoint
 S_REPLY             equ 0xFF            ; 31: a reply saved
 X_HOLD              equ 0x107           ; 32: a space of 64 slots, the revoker's
-HOLDER              equ 0x10F           ; 33: the pools' space that holds 40
+HOLDER              equ 0x10F           ; 33: the pools' space that holds 64 spaces
 SMALL               equ 0x117           ; 34: each of them, before it moves there
-UT_POOLS            equ 0x11F           ; 35: the pools' part of the arena
-POOLS_BYTES         equ 14336             ; (the program has about 15 KB of the arena)
-THREADS             equ 24
-SPACES              equ 40
+UT_POOLS            equ 0x11F           ; 35: the pools' memory, from UT_MEMORY
+T_HOLDER            equ 0x12F           ; 37: the space that holds 128 threads
+POOLS_BYTES         equ 0xF000            ; 60 KB: 128 threads, 66 spaces, an endpoint
+THREADS             equ 128
+SPACES              equ 64
 UT_SEG              equ 0x127           ; 36: TEST_ADD_RESUME's memory for a segment
 COPY_FIRST          equ 0x14F           ; 41 on: copies of S_EP
 COPIES              equ 10
@@ -1310,50 +1310,63 @@ ten_copies:
 
 ; ============================================================================ the pools
 ; ----------------------------------------------------------------------------
-; pools_part - 24 threads made, more than the old pools left room for (pools
-; of 64), or until a retype is refused: KE_MEM, the arena full, not KE_POOL;
-; revoked, and 40 spaces made in their room; then a 64 KB segment, zeroed in
+; pools_part - 128 threads and 64 spaces made of the memory for segments
+; (os-server.md P3), all revoked at once; then a 64 KB segment, zeroed in
 ; pieces
 ;   In:       nothing
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 pools_part:
-        mov dx, UT_ARENA                ; (not UT_ARENA itself: everything the
-        mov al, CAP_UNTYPED             ; root made is below it)
-        mov si, UT_POOLS
+        mov dx, UT_MEMORY               ; any untyped makes objects (P3); not
+        mov al, CAP_UNTYPED             ; UT_MEMORY itself: everything the root
+        mov si, UT_POOLS                ; made is below it
         mov cx, POOLS_BYTES >> 4
         kcall KCALL_RETYPE
         must
+        mov dx, UT_POOLS
+        mov al, CAP_SPACE
+        mov si, T_HOLDER
+        mov cx, THREADS
+        kcall KCALL_RETYPE
+        must
         mov word [threads], 0
-        mov si, THREAD_FIRST
+        mov di, 0x07                    ; T_HOLDER's slot 0 on
 .thread:
-        cmp si, THREAD_FIRST + THREADS * 8
+        cmp word [threads], THREADS
         jae .counted
-        push si
+        push di
         mov dx, UT_POOLS
         mov al, CAP_THREAD
+        mov si, SMALL
         kcall KCALL_RETYPE
-        pop si
+        pop di
         jc .refused
+        push di
+        mov dx, T_HOLDER
+        mov si, SMALL
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        pop di
+        must
         inc word [threads]
-        add si, 8
+        add di, 8
         jmp .thread
 .refused:
         push ax
         mov ax, [threads]
-        report "threads made, more than the old pool's 24 less those in use"
+        report "threads made, before a refusal"
         pop ax
-        status "then the retype said (3: KE_MEM, the arena full)"
+        status "then the retype said"
         jmp .spaces
 .counted:
         mov ax, [threads]
-        report "threads made, all 24 (the old pool held 24 in all)"
+        report "threads made (128)"
 .spaces:
-        mov dx, UT_POOLS                ; its memory back: every thread gone
-        kcall KCALL_REVOKE
-        status "the threads revoked (0)"
         call many_spaces
+        mov dx, UT_POOLS                ; its memory back: every one of them gone
+        kcall KCALL_REVOKE
+        status "all of them revoked (0)"
 .big:
         mov dx, UT_MEMORY
         mov al, CAP_SEGMENT
@@ -1372,9 +1385,8 @@ pools_part:
         jmp done
 
 ; ----------------------------------------------------------------------------
-; many_spaces - 40 spaces more, each with a copy of an endpoint, moved into
-; a space that holds them all; the endpoint revoked, then that space deleted
-; (and with it all 40)
+; many_spaces - 64 spaces more, each with a copy of an endpoint, moved into
+; a space that holds them all; the endpoint revoked
 ;   In:       nothing
 ;   Out:      lines
 ;   Destroys: everything but DS
@@ -1420,13 +1432,10 @@ many_spaces:
         add di, 8
         loop .space
         mov ax, SPACES
-        report "spaces made (40)"
+        report "spaces made (64)"
         mov dx, S_EP
         kcall KCALL_REVOKE
         status "their copies of an endpoint revoked (0)"
-        mov dx, HOLDER
-        kcall KCALL_DELETE
-        status "the space that holds them deleted (0)"
         ret
 
 %include "uprint.asm"

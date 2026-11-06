@@ -17,8 +17,8 @@ caps: retype an endpoint: 0
 caps: retype a notification: 0
 caps: retype from a segment (1): 1
 caps: retype into a full slot (4): 4
-caps: a segment from the arena (1): 1
-caps: a thread from the memory for segments (1): 1
+caps: a segment from the arena (0): 0
+caps: a thread from the memory for segments (0): 0
 caps: a code segment (2): 2
 caps: a segment of DPL 0 (2): 2
 caps: a space of 12 slots (2): 2

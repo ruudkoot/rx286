@@ -31,14 +31,16 @@ restart_program:
 %endif
         push ax
         push bx
+        push es
         mov bx, [cur_thread]
-        mov ax, [bx + T_ENTRY]
+        mov es, bx
+        mov ax, [es:T_ENTRY]
         mov [bp + FRAME_IP], ax
         call thread_flags
         mov [bp + FRAME_FLAGS], ax
-        mov ax, [bx + T_USTACK_TOP]
+        mov ax, [es:T_USTACK_TOP]
         mov [bp + FRAME_USER_SP], ax
-        mov al, [bx + T_RING]           ; slots 0, 1, 2 of its space, at its ring
+        mov al, [es:T_RING]             ; slots 0, 1, 2 of its space, at its ring
         xor ah, ah
         or ax, SEL_UDATA & ~CPL_MASK
         mov [bp + FRAME_DS], ax
@@ -56,6 +58,7 @@ restart_program:
         mov [bp + FRAME_DI], ax
         mov [bp + FRAME_BP], ax
         call program_reset
+        pop es
         pop bx
         pop ax
         ret
@@ -76,7 +79,10 @@ program_reset:
         call fpu_reset_thread           ; a clean 287, whatever the last run left
         call ipc_reset                  ; a reply it owed will not come
         mov bx, [cur_thread]
-        test byte [bx + T_FLAGS], TF_FOREGROUND
+        push es
+        mov es, bx
+        test byte [es:T_FLAGS], TF_FOREGROUND
+        pop es
         jz .done
 %ifdef WITH_TEST_HOOKS
         call test_program_started
@@ -108,9 +114,10 @@ fault_program:
 .flagged:
 %endif
         mov bx, [cur_thread]
-        cmp word [bx + T_FAULT], 0
+        mov es, bx
+        cmp word [es:T_FAULT], 0
         je .kernel
-        mov [bx + T_CONT], al           ; what it does once the call ends
+        mov [es:T_CONT], al             ; what it does once the call ends
         jmp ipc_fault                   ; waits for the handler (ipc.asm)
 .kernel:
         test di, di

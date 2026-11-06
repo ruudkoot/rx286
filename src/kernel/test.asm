@@ -99,7 +99,7 @@ msg_ticks_ok        db "timer: 50 ticks a second, by the clock", CHAR_LF, 0
 msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
 msg_kernel_changed  db "the kernel's code or tables changed", 0
-msg_stack_leak      db "a frame from ring 3 is not the running thread's", 0
+msg_stack_leak      db "a frame from ring 3 is not at the kernel stack's top", 0
 %ifdef TEST_KERNEL_CHECKS
 test_sum            dw 0
 test_sum_known      db 0
@@ -605,18 +605,14 @@ test_program_started:
 
 ; ----------------------------------------------------------------------------
 ; test_restart_check - a frame from ring 3 must be the running thread's, at
-; its control block's end (SP0): anything else is a frame on the kernel's
-; stack, or another thread's
+; the kernel stack's top (SP0, KFRAME): anything else is a frame deeper on
+; the kernel's stack
 ;   In:       BP = the frame being restarted; DS = SEL_KDATA
 ;   Out:      nothing (or never: a panic)
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_restart_check:
-        push ax
-        mov ax, [cur_thread]
-        add ax, T_FRAME
-        cmp bp, ax
-        pop ax
+        cmp bp, KFRAME
         je .ok
         mov si, msg_stack_leak
         xor bp, bp
@@ -665,8 +661,8 @@ test_kernel_sum:
         add ax, [cs:si]
         add si, 2
         loop .code
-        mov si, gdt
-        mov cx, (gdt_end - gdt) / 2
+        mov si, GDT_OFF                 ; the GDT's fixed part, before the windows
+        mov cx, SEL_SCRATCH / 2
         call .data
         mov si, idt
         mov cx, IDT_ENTRIES * 8 / 2        ; words of 8-byte gates
@@ -777,7 +773,8 @@ test_probes:
         dw SEL_USTACK & ~7, PROBE_ACC_READ_ONLY         ; PROBE_SS_READONLY
         dw SEL_UCODE & ~7, 0                            ; PROBE_CS_ABSENT
         dw SEL_UCODE & ~7, ACC_UDATA                    ; PROBE_CS_DATA
-probe_changed       dw 0                ; the descriptor the last probe changed, or 0
+probe_space         dw 0                ; the space of the descriptor the last probe
+probe_changed       dw 0                ;    changed, and the descriptor, or 0
 probe_access        db 0                ; its access byte before
 end_kdata
 
@@ -789,7 +786,7 @@ end_kdata
 ; undoes it at the next start of the program.
 ;   In:       BP = the frame (BL the probe); DS = SEL_KDATA
 ;   Out:      the program's LDT changed, KE_OK; or KE_ARG
-;   Destroys: AX, BX, SI
+;   Destroys: AX, BX, SI, ES
 ; ----------------------------------------------------------------------------
 test_probe:
         mov bl, [bp + FRAME_BX]
@@ -801,18 +798,21 @@ test_probe:
         shl bx, 2
         mov ax, [test_probes + bx + 2]
         mov bx, [test_probes + bx]
-        mov si, [cur_thread]
-        add bx, [si + T_LDT_LIVE]       ; the program's live LDT, in its space
+        add bx, SP_LDT                  ; the program's LDT, in its space
         call test_probe_undo            ; one probe at a time
+        mov es, [cur_thread]
+        mov si, [es:T_SPACE]
+        mov [probe_space], si
         mov [probe_changed], bx
-        mov ah, [bx + 5]
+        mov es, si
+        mov ah, [es:bx + 5]
         mov [probe_access], ah
         test al, al
         jz .absent
-        mov [bx + 5], al                ; the access byte
+        mov [es:bx + 5], al             ; the access byte
         jmp kc_done.ok
 .absent:
-        and byte [bx + 5], ~ACC_PRESENT
+        and byte [es:bx + 5], ~ACC_PRESENT
         jmp kc_done.ok
 .invalid:
         jmp kc_done.arg
@@ -826,13 +826,16 @@ test_probe:
 test_probe_undo:
         push ax
         push si
+        push es
         mov si, [probe_changed]
         test si, si
         jz .done
+        mov es, [probe_space]
         mov al, [probe_access]
-        mov [si + 5], al
+        mov [es:si + 5], al
         mov word [probe_changed], 0
 .done:
+        pop es
         pop si
         pop ax
         ret
@@ -849,26 +852,36 @@ test_probe_undo:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_fuzz_alias:
-        test byte [bx + T_FLAGS], TF_FOREGROUND
+        push es
+        mov es, bx
+        test byte [es:T_FLAGS], TF_FOREGROUND
         jz .out
         push ax
         push bx
         push si
         push di
-        mov bx, [bx + T_SPACE]
-        test byte [bx + SP_LDT + (SEL_UDATA & ~7) + 5], ACC_PRESENT
+        mov bx, [es:T_SPACE]
+        mov es, bx
+        test byte [es:SP_LDT + (SEL_UDATA & ~7) + 5], ACC_PRESENT
         jz .done                        ; no data: nothing to alias
         mov ax, SEL_UFUZZ >> 3
-        call slot_at                    ; SI, DI = slot 3
-        add bx, SP_LDT + (SEL_UDATA & ~7)
-        call slot_put_descriptor
-        mov byte [di + 5], ACC_UCODE
+        call slot_at                    ; ES:SI, ES:DI = slot 3
+        push ds
+        push es
+        pop ds
+        push bx
+        mov bx, SP_LDT + (SEL_UDATA & ~7)
+        call slot_put_descriptor        ; (DS:BX: slot 1's, in the same space)
+        pop bx
+        pop ds
+        mov byte [es:di + 5], ACC_UCODE
 .done:
         pop di
         pop si
         pop bx
         pop ax
 .out:
+        pop es
         ret
 %endif
 
@@ -884,7 +897,7 @@ end_kdata
 ; (roadmap l4.md L2)
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing
-;   Destroys: AX, BX, SI
+;   Destroys: AX, BX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 test_thread_report:
         xor di, di
@@ -895,16 +908,19 @@ test_thread_report:
         shl di, 1
         mov bx, [thread_list + di]
         pop di
-        cmp byte [bx + T_STATE], TS_FREE
+        mov es, bx
+        cmp byte [es:T_STATE], TS_FREE
         je .next                        ; never started
         mov si, msg_log_prefix
         call kputs
         mov si, msg_report_thread
         call kputs
-        mov si, [bx + T_NAME]
+        mov es, bx
+        mov si, [es:T_NAME]
         call kputs
         mov si, msg_report_ran
-        cmp word [bx + T_RUNS], 0
+        mov es, bx
+        cmp word [es:T_RUNS], 0
         jne .say
         mov si, msg_report_idle
 .say:

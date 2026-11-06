@@ -1,6 +1,7 @@
-# The kernel's additions (roadmap os-server.md P2): pools of 64; 40 spaces more, whose
-# copies a revoke deletes, and a 64 KB retype zeroed in pieces: interrupts never off for
-# half a tick, since no delete looks through every slot (D9). tests/programs/additions.asm.
+# The kernel's additions (roadmap os-server.md P2, P3): 128 threads and 64 spaces more,
+# objects of the memory for segments, the spaces holding copies a revoke deletes, all
+# revoked at once, and a 64 KB retype zeroed in pieces: interrupts never off for half a
+# tick, since no delete looks through every slot (D9). tests/programs/additions.asm.
 program: additions
 define: TEST_CAPS
 define: TEST_ADD_POOLS
@@ -9,11 +10,10 @@ emulators: bochs mame
 match: contains
 timeout: 120
 ---
-additions: threads made, all 24 (the old pool held 24 in all): 24
-additions: the threads revoked (0): 0
-additions: spaces made (40): 40
+additions: threads made (128): 128
+additions: spaces made (64): 64
 additions: their copies of an endpoint revoked (0): 0
-additions: the space that holds them deleted (0): 0
+additions: all of them revoked (0): 0
 additions: a 64 KB segment retyped (0): 0
 additions: zeroed (0): 0
 additions: done

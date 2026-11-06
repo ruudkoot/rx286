@@ -34,11 +34,12 @@ FRAME_SIZE_KERNEL   equ 30      ; a frame from ring 0
 FRAME_SIZE_USER     equ 34      ; a frame from ring 3
 
 ; ---------------------------------------------------------------- threads
-; A thread control block (thread.asm; roadmap l4.md L2, os-server.md P3).
-; Its last bytes are its frame: the CPU puts there the frame of every
-; interrupt from its ring (SP0), and the kernel then works on its one stack.
-; Nothing of a thread's lies on that stack while the thread does not run:
-; what it still has to do in the kernel is T_CONT, and the call's progress.
+; A thread control block (thread.asm; roadmap l4.md L2, os-server.md P3),
+; an object anywhere, named by its descriptor's selector. Its last bytes
+; keep its frame while it does not run (T_FRAME); the running thread's is at
+; the top of the kernel's one stack (KFRAME), where SP0 puts it. Nothing
+; else of a thread's lies on that stack while the thread does not run: what
+; it still has to do in the kernel is T_CONT, and the call's progress.
 T_CONT              equ 0       ; byte: CONT_*, what it does when it runs again
 T_LOG_DONE          equ 2       ; KCALL_LOG: the bytes written before a preemption
 T_STATE             equ 4       ; byte: TS_*
@@ -53,10 +54,9 @@ T_NAME              equ 16      ; its name (kdata)
 T_SLICE             equ 18      ; byte: ticks left of its time slice
 T_FLAGS             equ 19      ; byte: TF_*
 T_RUN_TICKS         equ 20      ; ticks during which it was running
-T_LDT_LIVE          equ 22      ; its LDT (kdata)
 T_FAULT             equ 24      ; the endpoint its faults go to, or 0 (l4.md D18)
 T_RUNS              equ 26      ; times it was switched to
-T_SPACE             equ 28      ; its space (kdata)
+T_SPACE             equ 28      ; its space
 T_ENTRY             equ 30      ; its program's entry: the IP of a start
 T_RING              equ 32      ; byte: its ring, its space's slot 0's DPL
 T_IPC               equ 33      ; byte: TI_*, of the message it sends
@@ -104,20 +104,23 @@ CONT_RESUMED        equ 3       ; (while the call runs again: it finds its progr
 CONT_FAULT          equ 4       ; a fault from an exception
 CONT_FAULT_WAY      equ 5       ; a fault the way back found in its frame
 
-; A thread as an object of the arena (roadmap l4.md L3): its control block,
-; its frame at its end; no kernel stack of its own since os-server.md P3
+; A thread as an object (roadmap l4.md L3): its control block, its frame at
+; its end; no kernel stack of its own since os-server.md P3
 TCB_OBJECT_SIZE     equ 256
+KFRAME              equ KSTACK_TOP - FRAME_SIZE_USER    ; the running thread's frame
 %if TCB_SIZE > TCB_OBJECT_SIZE
   %error "kernel.inc: a thread's control block outgrew its object"
 %endif
 
 ; ---------------------------------------------------------------- spaces and capabilities
-; A space (l4.md L3): a header, its LDT (a descriptor a slot), then a shadow
-; entry a slot, which says what the slot holds. kcalls.inc names the types.
+; A space (l4.md L3): an object, named by its descriptor's selector (os-server.md
+; P3): a header, its LDT (a descriptor a slot), then a shadow entry a slot, which
+; says what the slot holds. kcalls.inc names the types.
 SP_SLOTS            equ 0       ; the header: how many slots
 SP_GDT_SELECTOR     equ 2       ; its LDT's descriptor, from the GDT's pool
 SP_DEAD             equ 4       ; byte: 1 once its last capability went (revoke.asm)
 SP_REFS             equ 6       ; the capabilities to it: it dies with the last
+SP_FLUSH            equ 8       ; dead: the next slot dead_flush empties
 SP_HEADER_SIZE      equ 16
 SP_LDT              equ SP_HEADER_SIZE
 SH_TYPE             equ 0       ; byte: CAP_*

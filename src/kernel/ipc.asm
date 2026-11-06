@@ -6,18 +6,20 @@
 ; A message is a label (AL) and four words (BX, CX, SI, DI), with the badge
 ; of the sender's capability (DX) and at most one capability (named by the
 ; sender's BP, landing in the slot the receiver named by its BP; l4.md D5).
-; Nothing but registers is copied: a sender's message is in its frame, at
-; the top of its kernel stack in the arena, and delivery writes it into the
-; receiver's frame. An endpoint holds a queue of senders or of receivers;
-; whoever comes second does the transfer. A call leaves the receiver owing a
-; reply: a link in its control block, which it may save into a slot and
-; answer later; a sequence number keeps a stale reply from answering a later
-; call (E10). A notification is a word of bits: a signal ORs the
-; capability's badge into it; a receive returns and clears it, and a thread
-; bound to it gets its bits even while it waits on an endpoint. There are no
-; timeouts (l4.md D6): the kernel's timer signals a notification. A thread
-; waits for IPC inside its own kernel call, on its own kernel stack; a
-; restart (Ctrl+Break, a 287 error) takes it out of any queue.
+; Nothing but registers is copied: a sender's message is in its frame (at
+; the top of the kernel's stack while it runs, else in its control block),
+; and delivery writes it into the receiver's frame. An endpoint holds a
+; queue of senders or of receivers; whoever comes second does the transfer.
+; A call leaves the receiver owing a reply: a link in its control block,
+; which it may save into a slot and answer later; a sequence number keeps a
+; stale reply from answering a later call (E10). A notification is a word of
+; bits: a signal ORs the capability's badge into it; a receive returns and
+; clears it, and a thread bound to it gets its bits even while it waits on
+; an endpoint. There are no timeouts (l4.md D6): the kernel's timer signals
+; a notification. A thread waiting for IPC has nothing left to do in the
+; kernel (thread.asm); a restart (Ctrl+Break, a 287 error) takes it out of
+; any queue. Endpoints, notifications and threads are objects named by their
+; selectors, which ES holds while the kernel works on one (os-server.md P3).
 ; ============================================================================
 
 TIMER_MAX           equ 16              ; timers armed at once: one a notification
@@ -31,36 +33,52 @@ begin_kdata
 timers              times TIMER_MAX * TIMER_SIZE db 0
 ipc_calling         db 0                ; TI_CALLING for KCALL_CALL, 0 for KCALL_SEND
 ipc_poll            db 0                ; 1 for KCALL_POLL
-dl_sender_frame     dw 0                ; deliver's temporaries
-dl_receiver_frame   dw 0
-dl_shadow           dw 0
-dl_slot             dw 0
+dl_ipc              db 0                ; deliver's temporaries
+                    db 0
+dl_cap              dw 0
+dl_badge            dw 0
+dl_sender           dw 0
+dl_receiver         dw 0
+dl_src_space        dw 0
+dl_src_slot         dw 0
+dl_dst_space        dw 0
+dl_dst_slot         dw 0
+dl_dst_shadow       dw 0
+dl_dst_desc         dw 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; thread_frame - where a thread's frame is: at its control block's end
-; (thread.asm), since every kernel call comes from rings 1-3
+; thread_frame - where a thread's frame is: the running thread's at the top
+; of the kernel's stack (KFRAME), any other's in its control block
 ;   In:       BX = the thread
-;   Out:      DI = its frame (kdata)
+;   Out:      ES:DI = its frame
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 thread_frame:
-        lea di, [bx + T_FRAME]
+        cmp bx, [cur_thread]
+        je .running
+        mov es, bx
+        mov di, T_FRAME
+        ret
+.running:
+        push ds
+        pop es
+        mov di, KFRAME
         ret
 
 ; ----------------------------------------------------------------------------
 ; frame_status - a status into a frame: AX (AH 0), CF if not KE_OK
-;   In:       DI = the frame; AL = KE_*
+;   In:       ES:DI = the frame; AL = KE_*
 ;   Out:      nothing
 ;   Destroys: AH
 ; ----------------------------------------------------------------------------
 frame_status:
         xor ah, ah
-        mov [di + FRAME_AX], ax
-        and word [di + FRAME_FLAGS], ~FLAGS_CF
+        mov [es:di + FRAME_AX], ax
+        and word [es:di + FRAME_FLAGS], ~FLAGS_CF
         test al, al
         jz .done
-        or word [di + FRAME_FLAGS], FLAGS_CF
+        or word [es:di + FRAME_FLAGS], FLAGS_CF
 .done:
         ret
 
@@ -71,19 +89,22 @@ frame_status:
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 ep_push:
-        mov word [bx + T_NEXT], 0
-        mov ax, [si + E_TAIL]
+        push es
+        mov es, bx
+        mov word [es:T_NEXT], 0
+        mov es, si
+        mov ax, [es:E_TAIL]
         test ax, ax
         jz .first
-        push di
-        mov di, ax
-        mov [di + T_NEXT], bx
-        pop di
+        mov es, ax
+        mov [es:T_NEXT], bx
+        mov es, si
         jmp .tail
 .first:
-        mov [si + E_HEAD], bx
+        mov [es:E_HEAD], bx
 .tail:
-        mov [si + E_TAIL], bx
+        mov [es:E_TAIL], bx
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
@@ -93,14 +114,19 @@ ep_push:
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 ep_pop:
-        mov bx, [si + E_HEAD]
-        mov ax, [bx + T_NEXT]
-        mov [si + E_HEAD], ax
+        push es
+        mov es, si
+        mov bx, [es:E_HEAD]
+        mov es, bx
+        mov ax, [es:T_NEXT]
+        mov es, si
+        mov [es:E_HEAD], ax
         test ax, ax
         jnz .done
-        mov word [si + E_TAIL], 0
-        mov byte [si + E_KIND], EK_IDLE
+        mov word [es:E_TAIL], 0
+        mov byte [es:E_KIND], EK_IDLE
 .done:
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
@@ -111,34 +137,43 @@ ep_pop:
 ; ----------------------------------------------------------------------------
 ep_remove:
         push di
+        push es
         xor di, di                      ; DI = the one before it
-        mov ax, [si + E_HEAD]
+        mov es, si
+        mov ax, [es:E_HEAD]
 .find:
         test ax, ax
         jz .done                        ; not there after all
         cmp ax, bx
         je .found
         mov di, ax
-        mov ax, [di + T_NEXT]
+        mov es, ax
+        mov ax, [es:T_NEXT]
         jmp .find
 .found:
-        mov ax, [bx + T_NEXT]
+        mov es, bx
+        mov ax, [es:T_NEXT]
         test di, di
         jz .head
-        mov [di + T_NEXT], ax
+        mov es, di
+        mov [es:T_NEXT], ax
         jmp .tail
 .head:
-        mov [si + E_HEAD], ax
+        mov es, si
+        mov [es:E_HEAD], ax
 .tail:
-        cmp [si + E_TAIL], bx
+        mov es, si
+        cmp [es:E_TAIL], bx
         jne .done
-        mov [si + E_TAIL], di
+        mov [es:E_TAIL], di
 .done:
-        cmp word [si + E_HEAD], 0
+        mov es, si
+        cmp word [es:E_HEAD], 0
         jne .out
-        mov word [si + E_TAIL], 0
-        mov byte [si + E_KIND], EK_IDLE
+        mov word [es:E_TAIL], 0
+        mov byte [es:E_KIND], EK_IDLE
 .out:
+        pop es
         pop di
         ret
 
@@ -150,99 +185,113 @@ ep_remove:
 ;   In:       SI = the sender; BX = the receiver
 ;   Out:      the receiver's frame: AX the label, BX CX SI DI, DX the badge,
 ;             BP the selector the capability arrived in, or 0; CF clear
-;   Destroys: AX, CX, DX, DI
+;   Destroys: AX, CX, DX, DI, ES
 ; ----------------------------------------------------------------------------
 deliver:
-        push si
-        push bx
+        mov [dl_sender], si
+        mov [dl_receiver], bx
+        mov es, si
+        mov ax, [es:T_BADGE]
+        mov [dl_badge], ax
+        mov al, [es:T_IPC]
+        mov [dl_ipc], al
         mov bx, si
-        call thread_frame
-        mov [dl_sender_frame], di
-        pop bx
-        push bx
-        call thread_frame
-        mov [dl_receiver_frame], di
-        mov si, [dl_sender_frame]
-        mov ax, [si + FRAME_BX]
-        mov [di + FRAME_BX], ax
-        mov ax, [si + FRAME_CX]
-        mov [di + FRAME_CX], ax
-        mov ax, [si + FRAME_SI]
-        mov [di + FRAME_SI], ax
-        mov ax, [si + FRAME_DI]
-        mov [di + FRAME_DI], ax
-        mov al, [si + FRAME_AX]         ; the label
-        call frame_status               ; (AH 0, CF clear: a label is not an error)
-        and word [di + FRAME_FLAGS], ~FLAGS_CF
-        pop bx
+        call thread_frame               ; ES:DI = the sender's frame
+        push es
+        push di
+        mov bx, [dl_receiver]
+        call thread_frame               ; ES:DI = the receiver's
         pop si
-        push si
-        push bx
-        mov ax, [si + T_BADGE]
-        mov [di + FRAME_DX], ax
-        mov word [di + FRAME_BP], 0
-        test byte [si + T_IPC], TI_GRANT
-        jz .done
-        cmp word [bx + T_RSLOT], 0
-        je .done
-        ; the destination: the receiver's slot, empty
-        push si
-        mov ax, [bx + T_RSLOT]
-        mov bx, [bx + T_SPACE]
-        call slot_of                    ; SI, DI
-        mov [dl_shadow], si
-        mov dx, di
-        pop si
-        jc .done
-        mov di, [dl_shadow]
-        cmp byte [di + SH_TYPE], CAP_EMPTY
-        jne .done
-        ; the source: the sender's slot, not empty
-        mov di, [dl_sender_frame]
-        mov ax, [di + FRAME_BP]
-        mov bx, [si + T_SPACE]
-        call slot_of                    ; AX = its slot; SI, DI
-        jc .done
-        cmp byte [si + SH_TYPE], CAP_EMPTY
-        je .done
-        cmp byte [si + SH_TYPE], CAP_UNTYPED
-        je .done                        ; untyped is moved, never shared: two
-        cmp byte [si + SH_TYPE], CAP_REPLY  ; retypes would carve the same memory;
-        je .done                        ; a reply is answered once (l4.md L13)
-        mov [dl_slot], ax
+        pop ax
         push ds
-        pop es
+        mov ds, ax                      ; DS:SI = the sender's
+        mov ax, [si + FRAME_BX]
+        mov [es:di + FRAME_BX], ax
+        mov ax, [si + FRAME_CX]
+        mov [es:di + FRAME_CX], ax
+        mov ax, [si + FRAME_SI]
+        mov [es:di + FRAME_SI], ax
+        mov ax, [si + FRAME_DI]
+        mov [es:di + FRAME_DI], ax
+        mov cx, [si + FRAME_BP]         ; the capability it passes
+        mov al, [si + FRAME_AX]         ; the label: AH 0, CF clear (no error)
+        pop ds
+        xor ah, ah
+        mov [es:di + FRAME_AX], ax
+        and word [es:di + FRAME_FLAGS], ~FLAGS_CF
+        mov ax, [dl_badge]
+        mov [es:di + FRAME_DX], ax
+        mov word [es:di + FRAME_BP], 0
+        test byte [dl_ipc], TI_GRANT
+        jz .done
+        mov [dl_cap], cx
+        mov es, bx
+        mov ax, [es:T_RSLOT]
+        test ax, ax
+        jz .done
+        ; the destination: the receiver's slot, empty
+        mov bx, [es:T_SPACE]
+        mov [dl_dst_space], bx
+        call slot_of                    ; ES = its space, SI, DI; AX = the slot
+        jc .done
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
+        jne .done
+        mov [dl_dst_slot], ax
+        mov [dl_dst_shadow], si
+        mov [dl_dst_desc], di
+        ; the source: the sender's slot, not empty
+        mov es, [dl_sender]
+        mov bx, [es:T_SPACE]
+        mov [dl_src_space], bx
+        mov ax, [dl_cap]
+        call slot_of                    ; ES = its space; AX = its slot; SI, DI
+        jc .done
+        mov cl, [es:si + SH_TYPE]
+        cmp cl, CAP_EMPTY
+        je .done
+        cmp cl, CAP_UNTYPED
+        je .done                        ; untyped is moved, never shared: two
+        cmp cl, CAP_REPLY               ; retypes would carve the same memory;
+        je .done                        ; a reply is answered once (l4.md L13)
+        mov [dl_src_slot], ax
+        mov dx, [dl_dst_space]          ; from the sender's space (DS) to the
+        mov bx, [dl_dst_desc]           ; receiver's (ES)
+        mov ax, [dl_dst_shadow]
+        push ds
+        push es
+        pop ds
+        mov es, dx
         cld
         push si
         mov si, di                      ; the descriptor, 8 bytes
-        mov di, dx
+        mov di, bx
         mov cx, 4
         rep movsw
         pop si
-        mov di, [dl_shadow]             ; the shadow entry
+        mov di, ax                      ; the shadow entry
         mov cx, SHADOW_SIZE / 2
         rep movsw
-        mov ax, [dl_slot]               ; BX, AX = the sender's space and slot
-        pop si                          ; the receiver
-        push si
-        mov dx, [si + T_SPACE]          ; DX, CX = the receiver's slot: a child
-        mov cx, [si + T_RSLOT]          ; of the sender's
-        shr cx, 3
+        pop ds
+        mov bx, [dl_src_space]          ; a child of the sender's slot
+        mov ax, [dl_src_slot]
+        mov dx, [dl_dst_space]
+        mov cx, [dl_dst_slot]
         call child_link
-        mov di, [dl_shadow]
-        mov al, [di + SH_TYPE]
-        mov dx, [di + SH_OBJECT]
+        mov es, dx
+        mov si, [dl_dst_shadow]
+        mov al, [es:si + SH_TYPE]
+        mov dx, [es:si + SH_OBJECT]
         call obj_ref
-        pop bx                          ; the receiver: BP = the selector, at its ring
-        push bx
-        mov ax, [bx + T_RSLOT]
+        mov es, [dl_receiver]           ; the receiver: BP = the selector, at its ring
+        mov ax, [es:T_RSLOT]
         and ax, ~CPL_MASK
-        or al, [bx + T_RING]
-        mov di, [dl_receiver_frame]
-        mov [di + FRAME_BP], ax
+        or al, [es:T_RING]
+        mov bx, [dl_receiver]
+        call thread_frame
+        mov [es:di + FRAME_BP], ax
 .done:
-        pop bx
-        pop si
+        mov bx, [dl_receiver]
+        mov si, [dl_sender]
         ret
 
 ; ----------------------------------------------------------------------------
@@ -255,12 +304,16 @@ deliver:
 ; ----------------------------------------------------------------------------
 ipc_link:
         call reply_abandon
-        inc word [si + T_CALLS]
-        mov ax, [si + T_CALLS]
-        mov [bx + T_REPLY], si
-        mov [bx + T_REPLY_SEQ], ax
-        mov byte [si + T_STATE], TS_REPLY
-        mov [si + T_WAIT_OBJ], bx
+        push es
+        mov es, si
+        inc word [es:T_CALLS]
+        mov ax, [es:T_CALLS]
+        mov byte [es:T_STATE], TS_REPLY
+        mov [es:T_WAIT_OBJ], bx
+        mov es, bx
+        mov [es:T_REPLY], si
+        mov [es:T_REPLY_SEQ], ax
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
@@ -273,12 +326,14 @@ ipc_link:
 reply_abandon:
         push bx
         push si
+        push es
         mov si, bx
-        mov bx, [si + T_REPLY]
+        mov es, si
+        mov bx, [es:T_REPLY]
         test bx, bx
         jz .done
-        mov word [si + T_REPLY], 0
-        mov cx, [si + T_REPLY_SEQ]
+        mov word [es:T_REPLY], 0
+        mov cx, [es:T_REPLY_SEQ]
         mov dx, si
         call reply_valid
         jc .done
@@ -287,6 +342,7 @@ reply_abandon:
         call frame_status
         call ready_push
 .done:
+        pop es
         pop si
         pop bx
         ret
@@ -298,15 +354,19 @@ reply_abandon:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 reply_valid:
-        cmp byte [bx + T_STATE], TS_REPLY
+        push es
+        mov es, bx
+        cmp byte [es:T_STATE], TS_REPLY
         jne .stale
-        cmp [bx + T_WAIT_OBJ], dx
+        cmp [es:T_WAIT_OBJ], dx
         jne .stale
-        cmp [bx + T_CALLS], cx
+        cmp [es:T_CALLS], cx
         jne .stale
+        pop es
         clc
         ret
 .stale:
+        pop es
         stc
         ret
 
@@ -320,34 +380,35 @@ reply_valid:
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 ipc_wake:
-        push si
-        mov si, [cur_thread]
-        mov al, [bx + T_PRIO]
-        cmp al, [si + T_PRIO]
-        pop si
+        push es
+        mov es, bx
+        mov al, [es:T_PRIO]
+        mov es, [cur_thread]
+        cmp al, [es:T_PRIO]
+        pop es
         jb ready_push
         jmp ready_first
 
 ; ----------------------------------------------------------------------------
-; reply_send - a reply: four words into the caller's frame, which wakes
-;   In:       BX = the caller; CX = the T_CALLS it had; DX = the server;
-;             SI = the frame the reply's words are in, as an offset of kdata
-;             (thread_frame: never BP, an offset of a kernel stack's segment)
+; reply_send - a reply: the running thread's four words (its frame's BX CX
+; SI DI) into the caller's frame, which wakes
+;   In:       BX = the caller (not the running thread); CX = the T_CALLS it
+;             had; DX = the server; BP = the running thread's frame
 ;   Out:      CF clear if delivered; CF set if the caller waits no more
-;   Destroys: AX, DI
+;   Destroys: AX, DI, ES
 ; ----------------------------------------------------------------------------
 reply_send:
         call reply_valid
         jc .done
         call thread_frame
-        mov ax, [si + FRAME_BX]
-        mov [di + FRAME_BX], ax
-        mov ax, [si + FRAME_CX]
-        mov [di + FRAME_CX], ax
-        mov ax, [si + FRAME_SI]
-        mov [di + FRAME_SI], ax
-        mov ax, [si + FRAME_DI]
-        mov [di + FRAME_DI], ax
+        mov ax, [bp + FRAME_BX]
+        mov [es:di + FRAME_BX], ax
+        mov ax, [bp + FRAME_CX]
+        mov [es:di + FRAME_CX], ax
+        mov ax, [bp + FRAME_SI]
+        mov [es:di + FRAME_SI], ax
+        mov ax, [bp + FRAME_DI]
+        mov [es:di + FRAME_DI], ax
         mov al, KE_OK
         call frame_status
         call ipc_wake
@@ -360,7 +421,7 @@ reply_send:
 ;   In:       BP = the frame (DX the capability, AL the label, BX CX SI DI,
 ;             BP a capability to pass or 0)
 ;   Out:      the frame's status, and the reply in BX CX SI DI
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_call:
         mov byte [ipc_calling], TI_CALLING
@@ -371,7 +432,7 @@ kc_call:
 ; reply, that reply
 ;   In:       BP = the frame, as kc_call's
 ;   Out:      the frame's status
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_send:
         mov byte [ipc_calling], 0
@@ -381,47 +442,51 @@ kc_send:
 ; ipc_send - the body of kc_call and kc_send
 ;   In:       BP = the frame; ipc_calling
 ;   Out:      as kc_call
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 ipc_send:
         mov ax, [bp + FRAME_DX]
-        mov cl, CAP_REPLY
-        call cap_get
-        jnc .reply
-        mov ax, [bp + FRAME_DX]
-        mov cl, CAP_ENDPOINT
-        call cap_get
+        call cap_lookup                 ; ES:SI = its shadow entry
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_SEND
+        cmp byte [es:si + SH_TYPE], CAP_REPLY
+        je .reply
+        cmp byte [es:si + SH_TYPE], CAP_ENDPOINT
+        jne kc_done.cap
+        test byte [es:si + SH_RIGHTS], RIGHT_SEND
         jz kc_done.cap
         cmp byte [bp + FRAME_AX], NOTIFY_LABEL
         je kc_done.arg                  ; a bound notification's label: no sender's
+        mov dx, [es:si + SH_BADGE]
+        mov cl, [es:si + SH_RIGHTS]
+        mov si, [es:si + SH_OBJECT]     ; SI = the endpoint
         mov bx, [cur_thread]
+        mov es, bx
         mov al, [ipc_calling]
-        mov [bx + T_IPC], al
-        mov ax, [si + SH_BADGE]
-        mov [bx + T_BADGE], ax
+        mov [es:T_IPC], al
+        mov [es:T_BADGE], dx
         cmp word [bp + FRAME_BP], 0
         je .send
-        test byte [si + SH_RIGHTS], RIGHT_GRANT
+        test cl, RIGHT_GRANT
         jz kc_done.arg                  ; no capability through this endpoint
         push si
         push bx
         mov ax, [bp + FRAME_BP]
-        mov bx, [bx + T_SPACE]
+        mov bx, [es:T_SPACE]
         call slot_of
-        mov al, [si + SH_TYPE]
+        jc .no_cap
+        mov al, [es:si + SH_TYPE]
         pop bx
         pop si
-        jc kc_done.cap
         cmp al, CAP_EMPTY
         je kc_done.cap
-        or byte [bx + T_IPC], TI_GRANT
+        mov es, bx
+        or byte [es:T_IPC], TI_GRANT
 .send:
-        mov si, [si + SH_OBJECT]        ; the endpoint
-        test byte [bx + T_IPC], TI_CALLING
+        mov es, bx
+        test byte [es:T_IPC], TI_CALLING
         jnz ep_call
-        cmp byte [si + E_KIND], EK_RECV
+        mov es, si
+        cmp byte [es:E_KIND], EK_RECV
         jne ep_queue
         ; a receiver waits: the message now
         mov dx, bx                      ; the sender
@@ -430,23 +495,31 @@ ipc_send:
         call deliver
         call ready_push
         jmp kc_done.ok
+.no_cap:
+        pop bx
+        pop si
+        jmp kc_done.cap
 .reply:
+        ; ES:SI = the saved reply's shadow entry, ES:DI its descriptor, AX
+        ; its slot: the caller's back link names it no more
+        mov es, [cur_thread]
+        mov dx, [es:T_SPACE]            ; DX, CX = its space and slot
+        mov cx, ax
+        mov bx, dx
+        call slot_at                    ; ES:SI, ES:DI again
+        mov ax, [es:si + SH_OBJECT]     ; the caller (0: superseded, owed to nobody)
+        call reply_unlink
         push si
         push di
-        mov bx, [cur_thread]
-        mov dx, [bx + T_SPACE]          ; DX, AX = its space and slot: the
-        mov cx, ax                      ; caller's back link names it no more
-        mov ax, [si + SH_OBJECT]        ; (0: superseded, owed to nobody)
-        call reply_unlink
         test ax, ax
         stc
         jz .sent
-        call thread_frame               ; the reply's words: this frame's, as kdata
+        push es
         mov bx, ax                      ; the caller
-        mov cx, [si + SH_SEQ]
-        mov dx, [si + SH_SERVER]
-        mov si, di
+        mov cx, [es:si + SH_SEQ]
+        mov dx, [es:si + SH_SERVER]
         call reply_send
+        pop es
 .sent:
         pop di
         pop si
@@ -466,7 +539,8 @@ ipc_send:
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 ep_call:
-        cmp byte [si + E_KIND], EK_RECV
+        mov es, si
+        cmp byte [es:E_KIND], EK_RECV
         jne ep_queue
         mov dx, bx                      ; the caller
         call ep_pop                     ; BX = the receiver
@@ -485,9 +559,11 @@ ep_call:
 ; ----------------------------------------------------------------------------
 ep_queue:
         call ep_push
-        mov byte [si + E_KIND], EK_SEND
-        mov byte [bx + T_STATE], TS_SEND
-        mov [bx + T_WAIT_OBJ], si
+        mov es, si
+        mov byte [es:E_KIND], EK_SEND
+        mov es, bx
+        mov byte [es:T_STATE], TS_SEND
+        mov [es:T_WAIT_OBJ], si
         jmp schedule
 
 ; ----------------------------------------------------------------------------
@@ -503,22 +579,23 @@ ep_queue:
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 ipc_fault:
+        mov es, bx
         mov ax, [bp + FRAME_AX]         ; what the message and its end change
-        mov [bx + T_FAULT_REGS], ax
+        mov [es:T_FAULT_REGS], ax
         mov ax, [bp + FRAME_BX]
-        mov [bx + T_FAULT_REGS + 2], ax
+        mov [es:T_FAULT_REGS + 2], ax
         mov ax, [bp + FRAME_CX]
-        mov [bx + T_FAULT_REGS + 4], ax
+        mov [es:T_FAULT_REGS + 4], ax
         mov ax, [bp + FRAME_DX]
-        mov [bx + T_FAULT_REGS + 6], ax
+        mov [es:T_FAULT_REGS + 6], ax
         mov ax, [bp + FRAME_SI]
-        mov [bx + T_FAULT_REGS + 8], ax
+        mov [es:T_FAULT_REGS + 8], ax
         mov ax, [bp + FRAME_DI]
-        mov [bx + T_FAULT_REGS + 10], ax
+        mov [es:T_FAULT_REGS + 10], ax
         mov ax, [bp + FRAME_BP]
-        mov [bx + T_FAULT_REGS + 12], ax
+        mov [es:T_FAULT_REGS + 12], ax
         mov ax, [bp + FRAME_FLAGS]
-        mov [bx + T_FAULT_REGS + 14], ax
+        mov [es:T_FAULT_REGS + 14], ax
         mov ax, [bp + FRAME_VECTOR]
         mov [bp + FRAME_AX], ax
         mov ax, [bp + FRAME_ERROR]
@@ -529,10 +606,10 @@ ipc_fault:
         mov [bp + FRAME_SI], ax
         mov [bp + FRAME_DI], di
         mov word [bp + FRAME_BP], 0
-        mov byte [bx + T_IPC], TI_CALLING | TI_FAULT
-        mov ax, [bx + T_FAULT_BADGE]
-        mov [bx + T_BADGE], ax
-        mov si, [bx + T_FAULT]
+        mov byte [es:T_IPC], TI_CALLING | TI_FAULT
+        mov ax, [es:T_FAULT_BADGE]
+        mov [es:T_BADGE], ax
+        mov si, [es:T_FAULT]
         jmp ep_call
 
 ; ----------------------------------------------------------------------------
@@ -546,48 +623,49 @@ ipc_fault:
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 fault_resume:
-        and byte [bx + T_IPC], ~TI_FAULT & 0xFF
+        mov es, bx
+        and byte [es:T_IPC], ~TI_FAULT & 0xFF
         mov ah, [bp + FRAME_AX]
         cmp ah, KE_SUSPENDED
         je .suspended
         cmp ah, KE_OK
         jne .restart
         mov dx, [bp + FRAME_BX]
-        mov [bx + T_ENTRY], dx
+        mov [es:T_ENTRY], dx
 .restart:
+        push ds
+        pop es
         call restart_program
         cmp al, CONT_FAULT_WAY
         jne isr_exit
         call way_back_again             ; found by the way back: counted there
         jmp isr_exit.check_segments
 .suspended:
-        mov ax, [bx + T_FAULT_REGS]
+        mov ax, [es:T_FAULT_REGS]
         mov [bp + FRAME_AX], ax
-        mov ax, [bx + T_FAULT_REGS + 2]
+        mov ax, [es:T_FAULT_REGS + 2]
         mov [bp + FRAME_BX], ax
-        mov ax, [bx + T_FAULT_REGS + 4]
+        mov ax, [es:T_FAULT_REGS + 4]
         mov [bp + FRAME_CX], ax
-        mov ax, [bx + T_FAULT_REGS + 6]
+        mov ax, [es:T_FAULT_REGS + 6]
         mov [bp + FRAME_DX], ax
-        mov ax, [bx + T_FAULT_REGS + 8]
+        mov ax, [es:T_FAULT_REGS + 8]
         mov [bp + FRAME_SI], ax
-        mov ax, [bx + T_FAULT_REGS + 10]
+        mov ax, [es:T_FAULT_REGS + 10]
         mov [bp + FRAME_DI], ax
-        mov ax, [bx + T_FAULT_REGS + 12]
+        mov ax, [es:T_FAULT_REGS + 12]
         mov [bp + FRAME_BP], ax
-        mov ax, [bx + T_FAULT_REGS + 14]
+        mov ax, [es:T_FAULT_REGS + 14]
         mov [bp + FRAME_FLAGS], ax
         jmp thread_suspended
 
 ; ----------------------------------------------------------------------------
 ; slot_clear - empty a slot: its descriptor and its shadow entry
-;   In:       SI = the shadow entry; DI = the descriptor
+;   In:       ES = the space; SI = the shadow entry; DI = the descriptor
 ;   Out:      nothing
-;   Destroys: AX, CX, DI, ES
+;   Destroys: AX, CX, DI
 ; ----------------------------------------------------------------------------
 slot_clear:
-        push ds
-        pop es
         cld
         xor ax, ax
         mov cx, 4
@@ -601,23 +679,17 @@ slot_clear:
 ; kc_reply_recv - KCALL_REPLY_RECV: the reply owed, then a receive
 ;   In:       BP = the frame (BX CX SI DI the reply, DX, BP as kc_recv)
 ;   Out:      as kc_recv
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_reply_recv:
         mov dx, [cur_thread]
-        mov si, dx
-        mov bx, [si + T_REPLY]
+        mov es, dx
+        mov bx, [es:T_REPLY]
         test bx, bx
         jz kc_recv
-        mov word [si + T_REPLY], 0
-        mov cx, [si + T_REPLY_SEQ]
-        push bx
-        mov bx, dx
-        call thread_frame               ; the reply's words: this frame's, as kdata
-        mov si, di                      ; (BP is an offset of the kernel stack's segment)
-        pop bx
+        mov word [es:T_REPLY], 0
+        mov cx, [es:T_REPLY_SEQ]
         call reply_send                 ; a caller that waits no more: nothing
-        ; falls into kc_recv... through its entry
         jmp kc_recv
 
 ; ----------------------------------------------------------------------------
@@ -628,7 +700,7 @@ kc_reply_recv:
 ;   Out:      the frame: AL the label (NOTIFY_LABEL for a bound
 ;             notification), DX the badge, BX CX SI DI, BP the capability
 ;             received; a notification's: BX its bits
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_recv:
         mov byte [ipc_poll], 0
@@ -638,7 +710,7 @@ kc_recv:
 ; kc_poll - KCALL_POLL: as kc_recv, but KE_EMPTY at once if nothing is there
 ;   In:       BP = the frame, as kc_recv's
 ;   Out:      as kc_recv, or KE_EMPTY
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_poll:
         mov byte [ipc_poll], 1
@@ -648,34 +720,35 @@ kc_poll:
 ; ipc_recv - the body of kc_recv and kc_poll
 ;   In:       BP = the frame; ipc_poll
 ;   Out:      as kc_recv
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 ipc_recv:
         mov ax, [bp + FRAME_DX]
-        mov cl, CAP_NOTIFY
-        call cap_get
-        jnc .notification
-        mov ax, [bp + FRAME_DX]
-        mov cl, CAP_ENDPOINT
-        call cap_get
+        call cap_lookup
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_RECV
+        cmp byte [es:si + SH_TYPE], CAP_NOTIFY
+        je .notification
+        cmp byte [es:si + SH_TYPE], CAP_ENDPOINT
+        jne kc_done.cap
+        test byte [es:si + SH_RIGHTS], RIGHT_RECV
         jz kc_done.cap
+        mov si, [es:si + SH_OBJECT]     ; SI = the endpoint
         mov bx, [cur_thread]
+        mov es, bx
         mov ax, [bp + FRAME_BP]         ; the receive slot: 0, or a slot of its own
-        mov [bx + T_RSLOT], ax
+        mov [es:T_RSLOT], ax
         test ax, ax
         jz .slot_named
         push si
         push bx
-        mov bx, [bx + T_SPACE]
+        mov bx, [es:T_SPACE]
         call slot_of
         pop bx
         pop si
         jc kc_done.cap
 .slot_named:
-        mov si, [si + SH_OBJECT]        ; the endpoint
-        cmp byte [si + E_KIND], EK_SEND
+        mov es, si
+        cmp byte [es:E_KIND], EK_SEND
         jne .none
         ; a sender waits: its message now
         mov dx, bx                      ; the receiver
@@ -683,7 +756,8 @@ ipc_recv:
         mov si, bx
         mov bx, dx
         call deliver
-        test byte [si + T_IPC], TI_CALLING
+        mov es, si
+        test byte [es:T_IPC], TI_CALLING
         jz .was_send
         jmp ipc_link                    ; the sender now waits for the reply
 .was_send:
@@ -696,57 +770,63 @@ ipc_recv:
         pop bx
         ret
 .none:
-        mov di, [bx + T_BOUND]          ; a bound notification's bits?
+        mov es, bx
+        mov di, [es:T_BOUND]            ; a bound notification's bits?
         test di, di
         jz .wait
-        mov ax, [di + N_BITS]
+        mov es, di
+        mov ax, [es:N_BITS]
         test ax, ax
         jz .wait
-        mov word [di + N_BITS], 0
+        mov word [es:N_BITS], 0
         jmp bound_bits
 .wait:
         cmp byte [ipc_poll], 0
         jne kc_done.empty
         call ep_push
-        mov byte [si + E_KIND], EK_RECV
-        mov byte [bx + T_STATE], TS_RECV
-        mov [bx + T_WAIT_OBJ], si
+        mov es, si
+        mov byte [es:E_KIND], EK_RECV
+        mov es, bx
+        mov byte [es:T_STATE], TS_RECV
+        mov [es:T_WAIT_OBJ], si
         jmp schedule                    ; a sender, a signal or a cancel sets the frame
 .notification:
-        test byte [si + SH_RIGHTS], RIGHT_RECV
+        test byte [es:si + SH_RIGHTS], RIGHT_RECV
         jz kc_done.cap
-        mov si, [si + SH_OBJECT]
-        mov ax, [si + N_BITS]
+        mov si, [es:si + SH_OBJECT]
+        mov es, si
+        mov ax, [es:N_BITS]
         test ax, ax
         jz .notify_wait
-        mov word [si + N_BITS], 0
+        mov word [es:N_BITS], 0
         mov [bp + FRAME_BX], ax
         jmp kc_done.ok
 .notify_wait:
         cmp byte [ipc_poll], 0
         jne kc_done.empty
         mov bx, [cur_thread]
-        cmp word [si + N_WAITER], 0
+        cmp word [es:N_WAITER], 0
         jne kc_done.state               ; one waiter at a time
-        mov [si + N_WAITER], bx
-        mov byte [bx + T_STATE], TS_NOTIFY
-        mov [bx + T_WAIT_OBJ], si
+        mov [es:N_WAITER], bx
+        mov es, bx
+        mov byte [es:T_STATE], TS_NOTIFY
+        mov [es:T_WAIT_OBJ], si
         jmp schedule                    ; a signal or a cancel sets the frame
 
 ; ----------------------------------------------------------------------------
 ; bound_bits - a bound notification's bits as a receive's message
 ;   In:       BX = the thread; AX = the bits
 ;   Out:      its frame: AL NOTIFY_LABEL, BX the bits, DX 0, BP 0, CF clear
-;   Destroys: AX, DI
+;   Destroys: AX, DI, ES
 ; ----------------------------------------------------------------------------
 bound_bits:
         call thread_frame
-        mov [di + FRAME_BX], ax
+        mov [es:di + FRAME_BX], ax
         mov al, NOTIFY_LABEL
         call frame_status
-        and word [di + FRAME_FLAGS], ~FLAGS_CF
-        mov word [di + FRAME_DX], 0
-        mov word [di + FRAME_BP], 0
+        and word [es:di + FRAME_FLAGS], ~FLAGS_CF
+        mov word [es:di + FRAME_DX], 0
+        mov word [es:di + FRAME_BP], 0
         ret
 
 ; ----------------------------------------------------------------------------
@@ -759,29 +839,34 @@ bound_bits:
 ntf_signal:
         push bx
         push di
-        mov bx, [si + N_WAITER]
+        push es
+        mov es, si
+        mov bx, [es:N_WAITER]
         test bx, bx
         jz .bound
-        mov word [si + N_WAITER], 0
-        or ax, [si + N_BITS]
-        mov word [si + N_BITS], 0
+        mov word [es:N_WAITER], 0
+        or ax, [es:N_BITS]
+        mov word [es:N_BITS], 0
         call thread_frame
-        mov [di + FRAME_BX], ax
+        mov [es:di + FRAME_BX], ax
         mov al, KE_OK
         call frame_status
         call ready_push
         jmp .done
 .bound:
-        mov bx, [si + N_BOUND]
+        mov bx, [es:N_BOUND]
         test bx, bx
         jz .keep
-        cmp byte [bx + T_STATE], TS_RECV
+        mov es, bx
+        cmp byte [es:T_STATE], TS_RECV
+        mov es, si
         jne .keep
-        or ax, [si + N_BITS]            ; it waits on an endpoint: off its queue
-        mov word [si + N_BITS], 0
+        or ax, [es:N_BITS]              ; it waits on an endpoint: off its queue
+        mov word [es:N_BITS], 0
         push ax
         push si
-        mov si, [bx + T_WAIT_OBJ]
+        mov es, bx
+        mov si, [es:T_WAIT_OBJ]
         call ep_remove
         pop si
         pop ax
@@ -789,8 +874,9 @@ ntf_signal:
         call ready_push
         jmp .done
 .keep:
-        or [si + N_BITS], ax
+        or [es:N_BITS], ax
 .done:
+        pop es
         pop di
         pop bx
         ret
@@ -800,21 +886,21 @@ ntf_signal:
 ; the notification's bits
 ;   In:       BP = the frame (DX the notification)
 ;   Out:      the frame's status
-;   Destroys: AX, CX, SI, DI
+;   Destroys: AX, CX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_signal:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_NOTIFY
         call cap_get
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_SEND
+        test byte [es:si + SH_RIGHTS], RIGHT_SEND
         jz kc_done.cap
-        mov ax, [si + SH_BADGE]
+        mov ax, [es:si + SH_BADGE]
         test ax, ax
         jnz .bits
         mov ax, 1
 .bits:
-        mov si, [si + SH_OBJECT]
+        mov si, [es:si + SH_OBJECT]
         call ntf_signal
         jmp kc_done.ok
 
@@ -825,20 +911,21 @@ kc_signal:
 ; replaces the one armed before, so waits that end early leave none behind
 ;   In:       BP = the frame (DX the notification, CX ticks, 1 or more)
 ;   Out:      the frame's status (KE_POOL: TIMER_MAX armed already)
-;   Destroys: AX, BX, CX, SI, DI
+;   Destroys: AX, BX, CX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_timer:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_NOTIFY
         call cap_get
         jc kc_done.cap
-        test byte [si + SH_RIGHTS], RIGHT_SEND
+        test byte [es:si + SH_RIGHTS], RIGHT_SEND
         jz kc_done.cap
         cmp word [bp + FRAME_CX], 0
         je kc_done.arg
         cmp word [bp + FRAME_CX], TIMER_TICKS_MAX
         ja kc_done.arg                  ; (a due tick is compared signed)
-        mov ax, [si + SH_OBJECT]
+        mov bx, [es:si + SH_BADGE]
+        mov ax, [es:si + SH_OBJECT]
         mov di, timers                  ; its own timer, armed again
         mov cx, TIMER_MAX
 .own:
@@ -855,17 +942,15 @@ kc_timer:
         loop .free
         jmp kc_done.pool
 .found:
-        mov ax, [si + SH_BADGE]
-        test ax, ax
+        test bx, bx
         jnz .bits
-        mov ax, 1
+        mov bx, 1
 .bits:
-        mov [di + TM_BITS], ax
+        mov [di + TM_BITS], bx
+        mov [di + TM_NOTIFY], ax
         mov ax, [ticks]
         add ax, [bp + FRAME_CX]
         mov [di + TM_DUE], ax
-        mov ax, [si + SH_OBJECT]
-        mov [di + TM_NOTIFY], ax
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -909,14 +994,14 @@ timers_tick:
 ;   Destroys: AX, BX, CX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_delete:
-        mov bx, [cur_thread]
-        cmp byte [bx + T_CONT], CONT_RESUMED
+        mov es, [cur_thread]
+        cmp byte [es:T_CONT], CONT_RESUMED
         je kc_done.ok                   ; deleted, and the dead spaces emptied since
+        mov bx, [es:T_SPACE]
         mov ax, [bp + FRAME_DX]
-        mov bx, [bx + T_SPACE]
         call slot_of
         jc kc_done.cap
-        cmp byte [si + SH_TYPE], CAP_EMPTY
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
         je kc_done.cap
         call cap_delete_at              ; BX, AX: the space and slot (revoke.asm)
         call dead_flush
@@ -927,40 +1012,48 @@ kc_delete:
 ; slot as a capability, so that it can receive again and answer later
 ;   In:       BP = the frame (SI the slot)
 ;   Out:      the frame's status (KE_STATE: no reply owed)
-;   Destroys: AX, BX, CX, SI, DI
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_save_reply:
         mov bx, [cur_thread]
-        cmp word [bx + T_REPLY], 0
-        je kc_done.state
+        mov es, bx
+        mov di, [es:T_REPLY]            ; DI = the caller
+        test di, di
+        jz kc_done.state
+        mov dx, [es:T_SPACE]
         mov ax, [bp + FRAME_SI]
+        push di
         push bx
-        mov bx, [bx + T_SPACE]
-        call slot_of
+        mov bx, dx
+        call slot_of                    ; ES = its space; AX = the slot
         pop bx
+        pop di
         jc kc_done.cap
-        cmp byte [si + SH_TYPE], CAP_EMPTY
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
         jne kc_done.slot
-        mov byte [si + SH_TYPE], CAP_REPLY
-        mov di, [bx + T_REPLY]          ; DI = the caller
-        mov [si + SH_OBJECT], di
-        mov [si + SH_SERVER], bx
-        mov cx, [bx + T_REPLY_SEQ]
-        mov [si + SH_SEQ], cx
-        mov word [bx + T_REPLY], 0
-        mov cx, ax                      ; CX = the slot
-        mov dx, [bx + T_SPACE]
-        push bx                         ; an older reply saved for it is stale:
-        mov bx, [di + T_SAVED_SPACE]    ; it is owed to nobody now, and the
+        mov byte [es:si + SH_TYPE], CAP_REPLY
+        mov [es:si + SH_OBJECT], di
+        mov [es:si + SH_SERVER], bx
+        push es
+        mov es, bx
+        mov cx, [es:T_REPLY_SEQ]
+        mov word [es:T_REPLY], 0
+        pop es
+        mov [es:si + SH_SEQ], cx
+        mov cx, ax                      ; DX, CX = the slot
+        push bx
+        mov es, di                      ; an older reply saved for it is stale:
+        mov bx, [es:T_SAVED_SPACE]      ; it is owed to nobody now, and the
         test bx, bx                     ; caller's back link names this one
         jz .linked
-        mov ax, [di + T_SAVED_SLOT]
-        call shadow_at
-        mov word [si + SH_OBJECT], 0
+        mov ax, [es:T_SAVED_SLOT]
+        call shadow_at                  ; ES:SI = that one's shadow entry
+        mov word [es:si + SH_OBJECT], 0
+        mov es, di
 .linked:
         pop bx
-        mov [di + T_SAVED_SPACE], dx
-        mov [di + T_SAVED_SLOT], cx
+        mov [es:T_SAVED_SPACE], dx
+        mov [es:T_SAVED_SLOT], cx
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -989,9 +1082,11 @@ ipc_fail:
         push ax
         push si
         push di
+        push es
         mov ah, al                      ; AH = the status
-        mov al, [bx + T_STATE]
-        mov si, [bx + T_WAIT_OBJ]
+        mov es, bx
+        mov al, [es:T_STATE]
+        mov si, [es:T_WAIT_OBJ]
         cmp al, TS_SEND
         je .queued
         cmp al, TS_RECV
@@ -1007,15 +1102,17 @@ ipc_fail:
         pop ax
         jmp .wake
 .notify:
-        cmp [si + N_WAITER], bx
+        mov es, si
+        cmp [es:N_WAITER], bx
         jne .wake
-        mov word [si + N_WAITER], 0
+        mov word [es:N_WAITER], 0
 .wake:
         call thread_frame
         mov al, ah
         call frame_status
         call ready_push
 .done:
+        pop es
         pop di
         pop si
         pop ax

@@ -31,9 +31,8 @@ isr_stub_ %+ vector:
 
 ; ----------------------------------------------------------------------------
 ; isr_common - the frame, the handler, the way back
-;   In:       the stub's and the CPU's pushes: from rings 1-3, at the end of
-;             the running thread's control block (SP0); from ring 0, on the
-;             kernel's stack
+;   In:       the stub's and the CPU's pushes on the kernel's stack: from
+;             rings 1-3 at its top (SP0: KFRAME), from ring 0 below
 ;   Out:      returns to the interrupted code with IRET
 ;   Destroys: nothing of the interrupted code's but what the handler changed
 ;             in the frame
@@ -47,10 +46,6 @@ isr_common:
         mov ds, ax
         mov es, ax
         cld
-        test byte [bp + FRAME_CS], CPL_MASK
-        jz .stacked
-        mov sp, KSTACK_TOP              ; from rings 1-3: the frame is the running
-.stacked:                               ; thread's (SP0); the kernel's stack is empty
 %ifdef TEST_STRETCH
         mov ah, [bp + FRAME_VECTOR]     ; the place: the vector, and a kernel call
         xor al, al
@@ -70,20 +65,20 @@ isr_common:
 ; more urgent thread, a pending restart and the checks of the frame. A
 ; thread that stops or gives way here goes the way back afresh when it runs
 ; again (dispatch)
-;   In:       BP = the frame (the running thread's, from rings 1-3); DS =
-;             SEL_KDATA; interrupts off
+;   In:       BP = the frame (the running thread's, from rings 1-3: KFRAME);
+;             DS = SEL_KDATA; interrupts off
 ;   Out:      IRET to the frame
 ;   Destroys: everything but what the frame restores
 ; ----------------------------------------------------------------------------
 isr_exit:
         test byte [bp + FRAME_CS], CPL_MASK
         jz .restore
-        mov bx, [cur_thread]            ; its last capability gone (l4.md L12):
-        test byte [bx + T_FLAGS], TF_DEAD   ; it never goes back
+        mov es, [cur_thread]            ; its last capability gone (l4.md L12):
+        test byte [es:T_FLAGS], TF_DEAD ; it never goes back
         jz .alive
         call thread_die
 .alive:
-        test byte [bx + T_FLAGS], TF_ORPHAN ; its space gone: it stops
+        test byte [es:T_FLAGS], TF_ORPHAN   ; its space gone: it stops
         jz .whole
         call thread_orphan
 .whole:
@@ -103,12 +98,15 @@ isr_exit:
         ; its frame is whole (os-server.md P2, E11); resumed, it goes the way
         ; back afresh, since much may have changed meanwhile
         mov bx, [cur_thread]
-        test byte [bx + T_FLAGS], TF_SUSPEND
+        mov es, bx
+        test byte [es:T_FLAGS], TF_SUSPEND
         jz .checks
         jmp thread_suspended            ; resumed: the way back afresh
 .checks:
-        mov bx, [cur_thread]
-        mov byte [bx + T_WAY_BACK], 0
+        mov es, [cur_thread]
+        mov byte [es:T_WAY_BACK], 0
+        push ds
+        pop es
 .check_segments:
         call way_back_check             ; may report a fault: the frame restarts,
         jnc .check_ip                   ; and its segments are checked in turn
@@ -149,14 +147,19 @@ isr_exit:
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 way_back_again:
-        mov bx, [cur_thread]
-        inc byte [bx + T_WAY_BACK]
-        cmp byte [bx + T_WAY_BACK], WAY_BACK_TRIES
+        push es
+        mov es, [cur_thread]
+        inc byte [es:T_WAY_BACK]
+        cmp byte [es:T_WAY_BACK], WAY_BACK_TRIES
+        pop es
         jb .done
-        mov byte [bx + T_WAY_BACK], 0
+        mov es, [cur_thread]
+        mov byte [es:T_WAY_BACK], 0
+        mov byte [es:T_STATE], TS_STOPPED
+        push ds
+        pop es
         mov si, msg_way_back
         call klog
-        mov byte [bx + T_STATE], TS_STOPPED
         jmp schedule                    ; started again: the way back afresh
 .done:
         ret

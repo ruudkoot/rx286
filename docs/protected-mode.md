@@ -23,28 +23,32 @@ writes the GDT except for the TSS's busy bit.
 |---|---|---|---|---|---|
 | 00h | `SEL_NULL` | | | | |
 | 08h | `SEL_KCODE` | 10100h | size | 9Bh: present, DPL 0, code, readable | the kernel |
-| 10h | `SEL_KDATA` | 04B00h | FFFFh | 93h: present, DPL 0, data, writable | its stacks, the arena, its tables and variables, the module table (*docs/memory-map.md*) |
+| 10h | `SEL_KDATA` | 0C000h | FFFFh | 93h: present, DPL 0, data, writable | its stack, the GDT, its tables and variables, the module table (*docs/memory-map.md*) |
 | 18h | `SEL_KSTACK` | `KDATA_BASE` | FFh | 97h: expand-down | the kernel's one stack (roadmap os-server.md P3): the same memory as `SEL_KDATA`, at the same offsets, valid from `KSTACK_BOTTOM` up, so that an overflow faults |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
 | 30h | `SEL_DFSTACK` | 04400h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
-| 40h-238h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`, 64) |
-| 240h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
-| 248h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
+| 40h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
+| 48h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
+| 50h | `SEL_IDLE` | in KDATA | D7h | 93h | the idle loop's thread |
+| 58h-1FF8h | `SEL_OBJ_POOL` | anywhere | the object's size - 1 | 93h, or 82h for an LDT; 00h until first taken | each kernel object's own descriptor, its name (roadmap os-server.md P3), and each space's LDT (`OBJ_MAX`, 1,013) |
 
 Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
 be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
 levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
-`GDT_LIMIT`, 24Fh. A free descriptor of a pool is all zeros, which no one
-can load. The kernel takes one when it makes a space or a thread
-(*docs/kernel-calls.md*). Any selector beyond the limit is a general protection
-fault.
+`GDT_LIMIT`, 1FFFh. The image holds its fixed part, which the entry
+loads with the limit `GDT_BOOT_LIMIT`; `gdt_init` builds the whole at `GDT_PHYS` and loads that. The kernel
+takes a descriptor of the pool for each object it makes, and for each
+space's LDT; one given back keeps what it described until it is taken
+again, so that a segment register that still holds it loads harmlessly.
+Any selector beyond the limit is a general protection fault.
 
 ## The programs' LDTs
 
-Each program runs in a space of its own: an LDT and its slots, in the arena
-(roadmap l4.md L3; *docs/kernel-calls.md*). The kernel makes the root's
+Each program runs in a space of its own: an LDT and its slots, an object
+of the kernel's anywhere in memory (roadmap l4.md L3, os-server.md P3;
+*docs/kernel-calls.md*). The kernel makes the root's
 space at its start, and the root makes every other program's
 (*docs/architecture.md*, roadmap l4.md L5); the kernel loads each thread's
 LDT at every switch. Until the first switch LDTR is null: never Bochs' live

@@ -35,13 +35,13 @@ IMAGE_MAX           equ 0x20000     ; its most: up to UMEM_PHYS, the memory for 
 ; l4.md L5, D13): tools/mkimage puts them there.
 ENTRY_OFF           equ 0x0000      ; real-mode entry
 ENTRY_ROOM          equ 0x0100
-KTEXT_OFF           equ 0x0100      ; kernel code (12 KB: 16 KB until the old calls left,
-KTEXT_ROOM          equ 0x3000      ; roadmap l4.md L10)
-KDATA_OFF           equ 0x3100      ; kernel data: GDT, IDT, TSSs, variables, messages
+KTEXT_OFF           equ 0x0100      ; kernel code (16 KB: the arena's room, os-server.md
+KTEXT_ROOM          equ 0x4000      ; P3; 12 KB from l4.md L10 until then)
+KDATA_OFF           equ 0x4100      ; kernel data: the boot GDT, IDT, TSSs, variables, messages
 KDATA_ROOM          equ 0x1800
-MODULE_TABLE_OFF    equ 0x4900      ; the table of the image's modules
+MODULE_TABLE_OFF    equ 0x5900      ; the table of the image's modules
 MODULE_TABLE_SIZE   equ 0x0200
-MODULES_OFF         equ 0x4B00      ; the modules, each on a paragraph
+MODULES_OFF         equ 0x5B00      ; the modules, each on a paragraph
 KERNEL_END_MARK     equ 0x286E      ; the image's last word: the loader checks it arrived
 
 ; The module table: a header, then an entry a module, the root's first.
@@ -73,29 +73,33 @@ ROOT_NAME           equ 'ro'        ; the first module's name starts "root"
 ROOT_NAME_2         equ 'ot'
 
 ; Below the image: the boot code's memory, free once the kernel runs. The
-; kernel's data segment, SEL_KDATA, starts at KDATA_BASE: its 64 KB reach
-; the kernel's one stack, the arena, the kernel's variables and the module
-; table, just. The stack's segment, SEL_KSTACK, is the same memory at the
-; same offsets, expand-down from KSTACK_BOTTOM, so that SS and DS agree and
-; an overflow still faults (roadmap os-server.md P3).
+; double fault's stack; the arena; then what only the kernel reaches, in
+; its data segment, SEL_KDATA, which starts at KDATA_BASE and whose 64 KB
+; reach its one stack, the GDT and its free descriptors, the kernel's
+; variables and the module table. The stack's segment, SEL_KSTACK, is the
+; same memory at the same offsets, expand-down from KSTACK_BOTTOM, so that
+; SS and DS agree and an overflow still faults (roadmap os-server.md P3).
 DFSTACK_PHYS        equ 0x04400     ; the double-fault task's stack
 DFSTACK_SIZE        equ 0x0200
-KDATA_BASE          equ 0x04B00
-KSTACK_PHYS         equ 0x04C00     ; the kernel's one stack (os-server.md P3)
+; The arena: given to the root as untyped memory like any other
+; (os-server.md P3; until then only for the kernel's objects, l4.md D7, L3)
+ARENA_PHYS          equ 0x04600
+ARENA_SIZE          equ 0x7A00
+KDATA_BASE          equ 0x0C000
+KSTACK_PHYS         equ 0x0C100     ; the kernel's one stack (os-server.md P3)
 KSTACK_SIZE         equ 0x0400
 KSTACK_BOTTOM       equ KSTACK_PHYS - KDATA_BASE        ; its offsets in SEL_KDATA
 KSTACK_TOP          equ KSTACK_BOTTOM + KSTACK_SIZE
-; The arena (roadmap l4.md D7, L3): the kernel's objects - spaces, threads,
-; endpoints, notifications - reached with DS = SEL_KDATA, never at its
-; offset 0 (an object's address 0 means none). Only the kernel maps it: it
-; is given out as untyped memory, never as a segment.
-ARENA_PHYS          equ 0x05000
-ARENA_SIZE          equ 0xB000
+; The GDT, built here at the start (os-server.md P3): an object's
+; descriptor each; then the stack of its pool's free descriptors
+GDT_PHYS            equ 0x0C800
+GDT_ENTRIES         equ 1024
+OBJ_FREE_PHYS       equ GDT_PHYS + GDT_ENTRIES * 8
 ; Memory for programs' segments, given out as untyped (l4.md L3)
 UMEM_PHYS           equ 0x30000
 UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h
-SPACE_MAX           equ 64          ; LDT descriptors in the GDT's pool
-THREAD_MAX          equ 128         ; threads (thread_list)
+SPACE_MAX           equ 128         ; spaces (space_list)
+THREAD_MAX          equ 192         ; threads (thread_list)
 
 ; Physical addresses, and offsets of SEL_KDATA.
 KTEXT_PHYS          equ KERNEL_PHYS + KTEXT_OFF
@@ -103,19 +107,20 @@ KDATA_PHYS          equ KERNEL_PHYS + KDATA_OFF
 MODULE_TABLE_PHYS   equ KERNEL_PHYS + MODULE_TABLE_OFF
 KDATA_VSTART        equ KDATA_PHYS - KDATA_BASE         ; the kernel's variables
 MODULE_TABLE_VOFF   equ MODULE_TABLE_PHYS - KDATA_BASE  ; the module table
-ARENA_OFF           equ ARENA_PHYS - KDATA_BASE         ; the arena
+GDT_OFF             equ GDT_PHYS - KDATA_BASE           ; the GDT
+OBJ_FREE_OFF        equ OBJ_FREE_PHYS - KDATA_BASE      ; its pool's free descriptors
 
 %if KERNEL_PHYS + IMAGE_MAX > UMEM_PHYS
   %error "layout.inc: the image's room overlaps the memory for programs"
 %endif
-%if DFSTACK_PHYS + DFSTACK_SIZE > KDATA_BASE || KSTACK_PHYS <= KDATA_BASE
-  %error "layout.inc: the kernel's stacks must lie below and above KDATA_BASE"
+%if DFSTACK_PHYS + DFSTACK_SIZE > ARENA_PHYS || ARENA_PHYS + ARENA_SIZE > KDATA_BASE
+  %error "layout.inc: the double fault's stack, the arena and the kernel's data overlap"
 %endif
-%if KSTACK_PHYS + KSTACK_SIZE > ARENA_PHYS
-  %error "layout.inc: the kernel's stack and the arena overlap"
+%if KSTACK_PHYS <= KDATA_BASE || KSTACK_PHYS + KSTACK_SIZE > GDT_PHYS
+  %error "layout.inc: the kernel's stack must lie past KDATA_BASE, before the GDT"
 %endif
-%if ARENA_PHYS + ARENA_SIZE > KERNEL_PHYS || ARENA_PHYS <= KDATA_BASE
-  %error "layout.inc: the arena must lie between KDATA_BASE and the image"
+%if OBJ_FREE_PHYS + GDT_ENTRIES * 2 > KERNEL_PHYS
+  %error "layout.inc: the GDT and its free descriptors must lie below the image"
 %endif
 %if MODULE_TABLE_VOFF + MODULE_TABLE_SIZE > 0x10000
   %error "layout.inc: the module table must lie within the kernel data segment's 64 KB"

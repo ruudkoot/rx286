@@ -128,18 +128,22 @@ entry:
         mov bl, ACC_DATA3
         kcall KCALL_RETYPE
         report "retype into a full slot (4)"
-        mov dx, UT_ARENA
-        mov al, CAP_SEGMENT
+        mov dx, UT_ARENA                ; any untyped gives segments and objects
+        mov al, CAP_SEGMENT             ; alike (os-server.md P3)
         mov si, MY_EMPTY
         mov cx, 16
         mov bl, ACC_DATA3
         kcall KCALL_RETYPE
-        report "a segment from the arena (1)"
+        report "a segment from the arena (0)"
+        mov dx, MY_EMPTY
+        kcall KCALL_DELETE
         mov dx, UT_MEMORY
         mov al, CAP_THREAD
         mov si, MY_EMPTY
         kcall KCALL_RETYPE
-        report "a thread from the memory for segments (1)"
+        report "a thread from the memory for segments (0)"
+        mov dx, MY_EMPTY
+        kcall KCALL_DELETE
         mov dx, UT_MEMORY
         mov al, CAP_SEGMENT
         mov si, MY_EMPTY
