@@ -1,0 +1,17 @@
+# The drivers run above the root (roadmap os-server.md P4): while the root
+# forks a process of 64 KB four times, copying its data in ring 2, a thread
+# at the drivers' priority waits for every tick and misses none
+# (tests/programs/services.c, built with SERVICES_DRIVERS). DOSBox-X has no
+# extended memory, which TEST_CAPS leaves the services.
+program: services
+define: TEST_CAPS
+define: TEST_SERVICES
+define: SERVICES_DRIVERS
+match: contains
+timeout: 120
+emulators: bochs mame
+---
+services: a ticker at the drivers' priority (0): 0
+services: they took 8 ticks or more: yes
+services: the ticker missed 2 ticks at most: yes
+services: done

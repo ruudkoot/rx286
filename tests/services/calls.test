@@ -1,0 +1,36 @@
+# The root's services for processes (roadmap os-server.md P4): a code loaded,
+# sealed and found by its key; a process spawned of it, forked, its data
+# grown, a thread added; both ended, and the code with them; every refusal
+# (tests/programs/services.c). Then a thousand spawns and exits, after which
+# the memory gives the same segments of 64 KB as before. DOSBox-X has no
+# extended memory, so a TEST_CAPS program holds all the memory for segments.
+program: services
+define: TEST_CAPS
+define: TEST_SERVICES
+emulators: bochs mame
+match: contains
+timeout: 600
+---
+services: load 32 bytes (0): 0
+services: seal it (0): 0; my copy is gone (0): 0
+services: seal it again (3): 3
+services: find it by its key (0): 0, the same: 1
+services: find another key (17): 17
+services: spawn a load not sealed (3): 3; unload it (0): 0
+services: spawn a process (0): 0
+services: start it (0): 0; its call: badge 1, word 5
+services: its next, after my reply of 6: badge 1, word 6
+services: fork it (0): 0; the child's data: word 6
+services: start the child (0): 0; its call: badge 2, word 6
+services: grow its data (0): 0; 8192 bytes, word 6; the old gone (0): 0
+services: the child after my reply of 7: badge 2, word 7
+services: a thread more (0): 0, thread 1; start it (0): 0
+services: its call: badge 3, word 9
+services: unload a code that runs (3): 3
+services: exit the first (0): 0; its copies gone (0 0 0): 0 0 0
+services: the code stays (0): 0
+services: exit the child (0): 0; again (3): 3
+services: the code gone with them (17): 17
+services: 1000 spawns and exits: 0 failures
+services: loads of 64 KB before and after: the same
+services: done

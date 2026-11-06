@@ -33,7 +33,8 @@ unit`). Unicorn is not a 286, so only pure code is tested this way. The C
 is tested there too (roadmap os-server.md P1, *docs/c.md*): the libc built
 by the host's gcc with the sanitizers (`test_libc.py`), and the 32-bit
 helpers the compilers call, in Unicorn against Python's arithmetic
-(`test_helpers.py`).
+(`test_helpers.py`), and the root's buddy allocator against a simulation
+of untyped memory, 20,000 allocations and frees (`test_buddy.py`).
 
 ## 4. Boot tests in Bochs
 
@@ -107,7 +108,8 @@ The suites:
 | `tests/rings` | attacks from ring 2 (`IN`, `OUT`, `CLI`, the kernel's data, binding the timer's line; IOPL asked for and refused) and from ring 1 with IOPL (`HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT`, the kernel's data) |
 | `tests/demo` | the demonstration (roadmap l4.md L11): the clock and the counter on the status line while the shell works, the clock's fault reported and the clock started again, `ps`, `kill` and `start`, the clock ticking while the shell spins |
 | `tests/revoke` | delete and revoke (roadmap l4.md L12): a revoked copy in DS null on the way back, memory given back and made again at the same base, an endpoint's queued caller failed with `KE_CAP`, a worker's space and thread gone with their untyped, E3's ABA case, a worker that deletes its own stack stopped after its way back fails (L13), and copies of untyped and of a saved reply refused |
-| `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; a boot image without a root, or with a module outside it, refused by the loader |
+| `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; the root's own fault, a panic (os-server.md D8); a boot image without a root, or with a module outside it, refused by the loader |
+| `tests/services` | the root's services for processes (roadmap os-server.md P4; `tests/programs/services.c`, a C test program): a code loaded, sealed and found, a process spawned, forked, grown and given a thread, both ended, every refusal; a thousand spawns and exits, after which the memory gives the same segments of 64 KB; a thread at the drivers' priority missing no tick while the root forks 64 KB four times (Bochs and MAME) |
 | `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break and Ctrl+Alt+Del, through the keyboard driver and the OS server (`tests/programs/keys.asm`), the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC, the longest stretch with interrupts off (`stretch.test`, and across a kill and a start, `stretch-kill.test`; roadmaps/realtime.md R0) |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
 | `tests/syscalls` | every system call with good and bad arguments, through the OS server; `write`'s interrupt window; a call past the transfer segment's end; the file calls on the boot diskette (`files.test`, not on DOSBox-X) |

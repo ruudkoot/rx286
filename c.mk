@@ -49,6 +49,11 @@ $(C_B)/%.$(OBJ): src/%.c $(C_HEADERS) c.mk
 	$(WCC) $(WCC_FLAGS) -fo=$@ $<
 	$(WDIS) -l=$(@:.$(OBJ)=.dis) $@
 
+$(C_B)/tests/%.$(OBJ): tests/%.c $(C_HEADERS) c.mk
+	@mkdir -p $(dir $@)
+	$(WCC) $(WCC_FLAGS) -fo=$@ $<
+	$(WDIS) -l=$(@:.$(OBJ)=.dis) $@
+
 $(C_B)/lib/crt/helpers.$(OBJ): src/lib/crt/helpers.asm $(COMMON_SRC) src/include/cabi.inc
 	@mkdir -p $(dir $@)
 	$(NASM) -f obj $(NASM_C_FLAGS) -l $(@:.$(OBJ)=.lst) -o $@ $<
@@ -75,9 +80,15 @@ IA16_GCC := $(IA16)/bin/ia16-elf-gcc
 IA16_LD := $(IA16)/bin/ia16-elf-ld
 IA16_OBJDUMP := $(IA16)/bin/ia16-elf-objdump
 IA16_FLAGS := -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin \
-    -Os -std=gnu99 -Wall -Wextra -Werror -Isrc/include/c -Isrc/include -I$(INC_H) $(C_DEFINES)
+    -fcall-used-es -Os -std=gnu99 -Wall -Wextra -Werror -Isrc/include/c -Isrc/include \
+    -I$(INC_H) $(C_DEFINES)
 
 $(C_B)/%.$(OBJ): src/%.c $(C_HEADERS) c.mk
+	@mkdir -p $(dir $@)
+	$(IA16_GCC) $(IA16_FLAGS) -c -o $@ $<
+	$(IA16_OBJDUMP) -d -M i8086 $@ > $(@:.$(OBJ)=.dis)
+
+$(C_B)/tests/%.$(OBJ): tests/%.c $(C_HEADERS) c.mk
 	@mkdir -p $(dir $@)
 	$(IA16_GCC) $(IA16_FLAGS) -c -o $@ $<
 	$(IA16_OBJDUMP) -d -M i8086 $@ > $(@:.$(OBJ)=.dis)
@@ -124,8 +135,15 @@ $(C_B)/os.lib: $(OS_OBJS)
 
 # The C modules of the boot image: the root task, the first module
 # (roadmap l4.md L5; in C since os-server.md P4), the clock and the counter
-$(B)/root.rx: $(C_LIB_OBJS) $(C_B)/root/root.$(OBJ) tools/mkexe
-	$(call c_link,root,$(C_LIB_OBJS) $(C_B)/root/root.$(OBJ))
+ROOT_OBJS := $(addprefix $(C_B)/root/,root.$(OBJ) services.$(OBJ) buddy.$(OBJ))
+$(B)/root.rx: $(C_LIB_OBJS) $(ROOT_OBJS) tools/mkexe
+	$(call c_link,root,$(C_LIB_OBJS) $(ROOT_OBJS))
+
+$(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
+
+# A test program in C (tests/programs/*.c), the program module of its build
+$(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe
+	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ))
 
 $(B)/clock.rx: $(C_LIB_OBJS) $(C_B)/userland/clock.$(OBJ) tools/mkexe
 	$(call c_link,clock,$(C_LIB_OBJS) $(C_B)/userland/clock.$(OBJ))

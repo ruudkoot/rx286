@@ -27,7 +27,7 @@ writes the GDT except for the TSS's busy bit.
 | 18h | `SEL_KSTACK` | `KDATA_BASE` | FFh | 97h: expand-down | the kernel's one stack (roadmap os-server.md P3): the same memory as `SEL_KDATA`, at the same offsets, valid from `KSTACK_BOTTOM` up, so that an overflow faults |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
-| 30h | `SEL_DFSTACK` | 04400h | 1FFh | 93h | its stack |
+| 30h | `SEL_DFSTACK` | 00500h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
 | 40h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
 | 48h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |

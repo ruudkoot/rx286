@@ -120,6 +120,7 @@ E_NOT_FOUND         equ 17  ; no such file or directory
 E_NOT_DIR           equ 18  ; a path goes on through a file; a directory wanted
 E_BAD_NAME          equ 19  ; a name DOS does not allow, or a path too long
 E_BROKEN            equ 20  ; a cluster outside the volume, or a chain that loops
+E_NOMEM             equ 21  ; no memory, or no room in a table, for it (os-server.md P4)
 
 ; Scancodes (set 1) the program may look for in AH when AL = 0.
 SC_ESC              equ 0x01

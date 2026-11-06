@@ -112,8 +112,9 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 ## Threads
 
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
-the root, the drivers, the OS server's, the program in the foreground (the
-shell, or a test program), and the clock and the counter beside the shell. A thread is a kernel object, anywhere in
+the drivers (priority 7), the root (6), the OS server's (5), the program
+in the foreground (the shell, or a test program), and the clock and the
+counter beside the shell. A thread is a kernel object, anywhere in
 memory, named by its own descriptor's selector (*docs/memory-map.md*;
 roadmap os-server.md P3): a control block, at whose end it keeps its frame
 while it does not run. The kernel has one stack for all of them, at whose

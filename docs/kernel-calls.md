@@ -398,8 +398,10 @@ has `ROOT_SLOTS` slots:
 
 The rest are the root's own (*docs/root.md*): its fault endpoint (36), a
 scratch slot (37), a background program's own untyped from 38 on, the OS
-server's control notification (110), and from 128 on eight slots for each
-module it builds (roadmap l4.md L10, L12).
+server's control notification (110), from 128 on eight slots for each
+module it builds (roadmap l4.md L10, L12), and from `ROOT_SLOT_DYNAMIC`
+(256) to 511 the slots its services make and give back (roadmap
+os-server.md P4).
 
 The root (`src/root/root.c`; in C since roadmap os-server.md P4) builds a
 space for every other module: the module's code copied in as slot 0; a

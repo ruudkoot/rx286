@@ -4,9 +4,12 @@ The root (`src/root/root.c`, in C since roadmap os-server.md P4; roadmap
 l4.md L5, D12) is the first thread, in ring 2, which the kernel builds
 from the boot image's first module and gives everything it does not keep
 for itself (*docs/kernel-calls.md*). It builds every other module, starts
-it, and then serves two kinds of messages for ever: the faults of what it
-built, and the OS server's requests about the programs. Ring 2 gives it
-nothing that ring 3 lacks: its capabilities are its power.
+it, and then serves three kinds of messages for ever: the faults of what it
+built, the OS server's requests about the programs, and its requests for
+processes (`src/root/services.c`). Ring 2 gives it nothing that ring 3
+lacks: its capabilities are its power. It runs at priority 6, below the
+drivers' 7 (os-server.md P4): a fork's copy in it must not keep a device
+waiting.
 
 ## What it starts with
 
@@ -18,10 +21,11 @@ nothing that ring 3 lacks: its capabilities are its power.
 | 5 | the module table, read-only |
 | 6, 7 | its own space and thread |
 | 8 on | each module's code, and its data as assembled, read-only, two slots a module |
+| 100, 101 | with extended memory: the memory for segments below 1 MB and the arena's, as untyped (slots 3 and 4 then hold extended memory) |
 | 111 | the screen's text page, for the console driver |
 | 112-127 | every interrupt line the kernel does not keep, line n at 112 + n |
 
-Its space has `ROOT_SLOTS` (256) slots. Past the kernel's gifts it keeps
+Its space has `ROOT_SLOTS` (512) slots. Past the kernel's gifts it keeps
 its own:
 
 | Slots | What |
@@ -31,6 +35,8 @@ its own:
 | 38 on | a background program's own untyped: the arena's and the memory's, two a module |
 | 110 | the OS server's control notification, which the keyboard driver signals |
 | 128 on | eight a module it built: its space, its thread, its data and stack (copies, to put back), its endpoint to the OS server, its transfer segment, the OS server's thread for it, its files segment |
+| 255 | the services' scratch slot |
+| 256-511 | the slots it makes and gives back (`ROOT_SLOT_DYNAMIC`): the allocator's blocks, and every process's and code's capabilities |
 
 ## How it builds the system
 
@@ -82,6 +88,10 @@ The root reports it as the kernel did ("rx286: os fault #GP(0000) at
 0006:0123"), copies back any of the module's first three slots it emptied,
 and replies with the module's entry, which restarts it there.
 
+A fault of the root itself stops the system (os-server.md D8): the kernel
+reports "rx286 PANIC: the root faulted" with the fault's vector and
+address. It has no fault endpoint, and nothing could build it again.
+
 ## The OS server's requests
 
 On the same endpoint, badged `ROOT_BADGE_OS` (os.inc; roadmap l4.md L11):
@@ -98,10 +108,52 @@ On the same endpoint, badged `ROOT_BADGE_OS` (os.inc; roadmap l4.md L11):
 - **`ROOT_START`:** a killed background program built again, from the same
   untyped, as at the start: its data afresh from its module.
 
+## Its services for processes
+
+On the same endpoint and badge, `ROOT_LOAD` to `ROOT_UNLOAD` (os.inc;
+roadmap os-server.md P4) make and end the processes the OS server will
+run. Each answers in BX (0, `E_INVAL`, `E_NOMEM` or `E_IO`) and CX (a
+number), and copies what the server gets into its space, at the slots DI
+names:
+
+- **`ROOT_LOAD`:** a segment of DPL 3 of BX bytes, for the server to read
+  code into; **`ROOT_SEAL`:** the server's copy revoked and the segment
+  sealed (`KCALL_SEAL`), in the code table under a file's key of three
+  words; **`ROOT_FIND`:** a code by its key; **`ROOT_UNLOAD`:** a load, or a
+  code no process runs, gone.
+- **`ROOT_SPAWN`:** a process: a space of `PROC_SLOTS` holding the code,
+  a data segment of CX bytes as its data and again as its stack (SS = DS),
+  and an endpoint badged SI (`OS_SLOT_EP`); a thread, not yet configured,
+  whose faults go to that endpoint badged `FAULT_BADGE` too. The server
+  gets the endpoint, the thread, the space and the data.
+- **`ROOT_FORK`:** a child of a process, its data a copy of its parent's,
+  copied by the root in ring 2 with interrupts on; **`ROOT_THREAD`:** a
+  thread more in a process's space, with its own endpoint (up to
+  `PROC_THREADS`); **`ROOT_BRK`:** the data replaced by a segment of
+  another size, its bytes kept, every copy of the old revoked;
+  **`ROOT_EXIT`:** everything of a process revoked, its memory free, its
+  code's count lowered, the code gone at none.
+
+The memory is a buddy allocator's (`src/root/buddy.c`; D10), from the
+first request on: with extended memory, all the memory below 1 MB
+(`ROOT_SLOT_LOW_UNTYPED`); without, 128 KB of the memory for segments.
+Every block is an untyped of the root's, from 1 KB to 256 KB, split in
+halves retyped from it and merged by a revoke of their parent; a block is
+whole whenever it is free, since what was made of it is revoked first. A
+process's space, thread and endpoint (800 bytes) are a block of 1 KB of
+their own, since any untyped makes objects (os-server.md P3), and each
+thread more is another; its data is a block, its code a code table's
+entry with a count of the processes that run it. The allocator is tested
+on the host against a simulation of untyped memory
+(`tests/unit/c/test_buddy.c`).
+
 ## In test builds
 
 `TEST_CAPS` builds give the program the keys are for, in slots 10-13 of a
 space of 64, the rest of the memory for segments and of the arena as
 untyped, its own space and its own thread (`tests/caps`, `tests/ipc`,
-`tests/revoke`). `TEST_ROOT_REPORT` builds say how each module was found:
+`tests/revoke`); with `TEST_SERVICES`, in slot 14 the OS server's
+capability for the services, which then copy into its space
+(`tests/services`). `TEST_ROOT_FAULT` builds
+make the root fault once it has built everything (`tests/root`). `TEST_ROOT_REPORT` builds say how each module was found:
 where its code is, and sums of its code and its data (`tests/root`).

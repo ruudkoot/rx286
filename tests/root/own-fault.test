@@ -1,0 +1,8 @@
+# A fault of the root itself stops the system (roadmap os-server.md D8): it
+# has no fault endpoint, and no one could build it again. TEST_ROOT_FAULT
+# makes it execute an invalid opcode once it has built everything.
+define: TEST_ROOT_FAULT
+match: contains
+---
+rx286 PANIC: the root faulted
+#UD error 0000 at 0006:{r:rx_ud2}

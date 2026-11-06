@@ -13,6 +13,7 @@
 # Watcom's wdis or gcc-ia16's objdump. There it fails on the same, and on a
 # LOCK prefix (F0h) too: LOCK is #GP at ring 3 on a 286 (os-server.md W4,
 # X10), so no compiler may emit it, though NASM sources may on purpose.
+# wdis's dumps of data segments are passed over: their bytes are no code.
 #
 # It reads listings, not binaries, so data is never taken for code. For each
 # instruction it fails on:
@@ -120,11 +121,17 @@ DATA_MNEMONICS = {'db', 'dw', 'dd', '.byte', '.word', '.long', '(bad)'}
 
 
 def check_disassembly(path):
-    """A C object's disassembly: each instruction's bytes, LOCK refused too."""
+    """A C object's disassembly: each instruction's bytes, LOCK refused too.
+    wdis dumps the data segments (CONST, _DATA) as bytes and their text,
+    which are no instructions: only its code segments (_TEXT) are read."""
     problems = []
+    code_segment = True
     for n, raw in enumerate(open(path, encoding='latin-1'), 1):
+        if raw.startswith('Segment: '):
+            code_segment = raw.split()[1].endswith('TEXT')
+            continue
         m = WDIS.match(raw) or OBJDUMP.match(raw)
-        if not m or m.group(3).lower() in DATA_MNEMONICS:
+        if not code_segment or not m or m.group(3).lower() in DATA_MNEMONICS:
             continue
         code = instruction_bytes(m.group(2).replace(' ', ''))
         reason = check_instruction(code)
@@ -146,6 +153,10 @@ DIS_SELF_TEST = '''\
 000A  DW    0004
    0:\t55                   \tpush   %bp
    1:\tf0 ff 07             \tlock incw (%bx)
+Segment: CONST WORD USE16 00000010 bytes
+0000  66 65 64 20 75 70 00                            fed up.
+Segment: _TEXT BYTE USE16 00000002 bytes
+0000  66 50             push            eax
 '''
 
 
@@ -166,8 +177,8 @@ def self_test():
         with open(dis, 'w') as f:
             f.write(DIS_SELF_TEST)
         found = sorted(line for _, line, _, _, _ in check_disassembly(dis))
-    if found != [2, 3, 4, 7]:
-        print('check-286 self-test FAILED: the C checks flagged lines %s, not 2, 3, 4, 7'
+    if found != [2, 3, 4, 7, 11]:
+        print('check-286 self-test FAILED: the C checks flagged lines %s, not 2, 3, 4, 7, 11'
               % found)
         return 1
     print('check-286 self-test: all %d slips found, nothing else; the C checks too'

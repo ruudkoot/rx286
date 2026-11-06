@@ -20,12 +20,15 @@
  * (and a program's, if there is no OS server): it reports each as the
  * kernel did ("rx286: os fault #GP(0000) at 0006:0123"), puts back any of
  * the module's three segments that is gone from its slot, and restarts it
- * at its entry; and it answers the OS server's requests about its programs.
+ * at its entry; and it answers the OS server's requests about its programs,
+ * and for processes (services.c), on the same endpoint.
  *
  * Ring 2 gives it nothing that ring 3 lacks (l4.md D12): its capabilities
  * are its power. In TEST_CAPS builds it gives the program, in slots 10-13 of
  * a space of 64, the rest of the memory for segments and of the arena, its
- * own space and its own thread (tests/caps, tests/ipc). TEST_ROOT_REPORT
+ * own space and its own thread (tests/caps, tests/ipc); with TEST_SERVICES,
+ * in slot 14 the OS server's capability for its services (tests/services).
+ * TEST_ROOT_REPORT
  * builds say how each module was found: where its code is and sums of its
  * code and data (tests/root). Its lines go to the kernel's log.
  * ============================================================================ */
@@ -42,9 +45,8 @@
 #include "drivers.h"
 #include "descriptors.h"
 #include "vectors.h"
-
-#define RING 2
-#define SLOT(n) ((rx_u16)((n) * 8 + 4 + RING))  /* a slot of the root's, as a selector */
+#include "root.h"
+#include "buddy.h"
 
 #define MY_SPACE SLOT(ROOT_SLOT_SPACE)
 #define UNTYPED SLOT(ROOT_SLOT_UNTYPED)
@@ -61,7 +63,7 @@
 #define CONTROL SLOT(ROOT_SLOT_VIDEO - 1)       /* the OS server's control notification */
 #define PROGRAMS_MAX (MODULE_MAX - 1)           /* every module but the root */
 
-RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX <= ROOT_SLOTS, program_slots);
+RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, program_slots);
 RX_STATIC_ASSERT(CHILD_SLOT + 2 * PROGRAMS_MAX <= ROOT_SLOT_LOW_UNTYPED, child_slots);
 
 /* A module's slots in its own space, as selectors (any RPL names a slot) */
@@ -90,6 +92,7 @@ RX_STATIC_ASSERT(CHILD_SLOT + 2 * PROGRAMS_MAX <= ROOT_SLOT_LOW_UNTYPED, child_s
 #define CAPS_ARENA (11 * 8 + 4)                 /* the arena */
 #define CAPS_SPACE (12 * 8 + 4)                 /* its own space */
 #define CAPS_THREAD (13 * 8 + 4)                /* its own thread */
+#define CAPS_ROOT (14 * 8 + 4)                  /* TEST_SERVICES: the root's services */
 #endif
 
 #define ACC_DATA 0x92                           /* present, data, writable: DPL to add */
@@ -119,7 +122,7 @@ static rx_u16 m_entry, m_stack;         /* the OS server's, for its threads */
 static rx_u8 m_priority;
 
 /* say - a line on the kernel's log */
-static void say(const char *text)
+void say(const char *text)
 {
     rx_log(text, (unsigned)strlen(text));
 }
@@ -152,7 +155,7 @@ static void must(int status)
 }
 
 /* kcall - INT 31h: AH the call, AL a byte, then BX, CX, DX, SI, DI */
-static int kcall(int call, int al, rx_u16 bx, rx_u16 cx, rx_u16 dx, rx_u16 si, rx_u16 di)
+int kcall(int call, int al, rx_u16 bx, rx_u16 cx, rx_u16 dx, rx_u16 si, rx_u16 di)
 {
     struct rx_kregs r;
 
@@ -167,21 +170,83 @@ static int kcall(int call, int al, rx_u16 bx, rx_u16 cx, rx_u16 dx, rx_u16 si, r
 }
 
 /* retype - untyped into an object in a slot of the root's */
-static int retype(rx_u16 untyped, int type, rx_u16 slot, rx_u16 cx, int access)
+int retype(rx_u16 untyped, int type, rx_u16 slot, rx_u16 cx, int access)
 {
     return kcall(KCALL_RETYPE, type, (rx_u16)access, cx, untyped, slot, 0);
 }
 
 /* copy - a capability of the root's into a slot of a space it holds */
-static int copy(rx_u16 space, rx_u16 from, rx_u16 to, int how, rx_u16 badge, int rights)
+int copy(rx_u16 space, rx_u16 from, rx_u16 to, int how, rx_u16 badge, int rights)
 {
     return kcall(KCALL_COPY, how, badge, (rx_u16)rights, space, from, to);
 }
 
 /* thread_call - KCALL_THREAD on a thread of the root's */
-static int thread_call(rx_u16 thread, int op, rx_u16 si, rx_u16 bx, rx_u16 cx)
+int thread_call(rx_u16 thread, int op, rx_u16 si, rx_u16 bx, rx_u16 cx)
 {
     return kcall(KCALL_THREAD, op, bx, cx, thread, si, 0);
+}
+
+/* revoke - everything derived from a slot deleted */
+int revoke(rx_u16 slot)
+{
+    return kcall(KCALL_REVOKE, 0, 0, 0, slot, 0, 0);
+}
+
+/* delete_slot - a slot of the root's emptied */
+int delete_slot(rx_u16 slot)
+{
+    return kcall(KCALL_DELETE, 0, 0, 0, slot, 0, 0);
+}
+
+/* The slots the root makes and gives back, ROOT_SLOT_DYNAMIC on: a bit each,
+ * set while taken */
+static rx_u8 dynamic[(ROOT_SLOTS - ROOT_SLOT_DYNAMIC) / 8];
+
+/* slot_take - the first dynamic slot not taken */
+rx_u16 slot_take(void)
+{
+    unsigned n;
+
+    for (n = 0; n < ROOT_SLOTS - ROOT_SLOT_DYNAMIC; n++)
+        if (!(dynamic[n / 8] & (1 << (n % 8)))) {
+            dynamic[n / 8] |= (rx_u8)(1 << (n % 8));
+            return SLOT(ROOT_SLOT_DYNAMIC + n);
+        }
+    return 0;
+}
+
+/* slot_give - a dynamic slot not taken again */
+void slot_give(rx_u16 slot)
+{
+    unsigned n = (slot >> 3) - ROOT_SLOT_DYNAMIC;
+
+    dynamic[n / 8] &= (rx_u8)~(1 << (n % 8));
+}
+
+/* The buddy allocator's calls (buddy.h). buddy_carve - an untyped from an
+ * untyped */
+int buddy_carve(rx_u16 from, rx_u16 to, rx_u16 paragraphs)
+{
+    return retype(from, CAP_UNTYPED, to, paragraphs, 0);
+}
+
+/* buddy_revoke - a block's halves gone */
+int buddy_revoke(rx_u16 slot)
+{
+    return revoke(slot);
+}
+
+/* buddy_slot_take - as slot_take */
+rx_u16 buddy_slot_take(void)
+{
+    return slot_take();
+}
+
+/* buddy_slot_give - as slot_give */
+void buddy_slot_give(rx_u16 slot)
+{
+    slot_give(slot);
 }
 
 /* entry_of - a module's entry in the module table */
@@ -240,7 +305,7 @@ static rx_u16 child_arena(unsigned module)
 }
 
 /* paragraphs - bytes as paragraphs, rounded up (FFFFh bytes: 1000h) */
-static rx_u16 paragraphs(rx_u16 bytes)
+rx_u16 paragraphs(rx_u16 bytes)
 {
     return (rx_u16)(((rx_u32)bytes + 15) >> 4);
 }
@@ -313,7 +378,7 @@ static void program_ends(unsigned module)
 }
 
 /* far_copy - bytes from one segment of the root's to another */
-static void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes)
+void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes)
 {
     rx_u8 RX_FAR *d = (rx_u8 RX_FAR *)RX_MK_FP(to, 0);
     const rx_u8 RX_FAR *f = (const rx_u8 RX_FAR *)RX_MK_FP(from, 0);
@@ -682,7 +747,9 @@ static void report(int vector, rx_u16 error, rx_u16 cs, rx_u16 ip, unsigned modu
 
 #ifdef TEST_CAPS
 /* give_caps - TEST_CAPS: the program the keys are for gets the rest of the
- * memory for segments and of the arena, its own space and its own thread */
+ * memory for segments and of the arena, its own space and its own thread;
+ * with TEST_SERVICES, the OS server's capability for the root's services
+ * too, which then copy into its space (os-server.md P4) */
 static void give_caps(void)
 {
     if (foreground == 0)
@@ -692,6 +759,10 @@ static void give_caps(void)
     must(copy(s.space, ARENA, CAPS_ARENA, COPY_MOVE, 0, 0));
     give(s.space, CAPS_SPACE);
     give(s.thread, CAPS_THREAD);
+#ifdef TEST_SERVICES
+    must(copy(s.space, FAULT_EP, CAPS_ROOT, COPY_MINT, ROOT_BADGE_OS, RIGHT_SEND));
+    services_space = s.space;
+#endif
 }
 #endif
 
@@ -778,11 +849,15 @@ int RX_MAIN_CALL main(void)
     build_server();
     ut_arena = ARENA;
     ut_memory = UNTYPED;
+    services_space = server_space;
 #ifdef TEST_ROOT_REPORT
     module_report();
 #endif
 #ifdef TEST_CAPS
     give_caps();
+#endif
+#ifdef TEST_ROOT_FAULT
+    rx_ud2();                           /* the root's own fault: a panic (D8) */
 #endif
     /* the fault handler, and the OS server's requests for its programs
      * (l4.md L11), on the same endpoint */
@@ -796,7 +871,9 @@ int RX_MAIN_CALL main(void)
             r.bp = 0;
             continue;
         }
-        if (r.dx == ROOT_BADGE_OS) {
+        if (r.dx == ROOT_BADGE_OS && (r.ax & 0xFF) >= ROOT_LOAD) {
+            service(r.ax & 0xFF, &r);
+        } else if (r.dx == ROOT_BADGE_OS) {
             request(r.ax & 0xFF, r.bx, &r);
         } else {
             module = r.dx;              /* the badge: the module's number */

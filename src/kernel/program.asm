@@ -9,13 +9,15 @@
 ; a call on that endpoint, which its handler - the OS server for a
 ; program, the root for the rest - answers by reporting it and restarting
 ; it (l4.md D18); a thread without one is reported by the kernel (and its
-; registers, in debug and test builds). A restart begins at its entry with
+; registers, in debug and test builds), but the root's: its fault stops the
+; system (os-server.md D8). A restart begins at its entry with
 ; a fresh stack and a fresh 287. The kernel does not reset a program's
 ; data: its entry code initialises what it needs.
 ; ============================================================================
 
 begin_kdata
 msg_program_fault   db "program fault ", 0
+msg_root_fault      db "the root faulted", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
@@ -102,7 +104,7 @@ program_reset:
 ;   In:       BP = the frame (from rings 1-3); AL = CONT_FAULT, or
 ;             CONT_FAULT_WAY from the way back's checks; DS = SEL_KDATA
 ;   Out:      the frame changed to restart the program; with a fault
-;             endpoint, does not return
+;             endpoint, or for the root's fault (a panic), does not return
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 fault_program:
@@ -120,6 +122,11 @@ fault_program:
         mov [es:T_CONT], al             ; what it does once the call ends
         jmp ipc_fault                   ; waits for the handler (ipc.asm)
 .kernel:
+        cmp bx, [boot_thread]           ; the root's: nothing would be right after
+        jne .reported                   ; it, with no one to build again (D8)
+        mov si, msg_root_fault
+        jmp panic
+.reported:
         test di, di
         jnz .restart
         mov al, ATTR_KERNEL

@@ -10,8 +10,8 @@ D7). This document explains each one.
 | 00000h-003FFh | real-mode interrupt vectors | | the BIOS, until the kernel starts; never read after |
 | 00400h-004FFh | BIOS data area | | never read |
 | 00500h-07BFFh | the boot code's stack, down from 7C00h | `LOADER_STACK_TOP` | boot sector and loader |
-| 04400h-045FFh | the double-fault task's stack, once the kernel runs | `DFSTACK_PHYS`, `DFSTACK_SIZE` | the kernel (`SEL_DFSTACK`) |
-| 04600h-0BFFFh | the arena, once the kernel runs: untyped memory, the root's | `ARENA_PHYS`, `ARENA_SIZE` | the root, and what it gives |
+| 00500h-006FFh | the double-fault task's stack, once the kernel runs | `DFSTACK_PHYS`, `DFSTACK_SIZE` | the kernel (`SEL_DFSTACK`) |
+| 00700h-0BFFFh | the arena, once the kernel runs: untyped memory, the root's | `ARENA_PHYS`, `ARENA_SIZE` | the root, and what it gives |
 | 0C000h | where the kernel's data segment starts | `KDATA_BASE` | the kernel (`SEL_KDATA`) |
 | 0C100h-0C4FFh | the kernel's one stack (roadmap os-server.md P3) | `KSTACK_PHYS`, `KSTACK_SIZE`; its offsets in `SEL_KDATA`, `KSTACK_BOTTOM` to `KSTACK_TOP` | the kernel (`SEL_KSTACK`, expand-down over `SEL_KDATA`'s memory) |
 | 0C800h-0E7FFh | the GDT, 1,024 descriptors, built at the start | `GDT_PHYS`, `GDT_ENTRIES` | the kernel |

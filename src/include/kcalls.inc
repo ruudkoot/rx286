@@ -190,7 +190,9 @@ ROOT_SLOT_LOW_ARENA equ 101 ;    and the arena (slots 3 and 4 then hold extended
 ROOT_SLOT_VIDEO     equ 111 ; the screen's text page, a segment of DPL 1 (l4.md L8)
 ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
                             ;    does not keep (its own are left empty)
-ROOT_SLOTS          equ 256 ; its space's slots: past the kernel's gifts, its own (l4.md L10)
+ROOT_SLOTS          equ 512 ; its space's slots: past the kernel's gifts, its own (l4.md
+                            ;    L10); 256 on, those it makes and gives back (os-server.md P4)
+ROOT_SLOT_DYNAMIC   equ 256
 
 KE_OK               equ 0
 KE_CAP              equ 1   ; not a capability of the type the call needs

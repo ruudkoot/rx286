@@ -79,12 +79,12 @@ ROOT_NAME_2         equ 'ot'
 ; variables and the module table. The stack's segment, SEL_KSTACK, is the
 ; same memory at the same offsets, expand-down from KSTACK_BOTTOM, so that
 ; SS and DS agree and an overflow still faults (roadmap os-server.md P3).
-DFSTACK_PHYS        equ 0x04400     ; the double-fault task's stack
+DFSTACK_PHYS        equ 0x00500     ; the double-fault task's stack
 DFSTACK_SIZE        equ 0x0200
 ; The arena: given to the root as untyped memory like any other
 ; (os-server.md P3; until then only for the kernel's objects, l4.md D7, L3)
-ARENA_PHYS          equ 0x04600
-ARENA_SIZE          equ 0x7A00
+ARENA_PHYS          equ 0x00700
+ARENA_SIZE          equ 0xB900
 KDATA_BASE          equ 0x0C000
 KSTACK_PHYS         equ 0x0C100     ; the kernel's one stack (os-server.md P3)
 KSTACK_SIZE         equ 0x0400

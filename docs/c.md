@@ -51,9 +51,11 @@ every rx286 program does.
 
 - **cdecl:** arguments on the stack, right to left, the caller pops them;
   the result in AX, or DX:AX.
-- **Kept across a call:** SI, DI, BP, DS, SS, and ES, since gcc-ia16 keeps
-  it. **Free:** AX, BX, CX, DX. NASM that calls C assumes ES lost, since
-  Watcom's cdecl may change it (E2).
+- **Kept across a call:** SI, DI, BP, DS, SS. **Free:** AX, BX, CX, DX
+  and ES. Watcom's cdecl may change ES (E2), and gcc-ia16, which would
+  keep it, is built with `-fcall-used-es`: a call may delete the segment
+  ES names (a revoke, a seal), and the kernel then leaves ES null on its
+  way back, so C must load ES again after any call (os-server.md P4).
 - **Names:** C's. NASM writes `global rx_ticks`; the Watcom build adds the
   underscore its cdecl names have (`--gprefix _`), the gcc-ia16 build
   does not. The compilers' own helpers (`__U4M`, `__udivsi3`) keep their

@@ -65,6 +65,7 @@ and `program.inc` the macro `sys`, a call of the stub to the OS server:
 | 18 | `E_NOT_DIR` | a path goes on through a file, or a directory was wanted |
 | 19 | `E_BAD_NAME` | a name DOS does not allow, or a path too long (`PATH_MAX`), or one whose end is not among the bytes passed |
 | 20 | `E_BROKEN` | a cluster outside the volume, or a chain that loops: a damaged disk |
+| 21 | `E_NOMEM` | no memory, or no room in a table: so far the root's answer to the server's requests for processes (roadmap os-server.md P4) |
 
 ### Drives and printers
 
@@ -199,7 +200,12 @@ it alone. `src/include/os.inc` holds the interface:
   endpoint, through a copy badged `ROOT_BADGE_OS` in the server's slot
   `OS_SLOT_ROOT`: `ROOT_INFO` (what a module is, and its main thread's
   state, priority and runs), `ROOT_KILL` and `ROOT_START`, for `SYS_PS`,
-  `SYS_KILL` and `SYS_START`.
+  `SYS_KILL` and `SYS_START`. On the same capability the root serves the
+  processes the C server will run (roadmap os-server.md P4; *docs/root.md*):
+  `ROOT_LOAD`, `ROOT_SEAL`, `ROOT_FIND` and `ROOT_UNLOAD` for code;
+  `ROOT_SPAWN`, `ROOT_FORK`, `ROOT_THREAD`, `ROOT_BRK` and `ROOT_EXIT` for
+  processes, each a space of `PROC_SLOTS` with up to `PROC_THREADS`
+  threads more. Today's server makes none of these requests.
 - **What has no system calls:** the root, the OS server and the drivers,
   which are not the OS server's clients; and threads a program makes,
   whose spaces hold no endpoint to the OS server (the IPC test's workers).

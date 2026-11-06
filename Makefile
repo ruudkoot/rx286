@@ -62,7 +62,10 @@ program_main_rings := tests/programs/rings.asm
 program_main_keys := tests/programs/keys.asm
 program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
+program_main_services := tests/programs/services.c
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
+# The program's module: assembled, or a C program linked (c.mk)
+PROGRAM_BIN := $(if $(filter %.c,$(PROGRAM_MAIN)),$(B)/user.rx,$(B)/user.bin)
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
 # timings stay their own. Its priority is below the program's (3), or as a
@@ -81,19 +84,21 @@ COUNTER_PRIORITY := $(if $(findstring TEST_COUNTER_SAME,$(TEST_DEFINES)),3,$(if 
 PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
     $(findstring TEST_RING2,$(TEST_DEFINES)),2:3:fg:iopl,3:3:fg))
 # The modules of the boot image (tools/mkimage): NAME=BINARY:RING:PRIORITY[:FLAG...].
-# Servers run above their clients (roadmap l4.md D9): the root, the drivers,
-# the OS server, the programs.
-MODULES := root=$(B)/root.rx:2:7 os=$(B)/os.bin:2:5:stack=8192 \
-    printer=$(B)/printer.bin:1:6:driver:service=1 mouse=$(B)/mouse.bin:1:6:driver:irq=4:service=2 \
-    console=$(B)/console.bin:1:6:driver:service=3 kbd=$(B)/keyboard.bin:1:6:driver:irq=1:service=4 \
-    fd=$(B)/diskette.bin:1:6:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:6:driver:irq=14:service=6 \
-    serial=$(B)/serial.bin:1:6:driver:irq=3:service=7 sound=$(B)/sound.bin:1:6:driver:service=8 \
-    rtc=$(B)/rtc.bin:1:6:driver:service=9 \
-    program=$(B)/user.bin:$(PROGRAM_RING) \
+# Servers run above their clients (roadmap l4.md D9): the drivers, the root,
+# the OS server, the programs. The drivers run above the root (os-server.md
+# P4), whose copy of a fork's data must not keep a serial line's bytes
+# waiting.
+MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.bin:2:5:stack=8192 \
+    printer=$(B)/printer.bin:1:7:driver:service=1 mouse=$(B)/mouse.bin:1:7:driver:irq=4:service=2 \
+    console=$(B)/console.bin:1:7:driver:service=3 kbd=$(B)/keyboard.bin:1:7:driver:irq=1:service=4 \
+    fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \
+    serial=$(B)/serial.bin:1:7:driver:irq=3:service=7 sound=$(B)/sound.bin:1:7:driver:service=8 \
+    rtc=$(B)/rtc.bin:1:7:driver:service=9 \
+    program=$(PROGRAM_BIN):$(PROGRAM_RING) \
     $(if $(WITH_CLOCK),clock=$(B)/clock.rx:3:4) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys or revoke, not '$(PROGRAM)')
+$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys, revoke, additions or services, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
@@ -106,7 +111,7 @@ FLOPPY_SERIAL := 52583836
 IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.bin \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
-    $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin \
+    $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) \
     $(B)/clock.rx $(B)/counter.rx $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
@@ -170,7 +175,7 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
 $(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
     $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
-    $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin $(B)/clock.rx $(B)/counter.rx tools/mkimage \
+    $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) $(B)/clock.rx $(B)/counter.rx tools/mkimage \
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 
@@ -265,6 +270,7 @@ check: unit test test-286 check-286 check-image check-repro lint check-docs
 # whose images carry C programs, on Bochs; not part of make check, since it
 # needs gcc-ia16 in $(IA16) (docs/building.md).
 IA16_TESTS := tests/demo/demo.test tests/root/fault.test $(wildcard tests/threads/*.test) \
+    $(wildcard tests/services/*.test) tests/root/own-fault.test \
     tests/kernel/stretch-kill.test
 check-ia16: disks
 	$(PYTHON) tools/run-test --cc ia16 $(IA16_TESTS)

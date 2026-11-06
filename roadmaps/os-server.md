@@ -122,7 +122,7 @@ What it rests on:
 | P1 | The C toolchain, the crt, the first C modules | done (2026-11-06, branch `os-server`) |
 | P2 | The kernel's additions; the list of children | done (2026-11-06, branch `os-server`) |
 | P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | done (2026-11-06, branch `os-server`) |
-| P4 | The root in C; its allocator and its services | not started |
+| P4 | The root in C; its allocator and its services | done (2026-11-06, branch `os-server`) |
 | P5 | The OS server in C, serving today's calls | not started |
 | P6 | Processes: fork, exec, exit, wait | not started |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | not started |
@@ -2054,6 +2054,40 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - the new services' tests pass on Bochs and MAME;
   - a thousand spawns and exits leave the memory as it began.
 * **Decisions:** D3, D8, D10.
+* **Done (2026-11-06):**
+  - **The port:** `src/root/root.c` does what `root.asm` did, every suite unchanged but for
+    DOSBox-X's bases, where the root's own data and stack are smaller.
+  - **The allocator** (`src/root/buddy.c`): blocks of 1 KB to 256 KB, each an untyped of the
+    root's; a split retypes two halves from its block, a merge revokes their parent. It is
+    tested on the host against a simulation of untyped memory (`tests/unit/test_buddy.py`,
+    20,000 allocations and frees). It takes its memory at the first request: with extended
+    memory everything below 1 MB, without it 128 KB of the memory for segments. The root's
+    space has 512 slots, the upper 256 its services' (`ROOT_SLOT_DYNAMIC`).
+  - **Otherwise than planned:** a process's kernel objects are a block of 1 KB of their own,
+    the allocator's smallest, not an untyped of exactly their size (800 bytes): a block is
+    what a revoke gives back whole. `ROOT_UNLOAD` is new: a load the server cannot finish,
+    or a code no process runs, must be able to go.
+  - **The services** (`src/root/services.c`): `ROOT_LOAD`, `ROOT_SEAL`, `ROOT_FIND`,
+    `ROOT_SPAWN`, `ROOT_FORK`, `ROOT_THREAD`, `ROOT_BRK`, `ROOT_EXIT`, `ROOT_UNLOAD`, tested by
+    `tests/services/calls.test` (`tests/programs/services.c`, the first C test program) on
+    Bochs and MAME. A thousand spawns and exits, each with its own code, leave as many
+    segments of 64 KB as before, at the same addresses. DOSBox-X has no extended memory, and
+    a TEST_CAPS program holds all of the memory for segments, so the services have none there.
+  - **The root's own fault** is a panic, "rx286 PANIC: the root faulted"
+    (`tests/root/own-fault.test`).
+  - **The drivers at 7, the root at 6.** A serial line's bytes could not show it: Bochs takes
+    a byte from the line only when the UART has room, so the modem's answer came whole with
+    the root above the drivers too. `tests/services/drivers.test` instead runs a thread of
+    the program's at 7 that waits for every tick while the root forks 64 KB four times: it
+    woke on 44 of 44 ticks on Bochs, and on 5 of 43 with the root at 7 and itself at 6.
+  - **ES is free across a call for gcc-ia16 too** (`-fcall-used-es`): a call may revoke the
+    segment ES names, and the kernel then leaves ES null on its way back. gcc-ia16 had kept a
+    selector in ES across a seal and a new load into the same slot.
+  - **The transcripts that changed:** the priorities in `ps` and in the thread dump; on MAME
+    the mouse driver has finished its reset by the dump, the drivers now running before the
+    root has built the rest; on DOSBox-X the bases after the root's data, 4,064 bytes up for
+    the root's tables. `tools/check-286` passes over wdis's dumps of data segments, whose
+    strings had read as 386 prefixes (64h-67h, "d" to "g").
 
 ### P5. The OS server in C, serving today's calls (XL, about 3,500)
 

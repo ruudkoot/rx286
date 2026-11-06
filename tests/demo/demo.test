@@ -25,12 +25,12 @@ status, clock:
 status, counter: idle
 status, clock:
   # name     kind       priority state, runs
-  0 root     root       7        running,
+  0 root     root       6        running,
   1 os       OS server  5        awaiting a notification,
-  2 printer  driver     6        receiving,
-  6 fd       driver     6        receiving,
-  9 sound    driver     6        receiving,
- 10 rtc      driver     6        receiving,
+  2 printer  driver     7        receiving,
+  6 fd       driver     7        receiving,
+  9 sound    driver     7        receiving,
+ 10 rtc      driver     7        receiving,
  11 program  foreground 3        awaiting its reply,
  12 clock    background 4
  13 counter  background 1

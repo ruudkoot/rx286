@@ -56,5 +56,37 @@ ROOT_KILL           equ 2       ; BX a module: killed, if a background program, 
 ROOT_START          equ 3       ; BX a module: built again from its untyped, if a killed
                                 ;    background program -> BX 0, E_INVAL, E_BUSY (running)
                                 ;    or E_IO (a kernel call failed: nothing left built)
+; The root's services for processes (os-server.md P4): BX 0 or E_INVAL, E_NOMEM, E_IO,
+; and CX a number. The root copies what the server gets into the server's space, at the
+; slots DI names (selectors); a file's key is three words, CX SI DI.
+ROOT_LOAD           equ 4       ; BX bytes; DI a slot -> CX a load: a segment of DPL 3 of so
+                                ;    many bytes, the server's copy at DI to read code into
+ROOT_SEAL           equ 5       ; BX a load; CX SI DI its file's key -> CX a code: the
+                                ;    server's copy revoked, the segment sealed (KCALL_SEAL)
+                                ;    and in the code table, used by no process yet
+ROOT_FIND           equ 6       ; CX SI DI a file's key -> CX the code of that file, or
+                                ;    E_NOT_FOUND
+ROOT_SPAWN          equ 7       ; BX a code; CX the data's bytes; SI a badge; DI four slots ->
+                                ;    CX a process: a space of PROC_SLOTS with the code, the
+                                ;    data, the data again as the stack (SS = DS) and an
+                                ;    endpoint badged SI (OS_SLOT_EP), a thread there not yet
+                                ;    configured, its faults on that endpoint badged SI or
+                                ;    FAULT_BADGE; the server's copies of the endpoint, the
+                                ;    thread, the space and the data at DI, DI + 8, + 16, + 24
+ROOT_FORK           equ 8       ; BX a process; SI a badge; DI four slots -> CX the child:
+                                ;    as ROOT_SPAWN, with its code and a copy of its data
+ROOT_THREAD         equ 9       ; BX a process; SI a badge; DI two slots -> CX its thread n:
+                                ;    another thread in its space and an endpoint badged SI
+                                ;    (its slot OS_SLOT_EP + n); the server's copies of the
+                                ;    endpoint and the thread at DI, DI + 8
+ROOT_BRK            equ 10      ; BX a process; CX bytes; DI a slot -> its data replaced by
+                                ;    a segment of so many bytes, the bytes kept, in its slots
+                                ;    1 and 2 and the server's DI; every copy of the old
+                                ;    revoked
+ROOT_EXIT           equ 11      ; BX a process: everything of it revoked, its memory free,
+                                ;    its code's count lowered (the code gone at 0)
+ROOT_UNLOAD         equ 12      ; BX a load, or a code no process runs: gone, its memory free
+PROC_SLOTS          equ 16      ; a process's space
+PROC_THREADS        equ 7       ; the threads ROOT_THREAD adds to a process at most
 
 %endif

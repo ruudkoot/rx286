@@ -14,7 +14,7 @@ code:  selector 0007h, base 0{m:program.base}h, limit {m:program.limit}h
 @bochs stack: selector 0017h, base 1202E0h, limit 07FFh
 @mame data:  selector 000Fh, base 11E2E0h, limit 1FFFh
 @mame stack: selector 0017h, base 1202E0h, limit 07FFh
-@dosbox-x data:  selector 000Fh, base 04E860h, limit 1FFFh
-@dosbox-x stack: selector 0017h, base 050860h, limit 07FFh
+@dosbox-x data:  selector 000Fh, base 04F840h, limit 1FFFh
+@dosbox-x stack: selector 0017h, base 051840h, limit 07FFh
 Nothing else is reachable: the kernel's selectors fault here.
 A:\>

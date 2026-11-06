@@ -4,11 +4,12 @@
 ; (roadmap os-server.md E2, D22).
 ;
 ; cdecl, the small model: arguments on the stack, right to left, the caller
-; pops them; a result in AX, or DX:AX; SI, DI, BP, DS and ES kept (ES too,
-; since gcc-ia16 keeps it); AX, BX, CX and DX free. A routine that calls C
-; assumes ES lost, since Watcom's cdecl may change it. Names are C's: the
-; Makefile assembles for Watcom with --gprefix _ (its cdecl names begin
-; with an underscore), and for gcc-ia16 (ELF, -dELF) without. code_section
+; pops them; a result in AX, or DX:AX; SI, DI, BP and DS kept; AX, BX, CX,
+; DX and ES free. ES is free for both compilers (gcc-ia16 by
+; -fcall-used-es): a call may delete the segment it names, and the kernel
+; then leaves it null (os-server.md P4). Names are C's: the Makefile
+; assembles for Watcom with --gprefix _ (its cdecl names begin with an
+; underscore), and for gcc-ia16 (ELF, -dELF) without. code_section
 ; and the data sections name the segments each compiler's linker expects:
 ; Watcom's _TEXT and DGROUP, or ELF's .text and .data.
 ; ============================================================================

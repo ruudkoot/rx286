@@ -12,8 +12,8 @@ caps: the segment, zeroed, reads back (4660): 4660
 @bochs caps: its base, low word: 60432
 @mame caps: its base, high byte: 17
 @mame caps: its base, low word: 60432
-@dosbox-x caps: its base, high byte: 4
-@dosbox-x caps: its base, low word: 61840
+@dosbox-x caps: its base, high byte: 5
+@dosbox-x caps: its base, low word: 368
 caps: its limit (255): 255
 caps: retype a space: 0
 caps: retype a thread: 0

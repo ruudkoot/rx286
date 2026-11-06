@@ -241,7 +241,7 @@ def build(test):
     stamp = os.path.join(b, 'defines.txt')
     wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
-        for name in ('kernel.bin', 'user.bin', 'root.rx', 'os.bin', 'counter.rx',
+        for name in ('kernel.bin', 'user.bin', 'user.rx', 'root.rx', 'os.bin', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
                      'rtc.bin', 'clock.rx'):
