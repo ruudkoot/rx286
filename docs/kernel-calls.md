@@ -70,7 +70,7 @@ milestone.
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots; untyped: CX paragraphs | the object made, zeroed, its capability in the slot |
 | 8 | `KCALL_COPY` | DX a space the caller holds; SI a slot of the caller's; DI an empty slot of that space; AL `COPY_COPY`, `COPY_MOVE` or `COPY_MINT`; a mint: BX the badge, CL the rights it keeps (`RIGHT_*`; 0: all) | the capability there |
-| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint), `THREAD_RESTART`, `THREAD_STOP` or `THREAD_INFO` | `THREAD_INFO`: BL its state (`STATE_*`), BH its priority, CX how often it ran |
+| 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint), `THREAD_RESTART`, `THREAD_STOP`, `THREAD_INFO`, `THREAD_SUSPEND` (SI a notification, or 0) or `THREAD_FRAME` (BL `FRAME_READ` or `FRAME_WRITE`; SI:DI `TFR_SIZE` bytes of the caller's) | `THREAD_INFO`: BL its state (`STATE_*`), BH its priority, CX how often it ran |
 | 10 | `KCALL_IRQ` | DX an interrupt line; AL `IRQ_BIND` (SI a notification) or `IRQ_ACK` | the line unmasked |
 | 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 to 7FFFh (`KE_ARG` otherwise) | |
 | 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
@@ -80,25 +80,33 @@ milestone.
 | 16 | `KCALL_TEST` | debug and test builds: AL `TEST_*` (*In test builds*, below) | |
 | 17 | `KCALL_LOG` | DS:SI bytes, CX how many (`LOG_MAX` at most) | AX the bytes written to the kernel's log (fewer if the thread is to restart); or `KE_ARG`, `KE_CAP` (a buffer the caller may not read) |
 | 18 | `KCALL_TICKS` | | DX:AX the ticks since the start, `TICKS_HZ` (50) a second |
+| 19 | `KCALL_SEAL` | DX a data segment of DPL 3, retyped from untyped, with no other capability to it | the segment readable code of DPL 3 (*Code from data*, below) |
 
 ### Retype
 
 Retype makes an object from untyped memory, at the untyped's next address
 aligned to the object's size (`retype_place`, `src/lib/caps.asm`), and
-zeroes it. The room an alignment skips is the untyped's hole, kept in its
-shadow entry: a later object that fits goes there first (roadmap l4.md L10):
+zeroes it. A space is aligned to a paragraph only: it is 16 bytes and 32 a
+slot, no power of two. The room an alignment skips is the untyped's hole,
+kept in its shadow entry: a later object that fits goes there first
+(roadmap l4.md L10). A segment of more than 2 KB is zeroed 2 KB at a time
+with an interrupt window between (about 0.8 ms each on an AT; roadmap
+os-server.md P2): a 64 KB retype no longer keeps interrupts off for 27 ms,
+and the call checks afterwards that its slot, its untyped and its space
+are still as they were (`KE_STATE` if not).
 
 - **Kernel objects** - spaces, threads, endpoints, notifications - only from
   the arena's untyped. A thread takes a kernel stack's descriptor, and a
-  space an LDT descriptor, from the GDT's pools: `KE_POOL` when none is left.
+  space an LDT descriptor, from the GDT's pools of 64 each (`THREAD_MAX`,
+  `SPACE_MAX`): `KE_POOL` when none is left.
 - **Segments** only from untyped outside the arena, and only data: present,
-  of DPL 1-3. No program can make code; code comes only from the boot image
-  (roadmap l4.md X14).
+  of DPL 1-3. Code comes from the boot image, or from data sealed
+  (`KCALL_SEAL`, below), never otherwise (roadmap l4.md X14).
 - **Untyped** from untyped, of so many paragraphs: memory of its own, which
   a revoke of it gives back whole (roadmap l4.md L12). The root makes each
   background program's of it, so that killing the program frees its memory.
-- **The new capability's parent** is the untyped it came from, so revoking
-  the untyped deletes it.
+- **The new capability is a child** of the untyped it came from, so
+  revoking the untyped deletes it.
 - **A space** has `SPACE_SLOTS_MIN` to `SPACE_SLOTS_MAX` slots, a power of
   two.
 
@@ -111,8 +119,9 @@ shadow entry: a later object that fits goes there first (roadmap l4.md L10):
   never copied (`KE_ARG`), and a message may not grant them (they are left
   out of it): two retypes of the same untyped would carve the same memory,
   and a reply is answered once (roadmap l4.md L13).
-- **A copy records its parent:** the space and slot it came from, for
-  revocation (roadmap l4.md L12). A move takes the capability's children
+- **A copy is a child of its source:** first in the source's list of
+  children, for revocation (roadmap l4.md L12; os-server.md D9). A move
+  takes the capability's place in its parent's list, and its children,
   with it.
 - **A segment moved away is gone at once** for the caller: a DS or ES still
   holding it is made null on the way back to ring 3 (*docs/interrupts.md*).
@@ -122,8 +131,8 @@ shadow entry: a later object that fits goes there first (roadmap l4.md L10):
 A thread made by retype is configured, then started:
 
 - **Configure** gives it a space whose slots 0, 1 and 2 are its program's
-  code, data and stack, an entry and a stack's top. Slot 0 must be code;
-  its DPL is the thread's ring (never 0).
+  code, data and stack, an entry and a stack's top. Slot 0 must be code,
+  not conforming; its DPL is the thread's ring (never 0).
 - **Start** puts it in the scheduler at a priority. `START_IOPL` asks for
   IOPL 1, which goes only to a thread of ring 1 (roadmap l4.md D11);
   `START_FOREGROUND` marks it as the program the keys are for, which only
@@ -142,6 +151,53 @@ A thread made by retype is configured, then started:
   of a server's thread started with `START_SESSION` - one that serves it
   alone, from rings 1-2 only - takes that thread with it, so that a wait in
   the kernel on its behalf is given up too.
+
+### Code from data
+
+`KCALL_SEAL` (roadmap os-server.md P2, D6) turns a data segment into code,
+for a program loaded from a disk: the root reads the file into a segment
+it made, revokes it to prove no alias is left, and seals it. The segment
+must be data of DPL 3, expand-up, present; a direct child of the untyped
+it came from; and without a child, so that no other capability to it
+lives (`KE_STATE`). It becomes readable code of DPL 3, non-conforming, at
+the same selector: a write through it faults from then on, and the root
+moves it into the program's slot 0. A segment of any other DPL, code, an
+endpoint, a segment sealed already: `KE_ARG`, `KE_CAP` or `KE_STATE`.
+
+### Suspending a thread
+
+The OS server delivers a signal to a thread in ring 3 by stopping it with
+its registers kept, writing its frame, and resuming it (roadmap os-server.md
+E6, D7):
+
+- **`THREAD_SUSPEND`** marks a thread of ring 3, not the caller, to stop on
+  its way back to its ring, as a restart does: any kernel call it is in
+  ends first, its results in its frame and the log's turn given up (E11).
+  Once it has stopped (`STATE_STOPPED`), the notification SI named is
+  signalled with its capability's badge (1 if none). A thread waiting for
+  its fault's reply stops at once instead, its wait ended and its registers
+  as they were at the fault; the handler's reply then finds nobody
+  (`KE_STATE`). A thread stopped, free or marked already: `KE_STATE`.
+- **`THREAD_FRAME`** reads or writes a suspended thread's whole frame,
+  `TFR_SIZE` bytes at SI:DI of the caller's, checked as `KCALL_LOG` checks
+  its buffer (`KE_CAP`): ES, DS, `PUSHA`'s eight words, the vector and
+  error code (not written), IP, CS, FLAGS, SP and SS (`TFR_*`). A write
+  keeps the thread's IOPL and IF, and clears NT; the way back checks every
+  selector, as for any frame. A thread not yet stopped: `KE_STATE`.
+- **`THREAD_START`** resumes a suspended thread where it was, at the
+  priority given.
+
+| Offset | Constant | | Offset | Constant | |
+|---|---|---|---|---|---|
+| 0 | `TFR_ES` | | 18 | `TFR_AX` | |
+| 2 | `TFR_DS` | | 20 | `TFR_VECTOR` | the kernel's: not written |
+| 4 | `TFR_DI` | `PUSHA`'s words | 22 | `TFR_ERROR` | likewise |
+| 6 | `TFR_SI` | | 24 | `TFR_IP` | |
+| 8 | `TFR_BP` | | 26 | `TFR_CS` | |
+| 10 | `TFR_SP_POPA` | `PUSHA`'s copy of SP, which `POPA` skips | 28 | `TFR_FLAGS` | |
+| 12 | `TFR_BX` | | 30 | `TFR_SP` | the thread's SP |
+| 14 | `TFR_DX` | | 32 | `TFR_SS` | |
+| 16 | `TFR_CX` | | 34 | `TFR_SIZE` | the frame's bytes |
 
 ## IPC
 
@@ -247,8 +303,9 @@ was given. The label is the vector; BX the error code (0 if none); CX:SI
 the CS:IP; DI `FAULT_COUNTED` if a test build counted the fault already
 (the fuzzer), which the handler then does not report. The thread waits
 for the reply, and the reply restarts it at the IP in its BX, with fresh
-registers and a fresh stack; until one comes it waits. A thread without a
-fault endpoint is reported and restarted by the kernel, as before.
+registers and a fresh stack; until one comes it waits, or a
+`THREAD_SUSPEND` stops it as it was. A thread without a fault endpoint is
+reported and restarted by the kernel, as before.
 
 ### Interrupt lines
 
@@ -263,44 +320,46 @@ them.
 ### Delete and revoke
 
 The capabilities form a tree: each records its parent, the slot it was
-copied, minted or granted from, or the untyped it was retyped from
-(`src/kernel/revoke.asm`; roadmap l4.md L12, D8).
+copied, minted or granted from, or the untyped it was retyped from, and
+each keeps a list of its children in its shadow entry, as seL4 keeps its
+derivation tree (`src/kernel/revoke.asm`; roadmap l4.md L12, D8;
+os-server.md D9). Every kernel object counts the capabilities to it.
+Nothing looks through every slot of every space any more: a delete's time
+does not grow with the number of spaces.
 
-- **`KCALL_DELETE`** empties a slot of the caller's. Its children become its
-  parent's, so the tree holds. A segment deleted while DS or ES holds it is
-  gone at once, as for a move: the way back makes the register null. A
-  delete looks through every slot of every space once, for the children and
-  for another capability to the object; not at all for a slot no capability
-  was ever copied, minted, granted or retyped from (`SR_PARENT`) that names
-  no object, such as the segment a driver was passed (roadmap l4.md L13).
-- **The last capability to an object** takes the object with it:
+- **`KCALL_DELETE`** empties a slot of the caller's. It leaves its parent's
+  list, and its children become its parent's, first in the parent's list,
+  so the tree holds. A segment deleted while DS or ES holds it is gone at
+  once, as for a move: the way back makes the register null.
+- **The last capability to an object** (its count 0) takes the object with
+  it:
   - an endpoint: every thread queued on it, to send or to receive, fails
     with `KE_CAP`, and no thread's faults go to it any more;
   - a notification: the thread waiting on it fails with `KE_CAP`; its
     thread and its interrupt lines are unbound (the lines masked), and its
     timer stops;
   - a thread: it stops for good, every link naming it - a reply owed to it,
-    a reply it owes, a saved reply - is cleared, a thread awaiting its
-    reply fails with `KE_CAP`, and its kernel stack's descriptor goes back
-    to the pool; the running thread dies at its way back;
+    a reply it owes, the saved reply owed to it (which its control block
+    names; a reply saved again for the same caller makes the older one owed
+    to nobody, `KE_STATE`) - is cleared, a thread awaiting its reply fails
+    with `KE_CAP`, and its kernel stack's descriptor goes back to the pool;
+    the running thread dies at its way back;
   - a space: its threads stop and lose it (they may be configured again),
     its slots are emptied in turn - which may take more objects with them -
     and its LDT's descriptor goes back to the pool once no thread names it;
   - an interrupt line: unbound.
   Segments and untyped are memory: nothing dies with them.
 - **`KCALL_REVOKE`** deletes every capability below a slot, in every space,
-  and keeps the slot's own: each child of the slot in turn, whose own
-  children become the slot's, until it has none. Revoking untyped deletes
+  and keeps the slot's own: the slot's first child, whose own children
+  become the slot's first, until it has none. Revoking untyped deletes
   everything made from it, so none of its memory is used any more: its
   watermark and hole go back to 0, and the next retype uses it again,
   zeroed. (The root's untyped in slots 3 and 4 begin past what the kernel
-  made for the root itself, which is no child of theirs.) The tree is
-  searched slot by slot over every space: a revoke is slow, and kept for
-  rare work such as `kill`. Interrupts are open after each search - for a
-  child, and to delete it - and other threads may run there; a child that
-  is no longer the slot's after a window is left to the next search. A
-  thread that is to restart meanwhile gives the revoke up, partly done, and
-  may call it again (roadmap l4.md L13).
+  made for the root itself, which is no child of theirs.) Interrupts are
+  open after each capability it deletes, and other threads may run there.
+  A thread that is to restart meanwhile gives the revoke up, partly done,
+  and may call it again (roadmap l4.md L13); one suspended meanwhile stops
+  once the revoke has ended.
 
 ## Errors
 

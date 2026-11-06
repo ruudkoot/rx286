@@ -95,8 +95,8 @@ idle_loop:
         jmp idle_loop
 
 ; Where a new thread's frame and its first switch_to's pushes lie
-THREAD_FRAME        equ TCB_STACK_SIZE - FRAME_SIZE_USER
-THREAD_START_SP     equ THREAD_FRAME - 2 - 16 - 4      ; a return address, PUSHA, DS, ES
+FRAME_AT_TOP        equ TCB_STACK_SIZE - FRAME_SIZE_USER
+THREAD_START_SP     equ FRAME_AT_TOP - 2 - 16 - 4      ; a return address, PUSHA, DS, ES
 
 ; ----------------------------------------------------------------------------
 ; thread_init - make a thread ready to start its program at its entry: its
@@ -130,18 +130,18 @@ thread_init:
         mov al, [bx + T_RING]
         xor ah, ah
         or ax, SEL_UDATA & ~CPL_MASK
-        mov [es:THREAD_FRAME + FRAME_ES], ax
-        mov [es:THREAD_FRAME + FRAME_DS], ax
+        mov [es:FRAME_AT_TOP + FRAME_ES], ax
+        mov [es:FRAME_AT_TOP + FRAME_DS], ax
         add ax, SEL_USTACK - SEL_UDATA
-        mov [es:THREAD_FRAME + FRAME_USER_SS], ax
+        mov [es:FRAME_AT_TOP + FRAME_USER_SS], ax
         sub ax, SEL_USTACK - SEL_UCODE
-        mov [es:THREAD_FRAME + FRAME_CS], ax
+        mov [es:FRAME_AT_TOP + FRAME_CS], ax
         mov ax, [bx + T_ENTRY]
-        mov [es:THREAD_FRAME + FRAME_IP], ax
+        mov [es:FRAME_AT_TOP + FRAME_IP], ax
         call thread_flags
-        mov [es:THREAD_FRAME + FRAME_FLAGS], ax
+        mov [es:FRAME_AT_TOP + FRAME_FLAGS], ax
         mov ax, [bx + T_USTACK_TOP]
-        mov [es:THREAD_FRAME + FRAME_USER_SP], ax
+        mov [es:FRAME_AT_TOP + FRAME_USER_SP], ax
         mov [bx + T_SS], es
         mov word [bx + T_SP], THREAD_START_SP
         push ds
@@ -424,6 +424,33 @@ thread_restart:
         pop bx
 .cancel:
         jmp ipc_cancel                  ; waiting in IPC: it wakes, to restart
+
+; ----------------------------------------------------------------------------
+; thread_suspended - the running thread stops on its way back to its ring
+; (THREAD_SUSPEND; os-server.md P2): its registers kept in its frame, which
+; THREAD_FRAME may read and write meanwhile; its suspender's notification
+; signalled; it goes on when THREAD_START resumes it
+;   In:       BX = the running thread; BP = its frame; DS = SEL_KDATA;
+;             interrupts off
+;   Out:      nothing, once resumed
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+thread_suspended:
+        and byte [bx + T_FLAGS], ~TF_SUSPEND & 0xFF
+        or byte [bx + T_FLAGS], TF_SUSPENDED
+        mov byte [bx + T_STATE], TS_STOPPED
+        mov si, [bx + T_SUSPEND_NOTIFY]
+        test si, si
+        jz .stopped
+        mov word [bx + T_SUSPEND_NOTIFY], 0
+        mov ax, [bx + T_SUSPEND_BADGE]
+        test ax, ax
+        jnz .bits
+        inc ax                          ; a capability without a badge signals 1
+.bits:
+        call ntf_signal
+.stopped:
+        jmp schedule                    ; returns when THREAD_START readies it
 
 ; ----------------------------------------------------------------------------
 ; thread_stop - a thread stopped (KCALL_THREAD's THREAD_STOP; roadmap l4.md

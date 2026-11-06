@@ -87,8 +87,17 @@ isr_exit:
         ; Back to ring 3 with a restart pending (Ctrl+Break or a 287 error
         ; during a system call): restart the program instead.
         cmp byte [restart_pending], 0
-        je .checks
+        je .suspend
         call restart_program
+.suspend:
+        ; THREAD_SUSPEND: it stops here, where its kernel call has ended and
+        ; its frame is whole (os-server.md P2, E11); resumed, it goes the way
+        ; back afresh, since much may have changed meanwhile
+        mov bx, [cur_thread]
+        test byte [bx + T_FLAGS], TF_SUSPEND
+        jz .checks
+        call thread_suspended
+        jmp isr_exit
 .checks:
         mov bx, [cur_thread]
         mov byte [bx + T_WAY_BACK], 0

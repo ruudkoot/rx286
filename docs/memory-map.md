@@ -131,11 +131,11 @@ root's but its own data and stack.
 | Object | Bytes | What |
 |---|---|---|
 | a thread | 512 | its control block (160), then its kernel stack (352, more than three times the deepest any test reaches: 102 bytes, roadmap l4.md L9): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from rings 1-3 |
-| a space | 16 + 24 a slot, rounded up to a power of two | its header, its LDT (8 a slot), a shadow entry a slot (16): a driver's of 8 slots 256 bytes, a program's of 16 512, the root's and the OS server's of 256 8 KB |
+| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its parent, its first child and its next sibling: roadmap os-server.md D9): a driver's of 8 slots 272 bytes, a program's of 16 528, the root's and the OS server's of 256 8,208 |
 | an endpoint, a notification | 16 | |
 
-An object lies at an address of the arena aligned to its size, zeroed. The
-room an alignment skips is kept as the untyped memory's hole, and a later
+An object lies at an address of the arena aligned to its size, a space at
+a paragraph, zeroed. The room an alignment skips is kept as the untyped memory's hole, and a later
 object that fits is placed there (roadmap l4.md L10): without it, a quarter
 of the arena was holes. The GDT's pools hold `SPACE_MAX` LDT descriptors
 and `THREAD_MAX` kernel stacks.

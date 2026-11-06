@@ -125,7 +125,7 @@ that faulted:
 |---|---|
 | `CLI`, `STI`, `IN`, `OUT`, `INSB`, `OUTSB`, `HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT` | #GP(0000) |
 | the kernel's data, the kernel's stack, the screen (DS, SS, ES) | #GP(selector) |
-| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(01D0), #GP(0084), #GP(007C), #GP(0000) |
+| a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(0450), #GP(0084), #GP(007C), #GP(0000) |
 | every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments and its transfer segment as they are; its endpoint and every empty slot refused by all four |
 | the test probe (`KCALL_TEST`'s `TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
 | the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |
@@ -154,6 +154,8 @@ that faulted:
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 | the kernel's calls with a GDT selector, its own data, an empty slot or a selector past its LDT as the untyped; its code as a space to copy into; its data as a thread to start | refused, `KE_CAP` (1) |
 | a kernel call that does not exist | refused, `KE_NOSYS` (7) |
+| `KCALL_SEAL` of its own data or stack, to run it (the root keeps a copy of each: a segment with another capability to it is never sealed, os-server.md P2) | refused, `KE_STATE` (6) |
+| `KCALL_SEAL` of its code (not data of DPL 3); of a GDT selector | refused, `KE_ARG` (2); `KE_CAP` (1) |
 
 The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core
 (*docs/emulators.md*). Before every restart in attack and fuzz builds, the kernel checks that a

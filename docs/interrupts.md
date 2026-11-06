@@ -169,9 +169,11 @@ the end of a test how long the longest was and where
 (`tests/kernel/stretch.test`, `stretch-kill.test`; roadmaps/realtime.md
 R0). On MAME's AT, which runs at an AT's speed: 4.5 ms at most in a test
 build, most of it a trace line on the log, written whole; 3.5 ms without
-the log's bytes, which a release build does not have. A kill is the longest
-work: 6.5 ms, one pass of its revocation over every slot of every space,
-which a window ends.
+the log's bytes, which a release build does not have. A kill was the
+longest work, 6.5 ms, while its revocation looked through every slot of
+every space for each child; it follows each capability's list of children
+now (roadmap os-server.md D9), and stays under 3.6 ms, as does a 64 KB
+retype, zeroed 2 KB at a time, with 40 spaces more (`tests/caps/pools.test`).
 
 An IRQ at either point nests once on the running thread's kernel stack
 (or the kernel's own, when it idles): handlers run with IF clear and never

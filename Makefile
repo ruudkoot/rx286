@@ -61,6 +61,7 @@ program_main_ipc := tests/programs/ipc.asm
 program_main_rings := tests/programs/rings.asm
 program_main_keys := tests/programs/keys.asm
 program_main_revoke := tests/programs/revoke.asm
+program_main_additions := tests/programs/additions.asm
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and

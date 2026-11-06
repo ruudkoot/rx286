@@ -35,7 +35,7 @@ rx286: program fault #GP(0018) at 0007:{attacks.kstack_f}
 attack: video
 rx286: program fault #GP(0038) at 0007:{attacks.video_f}
 attack: beyond the GDT
-rx286: program fault #GP(01D0) at 0007:{attacks.beyond_f}
+rx286: program fault #GP(0450) at 0007:{attacks.beyond_f}
 attack: a selector past the LDT
 rx286: program fault #GP(0084) at 0007:{attacks.ldt_f}
 attack: call the kernel
@@ -189,4 +189,12 @@ attack: start its data, as a thread
 attack: refused, error 1
 attack: a kernel call that does not exist
 attack: refused, error 7
+attack: seal its own data, to run it
+attack: refused, error 6
+attack: seal its stack
+attack: refused, error 6
+attack: seal its code
+attack: refused, error 2
+attack: seal a GDT selector
+attack: refused, error 1
 attack: done

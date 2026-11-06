@@ -119,8 +119,8 @@ What it rests on:
 | Milestone | What | State |
 |---|---|---|
 | M0 | This roadmap | done (2026-11-06) |
-| P1 | The C toolchain, the crt, the first C modules | not started |
-| P2 | The kernel's additions; the list of children | not started |
+| P1 | The C toolchain, the crt, the first C modules | done (2026-11-06, branch `os-server`) |
+| P2 | The kernel's additions; the list of children | done (2026-11-06, branch `os-server`) |
 | P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | not started |
 | P4 | The root in C; its allocator and its services | not started |
 | P5 | The OS server in C, serving today's calls | not started |
@@ -1947,6 +1947,24 @@ NASM together, tests included. Each needs the decisions it names.
   - no stretch reaches 10 ms with 40 spaces and a 64 KB retype, on MAME's AT, and a delete's
     time no longer grows with the number of spaces.
 * **Decisions:** D6, D7, D9.
+* **Done (2026-11-06):**
+  - `tests/caps/seal.test`, `suspend.test` and `pools.test` (`tests/programs/additions.asm`)
+    on Bochs and MAME, and four seal attacks in `tests/attack` (`KE_STATE` for the program's
+    own data and stack, since the root keeps a copy of each).
+  - **A shadow entry is 24 bytes:** its parent, its first child and its next sibling, each a
+    space and a slot. A space is 16 bytes and 32 a slot, aligned to a paragraph, no power of
+    two: 8,208 bytes for 256 slots, as before, but 528 for 16, so a space of 16 slots and a
+    thread no longer fit in 1 KB. `tests/programs/revoke.asm` gives its worker 2 KB of
+    untyped instead; its expected lines are unchanged.
+  - **Every kernel object counts its capabilities,** and a thread names the saved reply owed
+    to it. A reply saved again for the same caller makes the older one owed to nobody
+    (`KE_STATE` when sent on), so one link is enough.
+  - **A thread waiting for its fault's reply** had six registers overwritten by the fault's
+    message. `ipc_fault` keeps them on the kernel stack and puts them back when a suspend ends
+    the wait (P3 moves them into the control block, with the one kernel stack).
+  - **On MAME's AT,** with 40 spaces more and a 64 KB retype, interrupts are off for 4.5 ms
+    at most in a test build. A kill's longest stretch is 3.6 ms without the log's bytes; its
+    revocation took 6.5 ms when it looked through every slot.
 
 ### P3. The kernel's memory: one kernel stack, objects anywhere, extended memory (XL, about 3,000)
 

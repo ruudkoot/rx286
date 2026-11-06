@@ -219,15 +219,20 @@ deliver:
         mov cx, 4
         rep movsw
         pop si
-        mov di, [dl_shadow]             ; the shadow entry, 16 bytes
+        mov di, [dl_shadow]             ; the shadow entry
         mov cx, SHADOW_SIZE / 2
         rep movsw
+        mov ax, [dl_slot]               ; BX, AX = the sender's space and slot
+        pop si                          ; the receiver
+        push si
+        mov dx, [si + T_SPACE]          ; DX, CX = the receiver's slot: a child
+        mov cx, [si + T_RSLOT]          ; of the sender's
+        shr cx, 3
+        call child_link
         mov di, [dl_shadow]
-        mov [di + SH_PARENT], bx        ; its parent: the sender's space and slot
-        mov ax, [dl_slot]
-        mov [di + SH_PARENT_SLOT], ax
-        and byte [di + SH_RIGHTS], ~SR_PARENT & 0xFF    ; new: no child yet
-        call parent_mark                ; the sender's: a parent now
+        mov al, [di + SH_TYPE]
+        mov dx, [di + SH_OBJECT]
+        call obj_ref
         pop bx                          ; the receiver: BP = the selector, at its ring
         push bx
         mov ax, [bx + T_RSLOT]
@@ -429,12 +434,20 @@ ipc_send:
         push si
         push di
         mov bx, [cur_thread]
+        mov dx, [bx + T_SPACE]          ; DX, AX = its space and slot: the
+        mov cx, ax                      ; caller's back link names it no more
+        mov ax, [si + SH_OBJECT]        ; (0: superseded, owed to nobody)
+        call reply_unlink
+        test ax, ax
+        stc
+        jz .sent
         call thread_frame               ; the reply's words: this frame's, as kdata
-        mov bx, [si + SH_OBJECT]        ; the caller
+        mov bx, ax                      ; the caller
         mov cx, [si + SH_SEQ]
         mov dx, [si + SH_SERVER]
         mov si, di
         call reply_send
+.sent:
         pop di
         pop si
         pushf
@@ -480,13 +493,23 @@ ep_queue:
 ; ipc_fault - the running thread's fault, as a call on its fault endpoint
 ; (l4.md D18): the vector as the label, BX the error code, CX:SI the CS:IP,
 ; DI the flags, with its capability's badge; it waits for the reply, whose
-; BX is where it starts again
+; BX is where it starts again. A THREAD_SUSPEND ends the wait (KE_SUSPENDED),
+; and its registers are as they were at the fault (os-server.md P2)
 ;   In:       BP = its frame (from rings 1-3); BX = the thread; DI = FAULT_*
-;   Out:      its T_ENTRY the reply's BX, if a reply came (KE_STATE: a
-;             restart cancelled the wait)
+;   Out:      CF clear and its T_ENTRY the reply's BX, if a reply came
+;             (KE_STATE: a restart cancelled the wait); CF set if a suspend
+;             ended it, the frame as at the fault
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 ipc_fault:
+        push word [bp + FRAME_FLAGS]    ; what the message and its end change
+        push word [bp + FRAME_BP]
+        push word [bp + FRAME_DI]
+        push word [bp + FRAME_SI]
+        push word [bp + FRAME_DX]
+        push word [bp + FRAME_CX]
+        push word [bp + FRAME_BX]
+        push word [bp + FRAME_AX]
         mov ax, [bp + FRAME_VECTOR]
         mov [bp + FRAME_AX], ax
         mov ax, [bp + FRAME_ERROR]
@@ -497,17 +520,33 @@ ipc_fault:
         mov [bp + FRAME_SI], ax
         mov [bp + FRAME_DI], di
         mov word [bp + FRAME_BP], 0
-        mov byte [bx + T_IPC], TI_CALLING
+        mov byte [bx + T_IPC], TI_CALLING | TI_FAULT
         mov ax, [bx + T_FAULT_BADGE]
         mov [bx + T_BADGE], ax
         mov si, [bx + T_FAULT]
         call ep_call
+        mov bx, [cur_thread]
+        and byte [bx + T_IPC], ~TI_FAULT & 0xFF
+        cmp byte [bp + FRAME_AX], KE_SUSPENDED
+        je .suspended
         cmp byte [bp + FRAME_AX], KE_OK
         jne .done
-        mov bx, [cur_thread]
         mov ax, [bp + FRAME_BX]
         mov [bx + T_ENTRY], ax
 .done:
+        add sp, 16
+        clc
+        ret
+.suspended:
+        pop word [bp + FRAME_AX]
+        pop word [bp + FRAME_BX]
+        pop word [bp + FRAME_CX]
+        pop word [bp + FRAME_DX]
+        pop word [bp + FRAME_SI]
+        pop word [bp + FRAME_DI]
+        pop word [bp + FRAME_BP]
+        pop word [bp + FRAME_FLAGS]
+        stc
         ret
 
 ; ----------------------------------------------------------------------------
@@ -871,12 +910,25 @@ kc_save_reply:
         cmp byte [si + SH_TYPE], CAP_EMPTY
         jne kc_done.slot
         mov byte [si + SH_TYPE], CAP_REPLY
-        mov ax, [bx + T_REPLY]
-        mov [si + SH_OBJECT], ax
+        mov di, [bx + T_REPLY]          ; DI = the caller
+        mov [si + SH_OBJECT], di
         mov [si + SH_SERVER], bx
-        mov ax, [bx + T_REPLY_SEQ]
-        mov [si + SH_SEQ], ax
+        mov cx, [bx + T_REPLY_SEQ]
+        mov [si + SH_SEQ], cx
         mov word [bx + T_REPLY], 0
+        mov cx, ax                      ; CX = the slot
+        mov dx, [bx + T_SPACE]
+        push bx                         ; an older reply saved for it is stale:
+        mov bx, [di + T_SAVED_SPACE]    ; it is owed to nobody now, and the
+        test bx, bx                     ; caller's back link names this one
+        jz .linked
+        mov ax, [di + T_SAVED_SLOT]
+        call shadow_at
+        mov word [si + SH_OBJECT], 0
+.linked:
+        pop bx
+        mov [di + T_SAVED_SPACE], dx
+        mov [di + T_SAVED_SLOT], cx
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------

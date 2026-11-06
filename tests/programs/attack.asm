@@ -383,6 +383,25 @@ attacks:
         int KCALL_VECTOR
         call report_refusal
         jmp entry
+.seal_data: mov dx, SEL_UDATA           ; its data made code, to run (os-server.md P2):
+        jmp seal_attack                 ; the root keeps a copy
+.seal_stack: mov dx, SEL_USTACK         ; its stack, likewise
+        jmp seal_attack
+.seal_code: mov dx, SEL_UCODE           ; its code: no data to seal
+        jmp seal_attack
+.seal_gdt: mov dx, SEL_KDATA            ; a GDT selector
+        jmp seal_attack
+
+; ----------------------------------------------------------------------------
+; seal_attack - KCALL_SEAL of DX, reported
+;   In:       DX = the selector given as the segment
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+seal_attack:
+        kcall KCALL_SEAL
+        call report_refusal
+        jmp entry
 
 ; ----------------------------------------------------------------------------
 ; retype_attack - KCALL_RETYPE from DX into the empty slot, reported
@@ -554,6 +573,10 @@ attack_table:
         attack "copy into its code, as a space", attacks.kcopy
         attack "start its data, as a thread", attacks.kthread
         attack "a kernel call that does not exist", attacks.knone
+        attack "seal its own data, to run it", attacks.seal_data
+        attack "seal its stack", attacks.seal_stack
+        attack "seal its code", attacks.seal_code
+        attack "seal a GDT selector", attacks.seal_gdt
         dw 0
 end_udata
 

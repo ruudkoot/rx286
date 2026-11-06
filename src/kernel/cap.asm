@@ -22,6 +22,7 @@
 ; ============================================================================
 
 ARENA_PARA          equ ARENA_PHYS >> 4
+RETYPE_PIECE        equ 2048            ; bytes zeroed between windows: about 0.8 ms on an AT
 ROOT_MODULE         equ MODULE_TABLE_VOFF + MODULE_HEADER_SIZE  ; the first entry
 
 begin_kdata
@@ -60,6 +61,7 @@ kcall_table:
         dw kc_test                                  ; KCALL_TEST
         dw kc_log                                   ; KCALL_LOG (log.asm)
         dw kc_ticks                                 ; KCALL_TICKS
+        dw kc_seal                                  ; KCALL_SEAL
 kcall_table_end:
 msg_thread_made     db "thread", 0
 ; Temporaries of the calls: no kernel call waits, so none is ever two deep.
@@ -77,6 +79,7 @@ boot_space          dw 0
 boot_thread         dw 0
 boot_base           times 3 db 0        ; boot_root's: a segment's base
 boot_descriptor     times 8 db 0
+frame_thread        dw 0                ; THREAD_FRAME's thread, across its checks
 end_kdata
 
 %if (kcall_table_end - kcall_table) / 2 != KCALL_COUNT
@@ -262,12 +265,24 @@ untyped_carve:
 ;   Destroys: AX, CX, DX, DI, ES
 ; ----------------------------------------------------------------------------
 arena_object:
+        mov dx, cx
+        shr dx, 4                       ; aligned to its size
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; arena_aligned - as arena_object, of any size, at an alignment given
+;   In:       SI = the untyped's shadow entry; CX = the object's bytes (a
+;             multiple of 16); DX = its alignment in paragraphs (a power of
+;             two)
+;   Out:      as arena_object's
+;   Destroys: AX, CX, DX, DI, ES
+; ----------------------------------------------------------------------------
+arena_aligned:
         mov al, KE_CAP
         call untyped_in_arena
         jc .refuse
         push cx                         ; its bytes
         shr cx, 4
-        mov dx, cx                      ; aligned to its size
         call untyped_carve              ; AX = its place, in paragraphs
         pop cx
         jc .full
@@ -329,6 +344,97 @@ phys_zero:
         rep stosw
         push ds
         pop es
+        ret
+
+; ----------------------------------------------------------------------------
+; retype_zero - a new segment's memory zeroed, a piece of RETYPE_PIECE bytes
+; at a time with a window after each when it is larger, so that a stretch
+; with interrupts off stays short (os-server.md P2, X7: 64 KB at once took
+; about 26 ms, E4). After the windows the retype goes on only if the caller's
+; space lives, its slot is still empty and the untyped still holds what was
+; carved; a revoke of the same untyped by another thread of the same space
+; is the caller's own race
+;   In:       DL:AX = the base; CX = bytes (even, 0 for 64 KB); BP = the frame
+;             (DX the untyped, SI the slot); the retype_* temporaries
+;   Out:      CF set if the retype cannot go on; the temporaries as they were
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+retype_zero:
+        test cx, cx
+        jz .pieces                      ; 64 KB
+        cmp cx, RETYPE_PIECE
+        ja .pieces
+        call phys_zero
+        clc
+        ret
+.pieces:
+        push word [retype_paragraphs]   ; another thread's retype may run in a window
+        push word [retype_base]
+        push word [retype_base_low]
+        push word [retype_base_high]
+        push word [retype_parent_slot]
+        mov bx, cx
+        shr bx, 4                       ; BX = paragraphs left (0 for 64 KB)
+        jnz .piece
+        mov bx, 0x1000
+.piece:
+        mov cx, RETYPE_PIECE
+        cmp bx, RETYPE_PIECE / 16
+        jae .zero
+        mov cx, bx
+        shl cx, 4
+.zero:
+        push ax
+        push dx
+        push cx
+        call phys_zero
+        pop cx
+        pop dx
+        pop ax
+        add ax, cx                      ; the next piece
+        adc dl, 0
+        shr cx, 4
+        sub bx, cx
+        jz .zeroed
+        push ax
+        push bx
+        push dx
+        KWINDOW (VEC_KCALL << 8) | KCALL_RETYPE
+        pop dx
+        pop bx
+        pop ax
+        jmp .piece
+.zeroed:
+        pop word [retype_parent_slot]
+        pop word [retype_base_high]
+        pop word [retype_base_low]
+        pop word [retype_base]
+        pop word [retype_paragraphs]
+        mov bx, [cur_thread]            ; everything as it was?
+        mov bx, [bx + T_SPACE]
+        test bx, bx
+        jz .changed
+        call space_alive
+        jc .changed
+        mov ax, [bp + FRAME_SI]
+        call slot_of
+        jc .changed
+        cmp byte [si + SH_TYPE], CAP_EMPTY
+        jne .changed
+        mov ax, [bp + FRAME_DX]
+        call slot_of
+        jc .changed
+        cmp byte [si + SH_TYPE], CAP_UNTYPED
+        jne .changed
+        mov ax, [retype_base]
+        add ax, [retype_paragraphs]
+        sub ax, [si + SH_OBJECT]        ; the carved end, from the untyped's start
+        cmp ax, [si + SH_WATERMARK]
+        ja .changed                     ; revoked and given out again
+        clc
+        ret
+.changed:
+        stc
         ret
 
 ; ----------------------------------------------------------------------------
@@ -402,18 +508,13 @@ space_make:
 .pooled:
         push ax                         ; the LDT's selector
         push cx                         ; the slots
-        mov ax, cx                      ; bytes: the header, 8 a descriptor, the shadows
-        mov dx, 8 + SHADOW_SIZE
-        mul dx
+        mov ax, cx                      ; bytes: the header, then a descriptor
+        mov dx, SLOT_SIZE               ; and a shadow entry a slot, aligned
+        mul dx                          ; to a paragraph (os-server.md P2)
         add ax, SP_HEADER_SIZE
-        mov cx, 16                      ; rounded up to a power of two
-.size:
-        cmp cx, ax
-        jae .sized
-        shl cx, 1
-        jmp .size
-.sized:
-        call arena_object               ; BX = the space, zeroed
+        mov cx, ax
+        mov dx, 1
+        call arena_aligned              ; BX = the space, zeroed
         pop cx
         pop dx                          ; DX = the LDT's selector
         jc .done
@@ -590,11 +691,14 @@ boot_root:
         call slot_at
         mov byte [si + SH_TYPE], CAP_SPACE
         mov [si + SH_OBJECT], bx
+        mov word [bx + SP_REFS], 1
         mov ax, ROOT_SLOT_THREAD
         call slot_at
         mov byte [si + SH_TYPE], CAP_THREAD
         mov ax, [boot_thread]
         mov [si + SH_OBJECT], ax
+        mov di, ax
+        mov word [di + T_REFS], 1
         ; the screen's text page, for the console driver (l4.md L8)
         mov ax, VIDEO_PHYS & 0xFFFF
         mov dl, VIDEO_PHYS >> 16
@@ -617,6 +721,9 @@ boot_root:
         call slot_at
         mov byte [si + SH_TYPE], CAP_IRQ
         mov [si + SH_OBJECT], cx
+        mov di, cx
+        shl di, 1
+        mov word [irq_refs + di], 1
 .kept:
         inc cx
         cmp cx, IRQ_LINES
@@ -951,7 +1058,8 @@ kc_retype:
         mov cx, [bp + FRAME_CX]
         inc cx
         and cx, ~1                      ; bytes to zero, even (0: 64 KB)
-        call phys_zero
+        call retype_zero
+        jc .changed
         pop di                          ; the destination: descriptor
         pop si                          ; and shadow entry
         mov ax, [bp + FRAME_CX]
@@ -971,6 +1079,9 @@ kc_retype:
         mov ax, [retype_paragraphs]
         mov [si + SH_SIZE], ax
         jmp retype_parent
+.changed:
+        mov al, KE_STATE                ; changed during the zeroing's windows
+        jmp .error
 .cap:
         mov al, KE_CAP
         jmp .error
@@ -985,19 +1096,24 @@ kc_retype:
         jmp kc_done
 
 ; ----------------------------------------------------------------------------
-; retype_parent - the end of a retype: the new capability's parent is the
-; untyped it came from, so a revoke of the untyped deletes it (l4.md L12)
+; retype_parent - the end of a retype: the new capability is a child of the
+; untyped it came from, so a revoke of the untyped deletes it (l4.md L12);
+; a new object's first capability
 ;   In:       SI = the new capability's shadow entry; BP = the frame
 ;   Out:      the frame's status, KE_OK
-;   Destroys: AX, BX
+;   Destroys: AX, BX, CX, DX
 ; ----------------------------------------------------------------------------
 retype_parent:
         mov bx, [cur_thread]
         mov bx, [bx + T_SPACE]
-        mov [si + SH_PARENT], bx
         mov ax, [retype_parent_slot]
-        mov [si + SH_PARENT_SLOT], ax
-        call parent_mark
+        mov dx, bx
+        mov cx, [bp + FRAME_SI]
+        shr cx, 3                       ; the new one's slot
+        call child_link
+        mov al, [si + SH_TYPE]
+        mov dx, [si + SH_OBJECT]
+        call obj_ref
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -1096,18 +1212,16 @@ kc_copy:
         mov bx, [copy_shadow]
         cmp byte [bp + FRAME_AX], COPY_MOVE
         je .move
-        push si
-        mov si, [cur_thread]            ; a copy: its parent is the source
-        mov ax, [si + T_SPACE]
-        pop si
-        mov [bx + SH_PARENT], ax
+        mov bx, [cur_thread]            ; a copy: the source's child
+        mov bx, [bx + T_SPACE]
         mov ax, [copy_slot]
-        mov [bx + SH_PARENT_SLOT], ax
-        and byte [bx + SH_RIGHTS], ~SR_PARENT & 0xFF    ; new: no child yet
-        push bx
-        mov bx, [bx + SH_PARENT]
-        call parent_mark                ; the source: a parent now
-        pop bx
+        mov dx, [copy_dest_space]
+        mov cx, [copy_dest_slot]
+        call child_link
+        mov bx, [copy_shadow]
+        mov al, [bx + SH_TYPE]
+        mov dx, [bx + SH_OBJECT]
+        call obj_ref
         cmp byte [bp + FRAME_AX], COPY_MINT
         jne kc_done.ok
         mov ax, [bp + FRAME_BX]
@@ -1124,15 +1238,13 @@ kc_copy:
         mov di, si
         mov cx, SHADOW_SIZE / 2
         rep stosw
-        mov bx, [copy_shadow]
-        test byte [bx + SH_RIGHTS], SR_PARENT
-        jz kc_done.ok                   ; no child to take along
-        mov bx, [cur_thread]            ; its children go with it (l4.md L12)
-        mov bx, [bx + T_SPACE]
+        mov bx, [cur_thread]            ; its place in the tree, and its
+        mov bx, [bx + T_SPACE]          ; children, go with it (l4.md L12)
         mov ax, [copy_slot]
         mov dx, [copy_dest_space]
         mov cx, [copy_dest_slot]
-        call cap_reparent
+        mov si, [copy_shadow]
+        call cap_moved
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -1167,6 +1279,10 @@ kc_thread:
         je .stop
         cmp al, THREAD_INFO
         je .info
+        cmp al, THREAD_SUSPEND
+        je .suspend
+        cmp al, THREAD_FRAME
+        je .frame
         cmp byte [bx + T_STATE], TS_STOPPED
         je .stopped
         cmp byte [bx + T_STATE], TS_FREE
@@ -1236,12 +1352,104 @@ kc_thread:
         jmp kc_done.ok
 .stopped:
         cmp al, THREAD_START            ; a stopped thread: started again, at
-        jne kc_done.state               ; its entry, at the priority given
-        mov cx, [bp + FRAME_CX]
+        jne kc_done.state               ; its entry, at the priority given; or a
+        mov cx, [bp + FRAME_CX]         ; suspended one where it was
         cmp cl, PRIORITY_MAX
         ja kc_done.arg
         mov [bx + T_PRIO], cl
+        and byte [bx + T_FLAGS], ~TF_SUSPENDED & 0xFF
         call ready_push
+        jmp kc_done.ok
+.suspend:
+        ; stopped on its way back to its ring (thread_suspended), so that a
+        ; kernel call it is in ends first, its results in the frame and the
+        ; log's turn given up (os-server.md E11); of ring 3 only, not the
+        ; caller, not stopped
+        cmp bx, [cur_thread]
+        je kc_done.arg
+        cmp byte [bx + T_RING], RPL_USER
+        jne kc_done.arg
+        cmp byte [bx + T_STATE], TS_FREE
+        je kc_done.state
+        cmp byte [bx + T_STATE], TS_STOPPED
+        je kc_done.state
+        test byte [bx + T_FLAGS], TF_SUSPEND
+        jnz kc_done.state
+        xor dx, dx                      ; DX:CX = the notification and badge, or 0
+        xor cx, cx
+        mov ax, [bp + FRAME_SI]
+        test ax, ax
+        jz .suspend_set
+        push bx
+        mov cl, CAP_NOTIFY
+        call cap_get
+        pop bx
+        jc kc_done.cap
+        test byte [si + SH_RIGHTS], RIGHT_SEND
+        jz kc_done.cap
+        mov dx, [si + SH_OBJECT]
+        mov cx, [si + SH_BADGE]
+.suspend_set:
+        mov [bx + T_SUSPEND_NOTIFY], dx
+        mov [bx + T_SUSPEND_BADGE], cx
+        or byte [bx + T_FLAGS], TF_SUSPEND
+        test byte [bx + T_IPC], TI_FAULT
+        jz kc_done.ok
+        cmp byte [bx + T_STATE], TS_SEND
+        je .fault_wait
+        cmp byte [bx + T_STATE], TS_REPLY
+        jne kc_done.ok
+.fault_wait:
+        mov al, KE_SUSPENDED            ; waiting for its fault's reply: it
+        call ipc_fail                   ; stops at once, at the fault
+        jmp kc_done.ok
+.frame:
+        ; the frame of a suspended thread to or from the caller's bytes,
+        ; checked as the log's are (check_buffer): TFR_SIZE of them at SI:DI
+        test byte [bx + T_FLAGS], TF_SUSPENDED
+        jz kc_done.state
+        mov [frame_thread], bx
+        mov ax, [bp + FRAME_SI]
+        mov si, [bp + FRAME_DI]
+        mov cx, TFR_SIZE
+        cmp byte [bp + FRAME_BX], FRAME_WRITE
+        je .frame_write
+        cmp byte [bp + FRAME_BX], FRAME_READ
+        jne kc_done.arg
+        call check_buffer_writable      ; ES = the caller's segment
+        jc kc_done.cap
+        mov bx, [frame_thread]
+        call thread_frame               ; DI = the frame, in kdata
+        xchg si, di                     ; DS:SI the frame, ES:DI the caller's
+        cld
+        mov cx, TFR_SIZE / 2
+        rep movsw
+        push ds
+        pop es
+        jmp kc_done.ok
+.frame_write:
+        call check_buffer               ; ES = the caller's segment
+        jc kc_done.cap
+        mov bx, [frame_thread]
+        call thread_frame               ; DI = the frame, in kdata
+        push ds
+        push es
+        pop ds                          ; DS:SI the caller's, ES:DI the frame
+        pop es
+        cld
+        mov cx, TFR_VECTOR / 2          ; the registers before the kernel's words
+        rep movsw
+        add si, TFR_IP - TFR_VECTOR
+        add di, TFR_IP - TFR_VECTOR
+        mov cx, (TFR_SIZE - TFR_IP) / 2 ; IP, CS, FLAGS, SP, SS
+        rep movsw
+        push es
+        pop ds
+        mov bx, [frame_thread]
+        call thread_frame
+        call thread_flags               ; IF on and the thread's IOPL, whatever was
+        and word [di + FRAME_FLAGS], FLAGS_USER_KEEP   ; written; NT never (E6)
+        or [di + FRAME_FLAGS], ax
         jmp kc_done.ok
 .configure:
         push bx
@@ -1254,9 +1462,9 @@ kc_thread:
         mov di, dx
         mov al, [di + SP_LDT + 5]       ; slot 0: present code, its DPL the ring
         mov ah, al
-        and ah, ACC_PRESENT | ACC_SEGMENT | ACC_CODE
+        and ah, ACC_PRESENT | ACC_SEGMENT | ACC_CODE | ACC_EXPAND_DOWN
         cmp ah, ACC_PRESENT | ACC_SEGMENT | ACC_CODE
-        jne kc_done.arg
+        jne kc_done.arg                 ; (and not conforming: os-server.md X1)
         and al, ACC_DPL_MASK
         mov cl, ACC_DPL_SHIFT
         shr al, cl
@@ -1306,6 +1514,40 @@ kc_thread:
 %ifdef TEST_FUZZ
         call test_fuzz_alias
 %endif
+        jmp kc_done.ok
+
+; ----------------------------------------------------------------------------
+; kc_seal - KCALL_SEAL: a data segment of DPL 3 made readable code of DPL 3
+; (os-server.md P2, E5, D6), if no copy of it remains (no SR_PARENT: none
+; was ever made, or a revoke took them) and its parent is the untyped it was
+; retyped from, so that no writable alias of it is left anywhere. A DS or ES
+; that holds it is reloaded on the way back, as the code. Never another DPL,
+; nor conforming code (X1)
+;   In:       BP = the frame (DX the segment)
+;   Out:      the frame's status
+;   Destroys: AX, BX, CX, SI, DI
+; ----------------------------------------------------------------------------
+kc_seal:
+        mov ax, [bp + FRAME_DX]
+        mov cl, CAP_SEGMENT
+        call cap_get                    ; SI the shadow entry, DI the descriptor
+        jc kc_done.cap
+        mov al, [di + 5]
+        and al, ACC_PRESENT | ACC_DPL_MASK | ACC_SEGMENT | ACC_CODE | ACC_EXPAND_DOWN
+        cmp al, ACC_PRESENT | ACC_DPL3 | ACC_SEGMENT
+        jne kc_done.arg                 ; data of DPL 3, expand-up
+        cmp word [si + SH_CHILD], 0
+        jne kc_done.state               ; a copy of it lives
+        mov bx, [si + SH_PARENT]
+        test bx, bx
+        jz kc_done.state
+        push di
+        mov ax, [si + SH_PARENT_SLOT]
+        call slot_at
+        pop di
+        cmp byte [si + SH_TYPE], CAP_UNTYPED
+        jne kc_done.state               ; its parent must be the untyped it came from
+        mov byte [di + 5], ACC_UCODE    ; present, DPL 3, code, readable, accessed
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------

@@ -1,0 +1,33 @@
+# The kernel's additions (roadmap os-server.md P2): tests/programs/additions.asm.
+program: additions
+define: TEST_CAPS
+define: TEST_ADD_SUSPEND
+emulators: bochs mame
+match: contains
+timeout: 120
+---
+additions: the worker counted (1): 1
+additions: signals it took (1): 1
+additions: it counts on after its handler (1): 1
+additions: FLAGS after a write of NT and CF (513: IF and CF, no NT): 513
+additions: suspend itself (2): 2
+additions: a frame of a thread not suspended (6): 6
+additions: suspend it twice (6): 6
+additions: a frame into bytes past the segment (1): 1
+additions: KCALL_LOG results the suspends spoilt (0): 0
+additions: the log is free
+additions: the line took under 5 ticks (1): 1
+additions: suspended in its call: stopped before the reply (0): 0
+additions: its reply in its frame (16962): 16962
+additions: and its status (0): 0
+additions: revokes and copies the suspends spoilt (0): 0
+additions: suspends that came in a revoke (1): 1
+additions: the worker revoked (1): 1
+additions: its fault's call: the vector (13): 13
+additions: and the IP, the HLT's (0): 0
+additions: its registers not as at the fault (0): 0
+additions: its IP not the HLT's (0): 0
+additions: its handler ran (1): 1
+additions: and never returned: it counts (1): 1
+additions: the fault's reply, after the suspend (6): 6
+additions: done
