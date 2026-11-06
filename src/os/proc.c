@@ -159,6 +159,12 @@ static void sleep_on(rx_u16 notify, int tick)
     rx_kcall(&r);
 }
 
+/* proc_alive - is entry i's process alive? (server.h) */
+int proc_alive(int i)
+{
+    return procs[i].state == P_ALIVE;
+}
+
 /* lock_take - the lock (server.h) */
 void lock_take(rx_u16 notify)
 {
@@ -687,10 +693,14 @@ static int handle(int i, struct rx_kregs *r)
         result = px_brk(i, r->bx, &error);
         break;
     default:
-        if ((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_FSYNC)
+        if ((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
             result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
         else
             error = ENOSYS;
+    }
+    if (result == VFS_SIGPIPE) {        /* its default action, until handlers (P10) */
+        end(i, SIGPIPE, 1);
+        result = NO_REPLY;
     }
     give();
     if (result == NO_REPLY || procs[i].state != P_ALIVE)
@@ -732,6 +742,22 @@ void proc_thread(unsigned i)
     }
 }
 
+/* proc_interrupt - Ctrl+Break (server.h): SIGINT's default action to the
+ * children of the terminal's last reader */
+void proc_interrupt(void)
+{
+    int t, c;
+
+    take(OS_CONTROL);
+    t = vfs_tty_reader();
+    for (c = 0; t >= 0 && c < PROCS; c++)
+        if (procs[c].state == P_ALIVE && procs[c].ppid == procs[t].pid && c != t) {
+            end(c, SIGINT, 1);
+            signal_entry((unsigned)c);
+        }
+    give();
+}
+
 /* proc_boot - init, process 1, started at boot by the control thread */
 void proc_boot(void)
 {
@@ -742,6 +768,7 @@ void proc_boot(void)
 
     take(OS_CONTROL);
     cache_init();                       /* the files' cache (P7) */
+    pipes_init();                       /* the pipes' buffers (P9) */
     if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, -1,
               &error) < 0) {
         char line[40];

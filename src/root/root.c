@@ -659,6 +659,12 @@ static void build_server(void)
     /* its requests about the programs, on the fault endpoint, badged so */
     must(copy(server_space, FAULT_EP, OS_SLOT_ROOT * 8 + 4, COPY_MINT, ROOT_BADGE_OS,
               RIGHT_SEND));
+    if (!foreground && keyboard_space()) {  /* no program the root builds has the keys: */
+        must(retype(ARENA, CAP_NOTIFY, SCRATCH, 0, 0));        /* the processes' (P9) */
+        must(copy(keyboard_space(), SCRATCH, W_DRV_KEYS, COPY_MINT, KEY_SIGNAL_BIT,
+                  RIGHT_SEND));
+        must(copy(server_space, SCRATCH, OS_SLOT_KEYS * 8 + 4, COPY_MOVE, 0, 0));
+    }
     for (module = 1; module <= programs; module++) {
         if (module == server)
             continue;

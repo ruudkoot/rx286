@@ -49,6 +49,9 @@ ROOT_BADGE_OS       equ 0x4000
 ROOT_BADGE_TEST     equ 0x4001  ; TEST_SERVICES: the test program's, whose copies go to it
 OS_SLOT_ROOT        equ 160
 OS_SLOT_ARCHIVE     equ 161     ; the server's: /z, the archive module's bytes (os-server.md P6)
+OS_SLOT_KEYS        equ 162     ;    a notification the keyboard driver signals, when no
+                                ;    program the root builds has the keys: the processes'
+                                ;    (os-server.md P9)
 ROOT_INFO           equ 1       ; BX a module's number -> BX 0 or E_INVAL (no such module);
                                 ;    CL its kind (PS_*), CH its main thread's state
                                 ;    (STATE_*), SI its priority, DI the times it ran

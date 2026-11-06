@@ -90,6 +90,17 @@ void overflowed(unsigned n, rx_u16 notify);
  * entry i; init's start, from the control thread */
 void proc_thread(unsigned i);
 void proc_boot(void);
+/* key_take - the next key from the keyboard driver, or 0 (os.c);
+ * test_reader - test builds: whether a key is awaited (TEST_READER) */
+rx_u16 key_take(void);
+void test_reader(int how);
+/* proc_alive - is process entry i's process alive? proc_interrupt - Ctrl+Break
+ * with no program the root builds having the keys: SIGINT to the children of
+ * the terminal's last reader (proc.c) */
+int proc_alive(int i);
+void proc_interrupt(void);
+#define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */
+
 /* lock_take, lock_give - the tables' and the files' lock (proc.c, D17): a
  * thread that finds it taken sleeps a tick on its notification */
 void lock_take(rx_u16 notify);

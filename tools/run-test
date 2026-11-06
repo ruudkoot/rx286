@@ -271,7 +271,7 @@ def build(test):
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
                      'rtc.bin', 'clock.rx', 'z.arc', 'z-init.rx', 'z-proc.rx', 'z-child.rx',
-                     'z-files.rx', 'z-execs.rx', 'z-codes.rx'):
+                     'z-files.rx', 'z-execs.rx', 'z-codes.rx', 'z-pipes.rx', 'z-keys.rx'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them

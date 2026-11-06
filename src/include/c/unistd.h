@@ -32,6 +32,7 @@ int rmdir(const char *path);
 int chdir(const char *path);
 char *getcwd(char *room, size_t n);
 int fsync(int fd);
+int pipe(int fds[2]);
 int brk(void *end);
 void *sbrk(int increment);
 

@@ -40,7 +40,20 @@
 
 /* What a node of the tree is: the server's own (the root, /dev, /z and its
  * files, the devices), or a volume's (a directory, a file) */
-enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_FILE };
+enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_FILE, K_PIPE_R,
+       K_PIPE_W };
+
+#define PIPES 8                         /* the pipes at once (P9) */
+#define PIPE_SIZE 1024                  /* each one's buffer, in the server's segment */
+#define PIPE_SEG SLOT(174)
+
+/* A pipe: its ends' descriptions, its bytes, the entries whose threads wait
+ * to read or write (-1: none) */
+struct pipe {
+    rx_u8 used, readers, writers;
+    signed char reader, writer;
+    rx_u16 head, count;
+};
 
 /* An open file description */
 struct ofd {
@@ -81,6 +94,8 @@ struct node {
 };
 
 static struct ofd ofds[OFDS];
+static struct pipe pipes[PIPES];
+static int pipes_ready, tty_reader = -1;
 static struct files files_of[PROCS];
 static struct vol vols[DRIVES];
 static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
@@ -427,17 +442,216 @@ static rx_u16 entry_back(struct ofd *o)
     return o->kind == K_FILE ? cache_flush(o->drive) : 0;
 }
 
+static int fd_new(int i, int k, int from);
+
+/* wake - an entry's server thread signalled, to look again */
+static void wake(int i)
+{
+    struct rx_kregs r;
+
+    if (i < 0)
+        return;
+    r.ax = KCALL_SIGNAL << 8;
+    r.dx = PROC_NOTIFY(i);
+    r.bp = 0;
+    rx_kcall(&r);
+}
+
+/* pipe_wait - process i's thread waits, the lock given up, until another
+ * signals it; 0 if the process ended meanwhile */
+static int pipe_wait(int i, signed char *who)
+{
+    struct rx_kregs r;
+
+    *who = (signed char)i;
+    lock_give();
+    r.ax = KCALL_RECV << 8;
+    r.dx = PROC_NOTIFY(i);
+    r.bp = 0;
+    rx_kcall(&r);
+    lock_take(PROC_NOTIFY(i));
+    if (*who == i)
+        *who = -1;
+    return proc_alive(i);
+}
+
 /* ofd_drop - a reference to a description gone; at the last, a file's
- * entry and data written */
+ * entry and data written, a pipe's end closed and its other end woken */
 static rx_u16 ofd_drop(int k)
 {
+    struct pipe *p = &pipes[ofds[k].unit % PIPES];  /* (a pipe's end's alone) */
     rx_u16 error = 0;
 
     if (--ofds[k].refs == 0) {
         error = entry_back(&ofds[k]);
+        if (ofds[k].kind == K_PIPE_R) {
+            p->readers--;
+            wake(p->writer);
+        } else if (ofds[k].kind == K_PIPE_W) {
+            p->writers--;
+            wake(p->reader);
+        }
+        if ((ofds[k].kind == K_PIPE_R || ofds[k].kind == K_PIPE_W) && !p->readers
+                && !p->writers)
+            p->used = 0;
         ofds[k].kind = K_FREE;
     }
     return error;
+}
+
+/* pipes_init - the pipes' segment, from the root (at boot) */
+int pipes_init(void)
+{
+    struct rx_kregs r;
+
+    if (call(OS_ROOT, ROOT_LOAD, PIPES * PIPE_SIZE, 0, 0, PIPE_SEG, 0, &r) || r.bx)
+        return E_NOMEM;
+    pipes_ready = 1;
+    return 0;
+}
+
+/* vfs_tty_reader - the terminal's last reader (fs.h) */
+int vfs_tty_reader(void)
+{
+    return tty_reader;
+}
+
+/* px_pipe - PX_PIPE: a pipe and its two ends' descriptors */
+static int px_pipe(int i, int *error, rx_u16 *write_fd)
+{
+    int p, r = -1, w = -1, fr = -1, fw = -1;
+
+    for (p = 0; p < PIPES && pipes[p].used; p++)
+        ;
+    if (!pipes_ready || p == PIPES || (r = ofd_new(K_PIPE_R)) < 0
+            || (w = ofd_new(K_PIPE_W)) < 0) {
+        if (r >= 0)
+            ofds[r].kind = K_FREE;
+        *error = ENFILE;
+        return -1;
+    }
+    if ((fr = fd_new(i, r, 0)) < 0 || (fw = fd_new(i, w, 0)) < 0) {
+        if (fr >= 0)
+            files_of[i].fd[fr] = NO_FD;
+        ofds[r].kind = ofds[w].kind = K_FREE;
+        *error = EMFILE;
+        return -1;
+    }
+    memset(&pipes[p], 0, sizeof pipes[p]);
+    pipes[p].used = 1;
+    pipes[p].readers = pipes[p].writers = 1;
+    pipes[p].reader = pipes[p].writer = -1;
+    ofds[r].unit = ofds[w].unit = (rx_u16)p;
+    ofds[r].flags = O_RDONLY;
+    ofds[w].flags = O_WRONLY;
+    *write_fd = (rx_u16)fw;
+    return fr;
+}
+
+/* pipe_read - a pipe's bytes, as many as there are up to n; with none, a
+ * wait for a writer, or 0 when there is no writer left */
+static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
+{
+    struct pipe *p = &pipes[o->unit];
+    rx_u8 RX_FAR *buf = (rx_u8 RX_FAR *)RX_MK_FP(PIPE_SEG, o->unit * PIPE_SIZE);
+    rx_u8 RX_FAR *to = (rx_u8 RX_FAR *)RX_MK_FP(data, at);
+    rx_u16 k;
+
+    while (p->count == 0) {
+        if (p->writers == 0)
+            return 0;
+        if (!pipe_wait(i, &p->reader))
+            return VFS_GONE;
+    }
+    if (n > p->count)
+        n = p->count;
+    for (k = 0; k < n; k++)
+        to[k] = buf[(p->head + k) % PIPE_SIZE];
+    p->head = (rx_u16)((p->head + n) % PIPE_SIZE);
+    p->count = (rx_u16)(p->count - n);
+    wake(p->writer);
+    return n;
+}
+
+/* pipe_write - bytes into a pipe, waiting for room; PIPE_BUF bytes or
+ * fewer at once, never split; with no reader, SIGPIPE */
+static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
+{
+    struct pipe *p = &pipes[o->unit];
+    rx_u8 RX_FAR *buf = (rx_u8 RX_FAR *)RX_MK_FP(PIPE_SEG, o->unit * PIPE_SIZE);
+    const rx_u8 RX_FAR *from = (const rx_u8 RX_FAR *)RX_MK_FP(data, at);
+    rx_u16 done = 0, room, take, k;
+
+    while (done < n) {
+        if (p->readers == 0)
+            return done ? (int)done : VFS_SIGPIPE;
+        room = (rx_u16)(PIPE_SIZE - p->count);
+        if (room < (n <= PIPE_BUF && done == 0 ? n : 1)) {
+            wake(p->reader);
+            if (!pipe_wait(i, &p->writer))
+                return VFS_GONE;
+            continue;
+        }
+        take = n - done < room ? (rx_u16)(n - done) : room;
+        for (k = 0; k < take; k++)
+            buf[(p->head + p->count + k) % PIPE_SIZE] = from[done + k];
+        p->count = (rx_u16)(p->count + take);
+        done = (rx_u16)(done + take);
+        wake(p->reader);
+    }
+    return done;
+}
+
+/* tty_read - keys from the keyboard driver, the lock given up while it
+ * waits for one: a key's ASCII, or an arrow's ANSI sequence (ESC [ A to D);
+ * 0 if the processes have no keys (a program the root builds has them) */
+static int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n)
+{
+    static const rx_u8 arrows[4][2] = { { 0x48, 'A' }, { 0x50, 'B' }, { 0x4D, 'C' },
+                                        { 0x4B, 'D' } };
+    rx_u8 RX_FAR *to = (rx_u8 RX_FAR *)RX_MK_FP(data, at);
+    struct rx_kregs r;
+    rx_u8 seq[3];
+    rx_u16 key, len = 0, k;
+
+    r.ax = KCALL_POLL << 8;             /* (a notification there: KE_EMPTY or KE_OK) */
+    r.dx = OS_KEYS;
+    r.bp = 0;
+    if (n == 0 || rx_kcall(&r) == KE_CAP)
+        return 0;
+    tty_reader = i;
+    lock_give();
+    while (len == 0) {
+        while ((key = key_take()) == 0) {
+            test_reader(TEST_READER_FOREVER);   /* test builds type now */
+            r.ax = KCALL_RECV << 8;
+            r.dx = OS_KEYS;
+            r.bp = 0;
+            rx_kcall(&r);
+            if (!proc_alive(i)) {
+                lock_take(PROC_NOTIFY(i));
+                return VFS_GONE;
+            }
+        }
+        if (key & 0xFF) {
+            seq[len++] = (rx_u8)key;
+        } else {
+            for (k = 0; k < 4 && arrows[k][0] != key >> 8; k++)
+                ;
+            if (k < 4) {
+                seq[len++] = 0x1B;
+                seq[len++] = '[';
+                seq[len++] = arrows[k][1];
+            }
+        }
+    }
+    test_reader(TEST_READER_NONE);
+    lock_take(PROC_NOTIFY(i));
+    if (len > n)
+        len = n;
+    for (k = 0; k < len; k++)
+        to[k] = seq[k];
+    return len;
 }
 
 /* fd_new - a process's lowest free descriptor from `from` on, naming a
@@ -674,6 +888,8 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
         return r.cx;
     case K_FILE:
         return file_io(o, data, at, n, 1, error);
+    case K_PIPE_W:
+        return pipe_write(i, o, data, at, n);
     }
     *error = EBADF;
     return -1;
@@ -695,7 +911,10 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
         return -1;
     }
     switch (o->kind) {
-    case K_TTY:                         /* no keys for a process yet (P11) */
+    case K_TTY:
+        return tty_read(i, data, at, n);
+    case K_PIPE_R:
+        return pipe_read(i, o, data, at, n);
     case K_NULL:
         return 0;
     case K_FILE:
@@ -832,6 +1051,8 @@ static void stat_put(rx_u16 data, rx_u16 at, int kind, const rx_u8 *entry, rx_u1
         mode = S_IFREG | 0555;
     else if (kind == K_NULL || kind == K_TTY || kind == K_LPT)
         mode = S_IFCHR | 0666;
+    else if (kind == K_PIPE_R || kind == K_PIPE_W)
+        mode = S_IFIFO | 0600;
     if (entry && (kind == K_FILE || kind == K_DIR))
         time = dos_seconds(w16(entry + DIR_DATE), w16(entry + DIR_TIME));
     w[ST_MODE / 2] = mode;
@@ -1137,7 +1358,8 @@ static int px_lseek(int i, struct rx_kregs *r, int *error, rx_u16 *high)
         *error = EBADF;
         return -1;
     }
-    if (o->kind == K_TTY || o->kind == K_NULL || o->kind == K_LPT) {
+    if (o->kind == K_TTY || o->kind == K_NULL || o->kind == K_LPT || o->kind == K_PIPE_R
+            || o->kind == K_PIPE_W) {
         *error = ESPIPE;
         return -1;
     }
@@ -1280,7 +1502,7 @@ int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
 {
     int result = call_files(i, data, r, error, si_out);
 
-    if (cache_flush_meta() && result >= 0) {
+    if (result >= 0 && cache_flush_meta()) {
         *error = EIO;
         return -1;
     }
@@ -1373,6 +1595,8 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         return 0;
     case PX_GETDENTS:
         return px_getdents(i, data, r->bx, r->di, r->cx, error);
+    case PX_PIPE:
+        return px_pipe(i, error, si_out);
     case PX_FSYNC:
         if (!(o = ofd_of(i, r->bx))) {
             *error = EBADF;

@@ -158,12 +158,16 @@ $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
 
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)
-Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) proc=$(C_B)/tests/posix/proc.$(OBJ) \
-    child=$(C_B)/tests/posix/child.$(OBJ) files=$(C_B)/tests/posix/files.$(OBJ) \
-    execs=$(C_B)/tests/posix/exec.$(OBJ)
+# The tests' programs (tests/posix) only in the builds of those tests
+# (TEST_POSIX_*), so that /z and the image stay small (64 KB at most)
+Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(OBJ) \
+    files=$(C_B)/tests/posix/files.$(OBJ) execs=$(C_B)/tests/posix/exec.$(OBJ) \
+    pipes=$(C_B)/tests/posix/pipe.$(OBJ) keys=$(C_B)/tests/posix/keys.$(OBJ)
+WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
+Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
 # install: lines put them on a run's drive C
-DISK_PROGRAMS := codes=$(C_B)/tests/posix/codes.$(OBJ)
+DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ))
 DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p))).rx)
 image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))

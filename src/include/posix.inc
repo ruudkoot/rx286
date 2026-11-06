@@ -45,7 +45,8 @@ PX_GETCWD           equ 25      ; DI the room, CX its bytes
 PX_GETDENTS         equ 26      ; BX a directory's descriptor, DI the room, CX its bytes -> the
                                 ;    bytes of whole DE_SIZE records written (0: the end)
 PX_FSYNC            equ 27      ; BX a descriptor: its file's data and entry on the disk
-PX_CALLS            equ 28
+PX_PIPE             equ 28      ; -> the read end's descriptor, and SI the write end's
+PX_CALLS            equ 29
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
@@ -76,6 +77,8 @@ ERANGE              equ 34
 ENAMETOOLONG        equ 36
 ENOSYS              equ 38
 ENOTEMPTY           equ 39
+EPIPE               equ 32
+PIPE_BUF            equ 512     ; a pipe's write of this many bytes or fewer is never split
 
 ; The signals, as their default actions end a process (signal.h; P10 adds
 ; the handlers)
@@ -124,6 +127,7 @@ ST_BYTES            equ 16
 S_IFMT              equ 0xF000
 S_IFDIR             equ 0x4000
 S_IFCHR             equ 0x2000
+S_IFIFO             equ 0x1000
 S_IFREG             equ 0x8000
 ; A directory's records, as PX_GETDENTS gives them (dirent.h)
 DE_INO              equ 0       ; word

@@ -51,6 +51,7 @@ typedef const rx_u8 RX_FAR *entry_ptr;
 #define ENTRY_W(e, field) (*(const rx_u16 RX_FAR *)((e) + (field)))
 
 static const char msg_ctrl_break[] = "rx286: Ctrl+Break: the program starts again\n";
+static const char msg_interrupt[] = "rx286: Ctrl+Break: SIGINT\n";
 static const char vector_names[] =
     "#DE #DB NMI #BP #OF #BR #UD #NM #DF #MP #TS #NP #SS #GP #14 #15 "
     "#MF #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 ";
@@ -135,17 +136,22 @@ static void keys_dropped(struct session *s)
  * which never gets a key, says nothing: its waits would hide the reader's */
 static void reader(struct session *s, int how)
 {
+    if (foreground(s))
+        test_reader(how);
+}
+
+/* test_reader - test builds: tell the kernel's typing whether a key is
+ * awaited, by the foreground program or a process (server.h) */
+void test_reader(int how)
+{
 #ifdef WITH_TEST_HOOKS
     struct rx_kregs r;
 
-    if (!foreground(s))
-        return;
     r.ax = (KCALL_TEST << 8) | TEST_READER;
     r.bx = (rx_u16)how;
     r.bp = 0;
     rx_kcall(&r);
 #else
-    (void)s;
     (void)how;
 #endif
 }
@@ -179,8 +185,8 @@ static void tick(struct session *s)
 }
 
 /* key_take - the next key from the keyboard driver's ring (AL ASCII, AH
- * scancode), or 0 */
-static rx_u16 key_take(void)
+ * scancode), or 0 (server.h) */
+rx_u16 key_take(void)
 {
     struct rx_kregs r;
 
@@ -690,7 +696,8 @@ static void forward(struct session *s, int function)
 
 /* control - the control thread: Ctrl+Break, which the keyboard driver
  * signals, ends a sound and restarts the foreground program (and its thread
- * here with it) */
+ * here with it); with no such program, the processes the terminal's reader
+ * runs get SIGINT (os-server.md P9; process groups come with P11) */
 static void control(void)
 {
     struct rx_kregs r;
@@ -701,14 +708,24 @@ static void control(void)
         r.bp = 0;
         if (rx_kcall(&r) || !(r.bx & CONTROL_BREAK))
             continue;
-        rx_log(msg_ctrl_break, sizeof msg_ctrl_break - 1);     /* the log */
-        console(OS_DATA, (rx_u16)(unsigned)msg_ctrl_break,     /* and the screen */
-                sizeof msg_ctrl_break - 1, CON_MAIN, 0);
         call(OS_SERVICE(SERVICE_KEYBOARD), DRV_KBD_CLEAR, 0, 0, 0, 0, 0, 0);
-        r.ax = (KCALL_THREAD << 8) | THREAD_RESTART;
-        r.dx = OS_FOREGROUND;
+        r.ax = (KCALL_THREAD << 8) | THREAD_INFO;  /* a program the root builds: */
+        r.dx = OS_FOREGROUND;                       /* restarted */
         r.bp = 0;
-        rx_kcall(&r);
+        if (rx_kcall(&r) == 0) {
+            rx_log(msg_ctrl_break, sizeof msg_ctrl_break - 1);     /* the log */
+            console(OS_DATA, (rx_u16)(unsigned)msg_ctrl_break,     /* and the screen */
+                    sizeof msg_ctrl_break - 1, CON_MAIN, 0);
+            r.ax = (KCALL_THREAD << 8) | THREAD_RESTART;
+            r.dx = OS_FOREGROUND;
+            r.bp = 0;
+            rx_kcall(&r);
+        } else {
+            rx_log(msg_interrupt, sizeof msg_interrupt - 1);
+            console(OS_DATA, (rx_u16)(unsigned)msg_interrupt, sizeof msg_interrupt - 1,
+                    CON_MAIN, 0);
+            proc_interrupt();
+        }
         r.ax = KCALL_SIGNAL << 8;       /* a sound of its ends at once */
         r.dx = OS_SOUND_STOP;
         r.bp = 0;

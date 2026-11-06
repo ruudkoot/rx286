@@ -108,12 +108,29 @@ its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short) |
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end. libc's `opendir` and `readdir` read through it (`dirent.h`) |
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk |
+| `PX_PIPE` | | a pipe (P9): its read end's descriptor, and its write end's in SI |
+
+A pipe holds 1 KB, in a segment of the server's; eight may be open at
+once. A read of an empty pipe waits, in the reader's server thread, until a
+writer's thread signals it, and returns 0 once no writer is left; a write
+waits for room, and one of `PIPE_BUF` (512) bytes or fewer is never split
+among others. A write with no reader left ends the writer with `SIGPIPE`,
+its default action (handlers come with P10), or is `EPIPE` once some of
+it went. `fstat` says `S_IFIFO`.
+
+The terminal's keys (P9): when no program the root builds has them (an
+image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
+signals a notification of the processes' (`OS_SLOT_KEYS`), and a read of
+`/dev/tty` waits for a key, the lock given up: a key's ASCII, an arrow as
+ESC [ A to D. The terminal is raw until P11's line discipline. Ctrl+Break
+gives the children of the terminal's last reader `SIGINT`, whose default
+action ends them (process groups come with P11).
 
 The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 `EMFILE` (no descriptor left), `ENOSPC`, `ESPIPE`, `EROFS` (`/`, `/z`, a
 diskette protected), `EXDEV`, `EEXIST`, `EBUSY`, `EACCES` (a read-only
 file), `ERANGE`, `ENAMETOOLONG` (past 8.3, or past `PX_PATH_MAX`),
-`ENOTEMPTY`.
+`ENOTEMPTY`, `EPIPE`.
 
 The volumes are read and written through a cache of 32 sectors in a
 segment of the server's (`src/os/cache.c`, `src/os/vol.c`): the FAT, in

@@ -52,7 +52,9 @@ program's thread's notification whenever the keyboard sent it something
 | 160 | the root's fault endpoint, badged `ROOT_BADGE_OS` (`OS_SLOT_ROOT`) |
 | 161 | `/z`, the archive of programs, read-only (`OS_SLOT_ARCHIVE`; *docs/processes.md*) |
 | 168-172 | exec's new image, before it takes the old one's slots, and a load, while code is read into it |
+| 162 | the processes' keys' notification, when no program the root builds has the keys (`OS_SLOT_KEYS`) |
 | 173 | the files' cache, 32 sectors (*docs/processes.md*, *Files*) |
+| 174 | the pipes' buffers, eight of 1 KB |
 | 176 + 8i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it and that thread's notification (`PROC_SLOT0`) |
 
 Its space has 256 slots.

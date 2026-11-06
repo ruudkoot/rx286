@@ -61,7 +61,7 @@ it into features:
 | `boot-loader.bin` | sectors 1-3 |
 | `kernel.bin` | the kernel: the boot image's first part |
 | `user.bin`, the drivers' | the assembled modules: the program, the drivers |
-| `root.rx`, `os.rx`, `clock.rx`, `counter.rx` | the C modules, rx286's executables (*docs/c.md*): the root, the OS server, the clock, the counter; `user.rx` for a C test program (`PROGRAM=services`) |
+| `root.rx`, `os.rx`, `clock.rx`, `counter.rx` | the C modules, rx286's executables (*docs/c.md*): the root, the OS server, the clock, the counter; `user.rx` for a C test program (`PROGRAM=services`); with `PROGRAM=none` no program module at all, and the processes have the keys |
 | `inc/`, `c/` | the C headers made from the include files; the C's objects, libraries, maps and disassemblies |
 | `z-init.rx`, `z-proc.rx`, `z-child.rx`, ..., `z.arc` | the programs of `/z`, and `/z` itself, their archive (`tools/mkarchive`; *docs/processes.md*); `z-codes.rx`, a program for the disks alone (`DISK_PROGRAMS`), which a test installs; `make run` installs them all in C's `/BIN` (`tools/install-programs`) |
 | `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules, `/z` the last (*docs/memory-map.md*) |

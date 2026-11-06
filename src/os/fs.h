@@ -79,6 +79,14 @@ void vfs_spawned(int i, int parent);
 void vfs_forked(int child, int parent);
 void vfs_exec(int i);
 void vfs_exit(int i);
+#define VFS_GONE (-2)                   /* vfs_call: the process ended as it waited */
+#define VFS_SIGPIPE (-3)                /*    a write to a pipe with no reader: SIGPIPE */
+
+int pipes_init(void);
+/* vfs_tty_reader - the entry of the process that last read the terminal, or
+ * -1 */
+int vfs_tty_reader(void);
+
 /* vfs_call - a file call (PX_WRITE, PX_READ, PX_OPEN to PX_FSYNC): its
  * result, or -1 and the error; SI out in *si_out. `give_up` is 1 if the call
  * may give the lock up while it waits for the console */

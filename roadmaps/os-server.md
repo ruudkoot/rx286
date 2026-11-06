@@ -127,7 +127,7 @@ What it rests on:
 | P6 | Processes: fork, exec, exit, wait | done (2026-11-06, branch `os-server`) |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
-| P9 | Pipes and the shell in C | not started |
+| P9 | Pipes and the shell in C | step 1 of 3 done (2026-11-06, branch `os-server`) |
 | P10 | Signals | not started |
 | P11 | Terminals, the eight virtual terminals, job control | not started |
 | P12 | The commands and the devices | not started |
@@ -2269,6 +2269,16 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - `ls c:/docs | wc -l > c:/n.txt` works, and `cat c:/n.txt` shows it;
   - the rewritten suites pass on all three emulators.
 * **Decisions:** D13, D14.
+* **Step 1 done (2026-11-06): pipes, and the terminal's keys for processes.**
+  - **Pipes:** `pipe` (`PX_PIPE`); eight of 1 KB in a segment of the server's; a read of an
+    empty pipe and a write to a full one wait in the server thread, which the other end's
+    signals; `PIPE_BUF` (512) bytes never split; `SIGPIPE`'s default action, or `EPIPE`
+    after a part (*docs/processes.md*). `tests/posix/pipe` on Bochs and MAME.
+  - **Keys:** with no program the root builds having them (`PROGRAM=none`, a new build), the
+    root gives the keyboard driver and the server a notification of the processes'
+    (`OS_SLOT_KEYS`), and `/dev/tty` reads keys, raw: an arrow as ESC [ A to D. Ctrl+Break
+    gives the children of the terminal's last reader `SIGINT` (process groups come with
+    P11). `tests/posix/keys` on all three emulators.
 
 ### P10. Signals (M, about 1,500)
 

@@ -210,7 +210,8 @@ it alone. `src/include/os.inc` holds the interface:
   (roadmap os-server.md P6; *docs/processes.md*). In `TEST_SERVICES` builds
   a test program makes them too, through a copy badged `ROOT_BADGE_TEST`.
   The server holds `/z`, the archive of programs, in its slot
-  `OS_SLOT_ARCHIVE`.
+  `OS_SLOT_ARCHIVE`, and when no program the root builds has the keys, the
+  processes' keys' notification in `OS_SLOT_KEYS` (*docs/processes.md*).
 - **What has no system calls:** the root, the OS server and the drivers,
   which are not the OS server's clients; and threads a program makes,
   whose spaces hold no endpoint to the OS server (the IPC test's workers).

@@ -63,9 +63,11 @@ program_main_keys := tests/programs/keys.asm
 program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
 program_main_services := tests/programs/services.c
+# PROGRAM=none: no program the root builds; the processes have the keys (P9)
+program_main_none := none
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The program's module: assembled, or a C program linked (c.mk)
-PROGRAM_BIN := $(if $(filter %.c,$(PROGRAM_MAIN)),$(B)/user.rx,$(B)/user.bin)
+PROGRAM_BIN := $(if $(filter none,$(PROGRAM)),,$(if $(filter %.c,$(PROGRAM_MAIN)),$(B)/user.rx,$(B)/user.bin))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
 # timings stay their own. Its priority is below the program's (3), or as a
@@ -94,7 +96,7 @@ MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=128 \
     fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \
     serial=$(B)/serial.bin:1:7:driver:irq=3:service=7 sound=$(B)/sound.bin:1:7:driver:service=8 \
     rtc=$(B)/rtc.bin:1:7:driver:service=9 \
-    program=$(PROGRAM_BIN):$(PROGRAM_RING) \
+    $(if $(PROGRAM_BIN),program=$(PROGRAM_BIN):$(PROGRAM_RING)) \
     $(if $(WITH_CLOCK),clock=$(B)/clock.rx:3:4) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
     z=$(B)/z.arc:3:0:archive

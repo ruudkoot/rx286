@@ -146,6 +146,19 @@ int fsync(int fd)
     return px(PX_FSYNC, (rx_u16)fd, 0, 0, 0, 0) < 0 ? -1 : 0;
 }
 
+/* pipe - PX_PIPE: its read end in fds[0], its write end in fds[1] */
+int pipe(int fds[2])
+{
+    rx_u16 write_end;
+    int read_end = px(PX_PIPE, 0, 0, 0, 0, &write_end);
+
+    if (read_end < 0)
+        return -1;
+    fds[0] = read_end;
+    fds[1] = (int)write_end;
+    return 0;
+}
+
 /* rx_getdents - PX_GETDENTS, for dirent.c */
 int rx_getdents(int fd, void *room, unsigned n)
 {
