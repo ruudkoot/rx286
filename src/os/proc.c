@@ -753,7 +753,8 @@ static int handle(int i, struct rx_kregs *r)
         status = r->si;
         break;
     default:
-        if ((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
+        if (((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
+                || (r->ax & 0xFF) == PX_TCGETATTR || (r->ax & 0xFF) == PX_TCSETATTR)
             result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
         else
             error = ENOSYS;
@@ -821,18 +822,27 @@ void proc_timers(void)
     give();
 }
 
-/* proc_interrupt - Ctrl+Break (server.h): SIGINT's default action to every
- * process but init and its children - the shell, and what it runs, until
- * process groups (P11) */
-void proc_interrupt(void)
+/* proc_terminal - a signal for the terminal's processes: every process but
+ * init and its children - the shell, and what it runs, until process
+ * groups (server.h; lock held) */
+void proc_terminal(int sig)
 {
     int c;
 
-    take(OS_CONTROL);
     for (c = 0; c < PROCS; c++)
         if (procs[c].state == P_ALIVE && procs[c].pid != INIT_PID
                 && procs[c].ppid != INIT_PID)
-            sig_send(c, SIGINT);
+            sig_send(c, sig);
+}
+
+/* proc_interrupt - Ctrl+Break (server.h): the INTR character's SIGINT, and
+ * the terminal's input dropped */
+void proc_interrupt(void)
+{
+    take(OS_CONTROL);
+    proc_terminal(SIGINT);
+    if (tty_keys())
+        tty_flush();
     give();
 }
 
@@ -847,6 +857,8 @@ void proc_boot(void)
     take(OS_CONTROL);
     cache_init();                       /* the files' cache (P7) */
     pipes_init();                       /* the pipes' buffers (P9) */
+    if (tty_keys())                     /* the terminal's thread (P11) */
+        root(ROOT_SERVE, 0, TTY_N * 4, 0, TTY_THREAD, 0);
     if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, -1,
               &error) < 0) {
         char line[40];

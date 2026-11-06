@@ -101,6 +101,25 @@ int proc_alive(int i);
 void proc_interrupt(void);
 #define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */
 #define OS_TIMER SLOT(OS_SLOT_TIMER)    /* the control notification, CONTROL_TIMER (P10) */
+#define TTY_N 27                        /* the tty thread's number (P11) */
+#define TTY_THREAD SLOT(164)            /* its thread and notification (ROOT_SERVE) */
+#define TTY_NOTIFY SLOT(165)
+
+/* The terminal (tty.c; P11). tty_keys - do the processes have the keys?
+ * tty_thread - the tty thread: each key through the line discipline;
+ * tty_read - process i's read (lock held, given up while it waits): the
+ * bytes, 0 at EOF, VFS_GONE or VFS_INTR; tty_getattr, tty_setattr - termios
+ * to and from a process's segment (TCSA*); tty_flush - the input dropped
+ * (lock held) */
+int tty_keys(void);
+void tty_thread(void);
+int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n);
+void tty_getattr(rx_u16 data, rx_u16 at);
+void tty_setattr(rx_u16 data, rx_u16 at, int action);
+void tty_flush(void);
+/* proc_terminal - a signal for the terminal's processes: every process but
+ * init and its children, until process groups (proc.c; lock held) */
+void proc_terminal(int sig);
 /* proc_timers - the processes' timers, at the control thread's every wake:
  * SIGALRM, a sleep's end, the timer armed for the next (proc.c, signal.c) */
 void proc_timers(void);

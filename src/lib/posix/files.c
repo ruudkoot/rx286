@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include "errno.h"
 #include "fcntl.h"
+#include "termios.h"
 #include "unistd.h"
 #include "sys/stat.h"
 #include "rx/rx286.h"
@@ -155,4 +156,26 @@ int pipe(int fds[2])
 int rx_getdents(int fd, void *room, unsigned n)
 {
     return px(PX_GETDENTS, (rx_u16)fd, (rx_u16)n, 0, P(room), 0);
+}
+
+/* tcgetattr - PX_TCGETATTR: a terminal's termios (ENOTTY: no terminal) */
+int tcgetattr(int fd, struct termios *t)
+{
+    return px(PX_TCGETATTR, (rx_u16)fd, 0, 0, P(t), 0) < 0 ? -1 : 0;
+}
+
+/* tcsetattr - PX_TCSETATTR: a terminal's termios set, now (TCSANOW), once
+ * its output is out (TCSADRAIN: it always is), or its input dropped too
+ * (TCSAFLUSH) */
+int tcsetattr(int fd, int when, const struct termios *t)
+{
+    return px(PX_TCSETATTR, (rx_u16)fd, (rx_u16)when, P(t), 0, 0) < 0 ? -1 : 0;
+}
+
+/* isatty - is the descriptor a terminal? */
+int isatty(int fd)
+{
+    struct termios t;
+
+    return tcgetattr(fd, &t) == 0;
 }

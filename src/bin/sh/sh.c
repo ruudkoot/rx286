@@ -21,6 +21,7 @@
 #include <string.h>
 #include "errno.h"
 #include "fcntl.h"
+#include "termios.h"
 #include "unistd.h"
 #include "sys/wait.h"
 
@@ -698,6 +699,17 @@ static int line_read(char *line)
     }
 }
 
+static struct termios cooked, raw;     /* the terminal's, and the editor's */
+static int terminal;                    /* descriptor 0 is one */
+
+/* editing - the terminal raw while a line is edited (1), as it was while
+ * a command runs (0) */
+static void editing(int on)
+{
+    if (terminal)
+        tcsetattr(0, TCSANOW, on ? &raw : &cooked);
+}
+
 /* main - the environment taken in, then line after line */
 int main(int argc, char **argv, char **envp)
 {
@@ -711,8 +723,17 @@ int main(int argc, char **argv, char **envp)
             var_set(*envp, 1);
     if (var_get("HOME", 4))
         chdir(var_get("HOME", 4));      /* (init's: /a, the boot drive) */
+    if (tcgetattr(0, &cooked) == 0) {   /* the editor's: key by key, its own echo */
+        terminal = 1;
+        raw = cooked;
+        raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+    }
     for (;;) {
+        editing(1);
         n = line_read(line);
+        editing(0);
         if (n < 0)
             return status;
         if (n == 0)

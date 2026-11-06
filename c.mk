@@ -161,7 +161,7 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 # The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
 # (start.asm), a thread a program, each on its part of the stacks
 SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ) \
-    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ))
+    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ))
 $(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
 
@@ -175,7 +175,8 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     files=$(C_B)/tests/posix/files.$(OBJ) execs=$(C_B)/tests/posix/exec.$(OBJ) \
     pipes=$(C_B)/tests/posix/pipe.$(OBJ) keys=$(C_B)/tests/posix/keys.$(OBJ) \
     signals=$(C_B)/tests/posix/signal.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
-    sigfpu=$(C_B)/tests/posix/sigfpu.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ)
+    sigfpu=$(C_B)/tests/posix/sigfpu.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
+    tty=$(C_B)/tests/posix/tty.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))

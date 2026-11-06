@@ -29,6 +29,7 @@ int dup(int fd);
 int dup2(int fd, int to);
 int unlink(const char *path);
 int pause(void);
+int isatty(int fd);
 unsigned alarm(unsigned seconds);
 unsigned sleep(unsigned seconds);
 int rmdir(const char *path);

@@ -7,12 +7,30 @@
 
 #include <stdio.h>
 #include "fcntl.h"
+#include "termios.h"
 #include "unistd.h"
 
 #define PAGE 23
 
 static char buf[512];
 static int lines, tty = -1;
+
+/* read_key - a key from the terminal, without Enter or echo */
+static int read_key(char *key)
+{
+    struct termios cooked, raw;
+    int n;
+
+    if (tcgetattr(tty, &cooked) < 0)
+        return (int)read(tty, key, 1);
+    raw = cooked;
+    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 1;
+    tcsetattr(tty, TCSANOW, &raw);
+    n = (int)read(tty, key, 1);
+    tcsetattr(tty, TCSANOW, &cooked);
+    return n;
+}
 
 /* page - a descriptor's bytes, stopping at each page: 0, 1 if quit, or -1
  * on an error, said with the file's name */
@@ -31,7 +49,7 @@ static int page(int fd, const char *name)
             write(1, "--More--", 8);
             if (tty < 0)
                 tty = open("/dev/tty", O_RDONLY);
-            if (read(tty, &key, 1) == 1 && key == 'q') {
+            if (read_key(&key) == 1 && key == 'q') {
                 write(1, "\n", 1);
                 return 1;
             }

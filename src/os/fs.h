@@ -84,9 +84,8 @@ void vfs_exit(int i);
 #define VFS_INTR (-4)                   /*    a wait a signal broke off (sig_interrupt) */
 
 int pipes_init(void);
-/* vfs_tty_reader - the entry of the process that last read the terminal, or
+/* (the terminal's reader is tty.c's: P11)
  * -1 */
-int vfs_tty_reader(void);
 
 /* vfs_call - a file call (PX_WRITE, PX_READ, PX_OPEN to PX_FSYNC): its
  * result, or -1 and the error; SI out in *si_out. `give_up` is 1 if the call

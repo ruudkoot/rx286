@@ -82,20 +82,6 @@ static int thread_call(int i, int op, rx_u16 bx, rx_u16 si, rx_u16 di, struct rx
     return rx_kcall(r);
 }
 
-/* keys_kick - process i woken if it waits for a key (the keys' notification
- * signalled: it looks again) */
-static void keys_kick(int i)
-{
-    struct rx_kregs r;
-
-    if (vfs_tty_reader() != i)
-        return;
-    r.ax = KCALL_SIGNAL << 8;
-    r.dx = OS_KEYS;
-    r.bp = 0;
-    rx_kcall(&r);
-}
-
 /* sig_start - process i's signals as it starts (server.h) */
 void sig_start(int i, int from, int how)
 {
@@ -193,14 +179,12 @@ void sig_send(int t, int sig)
     b = bit(sig);
     if (sig == SIGKILL || (a->handler == PX_SIG_DFL && !ignores(sig) && !(s->blocked & b))) {
         proc_end(t, sig);               /* the default action, at once */
-        keys_kick(t);
         return;
     }
     if (a->handler == PX_SIG_IGN || (a->handler == PX_SIG_DFL && ignores(sig)))
         return;
     s->pending |= b;
     proc_wake(t);                       /* its server thread, waiting or receiving */
-    keys_kick(t);
 }
 
 /* sig_fault - process i's fault as a signal (server.h; lock held) */

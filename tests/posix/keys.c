@@ -9,6 +9,7 @@
  * ============================================================================ */
 
 #include <stdio.h>
+#include "termios.h"
 #include "unistd.h"
 #include "sys/wait.h"
 
@@ -18,7 +19,13 @@ int main(void)
     unsigned char c[8];
     int n, k, status = 0;
     pid_t pid;
+    struct termios t;
 
+    tcgetattr(0, &t);                   /* raw: each key as it comes (P11) */
+    t.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    t.c_iflag &= (tcflag_t)~ICRNL;
+    t.c_cc[VMIN] = 1;
+    tcsetattr(0, TCSANOW, &t);
     for (k = 0; k < 4; k++) {
         n = read(0, c, sizeof c);
         printf("keys: %d bytes:", n);

@@ -95,7 +95,7 @@ struct node {
 
 static struct ofd ofds[OFDS];
 static struct pipe pipes[PIPES];
-static int pipes_ready, tty_reader = -1;
+static int pipes_ready;
 static struct files files_of[PROCS];
 static struct vol vols[DRIVES];
 static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
@@ -538,12 +538,6 @@ int pipes_init(void)
     return 0;
 }
 
-/* vfs_tty_reader - the terminal's last reader (fs.h) */
-int vfs_tty_reader(void)
-{
-    return tty_reader;
-}
-
 /* px_pipe - PX_PIPE: a pipe and its two ends' descriptors */
 static int px_pipe(int i, int *error, rx_u16 *write_fd)
 {
@@ -634,63 +628,6 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
         wake(p->reader);
     }
     return done;
-}
-
-/* tty_read - keys from the keyboard driver, the lock given up while it
- * waits for one: a key's ASCII, or an arrow's ANSI sequence (ESC [ A to D);
- * 0 if the processes have no keys (a program the root builds has them) */
-static int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n)
-{
-    static const rx_u8 arrows[4][2] = { { 0x48, 'A' }, { 0x50, 'B' }, { 0x4D, 'C' },
-                                        { 0x4B, 'D' } };
-    rx_u8 RX_FAR *to = (rx_u8 RX_FAR *)RX_MK_FP(data, at);
-    struct rx_kregs r;
-    rx_u8 seq[3];
-    rx_u16 key, len = 0, k;
-
-    r.ax = KCALL_POLL << 8;             /* (a notification there: KE_EMPTY or KE_OK) */
-    r.dx = OS_KEYS;
-    r.bp = 0;
-    if (n == 0 || rx_kcall(&r) == KE_CAP)
-        return 0;
-    tty_reader = i;
-    lock_give();
-    while (len == 0) {
-        while ((key = key_take()) == 0) {
-            test_reader(TEST_READER_FOREVER);   /* test builds type now */
-            r.ax = KCALL_RECV << 8;
-            r.dx = OS_KEYS;
-            r.bp = 0;
-            rx_kcall(&r);
-            if (!proc_alive(i)) {
-                lock_take(PROC_NOTIFY(i));
-                return VFS_GONE;
-            }
-            if (sig_ready(i)) {         /* a signal's handler is due (P10) */
-                test_reader(TEST_READER_NONE);
-                lock_take(PROC_NOTIFY(i));
-                return VFS_INTR;
-            }
-        }
-        if (key & 0xFF) {
-            seq[len++] = (rx_u8)key;
-        } else {
-            for (k = 0; k < 4 && arrows[k][0] != key >> 8; k++)
-                ;
-            if (k < 4) {
-                seq[len++] = 0x1B;
-                seq[len++] = '[';
-                seq[len++] = arrows[k][1];
-            }
-        }
-    }
-    test_reader(TEST_READER_NONE);
-    lock_take(PROC_NOTIFY(i));
-    if (len > n)
-        len = n;
-    for (k = 0; k < len; k++)
-        to[k] = seq[k];
-    return len;
 }
 
 /* fd_new - a process's lowest free descriptor from `from` on, naming a
@@ -1637,6 +1574,34 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         return px_getdents(i, data, r->bx, r->di, r->cx, error);
     case PX_PIPE:
         return px_pipe(i, error, si_out);
+    case PX_TCGETATTR:
+    case PX_TCSETATTR:                  /* the terminal's termios (P11; tty.c) */
+        if (!(o = ofd_of(i, r->bx))) {
+            *error = EBADF;
+            return -1;
+        }
+        if (o->kind != K_TTY) {
+            *error = ENOTTY;
+            return -1;
+        }
+        if ((r->ax & 0xFF) == PX_TCGETATTR) {
+            if (!in_segment(data, r->di, TC_SIZE)) {
+                *error = EFAULT;
+                return -1;
+            }
+            tty_getattr(data, r->di);
+            return 0;
+        }
+        if (!in_segment(data, r->si, TC_SIZE)) {
+            *error = EFAULT;
+            return -1;
+        }
+        if (r->cx > TCSAFLUSH) {
+            *error = EINVAL;
+            return -1;
+        }
+        tty_setattr(data, r->si, r->cx);
+        return 0;
     case PX_FSYNC:
         if (!(o = ofd_of(i, r->bx))) {
             *error = EBADF;

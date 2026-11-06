@@ -1,0 +1,31 @@
+# The terminal's line discipline (roadmap os-server.md P11): with no program
+# the root builds (program: none), init starts tests/posix/tty.c
+# (TEST_POSIX_TTY), which reads canonical lines, echoed: one, one with a
+# Backspace, one killed with ^U and typed again, EOF alone and after bytes,
+# a line read in two parts; then raw, a key at a time and not echoed; VMIN
+# 0; ^C as a byte without ISIG; a line not echoed; and ^C, SIGINT for a
+# reader.
+program: none
+define: TEST_POSIX_TTY
+keys: hello\nabX\b\nxyz{ctrl-u}ok\n{ctrl-d}ab{ctrl-d}abcd\nx{ctrl-c}secret\n{ctrl-c}
+match: contains
+---
+tty: isatty(0) (1): 1
+tty: a pipe's termios (-1, ENOTTY 1): -1, 1
+tty: ICANON ECHO ISIG ICRNL (1 1 1 1): 1 1 1 1
+tty: type
+hello
+tty: a line: 6 [hello\n]
+tty: ERASE: 3 [ab\n]
+tty: KILL: 3 [ok\n]
+tty: EOF alone: 0 []
+tty: EOF after bytes: 2 [ab]
+tty: a line's first 2: 2 [ab]
+tty: its rest: 3 [cd\n]
+tty: raw, a key: 1 [x]
+tty: raw, VMIN 0, nothing typed: 0 []
+tty: without ISIG, ^C: 1 [^C]
+tty: without echo: 7 [secret\n]
+^C
+tty: a reader at ^C (SIGINT 2): 2
+tty: done

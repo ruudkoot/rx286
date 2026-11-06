@@ -129,7 +129,7 @@ What it rests on:
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
-| P11 | Terminals, the eight virtual terminals, job control | not started |
+| P11 | Terminals, the eight virtual terminals, job control | step 1 of 4 done (2026-11-06, branch `os-server`) |
 | P12 | The commands and the devices | not started |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
@@ -2389,6 +2389,19 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - ^C, ^Z, `fg` and `bg` behave as XCU 2.11 says;
   - a panic test shows its screen while terminal 3 is shown (MAME's snapshot).
 * **Decisions:** D15.
+* **The steps:** (1) the line discipline and `termios`; (2) sessions, process groups and job
+  control; (3) the console driver's pages, cursors and ANSI subset, the EGA's memory, Alt+F1-F8;
+  (4) the eight terminals, a shell on each, the panic on page 0, the runner on any terminal.
+* **Step 1 done (2026-11-06): the line discipline.**
+  - **The tty thread** (`TTY_N`, from `ROOT_SERVE`) takes each key as it comes, so ^C works
+    while nobody reads, and puts it through the discipline (`src/os/tty.c`). A read waits in
+    the reader's server thread, and the tty thread wakes it.
+  - **termios** (`tcgetattr`, `tcsetattr`, `isatty`): `ICANON` with ERASE, KILL, EOF and EOL;
+    `ECHO`, `ECHOE`, `ECHOK`, `ECHONL`; `ISIG` with INTR and QUIT; `ICRNL`; `VMIN`. `VTIME` is
+    not kept. One termios for the terminal until step 4.
+  - **The programs:** the shell edits raw and runs its commands with the terminal as it was;
+    `more` reads its key raw; `tests/posix/keys` asks for raw first.
+  - **The tests:** `tests/posix/tty` on all three emulators.
 
 ### P12. The commands and the devices (M, about 1,500)
 

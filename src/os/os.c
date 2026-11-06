@@ -825,6 +825,8 @@ void os_thread(unsigned n)
 #endif
         control();
     }
+    if (n == TTY_N)
+        tty_thread();
     if (n >= PROC_N0)
         proc_thread(n - PROC_N0);
     s.n = n;

@@ -60,7 +60,10 @@ PX_ALARM            equ 34      ; BX seconds (0: none): SIGALRM then -> the seco
                                 ;    before had left (0: none)
 PX_NANOSLEEP        equ 35      ; CX:SI ticks (TICKS_HZ a second) -> 0; or -1, EINTR, and the
                                 ;    ticks left, SI:DI
-PX_CALLS            equ 36
+; The terminal (P11)
+PX_TCGETATTR        equ 36      ; BX a descriptor, DI TC_SIZE bytes of room: its termios
+PX_TCSETATTR        equ 37      ; BX a descriptor, CX TCSA*, SI the termios
+PX_CALLS            equ 38
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
@@ -92,6 +95,7 @@ ENAMETOOLONG        equ 36
 ENOSYS              equ 38
 ENOTEMPTY           equ 39
 EPIPE               equ 32
+ENOTTY              equ 25
 ERESTART            equ 85      ; never a program's: a call a signal's handler broke off,
                                 ;    which libc makes again (SA_RESTART)
 PIPE_BUF            equ 512     ; a pipe's write of this many bytes or fewer is never split
@@ -183,6 +187,43 @@ DE_INO              equ 0       ; word
 DE_NAME             equ 2       ; NAME.EXT and its zero
 DE_NAME_SIZE        equ 14
 DE_SIZE             equ 16
+; struct termios (termios.h; XBD 11): four words of flags, then NCCS bytes
+TC_IFLAG            equ 0
+TC_OFLAG            equ 2
+TC_CFLAG            equ 4
+TC_LFLAG            equ 6
+TC_CC               equ 8
+NCCS                equ 12
+TC_SIZE             equ 20
+IGNCR               equ 0x0080  ; c_iflag: CR dropped
+ICRNL               equ 0x0100  ;    CR read as LF
+INLCR               equ 0x0040  ;    LF read as CR
+OPOST               equ 0x0001  ; c_oflag: (the console does what is asked)
+ONLCR               equ 0x0004
+CS8                 equ 0x0030  ; c_cflag: (kept, and nothing more)
+CREAD               equ 0x0080
+ISIG                equ 0x0001  ; c_lflag: INTR, QUIT and SUSP are signals
+ICANON              equ 0x0002  ;    a line at a time, edited
+ECHO                equ 0x0008  ;    what is typed echoed
+ECHOE               equ 0x0010  ;    ERASE echoed as BS SP BS
+ECHOK               equ 0x0020  ;    KILL echoed as a new line (without ECHOE)
+ECHONL              equ 0x0040  ;    LF echoed even without ECHO
+NOFLSH              equ 0x0080  ;    the input kept at INTR and QUIT
+TOSTOP              equ 0x0100  ;    a background write gets SIGTTOU
+IEXTEN              equ 0x8000
+VEOF                equ 0       ; c_cc's places
+VEOL                equ 1
+VERASE              equ 2
+VINTR               equ 3
+VKILL               equ 4
+VMIN                equ 5
+VQUIT               equ 6
+VSUSP               equ 7
+VTIME               equ 8       ;    (not kept: 0)
+TCSANOW             equ 0       ; tcsetattr's when
+TCSADRAIN           equ 1
+TCSAFLUSH           equ 2
+MAX_CANON           equ 255     ; a line's bytes
 PX_ARG_MAX          equ 4096    ; ARG_MAX: argv's and environ's bytes, and their pointers
 PX_PATH_MAX         equ 80      ; a path's bytes, its zero too: DOS's 64 behind "/b" fit
 

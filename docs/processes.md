@@ -202,12 +202,37 @@ whose default action ends it; caught, ignored or blocked, the write is
 
 The terminal's keys (P9): when no program the root builds has them (an
 image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
-signals a notification of the processes' (`OS_SLOT_KEYS`), and a read of
-`/dev/tty` waits for a key, the lock given up: a key's ASCII, an arrow as
-ESC [ A to D. The terminal is raw until P11's line discipline. Ctrl+Break
-gives every process but init and init's children `SIGINT`, whose default
-action ends them: what the shell runs, and not the shell (process groups
-come with P11).
+signals a notification of the processes' (`OS_SLOT_KEYS`), and `/dev/tty`
+has them, through its line discipline (*The terminal* below).
+
+## The terminal
+
+`/dev/tty` has a line discipline and `termios` (roadmap os-server.md P11;
+XBD 11; `src/os/tty.c`). The server's tty thread (`TTY_N`, its slots 164
+and 165 from `ROOT_SERVE`) takes each key as the keyboard driver signals
+it, and puts it through the discipline. An arrow, which has no ASCII, is
+ESC [ A to D. The queue holds `MAX_CANON` (255) bytes. A process's read
+waits in its server thread until there is enough, which the tty thread
+wakes it for; a signal's handler breaks the wait off (`EINTR`).
+
+| `struct termios` | What rx286 does with it |
+|---|---|
+| `TC_IFLAG` (0) | `ICRNL` (Enter's CR read as LF), `INLCR`, `IGNCR` |
+| `TC_OFLAG` (2) | `OPOST`, `ONLCR`: kept; the console takes LF as a new line anyway |
+| `TC_CFLAG` (4) | `CS8`, `CREAD`: kept, and nothing more |
+| `TC_LFLAG` (6) | `ISIG`: the INTR (^C) and QUIT (^\) characters are `SIGINT` and `SIGQUIT`, echoed, the input dropped unless `NOFLSH`; `ICANON`: a line at a time, edited with ERASE (Backspace) and KILL (^U), ended by LF, EOL or EOF (^D), which is not read; `ECHO`, `ECHOE` (ERASE as BS SP BS), `ECHOK`, `ECHONL`; `TOSTOP`, `IEXTEN` kept |
+| `TC_CC` (8) | `NCCS` (12) bytes: `VEOF`, `VEOL`, `VERASE`, `VINTR`, `VKILL`, `VMIN`, `VQUIT`, `VSUSP`, `VTIME`; 0 disables one. Without `ICANON` a read waits for `VMIN` bytes (0: none); `VTIME` is not kept |
+
+`TC_SIZE` bytes in all. `PX_TCGETATTR` (BX the descriptor, DI the room)
+reads it, `PX_TCSETATTR` (BX, CX `TCSANOW`, `TCSADRAIN` or `TCSAFLUSH`,
+which drops the input; SI the termios) sets it: `tcgetattr`, `tcsetattr`
+and `isatty` (`termios.h`, `unistd.h`); `ENOTTY` for a descriptor not the
+terminal's. The defaults: `ICRNL`, `OPOST` and `ONLCR`, `ISIG`, `ICANON`,
+`ECHO`, `ECHOE`, `ECHOK` and `IEXTEN`, `VMIN` 1. What is echoed goes to
+the screen and the log, as a process's writes do. Ctrl+Break is INTR. The
+terminal's processes, for INTR and QUIT, are every process but init and
+init's children: what the shell runs, and not the shell, until process
+groups.
 
 The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 `EMFILE` (no descriptor left), `ENOSPC`, `ESPIPE`, `EROFS` (`/`, `/z`, a
@@ -281,8 +306,10 @@ until P9's last step. In `TEST_POSIX_*` builds init starts a test of
 ## The shell
 
 The shell (roadmap os-server.md P9, D14; `src/bin/sh/sh.c`) is a process
-in C, POSIX-like. It reads a line from `/dev/tty`, raw: it echoes what is
-typed, takes Backspace, and recalls its last 8 lines on Up and Down. Its
+in C, POSIX-like. It reads a line from `/dev/tty`, raw (`ICANON` and
+`ECHO` off while it edits, the terminal as it was while a command runs):
+it echoes what is typed, takes Backspace, and recalls its last 8 lines on
+Up and Down. Its
 prompt is the current directory and `$`. It starts in `HOME`, with the
 environment init gave it (`PATH=/z:/c/bin`, `HOME=/a`).
 
@@ -308,7 +335,7 @@ The commands are programs of `/z`, in C (`src/bin/`):
 | `rm`, `mkdir`, `rmdir` | each path |
 | `wc` | lines, words and bytes, of each file or descriptor 0; `-l`, `-w`, `-c` for one |
 | `lp` | each file, or descriptor 0, to `/dev/lpt1`; `-d lpt2` to the other |
-| `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, `q` to stop |
+| `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, without Enter, `q` to stop |
 
 A command's error is the path and `strerror`'s text, on descriptor 2
 ("c:/docs: is a directory"), and status 1; a read's error too.
