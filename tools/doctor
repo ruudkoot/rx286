@@ -47,6 +47,23 @@ check unicorn   required 2.0     "$(python3 -c 'import unicorn; print(unicorn.__
 check fsck.fat  required 4.2     "$(dpkg-query -W -f='${Version}' dosfstools 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+')" "(dosfstools)"
 check dosbox-x  optional 2024.03 "$(ver dosbox-x -version)" "M9: a 286 core"
 check mame      optional 0.264   "$(ver mame -version)" "M9: the IBM PC/AT"
+check gcc       required 9.0     "$(ver gcc --version)" "the host tests of the C"
+
+# The C compilers (docs/building.md, docs/c.md): Open Watcom v2 for the build,
+# gcc-ia16 for make check-ia16, both built from their repositories.
+WATCOM=${WATCOM:-$HOME/opt/open-watcom}
+IA16=${IA16:-$HOME/opt/gcc-ia16}
+if [ -x "$WATCOM/binl64/wcc" ] && [ -x "$WATCOM/binl64/wlink" ]; then
+    printf '%-12s %-12s %s\n' "open watcom" OK "$WATCOM ($("$WATCOM/binl64/wcc" 2>&1 | grep -o -E 'Version [0-9.]+ [a-z]* *[A-Z][a-z]+ +[0-9]+ [0-9]+' | head -n 1))"
+else
+    printf '%-12s %-12s %s\n' "open watcom" MISSING "build it into $WATCOM (docs/building.md)"
+    status=1
+fi
+if [ -x "$IA16/bin/ia16-elf-gcc" ]; then
+    printf '%-12s %-12s %s\n' "gcc-ia16" OK "$IA16 ($("$IA16/bin/ia16-elf-gcc" --version | head -n 1)), for make check-ia16"
+else
+    printf '%-12s %-12s %s\n' "gcc-ia16" "MISSING (optional)" "make check-ia16 needs it in $IA16"
+fi
 
 # Bochs: 2.7.x exactly, since its configuration syntax changes between releases.
 bochs_found=$(dpkg-query -W -f='${Version}' bochs 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+' )

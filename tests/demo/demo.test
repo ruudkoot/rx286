@@ -20,7 +20,7 @@ timeout: 120
 match: contains
 ---
 rx286 shell: type help for the commands
-rx286: clock fault #UD at 0007:{l:entry.fault}
+rx286: clock fault #UD at 0007:{l:rx_ud2}
 status, clock:
 status, counter: idle
 status, clock:
@@ -38,7 +38,7 @@ A:\>kill clock
 A:\>ps
  12 clock    background 4        stopped,
 A:\>start clock
-rx286: clock fault #UD at 0007:{l:entry.fault}
+rx286: clock fault #UD at 0007:{l:rx_ud2}
 status, clock:
 kill program
 Not a background program

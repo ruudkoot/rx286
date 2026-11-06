@@ -16,6 +16,21 @@
 | fsck.fat | 4.2 or later | the image check | `dosfstools` |
 | DOSBox-X | 2024.03 or later | the suites on a 286 core (optional) | `dosbox-x` |
 | MAME | 0.264 or later | the suites on the IBM PC/AT itself (optional) | `mame`, and the IBM 5170 ROMs in `~/mame/roms` |
+| Open Watcom v2 | 558748e (2026-11-05) | the C (*docs/c.md*) | built from its repository (below), in `~/opt/open-watcom` or `WATCOM` |
+| gcc | any | the host tests of the C | `gcc` |
+| gcc-ia16 | 9a55395 (2026-06-12), binutils-ia16 904e46a | `make check-ia16` (optional) | built from its repository (below), in `~/opt/gcc-ia16` or `IA16` |
+
+**The C compilers** are built from their repositories (roadmap
+os-server.md E1):
+- **Open Watcom v2** (about 71 minutes; 320 MB):
+  `git clone https://github.com/open-watcom/open-watcom-v2 ~/src/open-watcom-v2`,
+  then in it `OWGUINOBUILD=1 OWDOCBUILD=0 ./build.sh && ./build.sh rel`, and
+  copy `rel` to `~/opt/open-watcom`.
+- **gcc-ia16** (about 7 minutes; 424 MB): binutils-ia16 and gcc-ia16 from
+  github.com/tkchia, configured for `--target=ia16-elf`, the C compiler
+  alone with libgcc and no newlib (the steps of tkchia's build-ia16, at
+  codeberg.org/tkchia/build-ia16); `make MAKEINFO=true` where texinfo is
+  missing.
 
 Bochs is pinned to 2.7.x because its configuration syntax changes between
 releases. Its Debian build has the internal debugger but no gdb stub; doctor
@@ -45,7 +60,9 @@ it into features:
 | `boot-sector.bin` | sector 0 of the floppy |
 | `boot-loader.bin` | sectors 1-3 |
 | `kernel.bin` | the kernel: the boot image's first part |
-| `root.bin`, `os.bin`, `user.bin`, `counter.bin` | the modules: the root, the OS server, the program, the counter |
+| `root.bin`, `os.bin`, `user.bin`, the drivers' | the assembled modules: the root, the OS server, the program, the drivers |
+| `clock.rx`, `counter.rx` | the C modules: rx286 executables (*docs/c.md*) |
+| `inc/`, `c/` | the C headers made from the include files; the C's objects, libraries, maps and disassemblies |
 | `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules (*docs/memory-map.md*) |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |

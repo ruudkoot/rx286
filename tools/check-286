@@ -4,9 +4,15 @@
 # Finds 386 (and later) instructions in NASM listings, which NASM's `cpu 286`
 # lets through (roadmap E4, E10) and Bochs then runs without a word.
 #
-#   tools/check-286 build/*/*.lst
+#   tools/check-286 build/*/*.lst build/*/c/*/*/*.dis
 #   tools/check-286 --self-test       assembles tools/testdata/slips.asm and
-#                                     checks that exactly its SLIP lines fail
+#                                     checks that exactly its SLIP lines fail,
+#                                     and that the C checks find their slips
+#
+# C's code comes as disassembly (.dis, c.mk; roadmap os-server.md P1): Open
+# Watcom's wdis or gcc-ia16's objdump. There it fails on the same, and on a
+# LOCK prefix (F0h) too: LOCK is #GP at ring 3 on a 286 (os-server.md W4,
+# X10), so no compiler may emit it, though NASM sources may on purpose.
 #
 # It reads listings, not binaries, so data is never taken for code. For each
 # instruction it fails on:
@@ -108,6 +114,41 @@ def check_listing(path):
     return problems
 
 
+WDIS = re.compile(r'^([0-9A-F]{4,8})\s+((?:[0-9A-F]{2} )+)\s*(\S+)')
+OBJDUMP = re.compile(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*(\S+)')
+DATA_MNEMONICS = {'db', 'dw', 'dd', '.byte', '.word', '.long', '(bad)'}
+
+
+def check_disassembly(path):
+    """A C object's disassembly: each instruction's bytes, LOCK refused too."""
+    problems = []
+    for n, raw in enumerate(open(path, encoding='latin-1'), 1):
+        m = WDIS.match(raw) or OBJDUMP.match(raw)
+        if not m or m.group(3).lower() in DATA_MNEMONICS:
+            continue
+        code = instruction_bytes(m.group(2).replace(' ', ''))
+        reason = check_instruction(code)
+        i = 0
+        while not reason and i < len(code) and code[i] in PREFIXES:
+            if code[i] == 0xF0:
+                reason = 'LOCK (#GP at ring 3)'
+            i += 1
+        if reason:
+            problems.append((path, n, m.group(1), reason, raw.strip()))
+    return problems
+
+
+DIS_SELF_TEST = '''\
+0000  55                push            bp
+0001  F0 FF 07          lock inc        word ptr [bx]
+0004  66 50             push            eax
+0006  0F 84 10 00       je              L$1
+000A  DW    0004
+   0:\t55                   \tpush   %bp
+   1:\tf0 ff 07             \tlock incw (%bx)
+'''
+
+
 def self_test():
     here = os.path.dirname(os.path.abspath(__file__))
     src = os.path.join(here, 'testdata', 'slips.asm')
@@ -120,7 +161,17 @@ def self_test():
         print('check-286 self-test FAILED: missed lines %s, wrongly flagged %s'
               % (sorted(wanted - found), sorted(found - wanted)))
         return 1
-    print('check-286 self-test: all %d slips found, nothing else' % len(wanted))
+    with tempfile.TemporaryDirectory() as tmp:
+        dis = os.path.join(tmp, 'slips.dis')
+        with open(dis, 'w') as f:
+            f.write(DIS_SELF_TEST)
+        found = sorted(line for _, line, _, _, _ in check_disassembly(dis))
+    if found != [2, 3, 4, 7]:
+        print('check-286 self-test FAILED: the C checks flagged lines %s, not 2, 3, 4, 7'
+              % found)
+        return 1
+    print('check-286 self-test: all %d slips found, nothing else; the C checks too'
+          % len(wanted))
     return 0
 
 
@@ -129,13 +180,13 @@ def main(args):
         return self_test()
     problems = []
     for path in args:
-        problems += check_listing(path)
+        problems += check_disassembly(path) if path.endswith('.dis') else check_listing(path)
     for path, line, addr, reason, source in problems:
         print('%s:%d: %s at %s: %s' % (path, line, reason, addr, source))
     if problems:
         print('check-286: %d instruction(s) a 286 cannot run' % len(problems))
         return 1
-    print('check-286: %d listing(s), only 286 instructions' % len(args))
+    print('check-286: %d listing(s) and disassemblies, only 286 instructions' % len(args))
     return 0
 
 

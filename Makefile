@@ -14,6 +14,7 @@
 #   make test-286        the suites on DOSBox-X's 286 and MAME's IBM PC/AT
 #   make check           test and test-286, plus check-286, the image checks,
 #                        the reproducibility check, lint and the documents' checks
+#   make check-ia16      the C built with gcc-ia16, and its tests (not in check)
 #   make doctor          the tools and their versions
 #   make sizes           each segment against its room
 #   make clean
@@ -88,8 +89,8 @@ MODULES := root=$(B)/root.bin:2:7 os=$(B)/os.bin:2:5:stack=8192 \
     serial=$(B)/serial.bin:1:6:driver:irq=3:service=7 sound=$(B)/sound.bin:1:6:driver:service=8 \
     rtc=$(B)/rtc.bin:1:6:driver:service=9 \
     program=$(B)/user.bin:$(PROGRAM_RING) \
-    $(if $(WITH_CLOCK),clock=$(B)/clock.bin:3:4) \
-    $(if $(WITH_COUNTER),counter=$(B)/counter.bin:3:$(COUNTER_PRIORITY))
+    $(if $(WITH_CLOCK),clock=$(B)/clock.rx:3:4) \
+    $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY))
 ifeq ($(PROGRAM_MAIN),)
 $(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys or revoke, not '$(PROGRAM)')
 endif
@@ -105,10 +106,11 @@ IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.bin $(B)/os.bin \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
     $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin \
-    $(B)/clock.bin $(B)/counter.bin $(B)/kernel.bin $(B)/image.bin
+    $(B)/clock.rx $(B)/counter.rx $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
-        check-286 check-image check-repro lint check-docs unit doctor sizes clean disks
+        check-286 check-image check-repro lint check-docs unit doctor sizes clean disks \
+        check-ia16
 
 all:
 	$(MAKE) FLAVOUR=release image symbols
@@ -148,13 +150,9 @@ $(B)/boot-loader.bin: src/boot-loader/boot-loader.asm $(LOADER_SRC)
 $(B)/user.bin: $(PROGRAM_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
 
-# The clock, a background program beside the shell (roadmap l4.md L11).
-$(B)/clock.bin: src/userland/clock.asm $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
-	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
-
-# The counter, which runs beside the shell (roadmap l4.md L2).
-$(B)/counter.bin: src/userland/counter.asm $(COMMON_SRC)
-	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
+# The C programs and libraries (roadmap os-server.md P1): the clock, beside
+# the shell (l4.md L11), and the counter (l4.md L2), among them.
+include c.mk
 
 # The root task, the first module (roadmap l4.md L5).
 $(B)/root.bin: src/root/root.asm $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
@@ -175,7 +173,7 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
 $(B)/image.bin: $(B)/kernel.bin $(B)/root.bin $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
     $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
-    $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin $(B)/clock.bin $(B)/counter.bin tools/mkimage \
+    $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin $(B)/clock.rx $(B)/counter.rx tools/mkimage \
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 
@@ -244,7 +242,7 @@ unit:
 # have run (make check runs them first).
 check-286: all test-build
 	$(PYTHON) tools/check-286 --self-test
-	$(PYTHON) tools/check-286 $$(ls build/*/*.lst build/tests*/*/*.lst 2>/dev/null)
+	$(PYTHON) tools/check-286 $$(find build -name '*.lst' -o -name '*.dis' | sort)
 
 check-image: all
 	$(PYTHON) tools/check-image build/release
@@ -265,6 +263,17 @@ check-docs:
 
 check: unit test test-286 check-286 check-image check-repro lint check-docs
 	@echo "make check: all checks passed"
+
+# The C built with gcc-ia16 too (roadmap os-server.md D1, D22): the tests
+# whose images carry C programs, on Bochs; not part of make check, since it
+# needs gcc-ia16 in $(IA16) (docs/building.md).
+IA16_TESTS := tests/demo/demo.test tests/root/fault.test $(wildcard tests/threads/*.test) \
+    tests/kernel/stretch-kill.test
+check-ia16: disks
+	$(PYTHON) tools/run-test --cc ia16 $(IA16_TESTS)
+	$(MAKE) FLAVOUR=release B=build/release-ia16 CC_KIND=ia16 image
+	$(PYTHON) tools/check-286 $$(find build/tests-ia16 build/release-ia16 -name '*.dis' | sort)
+	@echo "make check-ia16: the C built with gcc-ia16 passed"
 
 doctor:
 	@tools/doctor

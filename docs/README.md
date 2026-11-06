@@ -22,6 +22,8 @@
 | [debugging.md](debugging.md) | Bochs' debugger, symbols, logs, recipes |
 | [emulators.md](emulators.md) | Bochs, DOSBox-X and MAME, and how they differ from the AT |
 | [style.md](style.md) | how the sources are written |
+| [c.md](c.md) | C: the compilers, the conventions with NASM, the libraries, the executable format |
 
 The plans behind all of it are `roadmaps/rx286.md`, `roadmaps/storage.md`,
-`roadmaps/devices.md`, `roadmaps/l4.md` and `roadmaps/realtime.md`.
+`roadmaps/devices.md`, `roadmaps/l4.md`, `roadmaps/realtime.md` and
+`roadmaps/os-server.md`.

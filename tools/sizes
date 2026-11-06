@@ -25,8 +25,11 @@ ROOMS = [
     ('root', 'udata', 'root: data', L['UDATA_ROOM']),
     ('user', 'utext', 'program: code', L['UTEXT_ROOM']),
     ('user', 'udata', 'program: data', L['UDATA_ROOM']),
-    ('counter', 'ctext', 'counter: code', L['CTEXT_ROOM']),
-    ('counter', 'cdata', 'counter: data', L['CDATA_ROOM']),
+    # C modules (tools/mkexe's maps; roadmap os-server.md P1): a segment each, at most 64 KB
+    ('clock', 'rxtext', 'clock (C): code', 0x10000),
+    ('clock', 'rxdata', 'clock (C): data', 0x10000),
+    ('counter', 'rxtext', 'counter (C): code', 0x10000),
+    ('counter', 'rxdata', 'counter (C): data', 0x10000),
 ]
 
 

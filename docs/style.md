@@ -1,7 +1,7 @@
 # Style
 
-The sources are NASM assembly for the 80286. `tools/lint` checks the rules
-marked (lint).
+The sources are NASM assembly for the 80286, and C (*docs/c.md*; roadmap
+os-server.md P1). `tools/lint` checks the rules marked (lint).
 
 ## Files
 
@@ -61,6 +61,33 @@ says so in Out.
 - Say why, and what the hardware wants; the instruction already says what.
 - Cite the source for a hardware fact: "(IBM 1-42)", "(Intel 9.6.2)".
 - Every number that is not a named constant gets a comment.
+
+## C
+
+- **The banner (lint):** every `.c` and `.h` starts with:
+
+  ```c
+  /* ============================================================================
+   * rx286 - src/userland/clock.c
+   * One line: what the file is.
+   *
+   * A paragraph: what it does, what it relies on, what it leaves to others.
+   * ============================================================================ */
+  ```
+
+- **A comment before every function (lint):** `/* name - what it does */`,
+  saying what it returns and what it needs where that is not plain.
+- **Nothing compiler-specific outside `src/include/rx/compiler.h` (lint):**
+  no `__far`, `__declspec`, `__attribute__`, `#pragma aux`, `asm`.
+- **Widths from `compiler.h`:** `rx_u16`, `rx_u32` (or `<stdint.h>`'s), never
+  `long` for 32 bits: `int` is 16 bits on the 286 and 32 on the host.
+- **No assembly in C:** a routine C cannot write is NASM, by the conventions
+  of `src/include/cabi.inc` (*docs/c.md*), with the header assembly routines
+  have.
+- Lower-case names, a module's prefix on what it exports (`rx_ticks`,
+  `os_write`); constants from the include files, by `tools/inc2h`.
+- The layout rules of assembly: no tabs, no trailing spaces, at most 100
+  characters a line (lint).
 
 ## Builds
 

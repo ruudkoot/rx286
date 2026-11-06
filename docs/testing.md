@@ -12,8 +12,8 @@ relies on, and NASM refuses segments that overlap.
 
 ## 2. On the binaries and the image
 
-- `tools/check-286` reads every listing and fails on an instruction a 286
-  cannot run: a 66h, 67h, 64h or 65h prefix anywhere among an instruction's
+- `tools/check-286` reads every listing, and every C object's disassembly,
+  and fails on an instruction a 286 cannot run (in C, a `LOCK` too): a 66h, 67h, 64h or 65h prefix anywhere among an instruction's
   prefixes, FS or GS, a 0Fh opcode outside the 286's, a 387-only opcode.
   NASM's `cpu 286` misses some of these (roadmap E4, E10). Its own test,
   `--self-test`, assembles `tools/testdata/slips.asm` and must flag exactly
@@ -29,7 +29,11 @@ Routines that take registers and memory and touch no hardware (the scancode
 table, number formatting, the shell's parser, FAT12 decoding, FAT names and
 time stamps, retype's placement and a selector's slot) are assembled
 alone and run in Unicorn's 16-bit mode by pytest (`tests/unit/`, `make
-unit`). Unicorn is not a 286, so only pure code is tested this way.
+unit`). Unicorn is not a 286, so only pure code is tested this way. The C
+is tested there too (roadmap os-server.md P1, *docs/c.md*): the libc built
+by the host's gcc with the sanitizers (`test_libc.py`), and the 32-bit
+helpers the compilers call, in Unicorn against Python's arithmetic
+(`test_helpers.py`).
 
 ## 4. Boot tests in Bochs
 
@@ -118,6 +122,10 @@ The suites:
 | `tests/attack` | 82 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3, with random system calls through the stub and random kernel calls on `INT 31h` |
 | `tests/unit` | the host tests (layer 3) |
+
+`make check-ia16` (not in `make check`) runs the suites whose images carry C
+programs with the C built by gcc-ia16 instead of Open Watcom, and check-286
+over its objects (*docs/c.md*).
 
 ## 5. The attack suite and the fuzzer
 

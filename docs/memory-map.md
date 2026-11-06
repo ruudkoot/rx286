@@ -100,13 +100,12 @@ length, whose first module is not the root, or whose table places a module
 outside it.
 
 **A module** is a program assembled on its own (the root, the OS server, the shell or a
-test program, the counter), with its code at `USER_TEXT_START` and its data
+test program), with its code at `USER_TEXT_START` and its data
 at `USER_DATA_START` of its binary, in rooms of `UTEXT_ROOM` and
-`UDATA_ROOM`; it runs with a stack of `USTACK_SIZE`. The counter
-(`src/userland/counter.asm`) has smaller rooms: `CTEXT_ROOM` and
-`CDATA_ROOM` (its data at `COUNTER_DATA_START`), and a stack of
-`CSTACK_SIZE`. `tools/mkimage` takes each module's code whole and its data
-without the zeros it ends with.
+`UDATA_ROOM`; it runs with a stack of `USTACK_SIZE`. A C module (the clock,
+the counter; roadmap os-server.md P1) is an rx286 executable, whose header
+gives its rooms (*docs/c.md*). `tools/mkimage` takes each module's code
+whole and its data without the zeros it ends with.
 
 **At its start** the kernel builds the root from the first module: its
 code is a segment over the module's code in the image, where it stays; its

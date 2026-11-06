@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 # ============================================================================
 # rx286 - tools/lint
-# Holds the assembly sources to docs/style.md.
+# Holds the sources to docs/style.md: the assembly, and the C (roadmap
+# os-server.md P1, D22).
 #
-#   tools/lint                every source of src/ and tests/programs/
+#   tools/lint                every source of src/, tests/programs/, tests/unit/
 #   tools/lint FILE...
 #
-# Rules:
+# Rules for C (.c, .h):
+#   header    the file starts with the banner and " * rx286 - <its path>"
+#   function  a function's definition follows a comment
+#   compiler  no compiler's own word (__far, __declspec, __attribute__,
+#             #pragma aux, asm, ...) outside src/include/rx/compiler.h
+#   layout    as for assembly
+# Rules for assembly:
 #   header    the file starts with the banner and "; rx286 - <its path>"
 #   cpu       a file that includes build.inc (a top-level source) says `cpu 286`
 #   routine   in code, every label that is not local (.x) follows a routine
@@ -26,6 +33,10 @@ import rxlib
 
 ROOT = rxlib.ROOT
 CODE_SECTIONS = {'entry', 'ktext', 'utext', '.text'}
+COMPILER_H = os.path.join(ROOT, 'src', 'include', 'rx', 'compiler.h')
+COMPILER_WORDS = re.compile(r'\b(__far|__near|__huge|__declspec|__attribute__|__watcall|__cdecl|'
+                            r'__interrupt|__pascal|_asm|__asm__|__asm|asm)\b|#\s*pragma\s+aux')
+C_FUNCTION = re.compile(r'^[A-Za-z_][\w \t*]*\b([A-Za-z_]\w*)\s*\([^;]*\)\s*$')
 
 
 def data_includes():
@@ -67,7 +78,46 @@ def is_marker(label, lines, n):
     return True
 
 
+def lint_c(path):
+    problems = []
+    rel = os.path.relpath(path, ROOT)
+    lines = open(path, encoding='utf-8').read().split('\n')
+
+    def report(n, rule, text):
+        problems.append('%s:%d: %s: %s' % (rel, n, rule, text))
+
+    if len(lines) < 2 or not lines[0].startswith('/* ====') or \
+            lines[1].strip() != '* rx286 - ' + rel:
+        report(1, 'header', 'the file must start with the banner and " * rx286 - %s"' % rel)
+    # the code without its comments and strings, line for line
+    text = '\n'.join(lines)
+    code_text = re.sub(r'/\*.*?\*/|//[^\n]*|"(?:[^"\\\n]|\\.)*"',
+                       lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text, flags=re.S)
+    code_lines = code_text.split('\n')
+    for n, line in enumerate(lines, 1):
+        if '\t' in line:
+            report(n, 'layout', 'a tab')
+        if line != line.rstrip():
+            report(n, 'layout', 'trailing spaces')
+        if len(line) > 100:
+            report(n, 'layout', 'longer than 100 characters')
+        code = code_lines[n - 1]
+        if path != COMPILER_H and COMPILER_WORDS.search(code):
+            report(n, 'compiler', 'a compiler\'s own word outside compiler.h: ' + line.strip())
+        m = C_FUNCTION.match(line)
+        if m and n < len(lines) and lines[n].strip() == '{' and \
+                not line.startswith(('if', 'for', 'while', 'switch', 'else', 'do')):
+            k = n - 2
+            while k >= 0 and lines[k].strip() == '':
+                k -= 1
+            if k < 0 or not lines[k].rstrip().endswith('*/'):
+                report(n, 'function', '%s needs a comment before it' % m.group(1))
+    return problems
+
+
 def lint(path):
+    if path.endswith(('.c', '.h')):
+        return lint_c(path)
     problems = []
     rel = os.path.relpath(path, ROOT)
     lines = open(path, encoding='utf-8').read().split('\n')
@@ -95,6 +145,9 @@ def lint(path):
         m = re.match(r'^\s*section\s+(\S+)', line)
         if m:
             section = m.group(1)
+        m = re.match(r'^\s*(code|data|bss)_section\b', line)     # cabi.inc's
+        if m:
+            section = '.text' if m.group(1) == 'code' else 'kdata'
         if re.match(r'^\s*begin_[ku]data\b', line):
             saved.append(section)
             section = 'kdata'
@@ -130,8 +183,12 @@ def main(args):
     paths = args or sorted(
         glob.glob(os.path.join(ROOT, 'src', '**', '*.asm'), recursive=True) +
         glob.glob(os.path.join(ROOT, 'src', '**', '*.inc'), recursive=True) +
+        glob.glob(os.path.join(ROOT, 'src', '**', '*.c'), recursive=True) +
+        glob.glob(os.path.join(ROOT, 'src', '**', '*.h'), recursive=True) +
         glob.glob(os.path.join(ROOT, 'tests', 'programs', '*.asm')) +
-        glob.glob(os.path.join(ROOT, 'tests', 'unit', '*.asm')))
+        glob.glob(os.path.join(ROOT, 'tests', 'programs', '*.c')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'unit', '*.asm')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'unit', 'c', '*.[ch]')))
     problems = []
     for p in paths:
         problems += lint(os.path.abspath(p))

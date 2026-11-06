@@ -57,10 +57,10 @@ The shell is the program the keys are for. Two more programs run beside
 it in `make run` (roadmap l4.md L11, D19), each in its field of the status
 line, the screen's top line:
 
-- **the clock** (`src/userland/clock.asm`), above the shell's priority,
+- **the clock** (`src/userland/clock.c`), above the shell's priority,
   writes the time from the real-time clock every second, so it ticks on
   even while the shell computes (`spin`);
-- **the counter** (`src/userland/counter.asm`), at the lowest priority,
+- **the counter** (`src/userland/counter.c`), at the lowest priority,
   counts whenever nothing else runs, and says how fast once a second:
   `idle 1900k/s` while the shell waits for a key, little or nothing while
   it works.

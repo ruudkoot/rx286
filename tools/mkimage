@@ -9,9 +9,11 @@
 # The kernel's part is padded to MODULE_TABLE_OFF. Each module is a program
 # assembled on its own, with its code and data in sections of its NASM map:
 # utext and udata (a program's rooms: UDATA_ROOM of data, USTACK_SIZE of
-# stack), or ctext and cdata (the counter's). Its code goes in whole; its
-# data without the zeros it ends with, which a fresh segment has anyway;
-# each on a paragraph. The flags: `fg` the program the keys are for,
+# stack). A C module is an rx286 executable (NAME.rx,
+# tools/mkexe; roadmap os-server.md P1): its header gives its code, its
+# data, its rooms and its entry. A module's code goes in whole; its data
+# without the zeros it ends with, which a fresh segment has anyway; each on
+# a paragraph. The flags: `fg` the program the keys are for,
 # `driver` a driver, `iopl` a program that asks for IOPL, `irq=N` a
 # driver's interrupt line, `service=N` what it serves, `stack=N` a stack of
 # N bytes instead of its rooms'. The image
@@ -30,7 +32,6 @@ L = rxlib.LAYOUT
 # section names -> (data room, stack)
 ROOMS = {
     ('utext', 'udata'): (L['UDATA_ROOM'], L['USTACK_SIZE']),
-    ('ctext', 'cdata'): (L['CDATA_ROOM'], L['CSTACK_SIZE']),
 }
 
 
@@ -38,8 +39,35 @@ def paragraph(data):
     return data + bytes(-len(data) % 16)
 
 
+E = rxlib.include_constants('exe.inc')
+RX_START_STACK = 64     # a C module's stack from the root (slot 2): crt0 leaves it at once
+
+
+def rx_parts(binary):
+    """A C module (tools/mkexe, exe.inc): its code, its data from the data
+    segment's offset 0 (the stack's zeros, then the initialised data), its
+    data room, its stack and its entry."""
+    blob = open(binary, 'rb').read()
+    if blob[0:2] != b'RX':
+        sys.exit('mkimage: %s: not an rx286 executable' % binary)
+
+    def word(field):
+        return struct.unpack_from('<H', blob, E[field])[0]
+    code_at = E['RX_HEADER_SIZE']
+    code = blob[code_at:code_at + word('RXH_CODE')]
+    data = blob[code_at + len(code):code_at + len(code) + word('RXH_DATA')]
+    initial = (bytes(word('RXH_STACK')) + data).rstrip(b'\0')
+    initial += bytes(len(initial) % 2)
+    room = word('RXH_STACK') + word('RXH_DATA') + word('RXH_BSS')
+    room += room % 2
+    return code, initial, room, RX_START_STACK, word('RXH_ENTRY')
+
+
 def module_parts(binary):
-    """A module's code and data as assembled, its data room and its stack."""
+    """A module's code and data as assembled, its data room, its stack and
+    its entry."""
+    if binary.endswith('.rx'):
+        return rx_parts(binary)
     blob = open(binary, 'rb').read()
     sections = rxlib.map_sections(os.path.splitext(binary)[0] + '.map')
     for (text, data), (room, stack) in ROOMS.items():
@@ -51,7 +79,7 @@ def module_parts(binary):
             initial += bytes(len(initial) % 2)
             if len(initial) > room:
                 sys.exit('mkimage: %s: its data outgrew its room' % binary)
-            return code, initial, room, stack
+            return code, initial, room, stack, 0
     sys.exit('mkimage: %s: no code section that it knows' % binary)
 
 
@@ -86,7 +114,7 @@ def main(args):
         if len(name) >= L['M_NAME_SIZE'] or name != name.lower():
             sys.exit('mkimage: %s: a name of lower case, at most %d characters'
                      % (name, L['M_NAME_SIZE'] - 1))
-        code, initial, room, stack = module_parts(binary)
+        code, initial, room, stack, entry_ip = module_parts(binary)
         stack = int(options.get('stack', stack))
         code_at = len(image)
         image += paragraph(code)
@@ -96,7 +124,8 @@ def main(args):
         entry[0:len(name)] = name.encode('ascii')
         for field, value in (('M_CODE', code_at // 16), ('M_CODE_SIZE', len(code)),
                              ('M_DATA', data_at // 16), ('M_DATA_SIZE', len(initial)),
-                             ('M_DATA_ROOM', room), ('M_STACK', stack), ('M_ENTRY', 0)):
+                             ('M_DATA_ROOM', room), ('M_STACK', stack),
+                             ('M_ENTRY', entry_ip)):
             struct.pack_into('<H', entry, L[field], value)
         entry[L['M_RING']] = ring
         entry[L['M_PRIORITY']] = priority

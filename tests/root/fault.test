@@ -8,7 +8,7 @@ keys: {wait 20}echo hi\n
 ---
 rx286, test build
 rx286 shell: type help for the commands
-A:\>rx286: counter fault #UD at 0007:{c:entry.fault}
+A:\>rx286: counter fault #UD at 0007:{c:rx_ud2}
 echo hi
 hi
 A:\>

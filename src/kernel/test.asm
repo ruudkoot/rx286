@@ -36,7 +36,7 @@
 ;   TEST_COUNTER_SAME   the counter at the program's priority (thread.asm;
 ;   TEST_COUNTER_ABOVE  roadmap l4.md L2), or above it; either also starts
 ;                       the counter beside a test program (Makefile)
-;   TEST_COUNTER_FPU    the counter checks its 287 state (counter.asm)
+;   TEST_COUNTER_FPU    the counter checks its 287 state (counter-fpu.asm)
 ;   TEST_THREAD_REPORT  at the end: which threads ran
 ;   TEST_CAPS           the root gives the program capabilities to try
 ;                       (src/root; roadmap l4.md L3)

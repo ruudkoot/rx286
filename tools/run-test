@@ -49,7 +49,8 @@
 #   differ (docs/emulators.md).
 #
 # --emulator chooses Bochs (the default), DOSBox-X's 286 or MAME's IBM PC/AT
-# (roadmap M9).
+# (roadmap M9). --cc ia16 builds the C with gcc-ia16 instead of Open Watcom
+# (c.mk; roadmap os-server.md D1), into build/tests-ia16/ (make check-ia16).
 #
 # full:     the transcript is exactly the expected lines, then `TEST END`.
 # prefix:   the transcript starts with the expected lines (the run stops then).
@@ -91,6 +92,7 @@ TIMEOUT_SCALE = {'bochs': 1, 'dosbox-x': 2, 'mame': 4}
 FLOPPY_DATA_BYTES = (2400 - 4 - 2 * 7 - 14) * 512
 JOBS_DIVISOR = {'bochs': 1, 'dosbox-x': 2, 'mame': 3}
 EMULATOR = 'bochs'                  # set from --emulator
+CC_KIND = 'watcom'                  # set from --cc
 
 
 class Test:
@@ -174,6 +176,8 @@ class Test:
     def build_dir(self):
         # MAME's images differ (TEST_TYPE_DIRECT), so they are built apart.
         tests = 'tests-mame' if EMULATOR == 'mame' else 'tests'
+        if CC_KIND != 'watcom':
+            tests += '-' + CC_KIND
         return os.path.join(ROOT, 'build', tests, '%s-%s' % (self.suite, self.name))
 
 
@@ -256,7 +260,7 @@ def build(test):
     if EMULATOR == 'mame':
         defines.append('-dTEST_TYPE_DIRECT')    # IBM's 8042 firmware has no D2h
     cmd = ['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=test', 'B=' + b,
-           'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
+           'CC_KIND=' + CC_KIND, 'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
            'TEST_KEYS_FILE=' + keys_inc,
            'image', 'symbols']
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -557,9 +561,11 @@ def main():
     parser.add_argument('--jobs', type=int, default=0, help='default: CPUs (fewer for MAME)')
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--emulator', choices=EMULATORS, default='bochs')
+    parser.add_argument('--cc', choices=('watcom', 'ia16'), default='watcom')
     args = parser.parse_args()
-    global EMULATOR
+    global EMULATOR, CC_KIND
     EMULATOR = args.emulator
+    CC_KIND = args.cc
     if not args.jobs:
         args.jobs = max(2, (os.cpu_count() or 2) // JOBS_DIVISOR[EMULATOR])
     paths = args.tests or sorted(glob.glob(os.path.join(ROOT, 'tests', '*', '*.test')))

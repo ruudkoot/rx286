@@ -123,17 +123,14 @@ ARENA_OFF           equ ARENA_PHYS - KDATA_BASE         ; the arena
 ; A program (src/userland, tests/programs, the root) is assembled on its
 ; own with its code at offset 0 and its data at USER_DATA_START, each in a
 ; room; tools/mkimage takes what each holds into the image. It runs with a
-; data segment of UDATA_ROOM bytes and a stack of USTACK_SIZE. The counter
-; (l4.md L2) has rooms of its own.
+; data segment of UDATA_ROOM bytes and a stack of USTACK_SIZE. A C program
+; (os-server.md P1) is an rx286 executable instead, whose header gives its
+; rooms (exe.inc).
 UTEXT_ROOM          equ 0x2000
 UDATA_ROOM          equ 0x2000
 USTACK_SIZE         equ 0x0800
 USER_TEXT_START     equ 0
 USER_DATA_START     equ UTEXT_ROOM
-CTEXT_ROOM          equ 0x0400
-CDATA_ROOM          equ 0x0400
-CSTACK_SIZE         equ 0x0400
-COUNTER_DATA_START  equ CTEXT_ROOM
 
 ; ---------------------------------------------------------------- the console
 VIDEO_PHYS          equ 0xB8000     ; colour text, page 0

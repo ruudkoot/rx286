@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/mkexe
+# Makes an rx286 executable (src/include/exe.inc; roadmap os-server.md D12)
+# from a C program's linked image, and a map of its symbols in NASM's form,
+# so that tools/run-test, tools/map2sym and tools/sizes read it as they read
+# an assembled program's (rxlib.read_map, rxlib.map_sections).
+#
+#   tools/mkexe --wlink RAW WLINK_MAP OUT.rx    Open Watcom: wlink's
+#                                               `format raw bin`, its map
+#   tools/mkexe --elf ELF OUT.rx                gcc-ia16: ld's ELF output
+#
+# Both link the code from offset 0 of its own segment and the data group
+# from offset 0 of its own: the stack (crt0's _STACKBOT or .stackbot), the
+# initialised data, then .bss. wlink puts the data 64 KB past the code in
+# its raw image (code at 1000:0, data at 2000:0). The map's sections are
+# rxtext and rxdata (the data from the segment's offset 0).
+# ============================================================================
+
+import os
+import re
+import struct
+import sys
+
+import rxlib
+
+E = rxlib.include_constants('exe.inc')
+WLINK_DATA_AT = 0x10000         # 2000:0 against 1000:0 in wlink's raw image
+
+
+def wlink_parts(raw_path, map_path):
+    """(code, data from offset 0 up to .bss, .bss bytes, stack bytes,
+    entry, symbols as (section, offset, name))."""
+    raw = open(raw_path, 'rb').read()
+    segments, symbols = [], []
+    part = None
+    for line in open(map_path, encoding='latin-1'):
+        if '|   Segments   |' in line:
+            part = 'segments'
+        elif '|   Memory Map   |' in line:
+            part = 'symbols'
+        elif '|   Linker Statistics' in line:
+            part = None
+        elif part == 'segments':
+            m = re.match(r'^(\S+)\s+(\S+)\s+(\S+)\s+([0-9a-f]{8})\s+([0-9a-f]{8})\s*$', line)
+            if m:
+                segments.append((m.group(1), m.group(2), m.group(3), int(m.group(4), 16),
+                                 int(m.group(5), 16)))
+        elif part == 'symbols':
+            m = re.match(r'^([0-9a-f]{8})[*+ ]?\s+(\S+)\s*$', line)
+            if m:
+                symbols.append((int(m.group(1), 16), m.group(2)))
+    code_end = max(a + n for _, cls, _, a, n in segments if cls == 'CODE')
+    data_end = max([a + n for _, cls, grp, a, n in segments if grp == 'DGROUP' and cls != 'BSS']
+                   or [0])
+    bss_end = max([a + n for _, _, grp, a, n in segments if grp == 'DGROUP'] or [0])
+    stack = sum(n for name, _, _, _, n in segments if name == '_STACKBOT')
+    code = raw[:code_end]
+    data = raw[WLINK_DATA_AT:WLINK_DATA_AT + data_end]
+    data += bytes(data_end - len(data))
+    # wlink's map does not say which segment a symbol is in. rx286's C
+    # publishes no data names that the tools look up, so they are all code.
+    # Watcom's cdecl names begin with an underscore, which C's do not: the
+    # map gives C's, as gcc-ia16's does (_start for __start, rx_ud2 for _rx_ud2).
+    out = [('rxtext', addr, name[1:] if name.startswith('_') else name)
+           for addr, name in symbols]
+    entry = next((a for a, n in symbols if n in ('__start', '_start')), 0)
+    return code, data, bss_end - data_end, stack, entry, out
+
+
+def elf_parts(path):
+    """The same, from an ELF file of ld's (tools: gcc-ia16)."""
+    blob = open(path, 'rb').read()
+    shoff, = struct.unpack_from('<I', blob, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from('<HHH', blob, 0x2E)
+    sections = []
+    for n in range(shnum):
+        sections.append(struct.unpack_from('<IIIIIIIIII', blob, shoff + n * shentsize))
+    names = sections[shstrndx]
+
+    def name(off):
+        start = names[4] + off
+        return blob[start:blob.index(b'\0', start)].decode()
+
+    by_name = {name(s[0]): s for s in sections}
+
+    def body(sec):
+        s = by_name.get(sec)
+        return blob[s[4]:s[4] + s[5]] if s and s[1] != 8 else b''   # 8: SHT_NOBITS
+
+    def span(sec):
+        s = by_name.get(sec)
+        return (s[3], s[5]) if s else (0, 0)    # address, size
+
+    code = body('.text')
+    stack = span('.stackbot')[1]
+    data_addr, data_size = span('.data')
+    data = bytes(data_addr) + body('.data') if data_size else bytes(stack)
+    bss_addr, bss_size = span('.bss')
+    bss = bss_size + (bss_addr - (data_addr + data_size) if data_size and bss_size else 0)
+    symbols = []
+    symtab = by_name.get('.symtab')
+    strtab = by_name.get('.strtab')
+    if symtab:
+        text_index = [n for n, s in enumerate(sections) if name(s[0]) == '.text']
+        for k in range(symtab[5] // 16):
+            st_name, value, _, info, _, shndx = struct.unpack_from('<IIIBBH', blob,
+                                                                  symtab[4] + 16 * k)
+            if info >> 4 != 1 or not st_name:    # global symbols only
+                continue
+            sym = blob[strtab[4] + st_name:blob.index(b'\0', strtab[4] + st_name)].decode()
+            symbols.append(('rxtext' if shndx in text_index else 'rxdata', value, sym))
+    entry = next((v for s, v, n in symbols if n == '_start'), 0)
+    return code, data, bss, stack, entry, symbols
+
+
+def write_map(path, code, data, symbols):
+    """A map in NASM's form: its sections, then its symbols."""
+    lines = ['- NASM-like map, made by tools/mkexe -', '', '-- Sections (summary) --', '',
+             'Vstart            Start             Stop              Length    Class     Name',
+             '%16X  %16X  %16X  %08X  progbits  rxtext' % (0, 0, len(code), len(code)),
+             '%16X  %16X  %16X  %08X  progbits  rxdata' % (0, 0x10000, 0x10000 + len(data),
+                                                           len(data)),
+             '', '-- Symbols --', '']
+    for section in ('rxtext', 'rxdata'):
+        lines += ['---- Section %s ----' % section, '', 'Real              Virtual           Name']
+        for sec, addr, name in sorted(symbols, key=lambda s: (s[1], s[2])):
+            if sec == section:
+                real = addr if section == 'rxtext' else 0x10000 + addr
+                lines.append('%16X  %16X  %s' % (real, addr, name))
+        lines.append('')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
+def main(args):
+    if len(args) == 4 and args[0] == '--wlink':
+        code, data, bss, stack, entry, symbols = wlink_parts(args[1], args[2])
+        out = args[3]
+    elif len(args) == 3 and args[0] == '--elf':
+        code, data, bss, stack, entry, symbols = elf_parts(args[1])
+        out = args[2]
+    else:
+        sys.exit('usage: mkexe --wlink RAW MAP OUT.rx | --elf ELF OUT.rx')
+    if len(code) > 0xFFFF or stack + len(data[stack:]) + bss > 0xFFFF:
+        sys.exit('mkexe: %s: a segment past 64 KB' % out)
+    if any(data[:stack]):
+        sys.exit('mkexe: %s: the stack (the data\'s first %d bytes) is not zeros' % (out, stack))
+    initial = data[stack:]
+    header = bytearray(E['RX_HEADER_SIZE'])
+    header[0:2] = b'RX'
+    for field, value in (('RXH_VERSION', E['RX_VERSION']), ('RXH_FLAGS', 0),
+                         ('RXH_CODE', len(code)), ('RXH_DATA', len(initial)),
+                         ('RXH_BSS', bss), ('RXH_STACK', stack),
+                         ('RXH_DGROUP_MAX', stack + len(initial) + bss),
+                         ('RXH_ENTRY', entry)):
+        struct.pack_into('<H', header, E[field], value)
+    with open(out + '.tmp', 'wb') as f:
+        f.write(bytes(header) + code + initial)
+    os.replace(out + '.tmp', out)
+    write_map(os.path.splitext(out)[0] + '.map', code, data, symbols)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

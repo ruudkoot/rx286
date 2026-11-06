@@ -13,8 +13,8 @@ L5):
 | the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 4.2 KB of code |
 | the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
-| the clock | `src/userland/clock.asm` | a module of the image, ring 3, beside the shell, above it | about 850 bytes |
-| the counter | `src/userland/counter.asm` | a module of the image, ring 3, beside the shell, below everything | a few hundred bytes |
+| the clock | `src/userland/clock.c` | a C module of the image (*docs/c.md*), ring 3, beside the shell, above it | about 900 bytes |
+| the counter | `src/userland/counter.c` | a C module of the image, ring 3, beside the shell, below everything | about 2 KB |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
