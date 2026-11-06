@@ -12,6 +12,7 @@ autolock = false
 
 [dosbox]
 machine = ega
+# 1 MB: no extended memory, an AT without any (roadmap os-server.md P3)
 memsize = 1
 fastbioslogo = true
 startbanner = false

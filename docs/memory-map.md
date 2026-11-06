@@ -26,7 +26,7 @@ D7). This document explains each one.
 | B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the console |
 | C0000h-C3FFFh | EGA BIOS ROM | | the BIOS |
 | F0000h-FFFFFh | system BIOS ROM | | the BIOS |
-| 100000h and up | extended memory, if fitted | | nobody |
+| 100000h and up | extended memory, if fitted: the root's untyped (roadmap os-server.md P3), up to 1 MB for segments and the rest, up to 1 MB, for objects; A20 on from the kernel's entry | CMOS `CMOS_EXT_LOW`, `CMOS_EXT_HIGH` | the root, and what it gives |
 
 The kernel's stacks, its GDT and the arena lie in the boot code's memory,
 which is free once the loader has jumped to the kernel (roadmap l4.md L5):

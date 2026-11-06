@@ -87,9 +87,9 @@ entry:
         kcall KCALL_SEGMENT
         mov bx, ax
         mov ax, dx
-        report "its base, high byte (5)"
+        report "its base, high byte"
         mov ax, bx                      ; past the others' segments, and its own
-        report "its base, low word (5136)"
+        report "its base, low word"
         mov ax, cx
         report "its limit (255)"
         mov dx, UT_ARENA

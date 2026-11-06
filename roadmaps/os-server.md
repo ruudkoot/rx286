@@ -121,7 +121,7 @@ What it rests on:
 | M0 | This roadmap | done (2026-11-06) |
 | P1 | The C toolchain, the crt, the first C modules | done (2026-11-06, branch `os-server`) |
 | P2 | The kernel's additions; the list of children | done (2026-11-06, branch `os-server`) |
-| P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | not started |
+| P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | done (2026-11-06, branch `os-server`) |
 | P4 | The root in C; its allocator and its services | not started |
 | P5 | The OS server in C, serving today's calls | not started |
 | P6 | Processes: fork, exec, exit, wait | not started |
@@ -2022,6 +2022,18 @@ The largest change to the kernel since l4.md, in three steps, each with every su
     capability up once and `deliver` copies frame to frame.
   - Found on the way: a dead space taken off the list before it was emptied, lost if the
     call gave way (now `SP_FLUSH`); checking builds panic on a descriptor freed twice.
+* **Step 3 done (2026-11-06):**
+  - The kernel's entry turns A20 on through the 8042's output port, and the kernel reads the
+    extended memory's size from the CMOS (30h-31h), checks that a word written at 1 MB does
+    not show at 0, and gives it to the root in its slots 3 and 4: up to 1 MB for segments and
+    a quarter, up to 1 MB, for objects; the memory below 1 MB goes to slots 100 and 101. An
+    untyped or a segment keeps its base paragraph's bits 16-19 in its shadow entry's rights
+    byte. An untyped is under 1 MB still (16 bits of paragraphs): more than 2 MB waits for
+    the root's allocator (P4), which can take more untyped.
+  - Bochs has 3 MB above 1 MB (`megs: 4`), MAME 1 MB (`-ramsize 1664K`, which its CMOS
+    image must say, or the POST stops at error 164; `4M` gets no further than the POST);
+    every suite runs there with the kernel's objects and the programs' segments above 1 MB.
+    DOSBox-X keeps 1 MB and no extended memory: its suites are an AT without any.
 
 ### P4. The root in C; its allocator and its services (L, about 2,000)
 

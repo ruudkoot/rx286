@@ -59,7 +59,7 @@ def main():
     disks = rxlib.include_constants('disks.inc')
     rc = open(rxlib.BOCHSRC_TEMPLATE, encoding='utf-8').read()
     wants = [
-        (r'^megs: 1$', 'megs: 1 (roadmap D6)'),
+        (r'^megs: 4$', 'megs: 4 (roadmap os-server.md P3: 3 MB above 1 MB)'),
         (r'^ata0: enabled=1, ioaddr1=0x%x, ioaddr2=0x3f0, irq=14$' % ports['HDC_DATA'],
          'the fixed-disk controller at HDC_DATA, IRQ14'),
         (r'cylinders=%d, heads=%d, spt=%d' % (disks['DISK_C_CYLINDERS'], disks['DISK_C_HEADS'],

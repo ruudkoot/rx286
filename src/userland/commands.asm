@@ -267,7 +267,8 @@ cmd_mem:
         ret
 
 ; ----------------------------------------------------------------------------
-; print_segment - "SSSSh, base BBBBBh, limit LLLLh"
+; print_segment - "SSSSh, base BBBBBBh, limit LLLLh": the base's 24 bits,
+; above 1 MB too (roadmap os-server.md P3)
 ;   In:       BX = the selector, a segment capability of the shell's
 ;   Out:      nothing
 ;   Destroys: AX, CX, DX
@@ -280,8 +281,7 @@ print_segment:
         call print_hex16
         PRINT "h, base "
         mov al, dl
-        add al, '0'                     ; the base's top digit: 0-9 here
-        call print_char
+        call print_hex8
         pop ax
         call print_hex16
         PRINT "h, limit "

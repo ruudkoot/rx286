@@ -176,13 +176,17 @@ SPACE_SLOTS_MAX     equ 256
 
 ; The root's slots at its start (roadmap l4.md L5): slots 0, 1 and 2 its
 ; code, data and stack, as every program's; then the kernel's gifts.
-ROOT_SLOT_UNTYPED   equ 3   ; the memory for segments, as untyped: what is left
-ROOT_SLOT_ARENA     equ 4   ; the arena, as untyped: what is left
+ROOT_SLOT_UNTYPED   equ 3   ; the memory for segments, as untyped: what is left (with
+                            ;    extended memory, most of that: os-server.md P3)
+ROOT_SLOT_ARENA     equ 4   ; the arena, as untyped: what is left (with extended memory,
+                            ;    the rest of that)
 ROOT_SLOT_MODULES   equ 5   ; the module table (layout.inc), read-only
 ROOT_SLOT_SPACE     equ 6   ; its own space
 ROOT_SLOT_THREAD    equ 7   ; its own thread
 ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2 (n - 1),
                             ;    and its data as assembled, read-only, in the next
+ROOT_SLOT_LOW_UNTYPED equ 100 ; with extended memory: the memory for segments below 1 MB,
+ROOT_SLOT_LOW_ARENA equ 101 ;    and the arena (slots 3 and 4 then hold extended memory)
 ROOT_SLOT_VIDEO     equ 111 ; the screen's text page, a segment of DPL 1 (l4.md L8)
 ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
                             ;    does not keep (its own are left empty)

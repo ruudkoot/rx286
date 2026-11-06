@@ -1,14 +1,20 @@
 # The shell's segments: where the root put them (KCALL_SEGMENT): its code in
 # the image, its data and stack after the root's own, the OS server's, the
-# drivers' and the transfer segments; limits from the CPU (LSL).
+# drivers' and the transfer segments - above 1 MB where there is extended
+# memory (Bochs, MAME: roadmap os-server.md P3), below it on DOSBox-X,
+# which has none; limits from the CPU (LSL).
 program: shell
 keys: mem\n
 ---
 rx286, test build
 rx286 shell: type help for the commands
 A:\>mem
-code:  selector 0007h, base {m:program.base}h, limit {m:program.limit}h
-data:  selector 000Fh, base 50AE0h, limit 1FFFh
-stack: selector 0017h, base 52AE0h, limit 07FFh
+code:  selector 0007h, base 0{m:program.base}h, limit {m:program.limit}h
+@bochs data:  selector 000Fh, base 11E2E0h, limit 1FFFh
+@bochs stack: selector 0017h, base 1202E0h, limit 07FFh
+@mame data:  selector 000Fh, base 11E2E0h, limit 1FFFh
+@mame stack: selector 0017h, base 1202E0h, limit 07FFh
+@dosbox-x data:  selector 000Fh, base 050AE0h, limit 1FFFh
+@dosbox-x stack: selector 0017h, base 052AE0h, limit 07FFh
 Nothing else is reachable: the kernel's selectors fault here.
 A:\>

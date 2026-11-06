@@ -70,6 +70,8 @@ KBC_STATUS_IBF      equ 0x02        ; input buffer full: wait before writing
 KBC_CMD_WRITE_CB    equ 0x60        ; write the command byte (next byte at 60h)
 KBC_CMD_WRITE_OUT   equ 0xD2        ; PS/2 only: write the keyboard output buffer (test builds)
 KBC_CMD_PULSE_RESET equ 0xFE        ; pulse output port bit 0: resets the CPU
+KBC_CMD_WRITE_PORT  equ 0xD1        ; write the output port (next byte at 60h)
+KBC_PORT_A20        equ 0xDF        ; the output port with A20 on, the CPU not reset (IBM 1-41)
 KBC_COMMAND_BYTE    equ 0x45        ; translate to set 1 (bit 6), system flag (2), IRQ1 (0)
 
 ; ---------------------------------------------------------------- system port B
@@ -96,6 +98,8 @@ CMOS_REG_C          equ 0x0C
 CMOS_REG_D          equ 0x0D
 CMOS_SHUTDOWN       equ 0x0F        ; the BIOS's shutdown status byte; 0 = soft reset
 CMOS_CENTURY        equ 0x32
+CMOS_EXT_LOW        equ 0x30        ; the KB of extended memory the POST found
+CMOS_EXT_HIGH       equ 0x31
 CMOS_REG_A_UIP      equ 0x80        ; update in progress
 CMOS_REG_A_RATE_1K  equ 0x26        ; 32 kHz base, 1,024 Hz periodic rate (test probe)
 CMOS_REG_B_24H_BCD  equ 0x02        ; 24-hour, BCD, no interrupts

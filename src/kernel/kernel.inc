@@ -81,7 +81,8 @@ T_ZERO_DONE         equ 160     ; KCALL_RETYPE: its paragraphs zeroed so far
 T_ZERO_BASE         equ 162     ;    its base, in paragraphs
 T_ZERO_SLOT         equ 164     ;    its untyped's slot
 T_FAULT_REGS        equ 166     ; 16 bytes: the registers its fault's message overwrote
-T_FRAME             equ 182     ; its frame (FRAME_SIZE_USER bytes): SP0 is its end
+T_ZERO_HIGH         equ 182     ; byte: KCALL_RETYPE: T_ZERO_BASE's bits 16-19
+T_FRAME             equ 184     ; its frame while it does not run (FRAME_SIZE_USER bytes)
 TCB_SIZE            equ T_FRAME + FRAME_SIZE_USER
 %if T_FPU + 94 > T_FAULT_BADGE
   %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
@@ -125,6 +126,8 @@ SP_HEADER_SIZE      equ 16
 SP_LDT              equ SP_HEADER_SIZE
 SH_TYPE             equ 0       ; byte: CAP_*
 SH_RIGHTS           equ 1       ; byte: RIGHT_*
+SH_HIGH             equ 1       ; byte: memory's base paragraph's bits 16-19 (untyped, a
+                                ;    segment: they have no rights; os-server.md P3)
 SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's base in
                                 ; paragraphs (a segment, untyped); an IRQ line
 SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
@@ -188,6 +191,8 @@ TF_SUSPENDED        equ 0x80    ; stopped so: THREAD_FRAME may move its frame, T
 
 PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
+EXT_KB_MAX          equ 15360       ; the extended memory a 286 addresses: 15 MB
+EXT_PROBE           equ 0x5AA5      ; ext_detect's word at 1 MB
 STACK_FILL          equ 0xA5A5  ; debug builds: an unused word of a kernel stack
 
 ; ---------------------------------------------------------------- the CPU

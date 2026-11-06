@@ -78,7 +78,9 @@ numbers below are the Technical Reference's.
   command byte, `KBC_COMMAND_BYTE` = 45h: translation to set 1 (bit 6), the
   system flag (bit 2), the keyboard interrupt (bit 0), as IBM defines them
   (1-40). `KBC_CMD_PULSE_RESET` (FEh) pulses output-port bit 0, which resets
-  the CPU (1-42). `KBC_CMD_WRITE_OUT` (D2h) is not the AT's: it is the PS/2
+  the CPU (1-42). `KBC_CMD_WRITE_PORT` (D1h) writes the output port: the
+  kernel's entry writes `KBC_PORT_A20` (DFh), A20 on and the CPU not reset
+  (1-41), so that memory above 1 MB is reached (roadmap os-server.md P3). `KBC_CMD_WRITE_OUT` (D2h) is not the AT's: it is the PS/2
   controller's "write keyboard output buffer", which Bochs has; test builds
   use it to type keys.
 - **System port B** (`SYS_PORT_B`): `SYS_PORT_B_PARITY` and
@@ -97,7 +99,9 @@ numbers below are the Technical Reference's.
   `CMOS_REG_B_PIE`, the probe's periodic interrupt), `CMOS_REG_C` (reading
   it acknowledges the clock's interrupt) and `CMOS_REG_D`; `CMOS_SHUTDOWN` is
   the BIOS's shutdown status byte (1-49), 0 for a soft reset (the BIOS
-  listing's table of shutdown codes).
+  listing's table of shutdown codes). `CMOS_EXT_LOW` and `CMOS_EXT_HIGH`
+  hold the KB of extended memory the POST found (1-45), which the kernel
+  gives the root (roadmap os-server.md P3).
   `CMOS_NMI_DISABLE` is bit 7 of the index port: set, NMI is masked (1-28).
 - **80287**: `FPU_CLEAR_BUSY` (F0h) clears the busy latch an error leaves;
   `FPU_RESET` (F1h) would reset the 287 into real mode (2-4).

@@ -385,12 +385,14 @@ has `ROOT_SLOTS` slots:
 | Slot | Constant | What |
 |---|---|---|
 | 0, 1, 2 | | its code, its data (initialised from its module) and its stack |
-| 3 | `ROOT_SLOT_UNTYPED` | the memory for programs, as untyped: what its data and stack left |
-| 4 | `ROOT_SLOT_ARENA` | the arena, as untyped: what its space and thread left |
+| 3 | `ROOT_SLOT_UNTYPED` | the memory for programs, as untyped: what its data and stack left; with extended memory, three quarters of that, up to 1 MB (roadmap os-server.md P3) |
+| 4 | `ROOT_SLOT_ARENA` | the arena, as untyped: what its space and thread left; with extended memory, the rest of it, up to 1 MB |
 | 5 | `ROOT_SLOT_MODULES` | the module table, read-only |
 | 6 | `ROOT_SLOT_SPACE` | its own space |
 | 7 | `ROOT_SLOT_THREAD` | its own thread |
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
+| 100 | `ROOT_SLOT_LOW_UNTYPED` | with extended memory: the memory for programs below 1 MB, what its data and stack left |
+| 101 | `ROOT_SLOT_LOW_ARENA` | with extended memory: the arena, what its space and thread left |
 | 111 | `ROOT_SLOT_VIDEO` | the screen's text page, a segment of DPL 1, for the console driver |
 | 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
 

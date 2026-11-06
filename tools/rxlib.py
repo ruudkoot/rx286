@@ -522,6 +522,7 @@ def at_cmos():
     c[0x12] = 0x00              # no fixed disk
     c[0x14] = 0x43              # two diskette drives, primary display with its own BIOS (EGA), 287
     c[0x15], c[0x16] = 0x80, 0x02   # 640 KB base memory
+    c[0x17], c[0x18] = MAME_EXTENDED_KB & 0xFF, MAME_EXTENDED_KB >> 8   # and above 1 MB
     total = sum(c[0x10:0x2E])
     c[0x2E], c[0x2F] = total >> 8, total & 0xFF
     c[0x32] = 0x19              # the century
@@ -530,6 +531,8 @@ def at_cmos():
 
 
 MAME_STOP_SECONDS = 10       # for MAME to save its diskettes and stop, after SIGTERM
+MAME_RAM = '1664K'           # 640 KB, and 1 MB above 1 MB (roadmap os-server.md P3)
+MAME_EXTENDED_KB = 1024      # which the CMOS says, or the POST stops at error 164
 
 
 def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
@@ -565,7 +568,7 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     log = open(os.path.join(directory, 'mame.log'), 'w')
     started = time.monotonic()
     proc = subprocess.Popen(
-        ['mame', 'ibm5170', '-rompath', MAME_ROMS, '-ramsize', '640K',
+        ['mame', 'ibm5170', '-rompath', MAME_ROMS, '-ramsize', MAME_RAM,
          '-isa2:fdc:fdc:0', '525hd', '-isa2:fdc:fdc:1', '525dd',
          '-isa3:comat:serport0', 'microsoft_mouse',     # COM1: the mouse
          '-isa3:comat:serport1', 'null_modem', '-bitb', serial,   # COM2: the log

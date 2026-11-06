@@ -42,6 +42,16 @@ memory_untyped:
         db CAP_UNTYPED, 0
         dw UMEM_PHYS >> 4, UMEM_SIZE >> 4, 0, 0, 0
         times SHADOW_SIZE - 12 db 0
+; Extended memory, if the CMOS says there is some (ext_detect): the root's
+; slots 3 and 4, each under 1 MB (an untyped's size is 16 bits of
+; paragraphs); 0 bytes if none
+ext_untyped_a:
+        db CAP_UNTYPED, 0
+        times SHADOW_SIZE - 2 db 0
+ext_untyped_b:
+        db CAP_UNTYPED, 0
+        times SHADOW_SIZE - 2 db 0
+ext_kb              dw 0                ; the extended memory found, in KB
 thread_list         times THREAD_MAX dw 0   ; every thread, in the order made
 thread_count        dw 0
 obj_free_count      dw 0                ; the GDT pool's free descriptors (OBJ_FREE_OFF)
@@ -77,6 +87,7 @@ retype_paragraphs   dw 0
 retype_base         dw 0
 retype_base_low     dw 0
 retype_base_high    db 0
+retype_base_para_high db 0
 retype_parent_slot  dw 0                ; the untyped's slot: the new capability's parent
 copy_dest_space     dw 0                ; a move's destination: its children go there
 copy_dest_slot      dw 0
@@ -233,8 +244,9 @@ cap_lookup:
 ; hole if it is larger than the one kept
 ;   In:       ES:SI = the untyped's shadow entry; CX = the object's
 ;             paragraphs; DX = its alignment in paragraphs (a power of two)
-;   Out:      CF clear and AX = its base in paragraphs; CF set if no room
-;   Destroys: nothing else
+;   Out:      CF clear and DL:AX = its base paragraph (20 bits: above 1 MB
+;             too, os-server.md P3); CF set if no room
+;   Destroys: DH
 ; ----------------------------------------------------------------------------
 untyped_carve:
         push bx
@@ -265,12 +277,34 @@ untyped_carve:
 .kept:
         mov [es:si + SH_WATERMARK], dx
 .placed:
+        pop dx
+        mov dl, [es:si + SH_HIGH]
         add ax, [es:si + SH_OBJECT]
+        adc dl, 0
+        pop cx
+        pop bx
         clc
+        ret
 .done:
         pop dx
         pop cx
         pop bx
+        ret
+
+; ----------------------------------------------------------------------------
+; para_phys - a paragraph's physical address
+;   In:       DL:AX = the paragraph (20 bits)
+;   Out:      DL:AX = its physical address (24 bits)
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+para_phys:
+        push cx
+        shl dl, 4                       ; bits 20-23
+        mov ch, ah
+        shr ch, 4                       ; bits 16-19
+        or dl, ch
+        shl ax, 4
+        pop cx
         ret
 
 ; ----------------------------------------------------------------------------
@@ -352,7 +386,7 @@ object_make:
         push cx
         shr cx, 4
         mov dx, 1
-        call untyped_carve              ; AX = its place, in paragraphs
+        call untyped_carve              ; DL:AX = its place, in paragraphs
         pop cx
         jc .full
         mov di, bx
@@ -360,9 +394,7 @@ object_make:
         dec cx
         mov [di], cx                    ; its limit
         inc cx
-        mov dx, ax
-        shl ax, 4
-        shr dx, 12                      ; DL:AX = its base
+        call para_phys                  ; DL:AX = its base
         mov [di + 2], ax
         mov [di + 4], dl
         mov byte [di + 5], ACC_KDATA
@@ -452,11 +484,11 @@ retype_zero:
         mov cx, RETYPE_PIECE / 16
 .piece:
         mov ax, [es:T_ZERO_BASE]
+        mov dl, [es:T_ZERO_HIGH]
         add ax, [es:T_ZERO_DONE]
+        adc dl, 0
         add [es:T_ZERO_DONE], cx
-        mov dx, ax
-        shl ax, 4
-        shr dx, 12                      ; DL:AX = the piece
+        call para_phys                  ; DL:AX = the piece
         shl cx, 4                       ; its bytes
         call phys_zero
         mov es, [cur_thread]
@@ -641,6 +673,9 @@ slot_put_descriptor:
         shl dx, 12
         or ax, dx
         mov [es:si + SH_OBJECT], ax
+        mov al, [es:di + 4]             ; bits 16-19 of the paragraph
+        shr al, 4
+        mov [es:si + SH_HIGH], al
         mov ax, [es:di]                 ; the size in paragraphs: (limit + 16) / 16
         add ax, 16
         rcr ax, 1
@@ -664,6 +699,7 @@ slot_put_descriptor:
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 boot_root:
+        call ext_detect
         push ds
         pop es
         mov si, boot_untyped
@@ -704,13 +740,31 @@ boot_root:
         xor ax, ax
         call boot_module_code
         call boot_root_data
-        ; slots 3, 4: what is left of the untyped memory
+        ; slots 3, 4: what is left of the untyped memory; with extended
+        ; memory, that, and what is left below 1 MB in two slots more
+        cmp word [ext_untyped_a + SH_SIZE], 0
+        je .low
+        mov ax, ROOT_SLOT_UNTYPED
+        mov dx, ext_untyped_a
+        call boot_slot_shadow
+        mov ax, ROOT_SLOT_ARENA
+        mov dx, ext_untyped_b
+        call boot_slot_shadow
+        mov ax, ROOT_SLOT_LOW_UNTYPED
+        mov dx, memory_untyped
+        call boot_slot_shadow
+        mov ax, ROOT_SLOT_LOW_ARENA
+        mov dx, boot_untyped
+        call boot_slot_shadow
+        jmp .untyped
+.low:
         mov ax, ROOT_SLOT_UNTYPED
         mov dx, memory_untyped
         call boot_slot_shadow
         mov ax, ROOT_SLOT_ARENA
         mov dx, boot_untyped
         call boot_slot_shadow
+.untyped:
         ; slot 5: the module table, read-only
         mov ax, MODULE_TABLE_PHYS & 0xFFFF
         mov dl, MODULE_TABLE_PHYS >> 16
@@ -764,7 +818,7 @@ boot_root:
         ; the other modules: each one's code and its data as assembled
         mov cx, [MODULE_TABLE_VOFF + MH_COUNT]
         dec cx
-        cmp cx, (ROOT_SLOTS - ROOT_SLOT_MODULE) / 2
+        cmp cx, (ROOT_SLOT_LOW_UNTYPED - ROOT_SLOT_MODULE) / 2
         ASSERT be, "boot_root: more modules than the root has slots for"
         mov si, ROOT_MODULE
         mov ax, ROOT_SLOT_MODULE
@@ -785,6 +839,93 @@ boot_root:
         jmp .module
 .done:
         mov bx, [boot_thread]
+        ret
+
+; ----------------------------------------------------------------------------
+; ext_detect - extended memory (roadmap os-server.md P3, D18 B): its size
+; as the POST found it (CMOS 30h-31h), if A20 is on - the entry turned it
+; on, and a word written at 1 MB must not show at 0 - split in two untyped
+; under 1 MB each from 1 MB on: a quarter for objects (ext_untyped_b), the
+; rest for segments (ext_untyped_a)
+;   In:       DS = SEL_KDATA; interrupts and NMI off
+;   Out:      ext_kb; ext_untyped_a and _b (sizes 0 if none)
+;   Destroys: AX, BX, CX, DX, DI, ES
+; ----------------------------------------------------------------------------
+ext_detect:
+        mov al, CMOS_EXT_HIGH | CMOS_NMI_DISABLE
+        out CMOS_INDEX, al
+        in al, CMOS_DATA
+        mov ah, al
+        mov al, CMOS_EXT_LOW | CMOS_NMI_DISABLE
+        out CMOS_INDEX, al
+        in al, CMOS_DATA
+        cmp ax, EXT_KB_MAX
+        jbe .sized
+        mov ax, EXT_KB_MAX
+.sized:
+        mov [ext_kb], ax
+        test ax, ax
+        jz .none
+        mov di, GDT_OFF + SEL_SCRATCH   ; A20: 1 MB, and its alias at 0
+        mov ax, 0
+        mov dl, 0x10
+        mov cx, 16
+        call scratch_window
+        mov di, GDT_OFF + SEL_SCRATCH2
+        xor dl, dl
+        call scratch_window
+        push ds
+        mov ax, SEL_SCRATCH2
+        mov ds, ax
+        mov ax, SEL_SCRATCH
+        mov es, ax
+        mov bx, [0]                     ; the word at 0, kept
+        xor cx, cx                      ; CX = 1 if it is an alias
+        mov word [es:0], EXT_PROBE
+        cmp word [0], EXT_PROBE
+        jne .apart
+        not word [es:0]
+        cmp word [0], ~EXT_PROBE & 0xFFFF
+        jne .apart
+        inc cx
+.apart:
+        mov [0], bx
+        pop ds
+        push ds
+        pop es
+        jcxz .a20
+        jmp .wraps                      ; the writes at 1 MB showed at 0
+.a20:
+        mov ax, [ext_kb]                ; KB to paragraphs: 64 each
+        mov dx, 64
+        mul dx                          ; DX:AX = all of it
+        mov bx, ax
+        mov cx, dx                      ; CX:BX = all of it
+        shr dx, 1                       ; a quarter for objects...
+        rcr ax, 1
+        shr dx, 1
+        rcr ax, 1
+        test dx, dx
+        jz .objects
+        mov ax, 0xFFFF                  ; (under 1 MB)
+.objects:
+        mov [ext_untyped_b + SH_SIZE], ax
+        sub bx, ax                      ; ... the rest for segments
+        sbb cx, 0
+        jz .segments
+        mov bx, 0xFFFF
+.segments:
+        mov [ext_untyped_a + SH_SIZE], bx
+        mov word [ext_untyped_a + SH_OBJECT], 0     ; from 1 MB
+        mov byte [ext_untyped_a + SH_HIGH], 1
+        mov [ext_untyped_b + SH_OBJECT], bx         ; then the objects'
+        mov byte [ext_untyped_b + SH_HIGH], 1
+        TRACE "kernel: extended memory for the root"
+        ret
+.wraps:
+        LOG "kernel: A20 is off: the extended memory is not used"
+.none:
+        mov word [ext_kb], 0
         ret
 
 ; ----------------------------------------------------------------------------
@@ -902,11 +1043,9 @@ boot_carve:
         pop es
         mov si, memory_untyped
         mov dx, 1
-        call untyped_carve              ; AX = its base in paragraphs
+        call untyped_carve              ; DL:AX = its base paragraph
         ASSERT nc, "boot_carve: no memory for the root"
-        mov dx, ax
-        shl ax, 4
-        shr dx, 12
+        call para_phys
         pop cx
         push ax
         push dx
@@ -1057,11 +1196,12 @@ kc_retype:
         test cx, cx
         jz kc_done.arg
         mov dx, 1
-        call untyped_carve              ; AX = its base in paragraphs
+        call untyped_carve              ; DL:AX = its base paragraph
         jc kc_done.mem
         call retype_destination
         mov byte [es:si + SH_TYPE], CAP_UNTYPED
         mov [es:si + SH_OBJECT], ax
+        mov [es:si + SH_HIGH], dl
         mov ax, [bp + FRAME_CX]
         mov [es:si + SH_SIZE], ax
         jmp retype_parent
@@ -1081,10 +1221,11 @@ kc_retype:
         rcr cx, 1                       ; (a carry is bit 16: up to 64 KB)
         shr cx, 3                       ; CX = paragraphs
         mov dx, 1
-        call untyped_carve              ; AX = its base in paragraphs
+        call untyped_carve              ; DL:AX = its base paragraph
         jc kc_done.mem
         mov es, [cur_thread]            ; zeroed in pieces: what a resumed call
         mov [es:T_ZERO_BASE], ax        ; finds again (retype_zero)
+        mov [es:T_ZERO_HIGH], dl
         mov [es:T_ZERO_PARAS], cx
         mov word [es:T_ZERO_DONE], 0
         mov ax, [retype_parent_slot]
@@ -1126,9 +1267,9 @@ retype_segment:
         mov [retype_base], ax
         mov [retype_paragraphs], cx
         mov [retype_parent_slot], dx
-        mov dx, ax                      ; DL:AX = its base
-        shl ax, 4
-        shr dx, 12
+        mov dl, [es:T_ZERO_HIGH]
+        mov [retype_base_para_high], dl
+        call para_phys                  ; DL:AX = its base
         mov [retype_base_low], ax
         mov [retype_base_high], dl
         call retype_destination         ; ES:SI, ES:DI
@@ -1146,6 +1287,8 @@ retype_segment:
         mov byte [es:si + SH_TYPE], CAP_SEGMENT
         mov ax, [retype_base]
         mov [es:si + SH_OBJECT], ax
+        mov al, [retype_base_para_high]
+        mov [es:si + SH_HIGH], al
         mov ax, [retype_paragraphs]
         mov [es:si + SH_SIZE], ax
         jmp retype_parent
@@ -1608,8 +1751,8 @@ thread_module_name:
         push cx
         push dx
         push si
-        mov ax, [es:SP_LDT + 2]         ; slot 0's base, in paragraphs
-        shr ax, 4
+        mov ax, [es:SP_LDT + 2]         ; slot 0's base, in paragraphs (the
+        shr ax, 4                       ; image's: below 1 MB)
         mov dl, [es:SP_LDT + 4]
         xor dh, dh
         shl dx, 12

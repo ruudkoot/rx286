@@ -29,7 +29,7 @@ Bochs is told everything about the machine it can be told. What it cannot be:
 | Video | EGA | VGA, a superset of the EGA registers rx286 uses |
 | LDTR at start | Intel: load it | a live LDT at 0, limit FFFFh (rx286 loads LDTR with 0) |
 | A20 after the BIOS | | on |
-| Memory with `megs: 1` | | 639 KB base, no extended memory |
+| Memory with `megs: 4` | | 639 KB base, 3 MB extended (roadmap os-server.md P3) |
 | `LOCK` at CPL 3 | #GP(0000) (seen on MAME) | runs |
 | `LOADALL` (0Fh 05h) at CPL 3 | #GP(0000) (seen on MAME) | #UD: it is `SYSCALL` |
 | `IRET` with NT and a null back link | #TS(0000) (seen on MAME; Intel's text says #GP, its pseudocode #TS) | #TS(0000) |
@@ -50,7 +50,11 @@ single-step trap in ring 0 (`fault.asm`), as Intel advises, and the attack
 DOSBox-X's 286 rejects 386 opcodes with #UD (a 66h-prefixed `MOV` faults at
 `cputype=286` and runs at `cputype=386`), so every test that passes on it
 proves its paths free of 386 instructions. Its protection is not a 286's,
-which is why the attack suite and the fuzzer run on Bochs and MAME instead:
+which is why the attack suite and the fuzzer run on Bochs and MAME instead.
+Its memory is 1 MB (`memsize = 1`): no extended memory, so its suites are
+the ones that prove an AT without any still boots and runs, the root's
+memory below 1 MB (roadmap os-server.md P3).
+
 
 | Seen | A 286 |
 |---|---|
@@ -80,8 +84,12 @@ firmware, IBM's EGA. What it needs:
 - **A valid CMOS**: the IBM BIOS stops its power-on test without one, as on a
   real AT nobody has run SETUP on. `rxlib.at_cmos()` writes the 64 bytes of
   rx286's AT (drive A 1.2 MB, B 360 KB, no fixed disk, two diskette drives, a
-  287, an EGA, 640 KB, the checksum) into a fresh nvram directory per run.
-- **The machine's slots**: drive A `525hd`, drive B `525dd`, `-ramsize 640K`,
+  287, an EGA, 640 KB and 1 MB extended, the checksum) into a fresh nvram
+  directory per run. The extended memory it says must be what `-ramsize`
+  fits, or the POST stops at error 164 (memory size) and waits for F1.
+- **The machine's slots**: drive A `525hd`, drive B `525dd`, `-ramsize 1664K`
+  (`rxlib.MAME_RAM`: 640 KB and 1 MB extended; with `4M` the BIOS gets no
+  further than its power-on test),
   a null modem on COM2 writing to a file (`-bitb`), and MAME's IDE card,
   which has the AT's task file at 1F0h.
 - **The null modem at 115200 baud**: `mame/rx286.lua` sets it at start.

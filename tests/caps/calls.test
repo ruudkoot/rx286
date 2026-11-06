@@ -8,8 +8,12 @@ define: TEST_CAPS
 rx286, test build
 caps: retype a segment: 0
 caps: the segment, zeroed, reads back (4660): 4660
-caps: its base, high byte (5): 5
-caps: its base, low word (5136): 5136
+@bochs caps: its base, high byte: 17
+@bochs caps: its base, low word: 60432
+@mame caps: its base, high byte: 17
+@mame caps: its base, low word: 60432
+@dosbox-x caps: its base, high byte: 5
+@dosbox-x caps: its base, low word: 5136
 caps: its limit (255): 255
 caps: retype a space: 0
 caps: retype a thread: 0
