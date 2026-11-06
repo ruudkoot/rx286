@@ -679,12 +679,12 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
     return -1;
 }
 
+static rx_u16 zfile_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n);
+
 /* px_read - PX_READ, by the description's kind */
 static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *error)
 {
     struct ofd *o = ofd_of(i, fd);
-    const rx_u8 RX_FAR *a;
-    rx_u16 offset, size, k;
 
     if (!o || (o->flags & O_ACCMODE) == O_WRONLY) {
         *error = EBADF;
@@ -701,18 +701,7 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
     case K_FILE:
         return file_io(o, data, at, n, 0, error);
     case K_ZFILE:
-        a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, AR_HEADER_SIZE + o->unit * AR_ENTRY_SIZE);
-        offset = (rx_u16)(a[AR_OFFSET] | (a[AR_OFFSET + 1] << 8));
-        size = (rx_u16)(a[AR_SIZE] | (a[AR_SIZE + 1] << 8));
-        if (o->offset >= size)
-            return 0;
-        if (n > size - o->offset)
-            n = (rx_u16)(size - o->offset);
-        a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, offset + (rx_u16)o->offset);
-        for (k = 0; k < n; k++)
-            ((rx_u8 RX_FAR *)RX_MK_FP(data, at))[k] = a[k];
-        o->offset += n;
-        return n;
+        return zfile_io(o, data, at, n);
     case K_DIR:
     case K_TOP:
     case K_DEVDIR:
@@ -1197,6 +1186,93 @@ static int px_fcntl(int i, struct rx_kregs *r, int *error)
 }
 
 static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out);
+
+/* zfile_io - a file of /z read from the description's offset into a
+ * segment: the bytes read */
+static rx_u16 zfile_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
+{
+    const rx_u8 RX_FAR *a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, AR_HEADER_SIZE
+                                                          + o->unit * AR_ENTRY_SIZE);
+    rx_u16 offset = (rx_u16)(a[AR_OFFSET] | (a[AR_OFFSET + 1] << 8)), size = zfile_size(o->unit);
+    rx_u16 k;
+
+    if (o->offset >= size)
+        return 0;
+    if (n > size - o->offset)
+        n = (rx_u16)(size - o->offset);
+    a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, offset + (rx_u16)o->offset);
+    for (k = 0; k < n; k++)
+        ((rx_u8 RX_FAR *)RX_MK_FP(data, at))[k] = a[k];
+    o->offset += n;
+    return n;
+}
+
+/* vfs_exe_open - an executable's file (fs.h) */
+int vfs_exe_open(int i, const char *path, struct exe_file *f)
+{
+    static struct path p;               /* (the lock is held: static) */
+    static struct node n;
+    const rx_u8 RX_FAR *a;
+    const char *last;
+    int error, k;
+
+    if ((error = path_make(i < 0 ? "/" : files_of[i].cwd, path, &p)) != 0
+            || (error = lookup(&p, &n)) != 0)
+        return error;
+    if (!n.exists)
+        return ENOENT;
+    if (n.kind != K_FILE && n.kind != K_ZFILE)
+        return EACCES;
+    if ((k = ofd_new(n.kind)) < 0)
+        return ENFILE;
+    ofds[k].drive = n.drive;
+    ofds[k].unit = n.unit;
+    ofds[k].first = n.first;
+    f->ofd = k;
+    if (n.kind == K_ZFILE) {
+        a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, AR_HEADER_SIZE + n.unit * AR_ENTRY_SIZE);
+        f->size = zfile_size(n.unit);
+        f->key[0] = (rx_u16)(0x5A00 | n.unit);  /* /z's: its entry, its place, its size */
+        f->key[1] = (rx_u16)(a[AR_OFFSET] | (a[AR_OFFSET + 1] << 8));
+        f->key[2] = (rx_u16)f->size;
+    } else {
+        ofds[k].size = w16(n.entry + DIR_FILE_SIZE)
+                       | (rx_u32)w16(n.entry + DIR_FILE_SIZE + 2) << 16;
+        f->size = ofds[k].size;
+        f->key[0] = (rx_u16)(0xD000 | n.drive); /* a volume's: its drive, its first cluster,
+                                                   its size and time stamp mixed */
+        f->key[1] = n.first;
+        f->key[2] = (rx_u16)(f->size ^ (f->size >> 16) ^ w16(n.entry + DIR_DATE)
+                             ^ w16(n.entry + DIR_TIME));
+    }
+    last = p.parts ? p.part[p.parts - 1] : "";
+    for (k = 0; k < (int)sizeof f->name - 1 && last[k]; k++)
+        f->name[k] = last[k];
+    f->name[k] = 0;
+    return 0;
+}
+
+/* vfs_exe_read - bytes of an executable's file (fs.h) */
+int vfs_exe_read(struct exe_file *f, rx_u32 at, rx_u16 segment, rx_u16 to, rx_u16 n)
+{
+    struct ofd *o = &ofds[f->ofd];
+    int error = 0, got;
+
+    o->offset = at;
+    if (o->kind == K_ZFILE)
+        got = zfile_io(o, segment, to, n);
+    else
+        got = file_io(o, segment, to, n, 0, &error);
+    if (got < 0)
+        return error;
+    return (rx_u16)got == n ? 0 : ENOEXEC;
+}
+
+/* vfs_exe_close - its description given back */
+void vfs_exe_close(struct exe_file *f)
+{
+    ofds[f->ofd].kind = K_FREE;
+}
 
 /* vfs_call - the processes' file calls (fs.h), the FAT and directory
  * sectors they changed written at their end */

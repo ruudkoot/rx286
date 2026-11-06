@@ -63,8 +63,8 @@ struct proc {
 
 /* A new image, between exec's checks and the process it becomes */
 struct image {
-    rx_u16 code;                        /* the root's code */
-    rx_u16 file;                        /* its file's offset in the archive */
+    struct exe_file file;               /* its file, open */
+    rx_u16 code, code_bytes;            /* the root's code, and its bytes in the file */
     rx_u16 data, stack, entry;          /* its initialised data's bytes, its stack's, IP */
     rx_u16 args_at, args_size, argc;    /* argv and environ: at the first break */
     rx_u16 bytes, most;                 /* the data segment's bytes, and its most */
@@ -186,27 +186,6 @@ static int entry_of(pid_t pid, int state)
     return -1;
 }
 
-/* file_find - a file of /z, by its path: its entry's number, or -1 */
-static int file_find(const char *path)
-{
-    const rx_u8 RX_FAR *a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, 0);
-    const rx_u8 RX_FAR *e;
-    unsigned i, k, count;
-
-    if (strncmp(path, "/z/", 3) != 0 || a[0] != 'R' || a[1] != 'Z')
-        return -1;
-    path += 3;
-    count = *far_word(ARCHIVE, ARH_COUNT);
-    for (i = 0; i < count; i++) {
-        e = a + AR_HEADER_SIZE + i * AR_ENTRY_SIZE;
-        for (k = 0; k < AR_NAME_SIZE && e[AR_NAME + k] == (rx_u8)path[k] && path[k]; k++)
-            ;
-        if (k < AR_NAME_SIZE && path[k] == 0 && e[AR_NAME + k] == 0)
-            return (int)i;
-    }
-    return -1;
-}
-
 /* string_in - a string of a segment, at most max bytes with its zero, into
  * the server's: its length, or -1 (EFAULT past the segment, E2BIG too long) */
 static int string_in(rx_u16 segment, rx_u16 at, char *to, unsigned max, int *error)
@@ -284,60 +263,77 @@ static int args_take(struct image *img, rx_u16 segment, rx_u16 argv, rx_u16 envp
     return 0;
 }
 
-/* image_take - a file of /z checked, its code sealed (or found, shared),
- * argv and environ taken from a segment: what make needs; 0 or the error.
- * Nothing of the caller's is changed yet */
-static int image_take(struct image *img, const char *path, rx_u16 segment, rx_u16 argv,
-                      rx_u16 envp)
+/* image_take - an executable file, of /z or of a volume, checked, its code
+ * sealed (or found, shared), argv and environ taken from a segment: what
+ * image_make needs, its file left open (image_done); 0 or the error.
+ * Nothing of the caller's is changed yet. A file is refused (ENOEXEC) at
+ * every fault of its header: its magic, its version, a flag rx286 does not
+ * know (more code segments, D2 B), no code, an entry outside it, code and
+ * data past the file's end, a stack too small for main's three words, or
+ * more data than a segment holds or than its own most */
+static int image_take(struct image *img, int i, const char *path, rx_u16 segment,
+                      rx_u16 argv, rx_u16 envp)
 {
-    int index = file_find(path), error;
-    const rx_u8 RX_FAR *e;
-    rx_u16 h, size, code, bss, load, code_at;
+    rx_u16 head[RX_HEADER_SIZE / 2], bss, load;
     rx_u32 end;
+    int error;
 
-    if (index < 0)
-        return ENOENT;
-    e = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, AR_HEADER_SIZE + index * AR_ENTRY_SIZE);
-    h = *(const rx_u16 RX_FAR *)(e + AR_OFFSET);
-    size = *(const rx_u16 RX_FAR *)(e + AR_SIZE);
-    for (error = 0; error < AR_NAME_SIZE; error++)
-        img->name[error] = (char)e[AR_NAME + error];
-    if (size < RX_HEADER_SIZE || *far_word(ARCHIVE, h + RXH_MAGIC) != RX_MAGIC
-            || *far_word(ARCHIVE, h + RXH_VERSION) != RX_VERSION)
-        return ENOEXEC;
-    code = *far_word(ARCHIVE, h + RXH_CODE);
-    img->data = *far_word(ARCHIVE, h + RXH_DATA);
-    bss = *far_word(ARCHIVE, h + RXH_BSS);
-    img->stack = *far_word(ARCHIVE, h + RXH_STACK);
-    img->entry = *far_word(ARCHIVE, h + RXH_ENTRY);
-    img->most = *far_word(ARCHIVE, h + RXH_DGROUP_MAX);
+    if ((error = vfs_exe_open(i, path, &img->file)) != 0)
+        return error;
+    memcpy(img->name, img->file.name, AR_NAME_SIZE);
+    if (vfs_exe_read(&img->file, 0, OS_DATA, (rx_u16)(unsigned)head, RX_HEADER_SIZE))
+        goto noexec;
+    img->code_bytes = head[RXH_CODE / 2];
+    img->data = head[RXH_DATA / 2];
+    bss = head[RXH_BSS / 2];
+    img->stack = head[RXH_STACK / 2];
+    img->entry = head[RXH_ENTRY / 2];
+    img->most = head[RXH_DGROUP_MAX / 2];
+    end = ((rx_u32)img->stack + img->data + bss + 1) & ~1ul;
+    if (head[RXH_MAGIC / 2] != RX_MAGIC || head[RXH_VERSION / 2] != RX_VERSION
+            || (head[RXH_FLAGS / 2] & ~RXF_287) || img->code_bytes == 0
+            || img->entry >= img->code_bytes
+            || (rx_u32)RX_HEADER_SIZE + img->code_bytes + img->data > img->file.size
+            || img->stack < 8 || (img->stack & 1) || end > 0xF000
+            || (img->most && img->most < end))
+        goto noexec;
     if (img->most == 0)
         img->most = 0xFFF0;
-    if (code == 0 || (rx_u32)RX_HEADER_SIZE + code + img->data > size || img->stack < 8)
-        return ENOEXEC;
-    code_at = (rx_u16)(h + RX_HEADER_SIZE);
-    img->file = (rx_u16)(code_at + code);   /* its data, after its code */
-    end = ((rx_u32)img->stack + img->data + bss + 1) & ~1ul;
-    if (end > 0xF000)
-        return ENOEXEC;
     img->args_at = (rx_u16)end;
-    error = args_take(img, segment, argv, envp);
-    if (error)
-        return error;
+    if ((error = args_take(img, segment, argv, envp)) != 0)
+        goto failed;
     end += img->args_size;
-    if (end > img->most)
-        return E2BIG;
+    if (end > img->most) {
+        error = E2BIG;
+        goto failed;
+    }
     img->bytes = (rx_u16)end;
-    if (root(ROOT_FIND, 0, ARCHIVE_KEY | (rx_u16)index, h, size, &img->code) == 0)
+    if (root(ROOT_FIND, 0, img->file.key[0], img->file.key[1], img->file.key[2],
+             &img->code) == 0)
         return 0;                       /* sealed before: shared */
-    if (root(ROOT_LOAD, code, 0, 0, LOAD_SLOT, &load))
-        return ENOMEM;
-    far_copy(LOAD_SLOT, 0, ARCHIVE, code_at, code);
-    if (root(ROOT_SEAL, load, ARCHIVE_KEY | (rx_u16)index, h, size, &img->code)) {
+    error = ENOMEM;
+    if (root(ROOT_LOAD, img->code_bytes, 0, 0, LOAD_SLOT, &load))
+        goto failed;
+    if ((error = vfs_exe_read(&img->file, RX_HEADER_SIZE, LOAD_SLOT, 0, img->code_bytes)) != 0
+            || root(ROOT_SEAL, load, img->file.key[0], img->file.key[1], img->file.key[2],
+                    &img->code)) {
         root(ROOT_UNLOAD, load, 0, 0, 0, 0);
-        return ENOMEM;
+        if (!error)
+            error = ENOMEM;
+        goto failed;
     }
     return 0;
+noexec:
+    error = ENOEXEC;
+failed:
+    vfs_exe_close(&img->file);
+    return error;
+}
+
+/* image_done - an image's file closed */
+static void image_done(struct image *img)
+{
+    vfs_exe_close(&img->file);
 }
 
 /* image_make - the process of an image: its four capabilities in the
@@ -351,8 +347,11 @@ static int image_make(struct image *img, rx_u16 to, unsigned badge, rx_u16 *n)
 
     if (root(ROOT_SPAWN, img->code, img->bytes, (rx_u16)badge, to, n))
         return ENOMEM;
-    if (img->data)
-        far_copy(data, img->stack, ARCHIVE, img->file, img->data);
+    if (img->data && vfs_exe_read(&img->file, (rx_u32)RX_HEADER_SIZE + img->code_bytes, data,
+                                  img->stack, img->data)) {
+        root(ROOT_EXIT, *n, 0, 0, 0, 0);
+        return EIO;
+    }
     far_copy(data, img->args_at, OS_DATA, (rx_u16)(unsigned)args, img->args_size);
     envp = img->args_at + 2 * (img->argc + 1);
     at = (rx_u16)(img->stack - 6);      /* main's argc, argv, envp (crt0) */
@@ -419,9 +418,11 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
         *error = EAGAIN;
         return -1;
     }
-    *error = image_take(&img, path, segment, argv, envp);
-    if (!*error)
-        *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
+    *error = image_take(&img, parent, path, segment, argv, envp);
+    if (*error)
+        return -1;
+    *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
+    image_done(&img);
     if (*error)
         return -1;
     procs[i].root = n;
@@ -516,11 +517,13 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
     struct image img;
     rx_u16 n;
 
-    *error = image_take(&img, path, P_SLOT(i, PK_DATA), argv, envp);
+    *error = image_take(&img, i, path, P_SLOT(i, PK_DATA), argv, envp);
     if (*error)
         return -1;
     root(ROOT_EXIT, procs[i].root, 0, 0, 0, 0);     /* its thread, in this call, too */
-    if (image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n)) {
+    *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
+    image_done(&img);
+    if (*error) {
         end(i, SIGKILL, 0);
         return NO_REPLY;
     }
@@ -734,7 +737,7 @@ void proc_boot(void)
 {
     static const char path[] = "/z/init";
     static const char *const argv[] = { path, 0 };
-    static const char *const envp[] = { 0 };
+    static const char *const envp[] = { "PATH=/z:/c/bin", 0 };
     int error;
 
     take(OS_CONTROL);

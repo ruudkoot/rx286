@@ -18,6 +18,7 @@ pid_t fork(void);
 pid_t _Fork(void);
 int execve(const char *path, char *const argv[], char *const envp[]);
 int execv(const char *path, char *const argv[]);
+int execvp(const char *name, char *const argv[]);
 pid_t getpid(void);
 pid_t getppid(void);
 ssize_t write(int fd, const void *bytes, size_t n);

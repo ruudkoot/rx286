@@ -117,7 +117,7 @@ LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ))
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
-    files.$(OBJ) dirent.$(OBJ))
+    files.$(OBJ) dirent.$(OBJ) path.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -159,15 +159,21 @@ $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)
 Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) proc=$(C_B)/tests/posix/proc.$(OBJ) \
-    child=$(C_B)/tests/posix/child.$(OBJ) files=$(C_B)/tests/posix/files.$(OBJ)
+    child=$(C_B)/tests/posix/child.$(OBJ) files=$(C_B)/tests/posix/files.$(OBJ) \
+    execs=$(C_B)/tests/posix/exec.$(OBJ)
+# Programs for the disks, not /z (roadmap os-server.md P8): run-test's
+# install: lines put them on a run's drive C
+DISK_PROGRAMS := codes=$(C_B)/tests/posix/codes.$(OBJ)
+DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p))).rx)
+image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
 Z_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(Z_NAMES)))
 define z_program
 $(B)/z-$(1).rx: $(PROCESS_LIBS) $(2) tools/mkexe
 	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(2))
 endef
-$(foreach p,$(Z_PROGRAMS),$(eval $(call z_program,$(firstword $(subst =, ,$(p))),$(lastword \
-    $(subst =, ,$(p))))))
+$(foreach p,$(Z_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
+    $(subst =, ,$(p))),$(lastword $(subst =, ,$(p))))))
 $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 	$(PYTHON) tools/mkarchive $@ $(foreach n,$(Z_NAMES),$(n)=$(B)/z-$(n).rx)
 

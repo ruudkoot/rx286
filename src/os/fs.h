@@ -55,6 +55,25 @@ rx_u16 vol_entry_put(struct vol *v, const struct place *where, const rx_u8 *entr
 rx_u16 vol_dir_empty(struct vol *v, rx_u16 dir, int *empty);
 void vol_now(rx_u16 *date, rx_u16 *time);
 
+/* An executable's file, open for exec (vfs.c): a description of the
+ * server's own, the key the root's code table knows its code by, its bytes,
+ * its last name */
+struct exe_file {
+    int ofd;
+    rx_u16 key[3];
+    rx_u32 size;
+    char name[12];
+};
+
+/* vfs_exe_open - a path, as a process (entry i; -1: from /) names it, open
+ * to be run: a file of /z or of a volume; 0 or the error (EACCES for one
+ * that is not a file) */
+int vfs_exe_open(int i, const char *path, struct exe_file *f);
+/* vfs_exe_read - bytes of it from an offset into a segment of the
+ * server's, all of them: 0 or the error (ENOEXEC if it is shorter) */
+int vfs_exe_read(struct exe_file *f, rx_u32 at, rx_u16 segment, rx_u16 to, rx_u16 n);
+void vfs_exe_close(struct exe_file *f);
+
 /* vfs.c: a process's files, from proc.c (entry i, its data segment's slot) */
 void vfs_spawned(int i, int parent);
 void vfs_forked(int child, int parent);

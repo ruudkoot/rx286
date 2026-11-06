@@ -41,6 +41,10 @@
 #                               (its partition's, on C or D) sound; may repeat
 #   file: B /MOVED.TXT text     after the run, that file of drive B's volume
 #                               holds the text (\n a new line), by mtools
+#   install: C /BIN/CHILD z-child.rx
+#                               before the run, a file the build made put on
+#                               the run's copy of drive C (B, D) at that path,
+#                               its directories made; may repeat
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
 #   {c:name} the counter's, {r:name} the root's, {z:program.name} a program of
@@ -120,6 +124,7 @@ class Test:
         self.sectors = []                   # (drive, sector, text)
         self.fscks = []                     # drives whose volumes fsck.fat checks
         self.files = []                     # (drive, path, text)
+        self.installs = []                  # (drive, path, a file the build made)
         self.expected = []
         self.parse(open(path, encoding='utf-8').read())
 
@@ -172,6 +177,11 @@ class Test:
                 if value not in DRIVE_IMAGES:
                     raise ValueError('%s: bad fsck line %r' % (self.path, line))
                 self.fscks.append(value)
+            elif key == 'install':
+                drive, path, name = (value.split(None, 2) + ['', ''])[:3]
+                if drive not in 'BCD' or not path.startswith('/') or not name:
+                    raise ValueError('%s: bad install line %r' % (self.path, line))
+                self.installs.append((drive, path, name))
             elif key == 'file':
                 drive, path, text = (value.split(None, 2) + [''])[:3]
                 if drive not in DRIVE_IMAGES or not path.startswith('/'):
@@ -261,7 +271,7 @@ def build(test):
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
                      'rtc.bin', 'clock.rx', 'z.arc', 'z-init.rx', 'z-proc.rx', 'z-child.rx',
-                     'z-files.rx'):
+                     'z-files.rx', 'z-execs.rx', 'z-codes.rx'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them
@@ -515,6 +525,17 @@ def volume_image(test, drive):
     return path
 
 
+def install(test):
+    """Each install: line: a file the build made, onto the run's copy of a
+    drive, its directories made (mtools, at the partition's offset)."""
+    for drive, path, name in test.installs:
+        error = rxlib.install_file(os.path.join(test.build_dir, DRIVE_IMAGES[drive]),
+                                   drive in 'CD', path, os.path.join(test.build_dir, name))
+        if error:
+            return 'install: %s to drive %s\'s %s: %s' % (name, drive, path, error)
+    return None
+
+
 def check_volumes(test):
     """Each fsck: and file: line against the drives' images after the run."""
     for drive in test.fscks:
@@ -558,6 +579,9 @@ def run(test):
     bochsrc = os.path.join(b, 'test.bochsrc')
     disks = rxlib.private_disks(os.path.join(b, 'disks'))
     rxlib.damage_disks(disks, test.media)
+    error = install(test)
+    if error:
+        return test, error, time.monotonic() - started
     peer = None
     if test.modem:
         peer = HayesPeer()

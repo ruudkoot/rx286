@@ -126,7 +126,7 @@ What it rests on:
 | P5 | The OS server in C, serving today's calls | done (2026-11-06, branch `os-server`) |
 | P6 | Processes: fork, exec, exit, wait | done (2026-11-06, branch `os-server`) |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
-| P8 | Programs from disk | not started |
+| P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | not started |
 | P10 | Signals | not started |
 | P11 | Terminals, the eight virtual terminals, job control | not started |
@@ -2234,6 +2234,25 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - a program on C runs, and is refused at every corruption of its file;
   - two copies share their code.
 * **Decisions:** D6, D11, D12.
+* **Done (2026-11-06):**
+  - **Loading** from `/z` or any volume, through one reader (`vfs_exe_open`, `vfs_exe_read`):
+    the header, then the code into a load the root seals, keyed for the code table by the
+    drive, the first cluster, and the size and time stamp mixed, so that a file written anew
+    gets its own code; then the data into the new segment. `ENOEXEC` at every fault of the
+    header (*docs/processes.md*), `EACCES` for a directory.
+  - **Finding:** init's environment is `PATH=/z:/c/bin`; libc's `getenv`, `execvp` and
+    `posix_spawnp`.
+  - **`tests/posix/exec`** (Bochs and MAME): programs installed on C run; PATH finds one on C
+    alone; two copies at once share their code (both find their code segment at one base);
+    a copy written to B with each of nine corruptions is refused; five execs from C take
+    under five seconds.
+  - **Otherwise than planned:**
+    - the corruptions are `tests/posix/exec`'s, not the attack suite's, whose program has
+      today's calls and no exec; the exec's time is that test's too, against a second, not
+      `tests/timing`'s count of instructions;
+    - `tools/mkdisks` makes the disks before anything is built, so `make run` puts the
+      programs in `/c/bin` (`tools/install-programs`), and a test with run-test's
+      `install:`.
 
 ### P9. Pipes and the shell in C (L, about 3,000)
 

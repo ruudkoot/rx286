@@ -1,7 +1,8 @@
 # Processes
 
-A process (roadmap os-server.md P6) is a program run from `/z`, the archive
-of programs in the boot image, by `fork`, `execve` or `posix_spawn`, beside
+A process (roadmap os-server.md P6, P8) is a program run from `/z`, the
+archive of programs in the boot image, or from a file of a drive (`/c/bin`),
+by `fork`, `execve` or `posix_spawn`, beside
 today's programs, which the root builds from the image's modules
 (*docs/root.md*). It is C, linked with `src/lib/posix/` instead of
 today's `src/lib/os/`. It ends: nothing restarts it. The OS server keeps
@@ -45,9 +46,11 @@ no transfer segment.
 | `PX_KILL` | BX a pid, CX a signal | its default action, which ends the process (handlers come with P10); 0 only looks; init takes none (`EPERM`) |
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
 
-The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts them all. A path has `PX_PATH_MAX` bytes at most, its zero
-too, and names a file of `/z`: "/z/init". `argv` and `environ` together, their
-pointers too, have `PX_ARG_MAX` bytes at most (`E2BIG`).
+The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts
+them all. A path has `PX_PATH_MAX` bytes at most, its zero too; a program's
+names a file of `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and
+`environ` together, their pointers too, have `PX_ARG_MAX` bytes at most
+(`E2BIG`).
 
 The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
 `EINTR`, `EIO`, `E2BIG`, `ENOEXEC`, `EBADF`, `ECHILD`, `EAGAIN` (the table
@@ -56,6 +59,26 @@ process: `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB,
 #BP), `SIGABRT`, `SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGSEGV` (any other
 fault), `SIGPIPE`, `SIGTERM`, `SIGCHLD`, up to `SIG_MAX`. A wait status is
 the exit's code in bits 8-15, or the signal in bits 0-6 (`sys/wait.h`).
+
+## Programs from disk
+
+`execve` and `posix_spawn` take a program from `/z` or from any volume
+(roadmap os-server.md P8): the server reads its header, then its code into
+a segment the root seals (`ROOT_LOAD`, `ROOT_SEAL`), unless the root's code
+table has its key already, and the processes of that file share it. A file
+of `/z` is keyed by its place in the archive; a volume's by its drive, its
+first cluster, and its size and time stamp mixed, so that a file written
+anew gets its own code. A file is refused (`ENOEXEC`) at every fault of its
+header (`exe.inc`): its magic, its version, a flag rx286 does not know, no
+code, an entry outside the code, code and data past the file's end, a
+stack too small for `main`'s three words, data past a segment, or more data
+than its own most. A directory is `EACCES`.
+
+init's environment is `PATH=/z:/c/bin`, which its children inherit; libc's
+`execvp` and `posix_spawnp` look for a name without a slash along it
+(`src/lib/posix/path.c`, with `getenv`). `make run` puts the programs a
+build made in C's `/BIN` (`tools/install-programs`), and run-test's
+`install:` lines put them on a run's drive.
 
 ## Files
 

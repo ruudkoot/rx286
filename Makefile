@@ -210,6 +210,7 @@ $(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img &: $(DISK_SOURCES)
 # ---------------------------------------------------------------- running
 run: disks
 	$(MAKE) FLAVOUR=debug image symbols
+	$(PYTHON) tools/install-programs $(DISKS)/hd0.img build/debug
 	$(PYTHON) tools/bochs-run --mode run --build build/debug
 
 debugger: disks
@@ -219,6 +220,7 @@ debugger: disks
 # The release image, whose COM2 is the modem's line (term), not the log.
 run-release: disks
 	$(MAKE) FLAVOUR=release image symbols
+	$(PYTHON) tools/install-programs $(DISKS)/hd0.img build/release
 	$(PYTHON) tools/bochs-run --mode run --build build/release --release
 
 # ---------------------------------------------------------------- checks

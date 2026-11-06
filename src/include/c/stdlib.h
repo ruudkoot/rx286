@@ -14,6 +14,7 @@
 #define EXIT_FAILURE 1
 
 void *malloc(size_t size);
+char *getenv(const char *name);
 void free(void *p);
 RX_NORETURN void exit(int status);
 

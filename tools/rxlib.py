@@ -9,6 +9,7 @@
 
 import os
 import re
+import struct
 import subprocess
 import time
 
@@ -260,6 +261,27 @@ def damage_disks(directory, media):
                     pair = (pair & 0xF000) | FAT12_BAD_LINK
                 f.seek(at)
                 f.write(pair.to_bytes(2, 'little'))
+
+
+def install_file(image, fixed, path, source):
+    """A file put on a drive's image at a path, its directories made: a
+    fixed disk's in its first FAT12 partition (mtools at its offset). An
+    error's text, or None."""
+    if fixed:
+        data = open(image, 'rb').read(512)
+        starts = [struct.unpack_from('<I', data, 0x1BE + 16 * k + 8)[0] for k in range(4)
+                  if data[0x1BE + 16 * k + 4] == 1]
+        if not starts:
+            return 'no FAT12 partition on %s' % image
+        image += '@@%d' % (starts[0] * 512)
+    env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
+    parts = path.strip('/').split('/')
+    for k in range(1, len(parts)):
+        subprocess.run(['mmd', '-i', image, '::/' + '/'.join(parts[:k])], capture_output=True,
+                       env=env)                     # (there already: fine)
+    done = subprocess.run(['mcopy', '-o', '-i', image, source, '::' + path],
+                          capture_output=True, text=True, env=env)
+    return done.stderr.strip() or 'mcopy failed' if done.returncode else None
 
 
 def private_disks(directory):

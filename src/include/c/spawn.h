@@ -15,5 +15,7 @@ typedef struct rx_spawn_attr posix_spawnattr_t;
 
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *actions,
                 const posix_spawnattr_t *attributes, char *const argv[], char *const envp[]);
+int posix_spawnp(pid_t *pid, const char *name, const posix_spawn_file_actions_t *actions,
+                 const posix_spawnattr_t *attributes, char *const argv[], char *const envp[]);
 
 #endif
