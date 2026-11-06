@@ -31,12 +31,12 @@ gdt:
         segment_descriptor 0, 0, 0                                  ; SEL_NULL
         segment_descriptor KTEXT_PHYS, ktext_end - 1, ACC_KCODE     ; SEL_KCODE
         segment_descriptor KDATA_BASE, 0xFFFF, ACC_KDATA            ; SEL_KDATA: and the arena
-        segment_descriptor KSTACK_PHYS, KSTACK_SIZE - 1, ACC_KDATA  ; SEL_KSTACK
+        segment_descriptor KDATA_BASE, KSTACK_BOTTOM - 1, ACC_KDATA | ACC_EXPAND_DOWN ; SEL_KSTACK
         kdata_descriptor tss, TSS286_LIMIT, ACC_TSS                 ; SEL_TSS
         kdata_descriptor df_tss, TSS286_LIMIT, ACC_TSS              ; SEL_DFTSS
         segment_descriptor DFSTACK_PHYS, DFSTACK_SIZE - 1, ACC_KDATA    ; SEL_DFSTACK
         segment_descriptor VIDEO_PHYS, VIDEO_SIZE - 1, ACC_KDATA    ; SEL_VIDEO
-%rep SPACE_MAX + THREAD_MAX                                 ; the pools (cap.asm)
+%rep SPACE_MAX                                              ; the pool (cap.asm)
         segment_descriptor 0, 0, 0
 %endrep
         segment_descriptor 0, 0, 0                                  ; SEL_SCRATCH

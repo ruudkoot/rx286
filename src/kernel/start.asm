@@ -36,11 +36,20 @@ pm_start:
         mov ax, SEL_KDATA
         mov ds, ax
         cld
-        zero_segment SEL_KSTACK, KSTACK_SIZE
+        mov ax, SEL_KDATA               ; the kernel's stack (expand-down: not
+        mov es, ax                      ; from offset 0)
+        mov di, KSTACK_BOTTOM
+%ifdef WITH_CHECKS
+        mov ax, STACK_FILL              ; the watermark: how deep it ever gets
+%else
+        xor ax, ax
+%endif
+        mov cx, KSTACK_SIZE / 2
+        rep stosw
         zero_segment SEL_DFSTACK, DFSTACK_SIZE
         mov ax, SEL_KSTACK
         mov ss, ax
-        mov sp, KSTACK_SIZE
+        mov sp, KSTACK_TOP
         mov ax, SEL_KDATA
         mov es, ax
         mov ax, SEL_TSS

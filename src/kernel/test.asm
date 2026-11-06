@@ -74,6 +74,7 @@ FUZZ_WATCHDOG       equ 5               ; ticks a fuzz iteration may run
 %endif
 
 begin_kdata
+test_give_way       dw 0                ; TEST_GIVE_WAY: windows still to give way
 %ifdef TEST_KEYS_INC
 %include TEST_KEYS_INC
 %else
@@ -98,7 +99,7 @@ msg_ticks_ok        db "timer: 50 ticks a second, by the clock", CHAR_LF, 0
 msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
 msg_kernel_changed  db "the kernel's code or tables changed", 0
-msg_stack_leak      db "a frame from ring 3 is not at the kernel stack's top", 0
+msg_stack_leak      db "a frame from ring 3 is not the running thread's", 0
 %ifdef TEST_KERNEL_CHECKS
 test_sum            dw 0
 test_sum_known      db 0
@@ -603,14 +604,19 @@ test_program_started:
         ret
 
 ; ----------------------------------------------------------------------------
-; test_restart_check - a frame from ring 3 must sit at the kernel stack's
-; top (SP0): anything else is a leak of the kernel's stack
+; test_restart_check - a frame from ring 3 must be the running thread's, at
+; its control block's end (SP0): anything else is a frame on the kernel's
+; stack, or another thread's
 ;   In:       BP = the frame being restarted; DS = SEL_KDATA
 ;   Out:      nothing (or never: a panic)
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_restart_check:
-        cmp bp, TCB_STACK_SIZE - FRAME_SIZE_USER    ; the running thread's kernel stack
+        push ax
+        mov ax, [cur_thread]
+        add ax, T_FRAME
+        cmp bp, ax
+        pop ax
         je .ok
         mov si, msg_stack_leak
         xor bp, bp

@@ -684,7 +684,7 @@ thread_destroy:
 ; ----------------------------------------------------------------------------
 ; thread_forget - every reference to a dead thread cleared: the 287's, the
 ; keys', the log's; replies it is owed or owes, the saved one by its back
-; link; its kernel stack's descriptor back to the pool
+; link
 ;   In:       BX = the thread, out of the list
 ;   Out:      nothing
 ;   Destroys: AX, CX, DX, SI, DI, ES
@@ -736,20 +736,13 @@ thread_forget:
         mov ax, [bx + T_SAVED_SLOT]     ; the saved reply owed to it: gone (a
         mov bx, [bx + T_SAVED_SPACE]    ; reply has no parent and no child)
         test bx, bx
-        jz .stack
+        jz .done
         call slot_at                    ; SI, DI
         call slot_clear
-.stack:
+.done:
         mov bx, dx
         mov word [bx + T_SAVED_SPACE], 0
         mov word [bx + T_SAVED_SLOT], 0
-        mov di, [bx + T_STACK]
-        add di, gdt
-        xor ax, ax
-        mov [di], ax                    ; its stack's descriptor: back to the pool
-        mov [di + 2], ax
-        mov [di + 4], ax
-        mov [di + 6], ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -901,7 +894,7 @@ thread_die:
         mov bx, [cur_thread]
         call thread_unlist
         mov byte [bx + T_STATE], TS_FREE
-        call thread_forget              ; its stack's descriptor too: SS keeps it
+        call thread_forget
         mov si, [bx + T_SPACE]
         test si, si
         jz .gone
@@ -912,8 +905,7 @@ thread_die:
         call space_free_ldt             ; LDTR keeps it until the switch
         pop bx
 .gone:
-        call schedule                   ; never back: nobody makes it ready
-        jmp thread_die                  ; (not reached)
+        jmp schedule                    ; never back: nobody makes it ready
 
 ; ----------------------------------------------------------------------------
 ; thread_orphan - the running thread, whose space died (TF_ORPHAN): free, to
@@ -937,23 +929,25 @@ thread_orphan:
         call space_free_ldt             ; LDTR keeps it until the switch
         pop bx
 .gone:
-        call schedule                   ; never back: thread_init starts it anew
-        jmp thread_orphan               ; (not reached)
+        jmp schedule                    ; never back: thread_init starts it anew
 
 ; ----------------------------------------------------------------------------
 ; kc_revoke - KCALL_REVOKE: every capability below a slot of the caller's
 ; deleted: its first child, whose own children become its first, until it
 ; has none (l4.md L12; os-server.md D9), with a window after each (l4.md
 ; L13). What it revokes is kept in the thread, since another thread may
-; revoke meanwhile. An untyped's memory is free again; a revoke cut short by
-; a restart leaves the rest of the tree as it was
+; revoke meanwhile, and the call resumes there if it gives way (kpreempt).
+; An untyped's memory is free again; a revoke cut short by a restart
+; leaves the rest of the tree as it was
 ;   In:       BP = the frame (DX the slot)
 ;   Out:      the frame's status (KE_CAP: an empty slot)
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 kc_revoke:
-        mov ax, [bp + FRAME_DX]
         mov bx, [cur_thread]
+        cmp byte [bx + T_CONT], CONT_RESUMED
+        je .child                       ; after giving way: where it was
+        mov ax, [bp + FRAME_DX]
         mov bx, [bx + T_SPACE]
         call slot_of                    ; AX = the slot, SI its shadow entry
         jc kc_done.cap

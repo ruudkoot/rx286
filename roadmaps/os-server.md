@@ -1993,6 +1993,19 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - an AT without extended memory still boots and passes the suites that fit;
   - the stretch tests stay under 10 ms, `tests/timing`'s IPC round trip within its budget.
 * **Decisions:** D9, D18.
+* **Step 1 done (2026-11-06):**
+  - The frame lives at the end of the thread's control block (SP0 points there), and the
+    kernel's one stack, `SEL_KSTACK`, is an expand-down alias of `SEL_KDATA` over the first
+    KB above `KDATA_BASE`, so SS and DS agree and an overflow still faults. The arena gave
+    that KB; a thread's object is 256 bytes, and the kernel lists 128 threads.
+  - `schedule` never returns: what a thread still has to do in the kernel is its `T_CONT`
+    (its first start, the rest of its fault's call, or the rest of a kernel call). A call
+    that gives way at an interrupt window resumes from its progress in the control block
+    (the log's bytes, a retype's paragraphs) or in the objects (a revoke, a dead space's
+    slots), so a suspend still takes effect only once the call has ended.
+  - `TEST_GIVE_WAY` makes every window give way; `tests/caps/resume.test` resumes a line of
+    the log, a 64 KB retype over written memory, a revoke and a delete that empties a space.
+    The deepest the kernel's stack has been in the dump's test is 50 bytes.
 
 ### P4. The root in C; its allocator and its services (L, about 2,000)
 

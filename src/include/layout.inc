@@ -74,23 +74,28 @@ ROOT_NAME_2         equ 'ot'
 
 ; Below the image: the boot code's memory, free once the kernel runs. The
 ; kernel's data segment, SEL_KDATA, starts at KDATA_BASE: its 64 KB reach
-; the arena, the kernel's variables and the module table, just.
+; the kernel's one stack, the arena, the kernel's variables and the module
+; table, just. The stack's segment, SEL_KSTACK, is the same memory at the
+; same offsets, expand-down from KSTACK_BOTTOM, so that SS and DS agree and
+; an overflow still faults (roadmap os-server.md P3).
 DFSTACK_PHYS        equ 0x04400     ; the double-fault task's stack
 DFSTACK_SIZE        equ 0x0200
-KSTACK_PHYS         equ 0x04600     ; the kernel's own stack: the start's, then the idle loop's
-KSTACK_SIZE         equ 0x0400
 KDATA_BASE          equ 0x04B00
+KSTACK_PHYS         equ 0x04C00     ; the kernel's one stack (os-server.md P3)
+KSTACK_SIZE         equ 0x0400
+KSTACK_BOTTOM       equ KSTACK_PHYS - KDATA_BASE        ; its offsets in SEL_KDATA
+KSTACK_TOP          equ KSTACK_BOTTOM + KSTACK_SIZE
 ; The arena (roadmap l4.md D7, L3): the kernel's objects - spaces, threads,
 ; endpoints, notifications - reached with DS = SEL_KDATA, never at its
 ; offset 0 (an object's address 0 means none). Only the kernel maps it: it
 ; is given out as untyped memory, never as a segment.
-ARENA_PHYS          equ 0x04C00
-ARENA_SIZE          equ 0xB400
+ARENA_PHYS          equ 0x05000
+ARENA_SIZE          equ 0xB000
 ; Memory for programs' segments, given out as untyped (l4.md L3)
 UMEM_PHYS           equ 0x30000
 UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h
 SPACE_MAX           equ 64          ; LDT descriptors in the GDT's pool
-THREAD_MAX          equ 64          ; kernel stack descriptors in the GDT's pool
+THREAD_MAX          equ 128         ; threads (thread_list)
 
 ; Physical addresses, and offsets of SEL_KDATA.
 KTEXT_PHYS          equ KERNEL_PHYS + KTEXT_OFF
@@ -103,8 +108,11 @@ ARENA_OFF           equ ARENA_PHYS - KDATA_BASE         ; the arena
 %if KERNEL_PHYS + IMAGE_MAX > UMEM_PHYS
   %error "layout.inc: the image's room overlaps the memory for programs"
 %endif
-%if DFSTACK_PHYS + DFSTACK_SIZE > KSTACK_PHYS || KSTACK_PHYS + KSTACK_SIZE > ARENA_PHYS
-  %error "layout.inc: the kernel's stacks and the arena overlap"
+%if DFSTACK_PHYS + DFSTACK_SIZE > KDATA_BASE || KSTACK_PHYS <= KDATA_BASE
+  %error "layout.inc: the kernel's stacks must lie below and above KDATA_BASE"
+%endif
+%if KSTACK_PHYS + KSTACK_SIZE > ARENA_PHYS
+  %error "layout.inc: the kernel's stack and the arena overlap"
 %endif
 %if ARENA_PHYS + ARENA_SIZE > KERNEL_PHYS || ARENA_PHYS <= KDATA_BASE
   %error "layout.inc: the arena must lie between KDATA_BASE and the image"

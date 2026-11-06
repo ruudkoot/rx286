@@ -21,18 +21,17 @@ SEL_TI_LDT          equ 0x04        ; the table indicator: an LDT selector
 SEL_NULL            equ 0x00
 SEL_KCODE           equ 0x08        ; kernel code
 SEL_KDATA           equ 0x10        ; kernel data: tables, variables, messages
-SEL_KSTACK          equ 0x18        ; kernel stack (SS0)
+SEL_KSTACK          equ 0x18        ; the kernel's one stack (SS0): SEL_KDATA, expand-down
 SEL_TSS             equ 0x20        ; the one task
 SEL_DFTSS           equ 0x28        ; the double-fault task
 SEL_DFSTACK         equ 0x30        ; the double-fault task's stack
 SEL_VIDEO           equ 0x38        ; colour text, page 0
-; Pools the kernel takes descriptors from (roadmap l4.md L3): one LDT
-; descriptor for each space, one kernel stack for each thread; a free one
-; is all zeros. Then the kernel's two windows on any memory, for zeroing
-; and copying it.
+; The pool the kernel takes LDT descriptors from (roadmap l4.md L3), one
+; for each space; a free one is all zeros. Then the kernel's two windows on
+; any memory, for zeroing and copying it. (A pool of kernel stacks, one for
+; each thread, was here until roadmap os-server.md P3.)
 SEL_LDT_POOL        equ 0x40                                ; SPACE_MAX of them
-SEL_STACK_POOL      equ SEL_LDT_POOL + SPACE_MAX * 8        ; THREAD_MAX of them
-SEL_SCRATCH         equ SEL_STACK_POOL + THREAD_MAX * 8
+SEL_SCRATCH         equ SEL_LDT_POOL + SPACE_MAX * 8
 SEL_SCRATCH2        equ SEL_SCRATCH + 8
 
 GDT_ENTRIES         equ SEL_SCRATCH2 / 8 + 1

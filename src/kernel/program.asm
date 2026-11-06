@@ -90,11 +90,13 @@ program_reset:
 
 ; ----------------------------------------------------------------------------
 ; fault_program - a program's fault: to its fault endpoint, whose handler's
-; reply restarts it, or a THREAD_SUSPEND stops it as it was; or, without one,
-; reported (and its registers, in debug and test builds) and restarted here
-;   In:       BP = the frame (from rings 1-3); DS = SEL_KDATA
-;   Out:      the frame changed to restart the program (or as it was, once
-;             a suspended thread is resumed)
+; reply restarts it, or a THREAD_SUSPEND stops it as it was (fault_resume,
+; ipc.asm); or, without one, reported (and its registers, in debug and test
+; builds) and restarted here
+;   In:       BP = the frame (from rings 1-3); AL = CONT_FAULT, or
+;             CONT_FAULT_WAY from the way back's checks; DS = SEL_KDATA
+;   Out:      the frame changed to restart the program; with a fault
+;             endpoint, does not return
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 fault_program:
@@ -108,10 +110,8 @@ fault_program:
         mov bx, [cur_thread]
         cmp word [bx + T_FAULT], 0
         je .kernel
-        call ipc_fault                  ; waits for the handler (ipc.asm)
-        jnc restart_program
-        mov bx, [cur_thread]            ; suspended meanwhile: it stops here,
-        jmp thread_suspended            ; its frame the fault's (os-server.md P2)
+        mov [bx + T_CONT], al           ; what it does once the call ends
+        jmp ipc_fault                   ; waits for the handler (ipc.asm)
 .kernel:
         test di, di
         jnz .restart

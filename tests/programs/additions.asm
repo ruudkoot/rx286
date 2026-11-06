@@ -19,6 +19,10 @@
 ;                     reply, which stops at once with its registers as at
 ;                     the fault, and goes on in a handler that never
 ;                     returns; every refusal
+;   TEST_ADD_RESUME   kernel calls that give way at every window (TEST_GIVE_WAY)
+;                     and resume (os-server.md P3): a line of the log, a
+;                     64 KB retype over memory that was written, a revoke, a
+;                     delete that empties a space
 ;   TEST_ADD_POOLS    threads made until the arena, not a pool, refuses
 ;                     (pools of 64); 40 spaces more, holding copies that a
 ;                     revoke deletes, then deleted; a 64 KB segment retyped,
@@ -63,6 +67,10 @@ UT_POOLS            equ 0x11F           ; 35: the pools' part of the arena
 POOLS_BYTES         equ 14336             ; (the program has about 15 KB of the arena)
 THREADS             equ 24
 SPACES              equ 40
+UT_SEG              equ 0x127           ; 36: TEST_ADD_RESUME's memory for a segment
+COPY_FIRST          equ 0x14F           ; 41 on: copies of S_EP
+COPIES              equ 10
+GIVE_WAY            equ 1000
 
 ; A worker's slots
 WK_CODE             equ 0x07
@@ -93,6 +101,7 @@ step                dw 0
 frame               times TFR_SIZE db 0
 signal_frame        times 13 dw 0
 threads             dw 0
+line                times 64 db 0
 role                dw 0
 inside              dw 0
 end_udata
@@ -158,6 +167,8 @@ entry:
         jmp seal_part
 %elifdef TEST_ADD_SUSPEND
         jmp suspend_part
+%elifdef TEST_ADD_RESUME
+        jmp resume_part
 %else
         jmp pools_part
 %endif
@@ -1094,6 +1105,208 @@ handler:
         pop ds
         popa
         iret
+
+; ============================================================================ resumed calls
+; ----------------------------------------------------------------------------
+; resume_part - every interrupt window of the kernel's gives way
+; (TEST_GIVE_WAY), and each call resumes where it was: a line of the log
+; whole, a 64 KB segment zeroed over memory that held a pattern, a revoke of
+; ten copies, a delete that empties a space of them
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+resume_part:
+        mov dx, UT_ARENA
+        mov al, CAP_ENDPOINT
+        mov si, S_EP
+        kcall KCALL_RETYPE
+        must
+        ; the log: a window after each byte
+        push ds
+        pop es
+        mov di, line
+        mov si, resume_line
+        mov cx, resume_line_end - resume_line
+        cs rep movsb
+        call give_way
+        mov si, line
+        mov cx, resume_line_end - resume_line
+        kcall KCALL_LOG
+        push ax
+        call no_give_way
+        call gave_way
+        pop ax
+        report "its bytes (40)"
+        ; a 64 KB segment, written, its memory given back, retyped again
+        mov dx, UT_MEMORY
+        mov al, CAP_UNTYPED
+        mov si, UT_SEG
+        mov cx, 0x1000
+        kcall KCALL_RETYPE
+        must
+        call big_segment
+        must
+        mov ax, BIG
+        mov es, ax
+        mov word [es:0], 0x5A5A
+        mov word [es:0x8000], 0x5A5A
+        mov word [es:0xFFFC], 0x5A5A
+        push ds
+        pop es
+        mov dx, UT_SEG
+        kcall KCALL_REVOKE
+        must
+        call give_way
+        call big_segment
+        push ax
+        call no_give_way
+        call gave_way
+        pop ax
+        status "a 64 KB retype, giving way (0)"
+        mov ax, BIG
+        mov es, ax
+        mov ax, [es:0]
+        or ax, [es:0x8000]
+        or ax, [es:0xFFFC]
+        push ds
+        pop es
+        report "the pattern left in it (0)"
+        ; a revoke of ten copies
+        call ten_copies
+        call give_way
+        mov dx, S_EP
+        kcall KCALL_REVOKE
+        push ax
+        call no_give_way
+        call gave_way
+        pop ax
+        status "a revoke of ten copies, giving way (0)"
+        call ten_copies                 ; their slots empty again?
+        status "the copies' slots empty after it (0)"
+        mov dx, S_EP
+        kcall KCALL_REVOKE
+        must
+        ; a delete that empties a space holding copies
+        mov dx, UT_ARENA
+        mov al, CAP_SPACE
+        mov si, HOLDER
+        mov cx, 16
+        kcall KCALL_RETYPE
+        must
+        mov di, 0x07
+        mov cx, 8
+.hold:
+        push cx
+        push di
+        mov dx, HOLDER
+        mov si, S_EP
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        pop di
+        pop cx
+        must
+        add di, 8
+        loop .hold
+        call give_way
+        mov dx, HOLDER
+        kcall KCALL_DELETE
+        push ax
+        call no_give_way
+        call gave_way
+        pop ax
+        status "a delete that empties a space, giving way (0)"
+        mov dx, HOLDER
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD              ; (any call on it: its slot is empty)
+        status "its slot empty (1)"
+        jmp done
+
+resume_line         db "additions: a line written a byte a turn", CHAR_LF
+resume_line_end     equ $
+
+; ----------------------------------------------------------------------------
+; give_way - every interrupt window of the kernel's gives way from now on
+;   In:       nothing
+;   Out:      nothing (the end on a failure)
+;   Destroys: AX, CX
+; ----------------------------------------------------------------------------
+give_way:
+        mov cx, GIVE_WAY
+        jmp give_way_set
+
+; ----------------------------------------------------------------------------
+; no_give_way - the windows give way only to a more urgent thread again
+;   In:       nothing
+;   Out:      nothing (the end on a failure)
+;   Destroys: AX, CX
+; ----------------------------------------------------------------------------
+no_give_way:
+        xor cx, cx
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; give_way_set - TEST_GIVE_WAY: the next CX windows give way
+;   In:       CX = the windows
+;   Out:      CX = the windows that were still to
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+give_way_set:
+        mov al, TEST_GIVE_WAY
+        kcall KCALL_TEST
+        must
+        ret
+
+; ----------------------------------------------------------------------------
+; gave_way - "gave way (1)" if a window gave way since give_way
+;   In:       CX = the windows that were still to (no_give_way's)
+;   Out:      a line
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+gave_way:
+        cmp cx, GIVE_WAY
+        setnz_ax
+        report "the call gave way (1)"
+        ret
+
+; ----------------------------------------------------------------------------
+; big_segment - a 64 KB segment in BIG, from UT_SEG
+;   In:       nothing
+;   Out:      CF and AL: the retype's status
+;   Destroys: AX, BX, CX, DX, SI
+; ----------------------------------------------------------------------------
+big_segment:
+        mov dx, UT_SEG
+        mov al, CAP_SEGMENT
+        mov si, BIG
+        mov cx, 0xFFFF
+        mov bl, 0xF2
+        kcall KCALL_RETYPE
+        ret
+
+; ----------------------------------------------------------------------------
+; ten_copies - S_EP copied into slots 41-50 of the program's own space
+;   In:       nothing
+;   Out:      CF and AL: the first copy's status that was not KE_OK
+;   Destroys: AX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+ten_copies:
+        mov di, COPY_FIRST
+        mov cx, COPIES
+.copy:
+        push cx
+        push di
+        mov dx, MY_SPACE
+        mov si, S_EP
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        pop di
+        pop cx
+        jc .done
+        add di, 8
+        loop .copy
+.done:
+        ret
 
 ; ============================================================================ the pools
 ; ----------------------------------------------------------------------------

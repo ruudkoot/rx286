@@ -347,73 +347,50 @@ phys_zero:
         ret
 
 ; ----------------------------------------------------------------------------
-; retype_zero - a new segment's memory zeroed, a piece of RETYPE_PIECE bytes
-; at a time with a window after each when it is larger, so that a stretch
-; with interrupts off stays short (os-server.md P2, X7: 64 KB at once took
-; about 26 ms, E4). After the windows the retype goes on only if the caller's
-; space lives, its slot is still empty and the untyped still holds what was
-; carved; a revoke of the same untyped by another thread of the same space
-; is the caller's own race
-;   In:       DL:AX = the base; CX = bytes (even, 0 for 64 KB); BP = the frame
-;             (DX the untyped, SI the slot); the retype_* temporaries
-;   Out:      CF set if the retype cannot go on; the temporaries as they were
+; retype_zero - the running thread's new segment zeroed (T_ZERO_BASE,
+; T_ZERO_PARAS), a piece of RETYPE_PIECE bytes at a time with a window after
+; each when it is larger, so that a stretch with interrupts off stays short
+; (os-server.md P2, X7: 64 KB at once took about 26 ms, E4). Its progress is
+; T_ZERO_DONE, where the call resumes if the thread gives way (kpreempt).
+; After the windows the retype goes on only if the caller's space lives, its
+; slot is still empty and the untyped still holds what was carved; a revoke
+; of the same untyped by another thread of the same space is the caller's
+; own race
+;   In:       BP = the frame (DX the untyped, SI the slot); the running
+;             thread's T_ZERO_*
+;   Out:      CF set if the retype cannot go on
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 retype_zero:
-        test cx, cx
-        jz .pieces                      ; 64 KB
-        cmp cx, RETYPE_PIECE
-        ja .pieces
-        call phys_zero
-        clc
-        ret
-.pieces:
-        push word [retype_paragraphs]   ; another thread's retype may run in a window
-        push word [retype_base]
-        push word [retype_base_low]
-        push word [retype_base_high]
-        push word [retype_parent_slot]
-        mov bx, cx
-        shr bx, 4                       ; BX = paragraphs left (0 for 64 KB)
-        jnz .piece
-        mov bx, 0x1000
-.piece:
-        mov cx, RETYPE_PIECE
-        cmp bx, RETYPE_PIECE / 16
-        jae .zero
-        mov cx, bx
-        shl cx, 4
-.zero:
-        push ax
-        push dx
-        push cx
-        call phys_zero
-        pop cx
-        pop dx
-        pop ax
-        add ax, cx                      ; the next piece
-        adc dl, 0
-        shr cx, 4
-        sub bx, cx
+        mov bx, [cur_thread]
+        mov cx, [bx + T_ZERO_PARAS]
+        sub cx, [bx + T_ZERO_DONE]      ; CX = paragraphs left
         jz .zeroed
-        push ax
-        push bx
-        push dx
+        cmp cx, RETYPE_PIECE / 16
+        jbe .piece
+        mov cx, RETYPE_PIECE / 16
+.piece:
+        mov ax, [bx + T_ZERO_BASE]
+        add ax, [bx + T_ZERO_DONE]
+        add [bx + T_ZERO_DONE], cx
+        mov dx, ax
+        shl ax, 4
+        shr dx, 12                      ; DL:AX = the piece
+        shl cx, 4                       ; its bytes
+        call phys_zero
+        mov bx, [cur_thread]
+        mov ax, [bx + T_ZERO_DONE]
+        cmp ax, [bx + T_ZERO_PARAS]
+        jae .zeroed
         KWINDOW (VEC_KCALL << 8) | KCALL_RETYPE
-        pop dx
-        pop bx
-        pop ax
-        jmp .piece
+        jmp retype_zero
 .zeroed:
-        pop word [retype_parent_slot]
-        pop word [retype_base_high]
-        pop word [retype_base_low]
-        pop word [retype_base]
-        pop word [retype_paragraphs]
-        mov bx, [cur_thread]            ; everything as it was?
-        mov bx, [bx + T_SPACE]
-        test bx, bx
+        mov ax, [bx + T_SPACE]          ; everything as it was?
+        test ax, ax
         jz .changed
+        mov dx, [bx + T_ZERO_BASE]
+        add dx, [bx + T_ZERO_PARAS]     ; DX = the carved end
+        mov bx, ax
         call space_alive
         jc .changed
         mov ax, [bp + FRAME_SI]
@@ -426,10 +403,8 @@ retype_zero:
         jc .changed
         cmp byte [si + SH_TYPE], CAP_UNTYPED
         jne .changed
-        mov ax, [retype_base]
-        add ax, [retype_paragraphs]
-        sub ax, [si + SH_OBJECT]        ; the carved end, from the untyped's start
-        cmp ax, [si + SH_WATERMARK]
+        sub dx, [si + SH_OBJECT]        ; the carved end, from the untyped's start
+        cmp dx, [si + SH_WATERMARK]
         ja .changed                     ; revoked and given out again
         clc
         ret
@@ -540,8 +515,9 @@ space_make:
         ret
 
 ; ----------------------------------------------------------------------------
-; tcb_make - a thread, from untyped memory: its control block, its kernel
-; stack's descriptor from the pool, in the list of threads; not yet started
+; tcb_make - a thread, from untyped memory: its control block (its frame at
+; its end: no kernel stack of its own, os-server.md P3), in the list of
+; threads; not yet started
 ;   In:       SI = the untyped's shadow entry
 ;   Out:      CF clear and BX = the thread; CF set and AL = KE_*
 ;   Destroys: AX, CX, DX, DI, ES
@@ -551,33 +527,9 @@ tcb_make:
         mov cx, [thread_count]
         cmp cx, THREAD_MAX
         jae .refuse
-        mov ax, SEL_STACK_POOL
-        mov cx, THREAD_MAX
-        call pool_take
-        jnc .pooled
-        mov al, KE_POOL
-.refuse:
-        stc
-        ret
-.pooled:
-        push ax
         mov cx, TCB_OBJECT_SIZE
         call arena_object               ; BX = the control block, zeroed
-        pop dx                          ; DX = its stack's selector
         jc .done
-        mov [bx + T_STACK], dx
-        mov di, gdt
-        add di, dx
-        mov word [di], TCB_STACK_SIZE - 1
-        mov ax, bx
-        add ax, TCB_STACK_OFF
-        add ax, KDATA_BASE & 0xFFFF
-        mov [di + 2], ax
-        mov al, KDATA_BASE >> 16
-        adc al, 0
-        mov [di + 4], al
-        mov byte [di + 5], ACC_KDATA
-        mov word [di + 6], 0
         mov word [bx + T_NAME], msg_thread_made
         mov byte [bx + T_SLICE], SLICE_TICKS
         mov di, [thread_count]
@@ -586,6 +538,9 @@ tcb_make:
         inc word [thread_count]
         clc
 .done:
+        ret
+.refuse:
+        stc
         ret
 
 ; ----------------------------------------------------------------------------
@@ -951,6 +906,12 @@ boot_slot_shadow:
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_retype:
+        mov bx, [cur_thread]
+        cmp byte [bx + T_CONT], CONT_RESUMED
+        jne .fresh
+        cmp word [bx + T_ZERO_PARAS], 0
+        jne retype_segment              ; it gave way while its segment was zeroed
+.fresh:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_UNTYPED
         call cap_get                    ; SI = the untyped, AX its slot
@@ -1045,23 +1006,57 @@ kc_retype:
         add cx, 15
         rcr cx, 1                       ; (a carry is bit 16: up to 64 KB)
         shr cx, 3                       ; CX = paragraphs
-        mov [retype_paragraphs], cx
         mov dx, 1
         call untyped_carve              ; AX = its base in paragraphs
         jc .mem
+        pop di
+        pop si
+        mov bx, [cur_thread]            ; zeroed in pieces: what a resumed call
+        mov [bx + T_ZERO_BASE], ax      ; finds again (retype_zero)
+        mov [bx + T_ZERO_PARAS], cx
+        mov word [bx + T_ZERO_DONE], 0
+        mov ax, [retype_parent_slot]
+        mov [bx + T_ZERO_SLOT], ax
+        jmp retype_segment
+.cap:
+        mov al, KE_CAP
+        jmp .error
+.mem:
+        mov al, KE_MEM
+        jmp .error
+.arg:
+        mov al, KE_ARG
+.error:
+        pop di
+        pop si
+        jmp kc_done
+
+; ----------------------------------------------------------------------------
+; retype_segment - the rest of a segment's retype: its memory zeroed, then
+; its capability into the slot; where a resumed call goes on
+;   In:       BP = the frame; the running thread's T_ZERO_*
+;   Out:      the frame's status
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+retype_segment:
+        call retype_zero
+        mov bx, [cur_thread]
+        mov ax, [bx + T_ZERO_BASE]
+        mov cx, [bx + T_ZERO_PARAS]
+        mov dx, [bx + T_ZERO_SLOT]
+        mov word [bx + T_ZERO_PARAS], 0
+        jc .changed
         mov [retype_base], ax
+        mov [retype_paragraphs], cx
+        mov [retype_parent_slot], dx
         mov dx, ax                      ; DL:AX = its base
         shl ax, 4
         shr dx, 12
         mov [retype_base_low], ax
         mov [retype_base_high], dl
-        mov cx, [bp + FRAME_CX]
-        inc cx
-        and cx, ~1                      ; bytes to zero, even (0: 64 KB)
-        call retype_zero
-        jc .changed
-        pop di                          ; the destination: descriptor
-        pop si                          ; and shadow entry
+        mov ax, [bp + FRAME_SI]         ; the destination
+        mov bx, [bx + T_SPACE]
+        call slot_of                    ; SI = its shadow entry, DI its descriptor
         mov ax, [bp + FRAME_CX]
         dec ax
         mov [di], ax                    ; the limit
@@ -1081,18 +1076,6 @@ kc_retype:
         jmp retype_parent
 .changed:
         mov al, KE_STATE                ; changed during the zeroing's windows
-        jmp .error
-.cap:
-        mov al, KE_CAP
-        jmp .error
-.mem:
-        mov al, KE_MEM
-        jmp .error
-.arg:
-        mov al, KE_ARG
-.error:
-        pop di
-        pop si
         jmp kc_done
 
 ; ----------------------------------------------------------------------------
@@ -1623,11 +1606,13 @@ kc_irq:
 ; kc_test - KCALL_TEST: the hooks of debug and test builds (KE_NOSYS in
 ; release builds): the thread dump; in test builds, the bytes a key script
 ; gave the mouse or typed where the 8042 cannot, whether the OS server
-; waits for a key, the sound driver's probes (TEST_SOUND builds) and the
-; attack program's (TEST_ATTACK builds)
+; waits for a key, windows that give way (TEST_GIVE_WAY), the sound
+; driver's probes (TEST_SOUND builds) and the attack program's (TEST_ATTACK
+; builds)
 ;   In:       BP = the frame (AL TEST_*; TEST_READER, TEST_PROBE: BL;
-;             TEST_SOUND_PROBE: BX)
-;   Out:      the frame's BL = a byte; or KE_EMPTY
+;             TEST_SOUND_PROBE: BX; TEST_GIVE_WAY: CX)
+;   Out:      the frame's BL = a byte; TEST_GIVE_WAY: CX the windows that
+;             were still to give way; or KE_EMPTY
 ;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 kc_test:
@@ -1661,6 +1646,8 @@ kc_test:
         je .reader
         cmp al, TEST_KEYS_READY
         je .ready
+        cmp al, TEST_GIVE_WAY
+        je .give_way
         mov bx, test_mouse_ring
         cmp al, TEST_MOUSE_BYTE
         je .byte
@@ -1678,6 +1665,11 @@ kc_test:
         jmp kc_done.ok
 .ready:
         mov byte [test_keys_ready], 1
+        jmp kc_done.ok
+.give_way:
+        mov ax, [bp + FRAME_CX]
+        xchg ax, [test_give_way]
+        mov [bp + FRAME_CX], ax         ; the windows that were still to give way
         jmp kc_done.ok
 %else
         jmp kc_done.nosys

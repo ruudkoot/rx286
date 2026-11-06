@@ -24,20 +24,19 @@ writes the GDT except for the TSS's busy bit.
 | 00h | `SEL_NULL` | | | | |
 | 08h | `SEL_KCODE` | 10100h | size | 9Bh: present, DPL 0, code, readable | the kernel |
 | 10h | `SEL_KDATA` | 04B00h | FFFFh | 93h: present, DPL 0, data, writable | its stacks, the arena, its tables and variables, the module table (*docs/memory-map.md*) |
-| 18h | `SEL_KSTACK` | 04600h | 3FFh | 93h | its own stack: the start's, then the idle loop's |
+| 18h | `SEL_KSTACK` | `KDATA_BASE` | FFh | 97h: expand-down | the kernel's one stack (roadmap os-server.md P3): the same memory as `SEL_KDATA`, at the same offsets, valid from `KSTACK_BOTTOM` up, so that an overflow faults |
 | 20h | `SEL_TSS` | in KDATA | 2Bh | 81h: 286 TSS | the one task; back link 0 |
 | 28h | `SEL_DFTSS` | in KDATA | 2Bh | 81h | the double-fault task |
 | 30h | `SEL_DFSTACK` | 04400h | 1FFh | 93h | its stack |
 | 38h | `SEL_VIDEO` | B8000h | F9Fh | 93h | colour text, page 0 |
 | 40h-238h | `SEL_LDT_POOL` | in the arena | | 82h: present, DPL 0, an LDT; 00h while free | a space's LDT, one each (`SPACE_MAX`, 64) |
-| 240h-438h | `SEL_STACK_POOL` | in the arena | 15Fh | 93h; 00h while free | a thread's kernel stack, one each (`THREAD_MAX`, 64): SS0 while it runs |
-| 440h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
-| 448h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
+| 240h | `SEL_SCRATCH` | any | any | 93h | the kernel's window on memory: to zero a retyped segment, the destination of a copy |
+| 248h | `SEL_SCRATCH2` | any | any | 93h | its second: the source of a copy (the root's data, at start) |
 
 Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
 be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
 levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
-`GDT_LIMIT`, 44Fh. A free descriptor of a pool is all zeros, which no one
+`GDT_LIMIT`, 24Fh. A free descriptor of a pool is all zeros, which no one
 can load. The kernel takes one when it makes a space or a thread
 (*docs/kernel-calls.md*). Any selector beyond the limit is a general protection
 fault.
@@ -88,9 +87,9 @@ A 286 TSS is 44 bytes (Intel 8.2.1). rx286 has two:
 
 - **`SEL_TSS`**, the one task: the threads switch in software, not by the
   CPU's task switch (roadmap l4.md D2, E5). Only SS0:SP0 matters: the CPU
-  loads the kernel's stack from it on every interrupt from ring 3, and the
-  kernel sets it at every switch to the running thread's kernel stack
-  (from `SEL_STACK_POOL`, its top). Its back link is 0, so a program that sets
+  loads it on every interrupt from rings 1-3. SS0 is `SEL_KSTACK`, and the
+  kernel sets SP0 at every switch to the end of the running thread's
+  control block, where the frame goes (roadmap os-server.md P3). Its back link is 0, so a program that sets
   NT and runs `IRET` faults instead of switching tasks.
 - **`SEL_DFTSS`**, the double-fault task, entered through the task gate at
   vector 8 with its own stack (`SEL_DFSTACK`). Intel: "a task gate must be

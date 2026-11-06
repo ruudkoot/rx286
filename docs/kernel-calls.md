@@ -96,9 +96,9 @@ and the call checks afterwards that its slot, its untyped and its space
 are still as they were (`KE_STATE` if not).
 
 - **Kernel objects** - spaces, threads, endpoints, notifications - only from
-  the arena's untyped. A thread takes a kernel stack's descriptor, and a
-  space an LDT descriptor, from the GDT's pools of 64 each (`THREAD_MAX`,
-  `SPACE_MAX`): `KE_POOL` when none is left.
+  the arena's untyped. A space takes an LDT descriptor from the GDT's pool
+  of 64 (`SPACE_MAX`), and the kernel lists 128 threads at most
+  (`THREAD_MAX`): `KE_POOL` past either.
 - **Segments** only from untyped outside the arena, and only data: present,
   of DPL 1-3. Code comes from the boot image, or from data sealed
   (`KCALL_SEAL`, below), never otherwise (roadmap l4.md X14).
@@ -342,8 +342,7 @@ does not grow with the number of spaces.
     a reply it owes, the saved reply owed to it (which its control block
     names; a reply saved again for the same caller makes the older one owed
     to nobody, `KE_STATE`) - is cleared, a thread awaiting its reply fails
-    with `KE_CAP`, and its kernel stack's descriptor goes back to the pool;
-    the running thread dies at its way back;
+    with `KE_CAP`; the running thread dies at its way back;
   - a space: its threads stop and lose it (they may be configured again),
     its slots are emptied in turn - which may take more objects with them -
     and its LDT's descriptor goes back to the pool once no thread names it;
@@ -431,6 +430,7 @@ answer `KE_NOSYS`:
 | 5 | `TEST_SOUND_PROBE` | `TEST_SOUND` builds: BX the frequency the speaker sounds; the sound driver asks, and the kernel measures channel 2's output over a tick and says on the log whether it is that |
 | 6 | `TEST_SILENCE_PROBE` | `TEST_SOUND` builds: the speaker silent over a tick? |
 | 7 | `TEST_PROBE` | `TEST_ATTACK` builds: BL `PROBE_*`, below |
+| 8 | `TEST_GIVE_WAY` | test builds: the next CX interrupt windows of any kernel call give way, a more urgent thread ready or not, so that the calls resume (roadmap os-server.md P3); CX back: the windows that were still to |
 
 The test probe changes one of the caller's own descriptors during the
 call, as a revocation would, so that the way back to its ring can be

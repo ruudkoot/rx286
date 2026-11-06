@@ -31,7 +31,9 @@ isr_stub_ %+ vector:
 
 ; ----------------------------------------------------------------------------
 ; isr_common - the frame, the handler, the way back
-;   In:       the stub's and the CPU's pushes on the current stack (ring 0)
+;   In:       the stub's and the CPU's pushes: from rings 1-3, at the end of
+;             the running thread's control block (SP0); from ring 0, on the
+;             kernel's stack
 ;   Out:      returns to the interrupted code with IRET
 ;   Destroys: nothing of the interrupted code's but what the handler changed
 ;             in the frame
@@ -45,6 +47,10 @@ isr_common:
         mov ds, ax
         mov es, ax
         cld
+        test byte [bp + FRAME_CS], CPL_MASK
+        jz .stacked
+        mov sp, KSTACK_TOP              ; from rings 1-3: the frame is the running
+.stacked:                               ; thread's (SP0); the kernel's stack is empty
 %ifdef TEST_STRETCH
         mov ah, [bp + FRAME_VECTOR]     ; the place: the vector, and a kernel call
         xor al, al
@@ -61,8 +67,11 @@ isr_common:
 
 ; ----------------------------------------------------------------------------
 ; isr_exit - the way back: to the kernel, or to ring 3 through a switch to a
-; more urgent thread, a pending restart and the checks of the frame
-;   In:       BP = the frame; DS = SEL_KDATA; interrupts off
+; more urgent thread, a pending restart and the checks of the frame. A
+; thread that stops or gives way here goes the way back afresh when it runs
+; again (dispatch)
+;   In:       BP = the frame (the running thread's, from rings 1-3); DS =
+;             SEL_KDATA; interrupts off
 ;   Out:      IRET to the frame
 ;   Destroys: everything but what the frame restores
 ; ----------------------------------------------------------------------------
@@ -96,8 +105,7 @@ isr_exit:
         mov bx, [cur_thread]
         test byte [bx + T_FLAGS], TF_SUSPEND
         jz .checks
-        call thread_suspended
-        jmp isr_exit
+        jmp thread_suspended            ; resumed: the way back afresh
 .checks:
         mov bx, [cur_thread]
         mov byte [bx + T_WAY_BACK], 0
@@ -117,11 +125,13 @@ isr_exit:
         jbe .restore
         mov word [bp + FRAME_VECTOR], VEC_GP
         mov word [bp + FRAME_ERROR], 0
+        mov al, CONT_FAULT_WAY
         call fault_program
         call way_back_again
         jmp .check_segments
 .restore:
         STRETCH_END
+        mov sp, bp                      ; (a frame from rings 1-3: off the kernel's stack)
         pop es
         pop ds
         popa
@@ -135,7 +145,7 @@ isr_exit:
 ; thread stops, said once, instead of the kernel trying for ever with
 ; interrupts off (l4.md L13); THREAD_START tries again
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      nothing (perhaps after a stop)
+;   Out:      nothing (or, stopped, does not return)
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 way_back_again:
@@ -147,7 +157,7 @@ way_back_again:
         mov si, msg_way_back
         call klog
         mov byte [bx + T_STATE], TS_STOPPED
-        call schedule                   ; back here only once started again
+        jmp schedule                    ; started again: the way back afresh
 .done:
         ret
 
@@ -197,6 +207,7 @@ way_back_check:
         mov [bp + FRAME_VECTOR], si
         and bx, ~CPL_MASK               ; the error code: the selector, as the CPU gives it
         mov [bp + FRAME_ERROR], bx
+        mov al, CONT_FAULT_WAY
         call fault_program
         stc
         ret

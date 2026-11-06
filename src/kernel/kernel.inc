@@ -34,17 +34,18 @@ FRAME_SIZE_KERNEL   equ 30      ; a frame from ring 0
 FRAME_SIZE_USER     equ 34      ; a frame from ring 3
 
 ; ---------------------------------------------------------------- threads
-; A thread control block (thread.asm; roadmap l4.md L2). Its kernel stack is
-; a segment of its own (SEL_TSTACK + 8n), at whose top the CPU puts the frame
-; of every interrupt from ring 3 (SP0); while it does not run, its kernel
-; SS:SP rest here, at what switch_to pushed.
-T_SS                equ 0       ; its kernel stack's SS:SP while another runs
-T_SP                equ 2
+; A thread control block (thread.asm; roadmap l4.md L2, os-server.md P3).
+; Its last bytes are its frame: the CPU puts there the frame of every
+; interrupt from its ring (SP0), and the kernel then works on its one stack.
+; Nothing of a thread's lies on that stack while the thread does not run:
+; what it still has to do in the kernel is T_CONT, and the call's progress.
+T_CONT              equ 0       ; byte: CONT_*, what it does when it runs again
+T_LOG_DONE          equ 2       ; KCALL_LOG: the bytes written before a preemption
 T_STATE             equ 4       ; byte: TS_*
 T_PRIO              equ 5       ; byte: 0, the lowest, to PRIORITIES - 1
 T_NEXT              equ 6       ; the next of its ready queue
 T_LDT               equ 8       ; its LDT's selector
-T_STACK             equ 10      ; its kernel stack's selector
+T_ZERO_PARAS        equ 10      ; KCALL_RETYPE: a segment's paragraphs, while it is zeroed
 T_USTACK_TOP        equ 12      ; its program's SP at a start
 T_RESTART           equ 14      ; byte: restart_pending, kept while another runs
 T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state
@@ -76,7 +77,12 @@ T_SUSPEND_BADGE     equ 152     ;    and the badge to signal with
 T_REFS              equ 154     ; the capabilities to it: it dies with the last (revoke.asm)
 T_SAVED_SPACE       equ 156     ; the slot of the saved reply owed to it, or 0 (ipc.asm)
 T_SAVED_SLOT        equ 158
-TCB_SIZE            equ 160
+T_ZERO_DONE         equ 160     ; KCALL_RETYPE: its paragraphs zeroed so far
+T_ZERO_BASE         equ 162     ;    its base, in paragraphs
+T_ZERO_SLOT         equ 164     ;    its untyped's slot
+T_FAULT_REGS        equ 166     ; 16 bytes: the registers its fault's message overwrote
+T_FRAME             equ 182     ; its frame (FRAME_SIZE_USER bytes): SP0 is its end
+TCB_SIZE            equ T_FRAME + FRAME_SIZE_USER
 %if T_FPU + 94 > T_FAULT_BADGE
   %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
 %endif
@@ -87,13 +93,23 @@ TI_FAULT            equ 0x04    ;        its fault's call (ipc_fault)
 KE_SUSPENDED        equ 0x7F    ; a fault's wait ended by THREAD_SUSPEND (the kernel's own:
                                 ;    ipc_fault puts the registers back before any program sees it)
 
+; What a thread does in the kernel when it runs again (T_CONT): the way back
+; to its ring, else the first start of its program, the rest of its fault's
+; call, or the rest of a kernel call that gave way to a more urgent thread
+; (kpreempt) or waits for the log's turn (call_enter)
+CONT_NONE           equ 0
+CONT_FIRST          equ 1
+CONT_KCALL          equ 2
+CONT_RESUMED        equ 3       ; (while the call runs again: it finds its progress)
+CONT_FAULT          equ 4       ; a fault from an exception
+CONT_FAULT_WAY      equ 5       ; a fault the way back found in its frame
+
 ; A thread as an object of the arena (roadmap l4.md L3): its control block,
-; then its kernel stack, a segment of its own from the GDT's pool. The
-; stack's 352 bytes are more than three times the deepest the watermark
-; found in any test once the disks left the kernel (102: l4.md D3, L9).
-TCB_OBJECT_SIZE     equ 512
-TCB_STACK_OFF       equ TCB_SIZE
-TCB_STACK_SIZE      equ TCB_OBJECT_SIZE - TCB_SIZE
+; its frame at its end; no kernel stack of its own since os-server.md P3
+TCB_OBJECT_SIZE     equ 256
+%if TCB_SIZE > TCB_OBJECT_SIZE
+  %error "kernel.inc: a thread's control block outgrew its object"
+%endif
 
 ; ---------------------------------------------------------------- spaces and capabilities
 ; A space (l4.md L3): a header, its LDT (a descriptor a slot), then a shadow

@@ -11,9 +11,9 @@ D7). This document explains each one.
 | 00400h-004FFh | BIOS data area | | never read |
 | 00500h-07BFFh | the boot code's stack, down from 7C00h | `LOADER_STACK_TOP` | boot sector and loader |
 | 04400h-045FFh | the double-fault task's stack, once the kernel runs | `DFSTACK_PHYS`, `DFSTACK_SIZE` | the kernel (`SEL_DFSTACK`) |
-| 04600h-049FFh | the kernel's own stack | `KSTACK_PHYS`, `KSTACK_SIZE` | the kernel (`SEL_KSTACK`) |
 | 04B00h | where the kernel's data segment starts | `KDATA_BASE` | the kernel (`SEL_KDATA`) |
-| 04C00h-0FFFFh | the arena: the kernel's objects, once it runs | `ARENA_PHYS`, `ARENA_SIZE` | the kernel, through `SEL_KDATA` |
+| 04C00h-04FFFh | the kernel's one stack (roadmap os-server.md P3) | `KSTACK_PHYS`, `KSTACK_SIZE`; its offsets in `SEL_KDATA`, `KSTACK_BOTTOM` to `KSTACK_TOP` | the kernel (`SEL_KSTACK`, expand-down over `SEL_KDATA`'s memory) |
+| 05000h-0FFFFh | the arena: the kernel's objects, once it runs | `ARENA_PHYS`, `ARENA_SIZE` | the kernel, through `SEL_KDATA` |
 | 07C00h-07DFFh | the boot sector | `BOOT_SECTOR_PHYS` | the BIOS loads it |
 | 07E00h-083FFh | the loader: 3 sectors | `LOADER_PHYS`, `LOADER_SECTORS` | the boot sector loads it |
 | 08400h-097FFh | the loader's FAT buffer | `LOADER_FAT_BUF` | the loader |
@@ -130,15 +130,15 @@ root's but its own data and stack.
 
 | Object | Bytes | What |
 |---|---|---|
-| a thread | 512 | its control block (160), then its kernel stack (352, more than three times the deepest any test reaches: 102 bytes, roadmap l4.md L9): a segment of its own from the GDT's pool, at whose top the CPU puts the frame of every interrupt from rings 1-3 |
+| a thread | 256 | its control block (216), whose last 34 bytes are its frame: the CPU puts there the frame of every interrupt from rings 1-3 (SP0), and the kernel works on its one stack (roadmap os-server.md P3) |
 | a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its parent, its first child and its next sibling: roadmap os-server.md D9): a driver's of 8 slots 272 bytes, a program's of 16 528, the root's and the OS server's of 256 8,208 |
 | an endpoint, a notification | 16 | |
 
 An object lies at an address of the arena aligned to its size, a space at
 a paragraph, zeroed. The room an alignment skips is kept as the untyped memory's hole, and a later
 object that fits is placed there (roadmap l4.md L10): without it, a quarter
-of the arena was holes. The GDT's pools hold `SPACE_MAX` LDT descriptors
-and `THREAD_MAX` kernel stacks.
+of the arena was holes. The GDT's pool holds `SPACE_MAX` LDT descriptors;
+the kernel lists `THREAD_MAX` threads at most.
 
 The kernel's data holds no disk buffer since the disks left it (roadmap
 l4.md L9). The diskette driver's DMA buffer is a segment the root retypes

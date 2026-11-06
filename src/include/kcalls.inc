@@ -74,6 +74,10 @@ TEST_PROBE          equ 7   ;    TEST_ATTACK builds: BL PROBE_*: change one of t
                             ;    own descriptors as a revocation would, so the way back
                             ;    to its ring can be tested (l4.md L1); its next start
                             ;    undoes it
+TEST_GIVE_WAY       equ 8   ;    CX: the next CX interrupt windows of any kernel call give
+                            ;    way, a more urgent thread ready or not, so that the
+                            ;    calls resume (os-server.md P3) -> CX the windows that
+                            ;    were still to
 PROBE_DS_ABSENT     equ 1   ; the data segment's descriptor not present
 PROBE_DS_EXEC       equ 2   ; the data segment's slot refilled with execute-only code
 PROBE_SS_ABSENT     equ 3   ; the stack's descriptor not present

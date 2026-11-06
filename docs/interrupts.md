@@ -135,27 +135,30 @@ every other line.
 All gates but the double fault's are interrupt gates, so the kernel runs with
 IF clear and nothing interleaves with a half-done change. Since the devices
 left it (roadmap l4.md L7-L10), no kernel path waits for one, and it sets IF
-in three places only, each where its state is whole (the `KWINDOW` macro,
+in four places only, each where its state is whole (the `KWINDOW` macro,
 but for the idle loop):
 
 - **The log's bytes** (`KCALL_LOG`, *docs/kernel-calls.md*), after each
   one: `sti; nop; cli`. `STI` takes effect after the next instruction, so
   `sti; cli` would open nothing. Without the window, a line of 4,096 bytes
   would keep IF clear for a third of a second at the log's 115,200 baud.
-  Before it writes a byte, a thread waits its turn at the log (`kwait`),
-  so that lines never mix.
-- **A revocation's passes** (`KCALL_REVOKE`, and the objects a delete
-  takes with it: `revoke.asm`), after each search for a child and after
-  each capability deleted. The
-  revocation's place is kept in the thread's control block, so another
-  thread's revocation may run meanwhile; one whose thread is to restart
-  stops there (roadmap l4.md L13).
-- **The idle loop**: with no thread ready, the kernel halts on its own
-  stack (`sti; hlt; cli`).
+  Before it writes a byte, a thread waits its turn at the log
+  (`call_enter`), so that lines never mix.
+- **A revocation** (`KCALL_REVOKE`, and the slots of a space a delete
+  kills: `revoke.asm`), after each capability deleted. The revocation's
+  place is kept in the thread's control block, so another thread's
+  revocation may run meanwhile; one whose thread is to restart stops there
+  (roadmap l4.md L13).
+- **A retype's zeroing** (`KCALL_RETYPE` of a segment over 2 KB), after
+  each 2 KB (roadmap os-server.md P2).
+- **The idle loop**: with no thread ready, the kernel halts on its stack
+  (`sti; hlt; cli`).
 
-After a window of the log or of a revocation, a thread more urgent than
-the running one may run (`kpreempt`): the running thread's kernel context
-waits on its own kernel stack. Everything else - IPC, the other calls on
+After a window, a thread more urgent than the running one may run
+(`kpreempt`): the running thread's call gives way and resumes when it runs
+again, from its progress in its control block (roadmap os-server.md P3).
+`TEST_GIVE_WAY` makes every window give way, so `tests/caps/resume.test`
+resumes each such call. Everything else - IPC, the other calls on
 capabilities, the timer's tick - runs to its end with interrupts off. The
 drivers run with interrupts on, in ring 1, and a wait that polls sleeps a
 tick after each burst of reads (`dw_poll`); only the sound driver turns
@@ -175,8 +178,7 @@ every space for each child; it follows each capability's list of children
 now (roadmap os-server.md D9), and stays under 3.6 ms, as does a 64 KB
 retype, zeroed 2 KB at a time, with 40 spaces more (`tests/caps/pools.test`).
 
-An IRQ at either point nests once on the running thread's kernel stack
-(or the kernel's own, when it idles): handlers run with IF clear and never
+An IRQ at either point nests once on the kernel's stack: handlers run with IF clear and never
 wait. After every IRQ, a thread waiting its turn at the log is made ready
 to look again (`wake_waiters`).
 

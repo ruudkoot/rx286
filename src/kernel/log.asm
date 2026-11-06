@@ -13,7 +13,9 @@
 ; and checked again after every interrupt window, since a descriptor may
 ; change while interrupts are in (l4.md X2). Interrupts come in after every
 ; byte, so a long line keeps neither the clock nor a more urgent thread
-; waiting; one thread's line at a time (call_enter), so lines never mix.
+; waiting: a call that gives way resumes after the bytes it wrote
+; (T_LOG_DONE), keeping the log's turn meanwhile; one thread's line at a
+; time (call_enter), so lines never mix.
 ; ============================================================================
 
 ; ----------------------------------------------------------------------------
@@ -21,16 +23,23 @@
 ;   In:       BP = the frame; DS = SEL_KDATA
 ;   Out:      the frame's AX = bytes written, CF clear; or CF and AX =
 ;             KE_ARG (more than LOG_MAX) or KE_CAP (a buffer it may not read)
-;   Destroys: AX, BX, CX, DX, SI, ES
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_log:
         call call_enter                 ; one thread's bytes at a time
+        mov di, [cur_thread]
+        xor bx, bx                      ; BX = bytes written
+        cmp byte [di + T_CONT], CONT_RESUMED
+        jne .fresh
+        mov bx, [di + T_LOG_DONE]       ; it gave way after these
+.fresh:
         mov cx, [bp + FRAME_CX]
         cmp cx, LOG_MAX
         ja .arg
-        xor bx, bx                      ; BX = bytes written
+        sub cx, bx                      ; CX = bytes left
         jcxz .written
         mov si, [bp + FRAME_SI]
+        add si, bx
         mov ax, [bp + FRAME_DS]
         call check_buffer               ; ES = the caller's segment, or CF
         jc .cap
@@ -47,11 +56,15 @@ kc_log:
         ; loads it again. Stop early if the thread is to restart.
         push ds
         pop es
+        mov di, [cur_thread]
+        mov [di + T_LOG_DONE], bx       ; where it resumes, if it gives way
         KWINDOW (VEC_KCALL << 8) | KCALL_LOG
         cmp byte [restart_pending], 0
         jne .written
         loop .next
 .written:
+        mov di, [cur_thread]
+        mov word [di + T_LOG_DONE], 0
         call con_cursor
         mov [bp + FRAME_AX], bx
         and word [bp + FRAME_FLAGS], ~FLAGS_CF

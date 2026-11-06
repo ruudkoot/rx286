@@ -38,14 +38,14 @@ dl_slot             dw 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; thread_frame - where a thread's frame is: the top of its kernel stack,
-; since every kernel call comes from ring 3
+; thread_frame - where a thread's frame is: at its control block's end
+; (thread.asm), since every kernel call comes from rings 1-3
 ;   In:       BX = the thread
 ;   Out:      DI = its frame (kdata)
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 thread_frame:
-        lea di, [bx + TCB_OBJECT_SIZE - FRAME_SIZE_USER]
+        lea di, [bx + T_FRAME]
         ret
 
 ; ----------------------------------------------------------------------------
@@ -461,8 +461,9 @@ ipc_send:
 ; frame, T_IPC and T_BADGE set): to the first receiver, or queued; it waits
 ; for the reply, which comes in its frame
 ;   In:       SI = the endpoint; BX = the running thread
-;   Out:      returns when it runs again
-;   Destroys: AX, BX, CX, DX, SI, DI
+;   Out:      does not return: its T_CONT, then the way back, when it runs
+;             again
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
 ep_call:
         cmp byte [si + E_KIND], EK_RECV
@@ -478,9 +479,9 @@ ep_call:
 ; ----------------------------------------------------------------------------
 ; ep_queue - the running thread waits in an endpoint's queue of senders
 ;   In:       SI = the endpoint (no receiver waits); BX = the running thread
-;   Out:      returns when it runs again: the receiver (or a cancel) has set
-;             its frame's status
-;   Destroys: AX
+;   Out:      does not return: when it runs again, the receiver (or a
+;             cancel) has set its frame's status
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
 ep_queue:
         call ep_push
@@ -493,23 +494,31 @@ ep_queue:
 ; ipc_fault - the running thread's fault, as a call on its fault endpoint
 ; (l4.md D18): the vector as the label, BX the error code, CX:SI the CS:IP,
 ; DI the flags, with its capability's badge; it waits for the reply, whose
-; BX is where it starts again. A THREAD_SUSPEND ends the wait (KE_SUSPENDED),
-; and its registers are as they were at the fault (os-server.md P2)
-;   In:       BP = its frame (from rings 1-3); BX = the thread; DI = FAULT_*
-;   Out:      CF clear and its T_ENTRY the reply's BX, if a reply came
-;             (KE_STATE: a restart cancelled the wait); CF set if a suspend
-;             ended it, the frame as at the fault
-;   Destroys: AX, BX, CX, DX, SI, DI
+; BX is where it starts again (fault_resume, when it runs again). A
+; THREAD_SUSPEND ends the wait (KE_SUSPENDED), and its registers are as they
+; were at the fault, kept meanwhile in T_FAULT_REGS (os-server.md P2)
+;   In:       BP = its frame (from rings 1-3); BX = the thread, its T_CONT
+;             CONT_FAULT or CONT_FAULT_WAY; DI = FAULT_*
+;   Out:      does not return
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
 ipc_fault:
-        push word [bp + FRAME_FLAGS]    ; what the message and its end change
-        push word [bp + FRAME_BP]
-        push word [bp + FRAME_DI]
-        push word [bp + FRAME_SI]
-        push word [bp + FRAME_DX]
-        push word [bp + FRAME_CX]
-        push word [bp + FRAME_BX]
-        push word [bp + FRAME_AX]
+        mov ax, [bp + FRAME_AX]         ; what the message and its end change
+        mov [bx + T_FAULT_REGS], ax
+        mov ax, [bp + FRAME_BX]
+        mov [bx + T_FAULT_REGS + 2], ax
+        mov ax, [bp + FRAME_CX]
+        mov [bx + T_FAULT_REGS + 4], ax
+        mov ax, [bp + FRAME_DX]
+        mov [bx + T_FAULT_REGS + 6], ax
+        mov ax, [bp + FRAME_SI]
+        mov [bx + T_FAULT_REGS + 8], ax
+        mov ax, [bp + FRAME_DI]
+        mov [bx + T_FAULT_REGS + 10], ax
+        mov ax, [bp + FRAME_BP]
+        mov [bx + T_FAULT_REGS + 12], ax
+        mov ax, [bp + FRAME_FLAGS]
+        mov [bx + T_FAULT_REGS + 14], ax
         mov ax, [bp + FRAME_VECTOR]
         mov [bp + FRAME_AX], ax
         mov ax, [bp + FRAME_ERROR]
@@ -524,30 +533,51 @@ ipc_fault:
         mov ax, [bx + T_FAULT_BADGE]
         mov [bx + T_BADGE], ax
         mov si, [bx + T_FAULT]
-        call ep_call
-        mov bx, [cur_thread]
+        jmp ep_call
+
+; ----------------------------------------------------------------------------
+; fault_resume - a thread whose fault's call has ended, when it runs again
+; (CONT_FAULT, CONT_FAULT_WAY): restarted at the reply's BX, or as a
+; restart left it; or, suspended meanwhile (KE_SUSPENDED), its registers as
+; at the fault, and stopped
+;   In:       AL = its T_CONT; BX = the thread; BP = its frame; DS =
+;             SEL_KDATA; interrupts off
+;   Out:      does not return: the way back
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+fault_resume:
         and byte [bx + T_IPC], ~TI_FAULT & 0xFF
-        cmp byte [bp + FRAME_AX], KE_SUSPENDED
+        mov ah, [bp + FRAME_AX]
+        cmp ah, KE_SUSPENDED
         je .suspended
-        cmp byte [bp + FRAME_AX], KE_OK
-        jne .done
-        mov ax, [bp + FRAME_BX]
-        mov [bx + T_ENTRY], ax
-.done:
-        add sp, 16
-        clc
-        ret
+        cmp ah, KE_OK
+        jne .restart
+        mov dx, [bp + FRAME_BX]
+        mov [bx + T_ENTRY], dx
+.restart:
+        call restart_program
+        cmp al, CONT_FAULT_WAY
+        jne isr_exit
+        call way_back_again             ; found by the way back: counted there
+        jmp isr_exit.check_segments
 .suspended:
-        pop word [bp + FRAME_AX]
-        pop word [bp + FRAME_BX]
-        pop word [bp + FRAME_CX]
-        pop word [bp + FRAME_DX]
-        pop word [bp + FRAME_SI]
-        pop word [bp + FRAME_DI]
-        pop word [bp + FRAME_BP]
-        pop word [bp + FRAME_FLAGS]
-        stc
-        ret
+        mov ax, [bx + T_FAULT_REGS]
+        mov [bp + FRAME_AX], ax
+        mov ax, [bx + T_FAULT_REGS + 2]
+        mov [bp + FRAME_BX], ax
+        mov ax, [bx + T_FAULT_REGS + 4]
+        mov [bp + FRAME_CX], ax
+        mov ax, [bx + T_FAULT_REGS + 6]
+        mov [bp + FRAME_DX], ax
+        mov ax, [bx + T_FAULT_REGS + 8]
+        mov [bp + FRAME_SI], ax
+        mov ax, [bx + T_FAULT_REGS + 10]
+        mov [bp + FRAME_DI], ax
+        mov ax, [bx + T_FAULT_REGS + 12]
+        mov [bp + FRAME_BP], ax
+        mov ax, [bx + T_FAULT_REGS + 14]
+        mov [bp + FRAME_FLAGS], ax
+        jmp thread_suspended
 
 ; ----------------------------------------------------------------------------
 ; slot_clear - empty a slot: its descriptor and its shadow entry
@@ -879,8 +909,10 @@ timers_tick:
 ;   Destroys: AX, BX, CX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_delete:
-        mov ax, [bp + FRAME_DX]
         mov bx, [cur_thread]
+        cmp byte [bx + T_CONT], CONT_RESUMED
+        je kc_done.ok                   ; deleted, and the dead spaces emptied since
+        mov ax, [bp + FRAME_DX]
         mov bx, [bx + T_SPACE]
         call slot_of
         jc kc_done.cap

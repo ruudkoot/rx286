@@ -95,8 +95,9 @@ quiet at its start.
 ## Interrupts
 
 Every interrupt enters through its stub and `isr_common`, which builds a frame
-on the kernel stack (*kernel.inc*) and calls the vector's handler with BP at
-the frame. A handler changes the frame to change what the interrupted code
+(*kernel.inc*) - from rings 1-3 at the end of the running thread's control
+block, where SP0 points, from ring 0 on the kernel's one stack - and calls
+the vector's handler with BP at the frame, on that stack. A handler changes the frame to change what the interrupted code
 gets back: a kernel call's results, or the program's entry for a restart.
 Every gate but the double fault's is an interrupt gate, so the kernel runs
 with IF clear, except after each byte of its log and while it idles
@@ -113,44 +114,52 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
 the root, the drivers, the OS server's, the program in the foreground (the
 shell, or a test program), and the clock and the counter beside the shell. A thread is an object of the arena
-(*docs/memory-map.md*): a control block and a kernel stack of its own (a
-segment from the GDT's pool), at whose top the CPU puts the frame of every
-interrupt from rings 1-3. It runs in a space: an LDT and its slots, which
+(*docs/memory-map.md*): a control block, at whose end the CPU puts the frame
+of every interrupt from rings 1-3. The kernel has one stack for all of them
+(roadmap os-server.md P3): nothing of a thread's lies on it while the thread
+does not run. It runs in a space: an LDT and its slots, which
 hold its capabilities (`cap.asm`, *docs/kernel-calls.md*; roadmap l4.md L3).
 The kernel makes the root's space and thread at its start from its own
 untyped memory; the root makes every other, and a program that holds
 untyped memory and a space can make more with the kernel's calls.
 
-- **The switch** is in software, through the one TSS (l4.md D2): the
-  running thread's registers are pushed on its kernel stack and its SS:SP
-  kept in its control block; the next thread's SS0:SP0, LDT and kernel
-  SS:SP are taken up, and the 287's TS set unless the 287 holds its state.
+- **The switch** is in software, through the one TSS (l4.md D2), and never
+  returns to its caller (`schedule`, `dispatch`): the next thread's SP0 and
+  LDT are taken up, the 287's TS set unless the 287 holds its state, the
+  kernel's stack emptied, and the thread does what it still has to do in
+  the kernel (`T_CONT`): nothing but its way back, its program's first
+  start, the rest of its fault's call, or the rest of a kernel call that
+  gave way.
 - **The scheduler:** eight priorities (`PRIORITIES`), round robin within
   each on time slices of `SLICE_TICKS` ticks; a 256-byte table gives the
   highest non-empty queue, since the 286 has no `BSF`. The program runs at
   priority 3, the clock at 4 and the counter at 1, so the counter runs only when the
   program waits. Preemption happens on the way back to ring 3 and at the
-  kernel's interrupt windows (`kpreempt`), never in the middle of a handler.
+  kernel's interrupt windows (`kpreempt`), never in the middle of a handler:
+  a call that gives way at a window keeps its progress in the thread's
+  control block - the log's bytes written, a retype's paragraphs zeroed -
+  or in the objects, as a revoke does, and resumes when the thread runs
+  again.
 - **Waiting:** a thread waits in IPC (*docs/kernel-calls.md*): for a
   message, a reply, or its notification's bits, which its interrupt or the
   kernel's timer signals. Inside the kernel it waits only for its turn at
   the log (`call_enter`: one thread's line at a time, l4.md X15), until the
-  next interrupt (`kwait`).
-- **Idling:** with no thread ready, the kernel halts on its own stack
-  (`SEL_KSTACK`), never on a thread's (l4.md X8).
+  next interrupt, when it calls again.
+- **Idling:** with no thread ready, the kernel halts on its stack
+  (`SEL_KSTACK`; l4.md X8).
 - **The 287** is switched lazily (l4.md D17): TS is set at a switch to a
   thread that does not own it, and its first 287 instruction raises #NM,
   which saves the owner's state in the owner's control block and restores
   its own. IRQ13 is charged to the 287's owner, whichever thread runs.
 - **IPC** (`ipc.asm`; roadmap l4.md L4): threads call each other through
   endpoints and signal notifications (*docs/kernel-calls.md*). A thread
-  waiting in IPC waits inside its own kernel call, on its own kernel
-  stack; a message is copied from the sender's frame into the receiver's,
-  registers only. A call or reply that wakes a thread at least as urgent
+  waiting in IPC has nothing left to do in the kernel: whoever ends its wait
+  writes the results into its frame; a message is copied from the sender's
+  frame into the receiver's, registers only. A call or reply that wakes a thread at least as urgent
   puts it first in its queue (the direct switch). A restart takes a thread
   out of any queue and wakes it with `KE_STATE`.
 - **Debug and test builds** print every thread on the AT's Sys Req key:
-  its state, priority, and how much of its kernel stack it has ever used.
+  its state and priority, and how much of the kernel's stack was ever used.
 
 ## The root
 
