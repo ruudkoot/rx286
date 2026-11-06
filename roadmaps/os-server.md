@@ -129,7 +129,7 @@ What it rests on:
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
-| P11 | Terminals, the eight virtual terminals, job control | steps 1 and 2 of 4 done (2026-11-06, branch `os-server`) |
+| P11 | Terminals, the eight virtual terminals, job control | steps 1 to 3 of 4 done (2026-11-06, branch `os-server`) |
 | P12 | The commands and the devices | not started |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
@@ -2419,6 +2419,26 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - **The tests:** `tests/posix/jobs` on all three emulators, `tests/sh/jobs` on Bochs and
     MAME; `tests/posix/tty` and `keys` now lead a session and give their child the
     foreground. The runner rejoins a line a kernel trace was written into.
+* **Step 3 done (2026-11-06): the console's pages.**
+  - **The console driver** (rewritten): eight pages, counted at its start with a mark past
+    each page's text (four on a 64 KB EGA); a cursor, an attribute and an escape state each;
+    the status line on every page; ANSI's cursor moves, `J`, `K` and `m`; `DRV_CON_SHOW` for
+    the page shown. Bochs, MAME and DOSBox-X all hold eight pages.
+  - **The keys:** Alt+F1 to F8 as the BIOS gives them (68h-6Fh). The tty thread shows the
+    page; until step 4 there is one terminal, on page 0.
+  - **The kernel:** the root's video segment covers the 32 KB, and a panic shows page 0 again.
+    `tests/panic/page` reads the CRTC's start address back on all three emulators, MAME's EGA
+    too, in place of the MAME snapshot this milestone asked for.
+  - **The tests:** `tests/posix/console` (a `TEST_SCREEN` build: the console driver puts a
+    page on the log as it shows it) on all three emulators. Key scripts gain `{f1}` to
+    `{f10}`, `{alt-f2}` and the like, and `{dump}`, the kernel's thread dump typed at once.
+  - **Found on the way:** a race in every wait of a server thread. A wait gives the lock up,
+    and meanwhile its process may end and a new one take its entry. The thread then took the
+    new process for its own: it slept on in the old `sigsuspend`, so the new process's calls
+    went unanswered. A pipe's or the terminal's read would have copied into the new
+    process's memory. Each wait now asks whether its process is still the one whose call it
+    serves (`proc_still`). `tests/posix/jobs` hit it, once the new console driver's timing
+    changed.
 
 ### P12. The commands and the devices (M, about 1,500)
 

@@ -215,7 +215,9 @@ has them, through its line discipline (*The terminal* below).
 XBD 11; `src/os/tty.c`). The server's tty thread (`TTY_N`, its slots 164
 and 165 from `ROOT_SERVE`) takes each key as the keyboard driver signals
 it, and puts it through the discipline. An arrow, which has no ASCII, is
-ESC [ A to D. The queue holds `MAX_CANON` (255) bytes. A process's read
+ESC [ A to D. Alt+F1 to F8 show a page of the screen (`DRV_CON_SHOW`;
+*docs/drivers.md*); the terminal writes page 0, and understands ANSI's
+cursor moves, erasing and attributes through the console driver. The queue holds `MAX_CANON` (255) bytes. A process's read
 waits in its server thread until there is enough, which the tty thread
 wakes it for; a signal's handler breaks the wait off (`EINTR`).
 

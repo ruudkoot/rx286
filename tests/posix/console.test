@@ -1,0 +1,25 @@
+# The console's pages and ANSI's sequences (roadmap os-server.md P11): with
+# no program the root builds (program: none), init starts
+# tests/posix/console.c (TEST_POSIX_CONSOLE), which clears its page and
+# writes at places (ESC [ H), moves back, up, down (D, A, B), erases a
+# line's end (K), and colours (m); the console driver of this TEST_SCREEN
+# build puts the page Alt+F1 shows on the log: each line, its attributes
+# as <XX>. Alt+F3 shows the third page, blank but its status line.
+program: none
+define: TEST_POSIX_CONSOLE
+define: TEST_SCREEN
+keys: {alt-f1}{alt-f3}
+match: contains
+---
+console: 8 pages
+screen 0: shown
+screen 0 01: plain
+screen 0 03:     at 3,5
+screen 0 05: axc
+screen 0 06: <04>red<07> and <1F>bright on blue<07>
+screen 0 07: to be
+screen 0 09:          y
+screen 0 10:          x
+screen 0 11:           z
+screen 0 12: done
+screen 2: shown

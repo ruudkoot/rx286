@@ -15,7 +15,8 @@
 ; limit, the test ends: "TEST END" on the log, then the shutdown port.
 ;
 ; A test image asks for more with -d (tools/run-test):
-;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK
+;   TEST_PANIC_DIVIDE, TEST_PANIC_ASSERT, TEST_PANIC_GP, TEST_PANIC_STACK,
+;   TEST_PANIC_PAGE
 ;                       a kernel fault of that kind
 ;   TEST_PROBES         make the printer port's -ACK and the RTC interrupt,
 ;                       though rx286 has no driver for them
@@ -100,6 +101,12 @@ msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
 msg_kernel_changed  db "the kernel's code or tables changed", 0
 msg_stack_leak      db "a frame from ring 3 is not at the kernel stack's top", 0
+%ifdef TEST_PANIC_PAGE
+msg_page_start      db "test: the screen starts at ", 0
+msg_page_text       db "h; page 0 shows the panic: ", 0
+msg_yes             db "yes", CHAR_LF, 0
+msg_no              db "no", CHAR_LF, 0
+%endif
 %ifdef TEST_KERNEL_CHECKS
 test_sum            dw 0
 test_sum_known      db 0
@@ -148,6 +155,23 @@ test_start:
 %ifdef TEST_PANIC_STACK
         call test_recurse
 %endif
+%ifdef TEST_PANIC_PAGE
+        mov dx, CRTC_INDEX              ; page 3 shown, as a terminal's may be
+        mov al, CRTC_START_HIGH
+        out dx, al
+        mov dx, CRTC_DATA
+        mov al, (3 * VIDEO_PAGE / 2) >> 8
+        out dx, al
+        mov dx, CRTC_INDEX
+        mov al, CRTC_START_LOW
+        out dx, al
+        mov dx, CRTC_DATA
+        mov al, (3 * VIDEO_PAGE / 2) & 0xFF
+        out dx, al
+        xor ax, ax
+        test ax, ax
+        ASSERT nz, "page 3 is shown"
+%endif
 %ifdef TEST_PROBES
         call test_probes
 %endif
@@ -159,6 +183,53 @@ test_start:
 %endif
         ret
 
+
+%ifdef TEST_PANIC_PAGE
+; ----------------------------------------------------------------------------
+; test_panic_page - TEST_PANIC_PAGE builds: once the panic is written, the
+; CRTC's start address read back, and whether page 0 shows the panic's
+; first words, on the screen and the log
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+test_panic_page:
+        mov si, msg_page_start
+        call kputs
+        mov dx, CRTC_INDEX
+        mov al, CRTC_START_HIGH
+        out dx, al
+        mov dx, CRTC_DATA
+        in al, dx
+        mov ah, al
+        mov dx, CRTC_INDEX
+        mov al, CRTC_START_LOW
+        out dx, al
+        mov dx, CRTC_DATA
+        in al, dx
+        call kput_hex16
+        mov si, msg_page_text
+        call kputs
+        mov ax, SEL_VIDEO
+        mov es, ax
+        mov si, msg_panic
+        xor di, di
+.char:
+        lodsb
+        test al, al
+        jz .shown
+        cmp [es:di], al
+        jne .not
+        add di, 2
+        jmp .char
+.shown:
+        mov si, msg_yes
+        jmp .say
+.not:
+        mov si, msg_no
+.say:
+        jmp kputs
+%endif
 
 %ifdef TEST_PANIC_STACK
 ; ----------------------------------------------------------------------------

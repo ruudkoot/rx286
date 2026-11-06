@@ -73,7 +73,7 @@ name nothing of the kernel's, and reaches it only through `INT 31h`.
 | `gdt.asm`, `idt.asm`, `tss.asm` | the prefilled tables |
 | `interrupt.asm` | a stub per vector, the common entry and exit, dispatch by vector, the deferred restart |
 | `fault.asm` | the CPU's exceptions: the program's fault, a kernel panic, NMI, a carried single-step trap |
-| `panic.asm` | the red screen and halt; the double-fault task |
+| `panic.asm` | the red screen and halt, page 0 shown whatever page the console driver showed; the double-fault task |
 | `program.asm` | a program: its restart; its fault, to its fault endpoint or reported |
 | `thread.asm` | the threads: the switch, the scheduler, the idle loop, waiting, the log's turn (`call_owner`), stopping a thread, the thread dump; the start of the first two |
 | `cap.asm` | capabilities and the kernel's memory: untyped memory and retype, spaces and their slots, copy, move and mint, threads made from capabilities, the kernel's calls on `INT 31h` (*docs/kernel-calls.md*); the root, built at start from the image |

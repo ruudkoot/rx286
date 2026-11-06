@@ -530,7 +530,7 @@ int sig_call(int i, struct rx_kregs *r, int *error)
             lock_give();
             proc_sleep(i);
             lock_take(PROC_NOTIFY(i));
-            if (!proc_alive(i))
+            if (!proc_still(i))
                 return SIG_GONE;
         }
         *error = EINTR;
@@ -566,7 +566,7 @@ int sig_call(int i, struct rx_kregs *r, int *error)
             lock_give();
             proc_sleep(i);
             lock_take(PROC_NOTIFY(i));
-            if (!proc_alive(i))
+            if (!proc_still(i))
                 return SIG_GONE;
         }
     }

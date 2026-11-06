@@ -75,6 +75,7 @@ struct image {
 };
 
 static struct proc procs[PROCS];
+static pid_t serving[PROCS];            /* the pid whose call entry i's thread serves */
 static int lock;
 static pid_t next_pid = INIT_PID;
 static rx_u8 args[PX_ARG_MAX];          /* an image's argv and environ, being built */
@@ -168,6 +169,14 @@ static void sleep_on(rx_u16 notify, int tick)
 int proc_alive(int i)
 {
     return procs[i].state == P_ALIVE;
+}
+
+/* proc_still - is entry i's process still the one whose call its server
+ * thread serves? A wait gives the lock up, and meanwhile the process may
+ * end, and a new one take its entry (server.h) */
+int proc_still(int i)
+{
+    return procs[i].state == P_ALIVE && procs[i].pid == serving[i];
 }
 
 /* proc_wake - entry i's server thread woken (server.h) */
@@ -642,7 +651,7 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
         sleep_on(P_SLOT(i, PK_NOTIFY), 0);
         take(P_SLOT(i, PK_NOTIFY));
         procs[i].waiting = 0;
-        if (procs[i].state != P_ALIVE)
+        if (!proc_still(i))
             return NO_REPLY;            /* ended meanwhile (kill) */
     }
 }
@@ -850,6 +859,7 @@ static int handle(int i, struct rx_kregs *r)
         give();
         return 0;
     }
+    serving[i] = procs[i].pid;
     if (r->dx & FAULT_BADGE) {
         if (sig_fault(i, fault_signal(r->ax & 0xFF))) {
             give();                     /* a handler's: no reply, the thread stops */
@@ -949,7 +959,7 @@ static int handle(int i, struct rx_kregs *r)
         error = EIO;
     }
     give();
-    if (result == NO_REPLY || procs[i].state != P_ALIVE)
+    if (result == NO_REPLY || !proc_still(i))
         return 0;
     r->bx = (rx_u16)result;
     r->cx = (rx_u16)(result == -1 ? error : 0);

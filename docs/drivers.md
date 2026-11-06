@@ -92,17 +92,35 @@ for the other events.
 
 ## The console driver
 
-It writes the text page and moves the cursor (roadmap l4.md L8, D19). The
-top line is the status line: a background program's writes go to its
-field there (`CON_STATUS`, DI the column past the field's end, which the
-OS server gives each background program: `CON_FIELD` columns, right
-aligned, spaces before; roadmap l4.md L11); the foreground program's to the 24 lines below
-(`CON_MAIN`), with CR, LF, BS, TAB and FF as the kernel's console took
-them, scrolling those lines. It starts where the kernel's cursor stopped,
+It writes the text pages and moves the cursor (roadmap l4.md L8, D19;
+os-server.md P11). Its segment is the 32 KB at B8000h: mode 3 has a page
+every `VIDEO_PAGE` bytes (4 KB), `VIDEO_PAGES` (8) of them, or four on an
+EGA of 64 KB. At its start the driver writes a mark past each page's text,
+the last page's first, and reads them back to count the pages; it blanks
+those past the first. The top line of every page is the status line: a
+background program's writes go to its field there, on every page
+(`CON_STATUS`, DI the column past the field's end, which the OS server
+gives each background program: `CON_FIELD` columns, right aligned, spaces
+before; roadmap l4.md L11). The 24 lines below are a page's main area
+(`CON_MAIN`, BH the page): the foreground program's, or a terminal's. CR,
+LF, BS, TAB and FF are control characters, as the kernel's console took
+them; ESC [ begins one of ANSI's sequences it knows: the cursor's moves
+(`A`, `B`, `C`, `D`, and `H` or `f` to a row and column of the main area),
+erasing (`J` 0 and 2, `K` 0 and 2) and attributes (`m`: 0, 1 bright, 7
+reversed, 30-37 and 40-47 the colours, 39 and 49 their defaults); every
+other byte is shown as its glyph, and a full page scrolls its 24 lines.
+Each page keeps its cursor, attribute and escape. `DRV_CON_SHOW` (BL a
+page) shows a page: the CRTC's start address (`CRTC_START_HIGH`,
+`CRTC_START_LOW`) and the hardware cursor at its cursor; it answers with
+the pages there are. Page 0 starts where the kernel's cursor stopped,
 below the banner. The OS server asks it with `DRV_CON_WRITE` for
-`SYS_WRITE`, after the kernel's write has checked the buffer and written
-the log; the kernel's console writes the screen only until the threads
-start, and again for a panic.
+`SYS_WRITE` and the terminal's output, after the kernel's write has
+checked the buffer and written the log; the kernel's console writes the
+screen only until the threads start, and again for a panic, which shows
+page 0 whatever page the driver showed. In `TEST_SCREEN` builds the
+driver says how many pages there are, and puts the page `DRV_CON_SHOW`
+shows on the log, its lines as text and its attributes as `<XX>`, for the
+tests to read.
 
 ## The keyboard driver
 
@@ -110,7 +128,9 @@ It owns the 8042 and IRQ1 (roadmap l4.md L8): the modifiers, a ring of
 keys, Ctrl+Break, Ctrl+Alt+Del and Sys Req, as the kernel did. The OS
 server takes a key with `DRV_KBD_GET`, looks with `DRV_KBD_PEEK`, and drops
 the keys waiting with `DRV_KBD_CLEAR` when it starts the foreground program
-again. While the foreground program waits for a key, the server's thread
+again. Alt+F1 to F8 come as the BIOS gives them, scancodes 68h to 6Fh
+without ASCII, which the OS server's terminal takes for its pages
+(os-server.md P11). While the foreground program waits for a key, the server's thread
 sleeps until the driver signals it (`DRV_SLOT_KEYS`), which the driver does
 after every byte the keyboard sends (roadmap os-server.md P5). Ctrl+Break is
 never a call (l4.md X13): the driver signals the OS server's control

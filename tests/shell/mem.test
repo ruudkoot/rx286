@@ -10,11 +10,11 @@ rx286, test build
 rx286 shell: type help for the commands
 A:\>mem
 code:  selector 0007h, base 0{m:program.base}h, limit {m:program.limit}h
-@bochs data:  selector 000Fh, base 123EB0h, limit 1FFFh
-@bochs stack: selector 0017h, base 125EB0h, limit 07FFh
-@mame data:  selector 000Fh, base 123EB0h, limit 1FFFh
-@mame stack: selector 0017h, base 125EB0h, limit 07FFh
-@dosbox-x data:  selector 000Fh, base 055410h, limit 1FFFh
-@dosbox-x stack: selector 0017h, base 057410h, limit 07FFh
+@bochs data:  selector 000Fh, base 123ED0h, limit 1FFFh
+@bochs stack: selector 0017h, base 125ED0h, limit 07FFh
+@mame data:  selector 000Fh, base 123ED0h, limit 1FFFh
+@mame stack: selector 0017h, base 125ED0h, limit 07FFh
+@dosbox-x data:  selector 000Fh, base 055430h, limit 1FFFh
+@dosbox-x stack: selector 0017h, base 057430h, limit 07FFh
 Nothing else is reachable: the kernel's selectors fault here.
 A:\>

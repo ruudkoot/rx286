@@ -338,8 +338,9 @@ for start, plain, shifted in _ROWS:
 SC_LSHIFT, SC_CTRL, SC_ALT = 0x2A, 0x1D, 0x38
 SC_SCROLL_LOCK, SC_DELETE = 0x46, 0x53
 NAMED = {'up': 0x48, 'down': 0x50, 'left': 0x4B, 'right': 0x4D,
-         'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'f1': 0x3B, 'caps': 0x3A,
+         'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'caps': 0x3A,
          'scroll-lock': 0x46, 'del': 0x53, 'sysrq': 0x54}
+NAMED.update({'f%d' % n: 0x3A + n for n in range(1, 11)})   # F1 3Bh to F10 44h
 
 
 def compile_keys(script):
@@ -347,9 +348,9 @@ def compile_keys(script):
 
     Plain characters are typed as the US keyboard types them; escapes are
     \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc). Braces name others:
-    {up}, {down}, {left}, {right}, {esc}, {f1}, {caps}, {scroll-lock}, {del},
-    {sysrq} (the kernel's thread dump, in debug and test builds),
-    {ctrl-X} and {alt-X} for a key X,
+    {up}, {down}, {left}, {right}, {esc}, {f1} to {f10}, {caps},
+    {scroll-lock}, {del}, {sysrq} (the kernel's thread dump, in debug and
+    test builds; {dump} the same at once, waiting or not), {ctrl-X} and {alt-X} for a key X or a named one ({alt-f2}),
     {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
     not wait), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's
     packet, DX right and DY down (-128 to 127), B the buttons down (L, R, LR
@@ -391,6 +392,8 @@ def compile_keys(script):
                 while n > 0:
                     out.extend([OP_WAIT, min(n, 255)])
                     n -= 255
+            elif name == 'dump':
+                out.extend([OP_NOW, NAMED['sysrq'], OP_NOW, NAMED['sysrq'] | 0x80])
             elif name == 'ctrl-break':
                 out.extend([OP_NOW, SC_CTRL, OP_NOW, SC_SCROLL_LOCK,
                             OP_NOW, SC_SCROLL_LOCK | 0x80, OP_NOW, SC_CTRL | 0x80])
@@ -403,6 +406,11 @@ def compile_keys(script):
                 modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
                 out.extend([OP_WHEN_WAITING, modifier])
                 press(KEYS[name[-1]][0])
+                out.extend([OP_NOW, modifier | 0x80])
+            elif name.startswith(('ctrl-', 'alt-')) and name.split('-', 1)[1] in NAMED:
+                modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
+                out.extend([OP_WHEN_WAITING, modifier])
+                press(NAMED[name.split('-', 1)[1]])
                 out.extend([OP_NOW, modifier | 0x80])
             else:
                 raise ValueError('key script: unknown key {%s}' % name)

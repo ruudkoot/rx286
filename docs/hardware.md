@@ -163,7 +163,9 @@ numbers below are the Technical Reference's.
   is empty; `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the
   modem), `UART_DIVISOR_1200` (the mouse).
 - **EGA**: `CRTC_CURSOR_HIGH` and `CRTC_CURSOR_LOW` hold the cursor's
-  position.
+  position, `CRTC_START_HIGH` and `CRTC_START_LOW` where the screen starts,
+  both in words from the video memory's start: a page shown is a start
+  (os-server.md P11). Both read back, on the EGA as on VGA.
 
 ## Interrupts
 

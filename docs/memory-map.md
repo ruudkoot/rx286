@@ -23,7 +23,8 @@ D7). This document explains each one.
 | 10000h-2FFFFh | the boot image, `KERNEL.BIN`: up to `IMAGE_MAX` bytes | `KERNEL_PHYS` | the loader loads, the kernel and the modules run |
 | 30000h-9FFFFh | memory for programs' segments, as untyped | `UMEM_PHYS`, `UMEM_SIZE` | the root, and what it gives |
 | A0000h-AFFFFh | EGA graphics memory | | nobody |
-| B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the console |
+| B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the kernel's console |
+| B8000h-BFFFFh | colour text, `VIDEO_PAGES` pages of `VIDEO_PAGE` bytes (`VIDEO_PAGE_SHIFT`) | | the console driver (os-server.md P11) |
 | C0000h-C3FFFh | EGA BIOS ROM | | the BIOS |
 | F0000h-FFFFFh | system BIOS ROM | | the BIOS |
 | 100000h and up | extended memory, if fitted: the root's untyped (roadmap os-server.md P3), up to 1 MB for segments and the rest, up to 1 MB, for objects; A20 on from the kernel's entry | CMOS `CMOS_EXT_LOW`, `CMOS_EXT_HIGH` | the root, and what it gives |

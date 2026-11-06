@@ -189,6 +189,8 @@ EGA_ATTR            equ 0x3C0       ; 3C0h-3CFh: attribute, sequencer, graphics,
 CRTC_INDEX          equ 0x3D4       ; colour CRTC
 CRTC_DATA           equ 0x3D5
 EGA_STATUS1         equ 0x3DA
+CRTC_START_HIGH     equ 0x0C        ; the page shown: where the screen starts, in words
+CRTC_START_LOW      equ 0x0D
 CRTC_CURSOR_HIGH    equ 0x0E
 CRTC_CURSOR_LOW     equ 0x0F
 

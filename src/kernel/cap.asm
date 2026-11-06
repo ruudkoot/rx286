@@ -786,10 +786,11 @@ boot_root:
         mov [es:si + SH_OBJECT], ax
         mov es, ax
         mov word [es:T_REFS], 1
-        ; the screen's text page, for the console driver (l4.md L8)
+        ; the screen's text pages, for the console driver (l4.md L8;
+        ; os-server.md P11: all eight)
         mov ax, VIDEO_PHYS & 0xFFFF
         mov dl, VIDEO_PHYS >> 16
-        mov cx, VIDEO_SIZE - 1
+        mov cx, VIDEO_PAGE * VIDEO_PAGES - 1
         mov dh, ACC_PRESENT | (1 << ACC_DPL_SHIFT) | ACC_SEGMENT | ACC_RW | ACC_ACCESSED
         mov bx, ROOT_SLOT_VIDEO
         call boot_slot_segment

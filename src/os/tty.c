@@ -9,7 +9,8 @@
  * with ICANON the line is edited (ERASE, KILL) and a read gets it whole
  * once LF, EOL or EOF ends it; with ECHO what is typed is echoed, to the
  * screen and the log as a process's writes are. An arrow, which has no
- * ASCII, is ESC [ A to D. The queue holds MAX_CANON bytes. A process's read
+ * ASCII, is ESC [ A to D; Alt+F1 to F8 show a page of the screen
+ * (DRV_CON_SHOW). The queue holds MAX_CANON bytes. A process's read
  * waits, in its server thread, until there is enough: a line, or VMIN bytes
  * (VTIME is not kept: 0); the tty thread wakes it. termios is one for the
  * terminal: tcgetattr and tcsetattr (XBD 11).
@@ -33,6 +34,7 @@
 #define QUEUE (MAX_CANON + 1)           /* the line, and its end */
 #define EOF_MARK 0x100                  /* an EOF in the queue: a line's end, no byte */
 #define ECHO_ROOM 48
+#define KEY_ALT_F1 0x68                 /* Alt+F1's scancode, as the keyboard driver gives it */
 
 /* The terminal: its queue of input (a word a byte: EOF_MARK besides), the
  * complete lines in it and the bytes of the line still edited at its end;
@@ -50,6 +52,7 @@ struct tty {
 static struct tty tty;
 static char echoes[ECHO_ROOM];
 static unsigned echoed;
+static int to_show = -1;                /* a page Alt+F1-F8 asked for, or -1 */
 static int ready_keys = -1;             /* do the processes have the keys? (-1: unknown) */
 
 /* tty_init - termios as POSIX's defaults have it, canonical and echoing */
@@ -210,6 +213,10 @@ static void key(rx_u16 k)
         input((rx_u8)k);
         return;
     }
+    if ((k >> 8) >= KEY_ALT_F1 && (k >> 8) < KEY_ALT_F1 + VIDEO_PAGES) {
+        to_show = (k >> 8) - KEY_ALT_F1;        /* Alt+F1-F8: a page shown (P11) */
+        return;
+    }
     for (a = 0; a < 4; a++)
         if (arrows[a][0] == k >> 8) {
             input(0x1B);
@@ -246,6 +253,10 @@ void tty_thread(void)
         wake_readers();
         lock_give();
         echo_flush();
+        if (to_show >= 0) {
+            console_show(to_show);
+            to_show = -1;
+        }
     }
 }
 
@@ -283,7 +294,7 @@ int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n)
         proc_sleep(i);
         lock_take(PROC_NOTIFY(i));
         tty.readers &= (rx_u16)~(1u << i);
-        if (!proc_alive(i))
+        if (!proc_still(i))
             return VFS_GONE;
         if (sig_ready(i) || sig_stopped(i)) {
             test_reader(TEST_READER_NONE);

@@ -498,7 +498,7 @@ static int pipe_wait(int i, signed char *who)
     lock_take(PROC_NOTIFY(i));
     if (*who == i)
         *who = -1;
-    if (!proc_alive(i))
+    if (!proc_still(i))
         return 0;
     return sig_ready(i) ? -1 : 1;
 }

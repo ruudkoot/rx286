@@ -79,8 +79,11 @@ void files(struct session *s, int function);
 void os_thread(unsigned n);
 /* console - bytes of a segment of the server's (passed) to the console
  * driver: the main screen, or a background program's field of the status
- * line ending before a column */
+ * line ending before a column; where's high byte a page (CON_MAIN) */
 void console(rx_u16 segment, rx_u16 offset, unsigned n, int where, rx_u16 column);
+/* console_show - a page of the screen shown (DRV_CON_SHOW; os-server.md
+ * P11): the pages the EGA holds */
+int console_show(int page);
 /* fault_text - a fault's report, as the kernel's ("rx286: WHO fault
  * #GP(0000) at 0007:0123"), into a line: its bytes */
 unsigned fault_text(char *line, unsigned size, const char *who, int vector, rx_u16 error,
@@ -162,10 +165,14 @@ void lock_give(void);
 #define FLAG_DF 0x0400
 
 /* proc_end - process i ends by a signal's default action, its server thread
- * woken; proc_wake - its server thread woken; proc_sleep - its server thread
+ * woken; proc_still - is it still the process whose call its server thread
+ * serves (a wait's test, once it has the lock again: the process may have
+ * ended, and a new one taken its entry); proc_wake - its server thread
+ * woken; proc_sleep - its server thread
  * sleeps until woken; proc_data_limit - its data segment's last offset (proc.c;
  * lock held, but proc_sleep) */
 void proc_end(int i, int sig);
+int proc_still(int i);
 void proc_wake(int i);
 void proc_sleep(int i);
 rx_u16 proc_data_limit(int i);

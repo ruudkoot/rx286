@@ -35,7 +35,8 @@ panic:
         mov ds, ax
         mov es, ax
         mov byte [con_off], 0           ; the screen is the kernel's again: the
-        mov al, ATTR_PANIC              ; panic writer's, whatever drivers run
+        call con_page0                  ; panic writer's, whatever drivers run,
+        mov al, ATTR_PANIC              ; page 0 shown (os-server.md P11)
         call con_set_attr
         call con_clear
         push si
@@ -68,6 +69,9 @@ panic:
         call kputs
         call kput_regs
 .halt:
+%ifdef TEST_PANIC_PAGE
+        call test_panic_page
+%endif
 %ifdef TEST_FUZZ
         call test_fuzz_seed
 %endif

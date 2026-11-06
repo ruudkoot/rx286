@@ -110,6 +110,17 @@ void console(rx_u16 segment, rx_u16 offset, unsigned n, int where, rx_u16 column
          segment, 0);
 }
 
+/* console_show - the console driver's DRV_CON_SHOW: a page shown; the pages
+ * the EGA holds (server.h) */
+int console_show(int page)
+{
+    struct rx_kregs r;
+
+    if (call(OS_SERVICE(SERVICE_CONSOLE), DRV_CON_SHOW, (rx_u16)page, 0, 0, 0, 0, &r))
+        return 1;
+    return r.bx;
+}
+
 /* entry_of - a module's entry in the module table */
 static entry_ptr entry_of(unsigned n)
 {

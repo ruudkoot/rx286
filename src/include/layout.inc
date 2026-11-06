@@ -154,5 +154,9 @@ VIDEO_PHYS          equ 0xB8000     ; colour text, page 0
 VIDEO_COLUMNS       equ 80
 VIDEO_ROWS          equ 25
 VIDEO_SIZE          equ VIDEO_COLUMNS * VIDEO_ROWS * 2
+VIDEO_PAGE_SHIFT    equ 12          ; mode 3's pages: one every 4 KB (os-server.md P11)
+VIDEO_PAGE          equ 1 << VIDEO_PAGE_SHIFT
+VIDEO_PAGES         equ 8           ;    at most: 32 KB, B8000h to BFFFFh (four on a
+                                    ;    64 KB EGA)
 
 %endif

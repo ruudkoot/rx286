@@ -52,6 +52,9 @@ SC_RELEASE          equ 0x80            ; set in a key's release code
 SC_PREFIX_E0        equ 0xE0
 SC_PREFIX_E1        equ 0xE1
 SC_CTRL             equ 0x1D
+SC_F1               equ 0x3B
+SC_F8               equ 0x42
+SC_ALT_F1           equ 0x68            ; Alt+F1's, as the BIOS gives it
 SC_LSHIFT           equ 0x2A
 SC_RSHIFT           equ 0x36
 SC_ALT              equ 0x38
@@ -296,6 +299,14 @@ kbd_scancode:
 .translate:
         mov bl, [kbd_mods]
         call kbd_translate              ; AL = ASCII, AH = scancode
+        test bl, KBD_ALT
+        jz .put
+        cmp ah, SC_F1                   ; Alt+F1 to F8: 68h to 6Fh, as the BIOS
+        jb .put                         ; has them (os-server.md P11)
+        cmp ah, SC_F8
+        ja .put
+        add ah, SC_ALT_F1 - SC_F1
+.put:
         jmp kbd_put
 .modifier:
         test al, SC_RELEASE
