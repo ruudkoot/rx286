@@ -1,6 +1,6 @@
 # C
 
-rx286's programs, and in time its root and OS server, are C, built
+rx286's programs, its root, and in time its OS server, are C, built
 against rx286's own crt and libc (roadmap os-server.md P1, D1, D22). The
 kernel and the drivers stay assembly. This document is the toolchain, the
 conventions C and NASM meet by, and rx286's executable format.
@@ -18,7 +18,7 @@ with gcc-ia16 instead of Watcom; `c.mk` holds the rules for both:
 
 | | Open Watcom | gcc-ia16 |
 |---|---|---|
-| C | `wcc -2 -ms -zl -zls -zld -s -ecc -os -zastd=c99 -wx -we` | `ia16-elf-gcc -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin -Os -std=c99 -Werror` |
+| C | `wcc -2 -ms -zl -zls -zld -s -ecc -os -zastd=c99 -wx -we` | `ia16-elf-gcc -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin -Os -std=gnu99 -Werror` (GNU's C99: `__far` is a GNU keyword) |
 | NASM | `-f obj --gprefix _` | `-f elf32 -dELF` |
 | libraries | `wlib` | `ia16-elf-ar` |
 | link | `wlink format raw bin`, the code at 1000:0, the data at 2000:0 | `ia16-elf-ld -T tools/ia16.ld` |
@@ -117,8 +117,8 @@ image (`clock=build/test/clock.rx:3:4`).
   `tests/unit/c/rename.h` so that it and the host's libc fit in one
   program; `tests/unit/test_helpers.py` runs the 32-bit helpers in Unicorn
   against Python's arithmetic.
-- **On rx286:** the clock and the counter are C (`src/userland/clock.c`,
-  `counter.c`), so the demonstration's, the threads' and the root's suites
-  test the crt and the libraries in every `make check`.
+- **On rx286:** the root (`src/root/root.c`, roadmap os-server.md P4), the
+  clock and the counter are C (`src/userland/clock.c`, `counter.c`), so
+  every suite tests the crt and the libraries in every `make check`.
 - **The second compiler:** `make check-ia16` runs those suites with every C
   module built by gcc-ia16, and check-286 over its objects.

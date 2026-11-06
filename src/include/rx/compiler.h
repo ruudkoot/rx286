@@ -66,6 +66,10 @@ typedef int rx_i32;
 #endif
 typedef unsigned int rx_size;
 
+/* A far pointer from a selector and an offset (the 16-bit compilers keep
+ * one as the selector in its high word); the host has none */
+#define RX_MK_FP(seg, off) ((void RX_FAR *)(((rx_u32)(seg) << 16) | (rx_u16)(off)))
+
 #define RX_STATIC_ASSERT(cond, name) typedef char rx_static_assert_##name[(cond) ? 1 : -1]
 
 RX_STATIC_ASSERT(sizeof(rx_u16) == 2, u16);

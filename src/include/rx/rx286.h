@@ -24,5 +24,7 @@ rx_u32 rx_ticks(void);
 int rx_log(const void *bytes, unsigned n);
 /* rx_ud2 - an invalid opcode on purpose, for the tests of faults */
 void rx_ud2(void);
+/* rx_verr - may the caller read through a selector (VERR)? 1 or 0 */
+int rx_verr(unsigned selector);
 
 #endif

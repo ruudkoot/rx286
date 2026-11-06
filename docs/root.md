@@ -1,12 +1,12 @@
 # The root
 
-The root (`src/root/root.asm`; roadmap l4.md L5, D12) is the first thread,
-in ring 2, which the kernel builds from the boot image's first module and
-gives everything it does not keep for itself (*docs/kernel-calls.md*). It
-builds every other module, starts it, and then serves two kinds of
-messages for ever: the faults of what it built, and the OS server's
-requests about the programs. Ring 2 gives it nothing that ring 3 lacks:
-its capabilities are its power.
+The root (`src/root/root.c`, in C since roadmap os-server.md P4; roadmap
+l4.md L5, D12) is the first thread, in ring 2, which the kernel builds
+from the boot image's first module and gives everything it does not keep
+for itself (*docs/kernel-calls.md*). It builds every other module, starts
+it, and then serves two kinds of messages for ever: the faults of what it
+built, and the OS server's requests about the programs. Ring 2 gives it
+nothing that ring 3 lacks: its capabilities are its power.
 
 ## What it starts with
 

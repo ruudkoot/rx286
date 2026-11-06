@@ -165,15 +165,15 @@ untyped memory and a space can make more with the kernel's calls.
 
 ## The root
 
-*docs/root.md* has the details. The root (`src/root/root.asm`; roadmap
-l4.md L5, D12) is the first thread,
-in ring 2, which the kernel builds from the image's first module and gives
+*docs/root.md* has the details. The root (`src/root/root.c`, in C since
+roadmap os-server.md P4; roadmap l4.md L5, D12) is the first thread, in
+ring 2, which the kernel builds from the image's first module and gives
 everything else: the untyped memory left, the module table, each other
 module's code and data. For each other module it builds a space - the
 module's code, a data segment initialised from the module, a stack. The OS
 server gets a thread for each program; every other module is a program and
-gets a thread, an endpoint to the OS server and a transfer segment, and its
-faults go to the OS server (l4.md D18). The root starts them at the
+gets a thread, an endpoint to the OS server and a transfer segment, and
+its faults go to the OS server (l4.md D18). The root starts them at the
 priorities the module table gives. Then it serves the OS server's faults:
 it reports each with the kernel's old line, puts back any of the server's
 segments that is gone from its slot, and restarts it at its entry

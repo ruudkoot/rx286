@@ -241,12 +241,13 @@ def build(test):
     stamp = os.path.join(b, 'defines.txt')
     wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
-        for name in ('kernel.bin', 'user.bin', 'root.bin', 'os.bin', 'counter.bin',
+        for name in ('kernel.bin', 'user.bin', 'root.rx', 'os.bin', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
-                     'rtc.bin', 'clock.bin'):
+                     'rtc.bin', 'clock.rx'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
+        shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them
         with open(stamp, 'w', encoding='utf-8') as f:
             f.write(wanted)
     defines = ["-dTEST_KEYS_INC='\"%s\"'" % keys_inc]

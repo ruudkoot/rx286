@@ -23,7 +23,7 @@ KR_SI               equ 8
 KR_DI               equ 10
 KR_BP               equ 12
 
-global rx_kcall, rx_ticks, rx_log, rx_ud2
+global rx_kcall, rx_ticks, rx_log, rx_ud2, rx_verr
 
 code_section
 
@@ -66,6 +66,25 @@ rx_kcall:
         pop bx
         pop di
         pop si
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_verr - int rx_verr(unsigned selector): may the caller read through it?
+; (VERR, at the caller's privilege)
+;   In:       the stack: the selector
+;   Out:      AX = 1 if so, else 0
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_verr:
+        push bp
+        mov bp, sp
+        mov ax, ARG(0)
+        verr ax
+        mov ax, 0
+        jnz .done
+        inc ax
+.done:
         pop bp
         ret
 

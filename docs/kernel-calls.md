@@ -401,23 +401,24 @@ scratch slot (37), a background program's own untyped from 38 on, the OS
 server's control notification (110), and from 128 on eight slots for each
 module it builds (roadmap l4.md L10, L12).
 
-The root (`src/root/root.asm`) builds a space for every other module: the
-module's code copied in as slot 0; a data segment of its room, initialised
-from its data, as slot 1; a stack as slot 2. The OS server's module ("os")
-gets a space of 256 slots and a thread for each program, which serves it
-alone (`START_SESSION`), with the program's capabilities in slots 8n to
-8n + 7 (*docs/syscalls.md*), among them a files segment of `FILES_SIZE`
-bytes that is the server's alone, and in slot 128 + n a notification the
-thread sleeps on, a tick at a time. A driver (`MF_DRIVER`) gets a space of
-`DRV_SLOTS` slots, a thread with IOPL, an endpoint, a notification and its
-interrupt line (*docs/drivers.md*). Every other module is a program: a
-thread, an endpoint to the OS server and a transfer segment, and its
-faults go to the OS server. The root starts each at the priority
-the table gives, the program the keys are for with `START_FOREGROUND`.
-Then it handles the OS server's faults: it reports each as the kernel did
-("rx286: os fault #GP(0000) at 0006:0123", the module's name for
-"program"), copies back any of the three slots the module emptied, and
-replies with the module's entry.
+The root (`src/root/root.c`; in C since roadmap os-server.md P4) builds a
+space for every other module: the module's code copied in as slot 0; a
+data segment of its room, initialised from its data, as slot 1; a stack as
+slot 2. The OS server's module ("os") gets a space of 256 slots and a
+thread for each program, which serves it alone (`START_SESSION`), with the
+program's capabilities in slots 8n to 8n + 7 (*docs/syscalls.md*), among
+them a files segment of `FILES_SIZE` bytes that is the server's alone, and
+in slot 128 + n a notification the thread sleeps on, a tick at a time. A
+driver (`MF_DRIVER`) gets a space of `DRV_SLOTS` slots, a thread with
+IOPL, an endpoint, a notification and its interrupt line
+(*docs/drivers.md*). Every other module is a program: a thread, an
+endpoint to the OS server and a transfer segment, and its faults go to the
+OS server. The root starts each at the priority the table gives, the
+program the keys are for with `START_FOREGROUND`. Then it handles the OS
+server's faults: it reports each as the kernel did ("rx286: os fault
+#GP(0000) at 0006:0123", the module's name for "program"), copies back any
+of the three slots the module emptied, and replies with the module's
+entry.
 
 ## In test builds
 

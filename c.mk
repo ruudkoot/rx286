@@ -75,7 +75,7 @@ IA16_GCC := $(IA16)/bin/ia16-elf-gcc
 IA16_LD := $(IA16)/bin/ia16-elf-ld
 IA16_OBJDUMP := $(IA16)/bin/ia16-elf-objdump
 IA16_FLAGS := -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin \
-    -Os -std=c99 -Wall -Wextra -Werror -Isrc/include/c -Isrc/include -I$(INC_H) $(C_DEFINES)
+    -Os -std=gnu99 -Wall -Wextra -Werror -Isrc/include/c -Isrc/include -I$(INC_H) $(C_DEFINES)
 
 $(C_B)/%.$(OBJ): src/%.c $(C_HEADERS) c.mk
 	@mkdir -p $(dir $@)
@@ -122,7 +122,11 @@ $(C_B)/rx286.lib: $(RX286_OBJS)
 $(C_B)/os.lib: $(OS_OBJS)
 	$(call make_lib,$@,$^)
 
-# The C modules of the boot image
+# The C modules of the boot image: the root task, the first module
+# (roadmap l4.md L5; in C since os-server.md P4), the clock and the counter
+$(B)/root.rx: $(C_LIB_OBJS) $(C_B)/root/root.$(OBJ) tools/mkexe
+	$(call c_link,root,$(C_LIB_OBJS) $(C_B)/root/root.$(OBJ))
+
 $(B)/clock.rx: $(C_LIB_OBJS) $(C_B)/userland/clock.$(OBJ) tools/mkexe
 	$(call c_link,clock,$(C_LIB_OBJS) $(C_B)/userland/clock.$(OBJ))
 

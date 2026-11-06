@@ -83,7 +83,7 @@ PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
 # The modules of the boot image (tools/mkimage): NAME=BINARY:RING:PRIORITY[:FLAG...].
 # Servers run above their clients (roadmap l4.md D9): the root, the drivers,
 # the OS server, the programs.
-MODULES := root=$(B)/root.bin:2:7 os=$(B)/os.bin:2:5:stack=8192 \
+MODULES := root=$(B)/root.rx:2:7 os=$(B)/os.bin:2:5:stack=8192 \
     printer=$(B)/printer.bin:1:6:driver:service=1 mouse=$(B)/mouse.bin:1:6:driver:irq=4:service=2 \
     console=$(B)/console.bin:1:6:driver:service=3 kbd=$(B)/keyboard.bin:1:6:driver:irq=1:service=4 \
     fd=$(B)/diskette.bin:1:6:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:6:driver:irq=14:service=6 \
@@ -104,7 +104,7 @@ FLOPPY_SECTORS := 2400
 FLOPPY_SERIAL := 52583836
 
 IMAGE := $(B)/rx286.img
-BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.bin $(B)/os.bin \
+BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.bin \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
     $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin \
     $(B)/clock.rx $(B)/counter.rx $(B)/kernel.bin $(B)/image.bin
@@ -155,10 +155,6 @@ $(B)/user.bin: $(PROGRAM_SRC)
 # the shell (l4.md L11), and the counter (l4.md L2), among them.
 include c.mk
 
-# The root task, the first module (roadmap l4.md L5).
-$(B)/root.bin: src/root/root.asm $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
-	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/)
-
 # The OS server, which serves the programs' system calls (roadmap l4.md L6).
 $(B)/os.bin: $(wildcard src/os/*.asm) $(wildcard src/userland/*.asm src/userland/*.inc) $(COMMON_SRC)
 	$(call assemble,$@,src/os/os.asm,-Isrc/userland/ -Isrc/lib/ -Isrc/os/)
@@ -172,7 +168,7 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 
 # The boot image: the kernel, the module table and the modules. On the
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
-$(B)/image.bin: $(B)/kernel.bin $(B)/root.bin $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
+$(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.bin $(B)/printer.bin $(B)/mouse.bin \
     $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
     $(B)/sound.bin $(B)/rtc.bin $(B)/user.bin $(B)/clock.rx $(B)/counter.rx tools/mkimage \
     tools/rxlib.py
