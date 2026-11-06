@@ -63,7 +63,8 @@ it into features:
 | `user.bin`, the drivers' | the assembled modules: the program, the drivers |
 | `root.rx`, `os.rx`, `clock.rx`, `counter.rx` | the C modules, rx286's executables (*docs/c.md*): the root, the OS server, the clock, the counter; `user.rx` for a C test program (`PROGRAM=services`) |
 | `inc/`, `c/` | the C headers made from the include files; the C's objects, libraries, maps and disassemblies |
-| `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules (*docs/memory-map.md*) |
+| `z-init.rx`, `z-proc.rx`, `z-child.rx`, `z.arc` | the programs of `/z`, and `/z` itself, their archive (`tools/mkarchive`; *docs/processes.md*) |
+| `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules, `/z` the last (*docs/memory-map.md*) |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |
 | `*.lst`, `*.map` | NASM's listing and map of each binary |

@@ -206,7 +206,11 @@ it alone. `src/include/os.inc` holds the interface:
   `ROOT_LOAD`, `ROOT_SEAL`, `ROOT_FIND` and `ROOT_UNLOAD` for code;
   `ROOT_SPAWN`, `ROOT_FORK`, `ROOT_THREAD`, `ROOT_BRK` and `ROOT_EXIT` for
   processes, each a space of `PROC_SLOTS` with up to `PROC_THREADS`
-  threads more. Today's server makes none of these requests.
+  threads more; `ROOT_SERVE` for a thread of the server's own for each
+  (roadmap os-server.md P6; *docs/processes.md*). In `TEST_SERVICES` builds
+  a test program makes them too, through a copy badged `ROOT_BADGE_TEST`.
+  The server holds `/z`, the archive of programs, in its slot
+  `OS_SLOT_ARCHIVE`.
 - **What has no system calls:** the root, the OS server and the drivers,
   which are not the OS server's clients; and threads a program makes,
   whose spaces hold no endpoint to the OS server (the IPC test's workers).

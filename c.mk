@@ -21,7 +21,7 @@ C_B := $(B)/c
 INC_H := $(B)/inc
 
 # The C headers made from the NASM include files (tools/inc2h)
-INC_NAMES := build syscalls kcalls os layout disks drivers ports selectors descriptors \
+INC_NAMES := build syscalls kcalls os layout disks drivers ports selectors descriptors posix archive \
     vectors exe
 INC_HEADERS := $(addprefix $(INC_H)/,$(addsuffix .h,$(INC_NAMES)))
 C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h) $(INC_HEADERS)
@@ -116,8 +116,11 @@ CRT_OBJS := $(addprefix $(C_B)/lib/crt/,memory.$(OBJ) setjmp.$(OBJ) helpers.$(OB
 LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ))
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
+POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
+# A process's (roadmap os-server.md P6): posix in place of today's os
+PROCESS_LIBS := $(START_OBJS) $(addprefix $(C_B)/,crt.lib c.lib rx286.lib posix.lib)
 
 ifeq ($(CC_KIND),watcom)
 make_lib = rm -f $(1) && $(WLIB) -q -n -b $(1) $(addprefix +,$(2))
@@ -132,6 +135,8 @@ $(C_B)/rx286.lib: $(RX286_OBJS)
 	$(call make_lib,$@,$^)
 $(C_B)/os.lib: $(OS_OBJS)
 	$(call make_lib,$@,$^)
+$(C_B)/posix.lib: $(POSIX_OBJS)
+	$(call make_lib,$@,$^)
 
 # The C modules of the boot image: the root task, the first module
 # (roadmap l4.md L5; in C since os-server.md P4), the clock and the counter
@@ -143,11 +148,26 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 
 # The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
 # (start.asm), a thread a program, each on its part of the stacks
-SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) files.$(OBJ) fat.$(OBJ))
+SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ))
 $(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
 
 $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
+
+# /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
+# init, and the processes' test programs (tests/posix)
+Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) proc=$(C_B)/tests/posix/proc.$(OBJ) \
+    child=$(C_B)/tests/posix/child.$(OBJ)
+Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
+Z_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(Z_NAMES)))
+define z_program
+$(B)/z-$(1).rx: $(PROCESS_LIBS) $(2) tools/mkexe
+	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(2))
+endef
+$(foreach p,$(Z_PROGRAMS),$(eval $(call z_program,$(firstword $(subst =, ,$(p))),$(lastword \
+    $(subst =, ,$(p))))))
+$(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
+	$(PYTHON) tools/mkarchive $@ $(foreach n,$(Z_NAMES),$(n)=$(B)/z-$(n).rx)
 
 # A test program in C (tests/programs/*.c), the program module of its build
 $(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe

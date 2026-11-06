@@ -124,7 +124,7 @@ What it rests on:
 | P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | done (2026-11-06, branch `os-server`) |
 | P4 | The root in C; its allocator and its services | done (2026-11-06, branch `os-server`) |
 | P5 | The OS server in C, serving today's calls | done (2026-11-06, branch `os-server`) |
-| P6 | Processes: fork, exec, exit, wait | not started |
+| P6 | Processes: fork, exec, exit, wait | done (2026-11-06, branch `os-server`) |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | not started |
 | P8 | Programs from disk | not started |
 | P9 | Pipes and the shell in C | not started |
@@ -2147,6 +2147,39 @@ The largest change to the kernel since l4.md, in three steps, each with every su
     child's fault, a fork bomb refused;
   - the old suites pass.
 * **Decisions:** D2, D5, D8, D11, D12.
+* **Done (2026-11-06):**
+  - **The server's processes** (`src/os/proc.c`; *docs/processes.md*): a table of ten, under
+    one lock (XCHG, `rx_xchg`); for each entry the server's copies of the process's endpoint,
+    thread, space and data, and a thread of its own from the root's new `ROOT_SERVE`. The
+    calls are messages with the buffers in the process's data segment (D5 B,
+    `src/include/posix.inc`): `_exit`, `write`, `fork`, `execve`, `posix_spawn`, `waitpid`,
+    `getpid`, `getppid`, `kill` and `brk`. A fault ends the process with its signal and
+    today's report, with the pid.
+  - **/z** is an archive module (`MF_ARCHIVE`, `tools/mkarchive`), whose bytes the root
+    gives the server; a file's code is sealed once and shared through the root's code table,
+    keyed by its place in the archive. `argv` and `environ` go at the first break, and their
+    count and pointers at the stack's top, where crt0 takes them for `main`.
+  - **init** starts at boot from the control thread and waits for ever, beside today's
+    programs; the server keeps it waiting even with no child, for the orphans to come.
+  - **The library** is `src/lib/posix/` (unistd, wait, spawn, signal, errno, `printf`,
+    `malloc`), beside today's `src/lib/os/`, which the root's programs keep.
+  - **Otherwise than planned:**
+    - init does not run today's shell: the shell stays a program the root builds until P9's
+      shell in C, and Ctrl+Break still restarts it. SIGINT to a process comes with the
+      terminals (P11), which give processes keys.
+    - The descriptor table is descriptors 0 to 2 alone, all the console; other files come
+      with P7.
+    - fork does not keep the 287's state: a child starts with a clean one.
+  - **Found on the way:**
+    - `memcpy` and its kin assumed ES = DS; since ES is free across a call (P4), C that has
+      used a far pointer may leave it anywhere. They load it from DS now.
+    - `tools/mkexe` wrote `RXH_DGROUP_MAX` as the data's present size, which left no room
+      for the arguments or the heap; it writes 0 (64 KB).
+    - A module's data travelled in the image with the zeros it starts with: the server's
+      25 KB of stacks. `M_DATA_AT` says where the rest goes; the image is 69 KB, not 98.
+  - **Transcripts:** the segment bases after the server's, 14,784 bytes higher (its larger
+    data); the root's report lists `/z`; the thread reports list init's thread and its server
+    thread.
 
 ### P7. Files (L, about 3,000)
 

@@ -29,6 +29,9 @@
 #define OS_SLOT_SLEEP 128               /* program n's thread's notification: + n */
 #define OS_CONTROL_N 16                 /* the control thread's number */
 #define OS_PART 1024                    /* each thread's part of the stacks (start.asm) */
+#define PROCS 10                        /* the processes at once (proc.c; P6) */
+#define PROC_SLOT0 176                  /* process entry i's slots: PROC_SLOT0 + 8i on */
+#define PROC_N0 17                      /* the server's thread for entry i: PROC_N0 + i */
 
 /* A program's slots of the server's: 8n + k */
 #define OS_K_EP 0                       /* the endpoint it calls on */
@@ -70,8 +73,23 @@ rx_u16 drive_sectors(unsigned drive);
 /* files - a file call (SYS_FIND to SYS_FREE), on the program's files
  * segment (files.c) */
 void files(struct session *s, int function);
-/* os_thread - a thread's C, from start.asm: n its program's module number */
+/* os_thread - a thread's C, from start.asm: n its program's module number,
+ * OS_CONTROL_N, or PROC_N0 and on for the processes */
 void os_thread(unsigned n);
+/* console - bytes of a segment of the server's (passed) to the console
+ * driver: the main screen, or a background program's field of the status
+ * line ending before a column */
+void console(rx_u16 segment, rx_u16 offset, unsigned n, int where, rx_u16 column);
+/* fault_text - a fault's report, as the kernel's ("rx286: WHO fault
+ * #GP(0000) at 0007:0123"), into a line: its bytes */
+unsigned fault_text(char *line, unsigned size, const char *who, int vector, rx_u16 error,
+                    rx_u16 cs, rx_u16 ip);
+/* overflowed - thread n ran past its stack's guard: said, and no more served */
+void overflowed(unsigned n, rx_u16 notify);
+/* proc_thread, proc_boot - the processes (proc.c): the server's thread for
+ * entry i; init's start, from the control thread */
+void proc_thread(unsigned i);
+void proc_boot(void);
 /* os_stack_ok, os_stack_used - thread n's part of the stacks (start.asm):
  * is its guard there; the bytes it has used at most */
 int os_stack_ok(unsigned n);

@@ -39,7 +39,8 @@
 #                               offset (storage.asm's fill); may repeat
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
-#   {c:name} the counter's, {r:name} the root's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   {c:name} the counter's, {r:name} the root's, {z:program.name} a program of
+#   /z's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
 #   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
 #   {m:module.codesum}, {m:module.datasum} sums of its code and data;
 #   {image_sum} entry.asm's Fletcher sum of the image's words; {image_size}
@@ -244,7 +245,7 @@ def build(test):
         for name in ('kernel.bin', 'user.bin', 'user.rx', 'root.rx', 'os.rx', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
-                     'rtc.bin', 'clock.rx'):
+                     'rtc.bin', 'clock.rx', 'z.arc', 'z-init.rx', 'z-proc.rx', 'z-child.rx'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them
@@ -298,7 +299,7 @@ def changed_image(test, kind):
         struct.pack_into('<H', data, last + L['M_CODE'], len(data) // 16)
     elif kind == 'large':                   # past 64 KB: zeros before the end mark
         end = data[-16:]
-        data = data[:-16] + bytes(0x11000 - len(data)) + end
+        data = data[:-16] + bytes(max(0, 0x11000 - len(data))) + end
         struct.pack_into('<H', data, table + L['MH_PARAGRAPHS'], len(data) // 16)
     path = os.path.join(test.build_dir, 'run-image.bin')
     with open(path, 'wb') as f:
@@ -354,7 +355,8 @@ def booted_image(test):
 def substitute(test, line):
     """{name} (the program's), {k:name} (the kernel's), {c:name} (the
     counter's), {r:name} (the root's), {o:name} (the OS server's) and
-    {l:name} (the clock's) to four upper-case hex digits;
+    {l:name} (the clock's) to four upper-case hex digits, and
+    {z:program.name} a program of /z's (roadmap os-server.md P6);
     {x:name} and {kx:name} to eight lower-case ones, as Bochs'
     debugger prints them; {m:module.base} to where a module's code is (five
     upper-case hex digits), {m:module.limit} to its code's limit,
@@ -383,14 +385,17 @@ def substitute(test, line):
             if field == 'datasum':
                 return '%04X' % rxlib.fletcher(image[m['data']:m['data'] + m['data_size']])
             return '%04X' % (m['code_size'] - 1)
-        mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map', 'o': 'os.map',
-                   'l': 'clock.map'}.get(
-            which[:1], 'user.map')
+        if which == 'z:':
+            program, _, name = name.partition('.')
+            mapfile = 'z-%s.map' % program
+        else:
+            mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map', 'o': 'os.map',
+                       'l': 'clock.map'}.get(which[:1], 'user.map')
         symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
-    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
 
 
 def relevant(lines):

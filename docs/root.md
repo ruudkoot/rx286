@@ -60,7 +60,9 @@ its own:
    `FAULT_BADGE`. Each module's thread is configured and started at the
    priority the module table gives; a driver's with IOPL, the program the
    keys are for with `START_FOREGROUND`.
-4. **The OS server:** the module table; its control thread, on the last
+4. **The OS server:** the module table; `/z`, the archive module's bytes
+   (`MF_ARCHIVE`, for which the root builds nothing; *docs/processes.md*);
+   its control thread, on the last
    part of its stack, with the control notification and the foreground
    program's thread; a copy of the fault endpoint badged `ROOT_BADGE_OS`,
    for its requests; each driver's endpoint in the slot its service names,
@@ -133,6 +135,10 @@ names:
   another size, its bytes kept, every copy of the old revoked;
   **`ROOT_EXIT`:** everything of a process revoked, its memory free, its
   code's count lowered, the code gone at none.
+- **`ROOT_SERVE`:** a thread of the server's own, at its entry with the SP
+  asked for, and its notification, from a block of theirs the server keeps:
+  the server's thread for each entry of its table of processes
+  (*docs/processes.md*).
 
 The memory is a buddy allocator's (`src/root/buddy.c`; D10), from the
 first request on: with extended memory, all the memory below 1 MB
@@ -153,7 +159,7 @@ on the host against a simulation of untyped memory
 space of 64, the rest of the memory for segments and of the arena as
 untyped, its own space and its own thread (`tests/caps`, `tests/ipc`,
 `tests/revoke`); with `TEST_SERVICES`, in slot 14 the OS server's
-capability for the services, which then copy into its space
-(`tests/services`). `TEST_ROOT_FAULT` builds
+capability for the services, badged `ROOT_BADGE_TEST`, so that what they
+make for it goes to its own space (`tests/services`). `TEST_ROOT_FAULT` builds
 make the root fault once it has built everything (`tests/root`). `TEST_ROOT_REPORT` builds say how each module was found:
 where its code is, and sums of its code and its data (`tests/root`).

@@ -1,0 +1,114 @@
+/* ============================================================================
+ * rx286 - tests/posix/proc.c
+ * The processes' calls (roadmap os-server.md P6; tests/posix/proc.test):
+ * init starts it (TEST_POSIX_PROC). Its parent; a fork, the child's exit
+ * status waited for; a fork that execs tests/posix/child.c with arguments
+ * and keeps its pid; posix_spawn; an exec of no file; a child's fault and
+ * a kill, which end the child with their signals; the heap on brk; a fork
+ * bomb, refused once the table is full; and every child reaped.
+ * ============================================================================ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "errno.h"
+#include "signal.h"
+#include "spawn.h"
+#include "unistd.h"
+#include "sys/wait.h"
+#include "rx/rx286.h"
+
+static char *child_env[] = { "TEST=proc", 0 };
+
+/* waited - a child waited for: its status, said */
+static void waited(const char *what, pid_t pid)
+{
+    int status = 0;
+    pid_t got = waitpid(pid, &status, 0);
+
+    if (got != pid)
+        printf("proc: %s: waitpid gave %d, errno %d\n", what, got, errno);
+    else if (WIFEXITED(status))
+        printf("proc: %s: exited %d\n", what, WEXITSTATUS(status));
+    else
+        printf("proc: %s: ended by signal %d\n", what, WTERMSIG(status));
+}
+
+/* main - each call, and how it refuses */
+int main(void)
+{
+    char pid_text[8], *argv[4], *heap;
+    pid_t pid, children;
+    int i, status;
+
+    printf("proc: my parent is init (1): %d\n", getppid());
+
+    pid = fork();
+    if (pid == 0) {
+        printf("proc: the child: its parent is the forker: %s\n", getppid() > 1 ? "yes" : "no");
+        _exit(3);
+    }
+    waited("a fork (3)", pid);
+
+    pid = fork();
+    if (pid == 0) {
+        snprintf(pid_text, sizeof pid_text, "%d", getpid());
+        argv[0] = "/z/child";
+        argv[1] = pid_text;
+        argv[2] = "two";
+        argv[3] = 0;
+        execve(argv[0], argv, child_env);
+        _exit(99);
+    }
+    waited("a fork and an exec (3)", pid);
+
+    argv[0] = "/z/child";
+    argv[1] = 0;
+    status = posix_spawn(&pid, argv[0], 0, 0, argv, 0);
+    waited("the spawned (1)", pid);     /* (said after it, which runs beside) */
+    printf("proc: posix_spawn (0): %d\n", status);
+
+    pid = fork();
+    if (pid == 0) {
+        argv[0] = "/z/nothing";
+        argv[1] = 0;
+        status = execve(argv[0], argv, 0);
+        printf("proc: an exec of no file (-1, ENOENT 2): %d, %d\n", status, errno);
+        _exit(4);
+    }
+    waited("after it (4)", pid);
+
+    pid = fork();
+    if (pid == 0)
+        rx_ud2();
+    waited("a child's #UD (SIGILL 4)", pid);
+
+    pid = fork();
+    if (pid == 0)
+        for (;;)
+            ;
+    printf("proc: kill (0): %d\n", kill(pid, SIGTERM));
+    waited("the killed (SIGTERM 15)", pid);
+    status = kill(1, SIGTERM);          /* (errno read after the call) */
+    printf("proc: kill init (-1, EPERM 1): %d, %d\n", status, errno);
+    status = kill(999, SIGTERM);
+    printf("proc: kill no one (-1, ESRCH 3): %d, %d\n", status, errno);
+
+    heap = malloc(3000);
+    if (heap)
+        memset(heap, 0x5A, 3000);
+    printf("proc: 3000 bytes of heap: %s; the break moved: %s\n", heap ? "yes" : "no",
+           sbrk(0) > (void *)heap ? "yes" : "no");
+    free(heap);
+
+    for (children = 0; (pid = fork()) > 0; children++)
+        ;
+    if (pid == 0)
+        _exit(0);
+    printf("proc: a fork bomb: %d children, then EAGAIN (11): %d\n", children, errno);
+    for (i = 0; wait(&status) > 0; i++)
+        ;
+    printf("proc: all %d reaped; then ECHILD (10): %d\n", i, errno);
+    printf("proc: done\n");
+    return 0;
+}

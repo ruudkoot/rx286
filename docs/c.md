@@ -41,7 +41,10 @@ into a binary, so no licence comes with one.
 An overflow of the stack wraps past the data segment's limit and faults
 (roadmap os-server.md E7). crt0 (`src/lib/crt/crt0.asm`) sets SS = DS, the
 stack and the guard word, then calls `rx_crt_main` (`start.c`), which calls
-`main` and ends the program with its status. Nothing zeroes the data: the
+`main` with argc, argv and envp, the stack's top three words (a process's,
+which the OS server put there; zeros for a program the root builds), and
+ends the program with its status (roadmap os-server.md P6). A process
+links `src/lib/posix/` in place of `src/lib/os/` (*docs/processes.md*). Nothing zeroes the data: the
 root made the segment zeroed, and a restarted program keeps its data, as
 every rx286 program does.
 
@@ -103,7 +106,7 @@ is fixed by its slot.
 | 8 | `RXH_DATA` | the initialised data's bytes, which begin at the data segment's offset `RXH_STACK` |
 | 10 | `RXH_BSS` | `.bss`'s bytes, after the data |
 | 12 | `RXH_STACK` | the stack's bytes, at the data segment's bottom |
-| 14 | `RXH_DGROUP_MAX` | the data segment's most bytes, for `brk` (0: 64 KB) |
+| 14 | `RXH_DGROUP_MAX` | the data segment's most bytes, for `brk` (0: 64 KB, which `tools/mkexe` writes) |
 | 16 | `RXH_ENTRY` | the IP of the start |
 
 `tools/mkexe` writes one from the linker's output, and a map in NASM's form

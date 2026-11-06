@@ -115,7 +115,10 @@ struct slots {
 static unsigned programs;               /* the modules it builds: 1 to programs */
 static unsigned foreground;             /* the one the keys are for */
 static unsigned server;                 /* the OS server's module, or 0 */
-static rx_u16 server_space;             /* its space, of the root's */
+rx_u16 server_space;                    /* its space, of the root's */
+#ifdef TEST_SERVICES
+static rx_u16 test_space;               /* the test program's, its requests' (give_caps) */
+#endif
 static rx_u16 ut_arena = ARENA;         /* where a module's objects come from: the */
 static rx_u16 ut_memory = UNTYPED;      /* root's, or a background program's own */
 static int building;                    /* while program_build builds: a failure is its */
@@ -291,6 +294,8 @@ static int module_kind(unsigned module, rx_u16 *thread)
     program_slots(module);
     *thread = s.thread;
     flags = ENTRY_B(entry_of(module), M_FLAGS);
+    if (flags & MF_ARCHIVE)
+        return -1;                      /* no program: /z (os-server.md P6) */
     if (module == server)
         return PS_OS;
     if (flags & MF_DRIVER)
@@ -372,7 +377,7 @@ static void program_ends(unsigned module)
 {
     if (server == 0 || module == server)
         return;
-    if (ENTRY_B(entry_of(module), M_FLAGS) & MF_DRIVER)
+    if (ENTRY_B(entry_of(module), M_FLAGS) & (MF_DRIVER | MF_ARCHIVE))
         return;                         /* a driver: its endpoint comes with build */
     program_slots(module);
     must(retype(ut_arena, CAP_ENDPOINT, s.ep, 0, 0));
@@ -380,15 +385,22 @@ static void program_ends(unsigned module)
     must(retype(ut_memory, CAP_SEGMENT, s.files, FILES_SIZE, ACC_FILES));
 }
 
-/* far_copy - bytes from one segment of the root's to another */
-void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes)
+/* far_copy_at - bytes from one segment of the root's to another, from an
+ * offset there */
+static void far_copy_at(rx_u16 to, rx_u16 at, rx_u16 from, rx_u16 bytes)
 {
-    rx_u8 RX_FAR *d = (rx_u8 RX_FAR *)RX_MK_FP(to, 0);
+    rx_u8 RX_FAR *d = (rx_u8 RX_FAR *)RX_MK_FP(to, at);
     const rx_u8 RX_FAR *f = (const rx_u8 RX_FAR *)RX_MK_FP(from, 0);
     rx_u16 i;
 
     for (i = 0; i < bytes; i++)
         d[i] = f[i];
+}
+
+/* far_copy - bytes from one segment of the root's to another */
+void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes)
+{
+    far_copy_at(to, 0, from, bytes);
 }
 
 /* driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
@@ -453,6 +465,8 @@ static void build(unsigned module)
     rx_u16 slots, fault_ep, badge;
     int start;
 
+    if (flags & MF_ARCHIVE)
+        return;                         /* /z: no program, its bytes the OS server's */
     program_slots(module);
     /* its space; a program's thread */
     if (module == server) {
@@ -477,7 +491,7 @@ static void build(unsigned module)
      * root's ring at the most, so that the root can fill it */
     new_segment(s.data, data_room, ring < RING ? RING : ring);
     if (data_size)
-        far_copy(s.data, s.template_, data_size);
+        far_copy_at(s.data, ENTRY_W(e, M_DATA_AT), s.template_, data_size);
     give(s.data, W_DATA);
     /* its stack, of its ring */
     new_segment(s.stack, stack, ring);
@@ -595,6 +609,25 @@ static void server_control(void)
     must(thread_call(s.thread, THREAD_START, 0, 0, m_priority));
 }
 
+/* serve_thread - ROOT_SERVE's thread made the OS server's, as its threads
+ * for the programs are (serve_program), but for no session */
+int serve_thread(rx_u16 thread, rx_u16 sp)
+{
+    int status;
+
+    if (server == 0)
+        return KE_CAP;
+    status = copy(MY_SPACE, FAULT_EP, SCRATCH, COPY_MINT, (rx_u16)server, 0);
+    if (status == 0)
+        status = thread_call(thread, THREAD_FAULT, SCRATCH, 0, 0);
+    kcall(KCALL_DELETE, 0, 0, 0, SCRATCH, 0, 0);
+    if (status == 0)
+        status = thread_call(thread, THREAD_CONFIGURE, server_space, m_entry, sp);
+    if (status == 0)
+        status = thread_call(thread, THREAD_START, 0, 0, m_priority);
+    return status;
+}
+
 /* give_service - a driver's endpoint to the OS server, in the slot its
  * service names (OS_SLOT_SERVICE + service; drivers.inc); and the sound
  * driver's notification, badged DRV_STOP_BIT, for Ctrl+Break */
@@ -632,6 +665,9 @@ static void build_server(void)
         e = entry_of(module);
         if (ENTRY_B(e, M_FLAGS) & MF_DRIVER) {
             give_service(module, ENTRY_B(e, M_SERVICE));
+        } else if (ENTRY_B(e, M_FLAGS) & MF_ARCHIVE) {
+            program_slots(module);      /* /z: its bytes, read-only */
+            give_server(s.template_, OS_SLOT_ARCHIVE * 8 + 4);
         } else {
             use_untyped(module);
             serve_program(module);
@@ -782,8 +818,8 @@ static void give_caps(void)
     give(s.space, CAPS_SPACE);
     give(s.thread, CAPS_THREAD);
 #ifdef TEST_SERVICES
-    must(copy(s.space, FAULT_EP, CAPS_ROOT, COPY_MINT, ROOT_BADGE_OS, RIGHT_SEND));
-    services_space = s.space;
+    must(copy(s.space, FAULT_EP, CAPS_ROOT, COPY_MINT, ROOT_BADGE_TEST, RIGHT_SEND));
+    test_space = s.space;
 #endif
 }
 #endif
@@ -871,7 +907,6 @@ int RX_MAIN_CALL main(void)
     build_server();
     ut_arena = ARENA;
     ut_memory = UNTYPED;
-    services_space = server_space;
 #ifdef TEST_ROOT_REPORT
     module_report();
 #endif
@@ -893,7 +928,12 @@ int RX_MAIN_CALL main(void)
             r.bp = 0;
             continue;
         }
-        if (r.dx == ROOT_BADGE_OS && (r.ax & 0xFF) >= ROOT_LOAD) {
+        if ((r.dx == ROOT_BADGE_OS || r.dx == ROOT_BADGE_TEST) && (r.ax & 0xFF) >= ROOT_LOAD) {
+            services_space = server_space;  /* where the copies go: the OS server's, */
+#ifdef TEST_SERVICES
+            if (r.dx == ROOT_BADGE_TEST)    /* or the test program's */
+                services_space = test_space;
+#endif
             service(r.ax & 0xFF, &r);
         } else if (r.dx == ROOT_BADGE_OS) {
             request(r.ax & 0xFF, r.bx, &r);

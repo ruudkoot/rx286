@@ -10,7 +10,9 @@
 ; rx_crt_main (start.c), compiled by the program's own compiler, which
 ; calls main: Watcom names main for its own convention (E3). Nothing here
 ; zeroes the data: the root built it zeroed, and a restarted program keeps
-; its data, as every rx286 program does.
+; its data, as every rx286 program does. The stack's top three words are
+; main's argc, argv and envp: a process's, which the OS server put there
+; (os-server.md P6), or zeros, for a program the root builds.
 ; ============================================================================
 
 cpu 286
@@ -21,6 +23,7 @@ bits 16
 %ifndef STACK_TOP
 STACK_TOP           equ 0x0400          ; the stack's bytes: data begins there
 %endif
+CRT_ARGS            equ 6               ; argc, argv, envp at its top: rx_crt_main's
 RX_GUARD            equ 0x5A5A          ; the null pointer's guard word
 RX_GUARD_AT         equ 0               ; where: the data segment's first word
 
@@ -46,7 +49,7 @@ code_section
 _start:
         mov ax, ds
         mov ss, ax                      ; interrupts wait for the next instruction
-        mov sp, STACK_TOP
+        mov sp, STACK_TOP - CRT_ARGS    ; rx_crt_main's arguments
         mov word [RX_GUARD_AT], RX_GUARD
         cld
         call rx_crt_main

@@ -102,10 +102,8 @@ rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 o
     return r.bx;
 }
 
-/* console - bytes of a segment of the server's (passed) to the console
- * driver: the main screen, or a background program's field of the status
- * line ending before a column */
-static void console(rx_u16 segment, rx_u16 offset, unsigned n, int where, rx_u16 column)
+/* console - the console driver's DRV_CON_WRITE (server.h) */
+void console(rx_u16 segment, rx_u16 offset, unsigned n, int where, rx_u16 column)
 {
     call(OS_SERVICE(SERVICE_CONSOLE), DRV_CON_WRITE, (rx_u16)where, (rx_u16)n, offset, column,
          segment, 0);
@@ -280,24 +278,34 @@ static void status_log(struct session *s, const rx_u8 RX_FAR *bytes, unsigned n)
 }
 #endif
 
-/* report - a fault, as the kernel reported one: "rx286: NAME fault
- * #GP(0000) at 0007:0123", on the log, and on the screen through the
- * transfer segment, idle while its program waits */
-static void report(struct session *s, int vector, rx_u16 error, rx_u16 cs, rx_u16 ip)
+/* fault_text - a fault's report as the kernel's: the vector's name, and the
+ * error code of the vectors that have one */
+unsigned fault_text(char *line, unsigned size, const char *who, int vector, rx_u16 error,
+                    rx_u16 cs, rx_u16 ip)
 {
-    char line[LINE_SIZE], name[M_NAME_SIZE], vec[5], code[8];
-    unsigned n;
+    char vec[5], code[8];
     int i;
 
-    *name_add(name, s->n) = 0;
     for (i = 0; i < 4 && vector_names[(vector & 31) * 4 + i] != ' '; i++)
         vec[i] = vector_names[(vector & 31) * 4 + i];
     vec[i] = 0;
     code[0] = 0;
     if (vector >= VEC_TS && vector <= VEC_GP)   /* the vectors with an error code */
         snprintf(code, sizeof code, "(%04X)", error);
-    n = (unsigned)snprintf(line, sizeof line, "rx286: %s fault %s%s at %04X:%04X\n", name, vec,
-                           code, cs, ip);
+    return (unsigned)snprintf(line, size, "rx286: %s fault %s%s at %04X:%04X\n", who, vec, code,
+                              cs, ip);
+}
+
+/* report - a fault, as the kernel reported one: "rx286: NAME fault
+ * #GP(0000) at 0007:0123", on the log, and on the screen through the
+ * transfer segment, idle while its program waits */
+static void report(struct session *s, int vector, rx_u16 error, rx_u16 cs, rx_u16 ip)
+{
+    char line[LINE_SIZE], name[M_NAME_SIZE];
+    unsigned n;
+
+    *name_add(name, s->n) = 0;
+    n = fault_text(line, sizeof line, name, vector, error, cs, ip);
     rx_log(line, n);
     far_copy(XFER(s)->data, (const rx_u8 *)line, n);
     console(K_SLOT(s, OS_K_XFER), XFER_DATA, n, CON_MAIN, 0);
@@ -723,15 +731,21 @@ static void stack_report(struct session *s)
 #endif
 
 /* overflowed - a thread's stack ran past its part's guard: the server's
- * data may be damaged, so the thread says so and serves no more */
-static void overflowed(struct session *s)
+ * data may be damaged, so the thread says so and serves no more, asleep on
+ * its notification */
+void overflowed(unsigned n, rx_u16 notify)
 {
     char line[LINE_SIZE];
+    struct rx_kregs r;
 
     rx_log(line, (unsigned)snprintf(line, sizeof line,
-                                    "rx286: os: thread %u overflowed its stack\n", s->n));
-    for (;;)
-        tick(s);
+                                    "rx286: os: thread %u overflowed its stack\n", n));
+    for (;;) {
+        r.ax = KCALL_RECV << 8;
+        r.dx = notify;
+        r.bp = 0;
+        rx_kcall(&r);
+    }
 }
 
 /* serve - receive the program's calls and faults, and answer them */
@@ -769,7 +783,7 @@ static void serve(struct session *s)
             r.ax = KCALL_REPLY_RECV << 8;
         }
         if (!os_stack_ok(s->n))
-            overflowed(s);
+            overflowed(s->n, SLOT(OS_SLOT_SLEEP + s->n));
         r.bx = answer;
         r.dx = K_SLOT(s, OS_K_EP);
         r.bp = 0;
@@ -777,14 +791,21 @@ static void serve(struct session *s)
     }
 }
 
-/* os_thread - a thread's start (start.asm): serve its program for ever; or,
- * on the last part of the stack, the control thread */
+/* os_thread - a thread's start (start.asm): serve its program for ever; the
+ * control thread, which starts init first (os-server.md P6; not in TEST_CAPS
+ * builds, whose program holds the memory); or serve a process */
 void os_thread(unsigned n)
 {
     struct session s;
 
-    if (n == OS_CONTROL_N)
+    if (n == OS_CONTROL_N) {
+#ifndef TEST_CAPS
+        proc_boot();
+#endif
         control();
+    }
+    if (n >= PROC_N0)
+        proc_thread(n - PROC_N0);
     s.n = n;
     serve(&s);
 }

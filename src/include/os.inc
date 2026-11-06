@@ -46,7 +46,9 @@ FAULT_BADGE         equ 0x8000  ; a program's fault endpoint: its endpoint, badg
 ; The OS server's requests to the root (l4.md L11): calls on the root's
 ; fault endpoint, badged ROOT_BADGE_OS, from slot OS_SLOT_ROOT of the server's
 ROOT_BADGE_OS       equ 0x4000
+ROOT_BADGE_TEST     equ 0x4001  ; TEST_SERVICES: the test program's, whose copies go to it
 OS_SLOT_ROOT        equ 160
+OS_SLOT_ARCHIVE     equ 161     ; the server's: /z, the archive module's bytes (os-server.md P6)
 ROOT_INFO           equ 1       ; BX a module's number -> BX 0 or E_INVAL (no such module);
                                 ;    CL its kind (PS_*), CH its main thread's state
                                 ;    (STATE_*), SI its priority, DI the times it ran
@@ -86,6 +88,10 @@ ROOT_BRK            equ 10      ; BX a process; CX bytes; DI a slot -> its data 
 ROOT_EXIT           equ 11      ; BX a process: everything of it revoked, its memory free,
                                 ;    its code's count lowered (the code gone at 0)
 ROOT_UNLOAD         equ 12      ; BX a load, or a code no process runs: gone, its memory free
+ROOT_SERVE          equ 13      ; CX an SP; DI two slots -> a thread of the server's own, at
+                                ;    its entry with that SP and its priority, started, its
+                                ;    faults the root's; a notification; the server's copies
+                                ;    of the thread and the notification at DI, DI + 8 (P6)
 PROC_SLOTS          equ 16      ; a process's space
 PROC_THREADS        equ 7       ; the threads ROOT_THREAD adds to a process at most
 

@@ -12,11 +12,14 @@
 # stack). A C module is an rx286 executable (NAME.rx,
 # tools/mkexe; roadmap os-server.md P1): its header gives its code, its
 # data, its rooms and its entry. A module's code goes in whole; its data
-# without the zeros it ends with, which a fresh segment has anyway; each on
-# a paragraph. The flags: `fg` the program the keys are for,
-# `driver` a driver, `iopl` a program that asks for IOPL, `irq=N` a
+# without the zeros it ends with, which a fresh segment has anyway, nor
+# those it starts with (a C module's stack: M_DATA_AT says where in its
+# segment the rest goes); each on a paragraph. The flags: `fg` the program
+# the keys are for, `driver` a driver, `iopl` a program that asks for IOPL, `irq=N` a
 # driver's interrupt line, `service=N` what it serves, `stack=N` a stack of
-# N bytes instead of its rooms'. The image
+# N bytes instead of its rooms', `archive` an archive of programs
+# (tools/mkarchive; roadmap os-server.md P6), whose bytes are its data, and
+# whose code is a paragraph of zeros, never run. The image
 # ends with a paragraph whose last word is KERNEL_END_MARK, which the
 # loader checks; the table gives its length (layout.inc, docs/memory-map.md).
 # ============================================================================
@@ -106,7 +109,7 @@ def main(args):
         options = dict(f.partition('=')[::2] for f in fields[3:])
         flags = 0
         for option, flag in (('fg', 'MF_FOREGROUND'), ('driver', 'MF_DRIVER'),
-                             ('iopl', 'MF_IOPL')):
+                             ('iopl', 'MF_IOPL'), ('archive', 'MF_ARCHIVE')):
             if option in options:
                 flags |= L[flag]
         irq = int(options['irq']) + 1 if 'irq' in options else 0
@@ -114,8 +117,17 @@ def main(args):
         if len(name) >= L['M_NAME_SIZE'] or name != name.lower():
             sys.exit('mkimage: %s: a name of lower case, at most %d characters'
                      % (name, L['M_NAME_SIZE'] - 1))
-        code, initial, room, stack, entry_ip = module_parts(binary)
+        if 'archive' in options:
+            initial = open(binary, 'rb').read()
+            if initial[0:2] != b'RZ':
+                sys.exit('mkimage: %s: not an archive (tools/mkarchive)' % binary)
+            initial += bytes(len(initial) % 2)
+            code, room, stack, entry_ip = bytes(16), len(initial), RX_START_STACK, 0
+        else:
+            code, initial, room, stack, entry_ip = module_parts(binary)
         stack = int(options.get('stack', stack))
+        data_skip = (len(initial) - len(initial.lstrip(b'\0'))) & ~15   # (M_DATA_AT)
+        initial = initial[data_skip:]
         code_at = len(image)
         image += paragraph(code)
         data_at = len(image)
@@ -125,7 +137,7 @@ def main(args):
         for field, value in (('M_CODE', code_at // 16), ('M_CODE_SIZE', len(code)),
                              ('M_DATA', data_at // 16), ('M_DATA_SIZE', len(initial)),
                              ('M_DATA_ROOM', room), ('M_STACK', stack),
-                             ('M_ENTRY', entry_ip)):
+                             ('M_ENTRY', entry_ip), ('M_DATA_AT', data_skip)):
             struct.pack_into('<H', entry, L[field], value)
         entry[L['M_RING']] = ring
         entry[L['M_PRIORITY']] = priority

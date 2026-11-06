@@ -4,9 +4,12 @@
 ; os-server.md P1).
 ;
 ; Near pointers in the small model: everything in DS, which C keeps equal
-; to ES and SS. gcc-ia16 calls memcpy for a struct's copy (E1), so these are
-; the crt's, not only libc's. The C convention of cabi.inc: arguments on
-; the stack, SI, DI, BP, DS and ES kept.
+; to SS; ES is free across a call (cabi.inc), and C that uses far pointers
+; leaves it anywhere, so each routine loads ES from DS for its string
+; instructions, and gives the caller's back. gcc-ia16 calls memcpy for a
+; struct's copy (E1), so these are the crt's, not only libc's. The C
+; convention of cabi.inc: arguments on the stack, SI, DI, BP, DS and ES
+; kept.
 ; ============================================================================
 
 cpu 286
@@ -29,6 +32,9 @@ memcpy:
         mov bp, sp
         push si
         push di
+        push es
+        push ds
+        pop es
         mov di, ARG(0)
         mov si, ARG(1)
         mov cx, ARG(2)
@@ -38,6 +44,7 @@ memcpy:
         adc cx, cx                      ; the odd byte, if any
         rep movsb
         mov ax, ARG(0)
+        pop es
         pop di
         pop si
         pop bp
@@ -55,6 +62,9 @@ memmove:
         mov bp, sp
         push si
         push di
+        push es
+        push ds
+        pop es
         mov di, ARG(0)
         mov si, ARG(1)
         mov cx, ARG(2)
@@ -73,6 +83,7 @@ memmove:
         rep movsb
 .done:
         mov ax, ARG(0)
+        pop es
         pop di
         pop si
         pop bp
@@ -88,6 +99,9 @@ memset:
         push bp
         mov bp, sp
         push di
+        push es
+        push ds
+        pop es
         mov di, ARG(0)
         mov al, ARG(1)
         mov ah, al
@@ -98,6 +112,7 @@ memset:
         adc cx, cx
         rep stosb
         mov ax, ARG(0)
+        pop es
         pop di
         pop bp
         ret
@@ -114,6 +129,9 @@ memcmp:
         mov bp, sp
         push si
         push di
+        push es
+        push ds
+        pop es
         mov si, ARG(0)
         mov di, ARG(1)
         mov cx, ARG(2)
@@ -126,6 +144,7 @@ memcmp:
         xor bh, bh
         sub ax, bx
 .done:
+        pop es
         pop di
         pop si
         pop bp

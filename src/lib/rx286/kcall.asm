@@ -23,7 +23,7 @@ KR_SI               equ 8
 KR_DI               equ 10
 KR_BP               equ 12
 
-global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr
+global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_xchg
 
 code_section
 
@@ -146,6 +146,23 @@ rx_log_far:
 .done:
         pop ds
         pop si
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_xchg - int rx_xchg(int *word, int value): the word swapped with a value
+; in one instruction, for a lock (os-server.md D17): XCHG locks the bus by
+; itself, which a LOCK prefix at ring 3 may not (W4)
+;   In:       the stack: word, value
+;   Out:      AX = the word's old value
+;   Destroys: BX
+; ----------------------------------------------------------------------------
+rx_xchg:
+        push bp
+        mov bp, sp
+        mov bx, ARG(0)
+        mov ax, ARG(1)
+        xchg ax, [bx]
         pop bp
         ret
 

@@ -93,9 +93,10 @@ an entry of `MODULE_ENTRY_SIZE` bytes for each module, at most
 | `M_ENTRY` | its IP at a start |
 | `M_RING` | 1-3: its code's DPL, the ring it runs in |
 | `M_PRIORITY` | 0-7 |
-| `M_FLAGS` | `MF_FOREGROUND`: the program the keys are for (until roadmap l4.md L8); `MF_DRIVER`: a driver (*docs/drivers.md*); `MF_IOPL`: a program that asks for IOPL (the tests of rings 1 and 2) |
+| `M_FLAGS` | `MF_FOREGROUND`: the program the keys are for (until roadmap l4.md L8); `MF_DRIVER`: a driver (*docs/drivers.md*); `MF_IOPL`: a program that asks for IOPL (the tests of rings 1 and 2); `MF_ARCHIVE`: no program, but `/z`, an archive of executables, whose bytes are its data (*docs/processes.md*) |
 | `M_IRQ` | a driver's interrupt line, plus one (0: none) |
 | `M_SERVICE` | what a driver serves (0: nothing) |
+| `M_DATA_AT` | where its data as assembled goes in its data segment: the zeros before it, a C module's stack, are not in the image (roadmap os-server.md P6) |
 
 Each module's code and its data each start on a paragraph. The image ends
 with a paragraph whose last word is `KERNEL_END_MARK`. The loader refuses

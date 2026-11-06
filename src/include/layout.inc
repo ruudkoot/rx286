@@ -67,8 +67,12 @@ M_FLAGS             equ 24
 MF_FOREGROUND       equ 1           ; the program the keys are for (the OS server's, L8)
 MF_DRIVER           equ 2           ; a driver: IOPL 1, an endpoint, a notification (L7)
 MF_IOPL             equ 4           ; a program that asks for IOPL (tests of rings 1 and 2)
+MF_ARCHIVE          equ 8           ; no program: its data is /z, an archive of executables
+                                    ;    (archive.inc; os-server.md P6), the OS server's
 M_IRQ               equ 25          ; a driver's interrupt line, plus one (0: none)
 M_SERVICE           equ 26          ; what a driver serves (drivers.inc; 0: nothing)
+M_DATA_AT           equ 28          ; where its data as assembled goes in its data segment:
+                                    ;    the zeros before it are not in the image (P6)
 ROOT_NAME           equ 'ro'        ; the first module's name starts "root"
 ROOT_NAME_2         equ 'ot'
 

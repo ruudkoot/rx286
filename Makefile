@@ -88,7 +88,7 @@ PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
 # the OS server, the programs. The drivers run above the root (os-server.md
 # P4), whose copy of a fork's data must not keep a serial line's bytes
 # waiting.
-MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5 \
+MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=128 \
     printer=$(B)/printer.bin:1:7:driver:service=1 mouse=$(B)/mouse.bin:1:7:driver:irq=4:service=2 \
     console=$(B)/console.bin:1:7:driver:service=3 kbd=$(B)/keyboard.bin:1:7:driver:irq=1:service=4 \
     fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \
@@ -96,7 +96,8 @@ MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5 \
     rtc=$(B)/rtc.bin:1:7:driver:service=9 \
     program=$(PROGRAM_BIN):$(PROGRAM_RING) \
     $(if $(WITH_CLOCK),clock=$(B)/clock.rx:3:4) \
-    $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY))
+    $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
+    z=$(B)/z.arc:3:0:archive
 ifeq ($(PROGRAM_MAIN),)
 $(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys, revoke, additions or services, not '$(PROGRAM)')
 endif
@@ -112,7 +113,7 @@ IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.rx \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
     $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) \
-    $(B)/clock.rx $(B)/counter.rx $(B)/kernel.bin $(B)/image.bin
+    $(B)/clock.rx $(B)/counter.rx $(B)/z.arc $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks \
@@ -171,7 +172,8 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
 $(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.rx $(B)/printer.bin $(B)/mouse.bin \
     $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
-    $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) $(B)/clock.rx $(B)/counter.rx tools/mkimage \
+    $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) $(B)/clock.rx $(B)/counter.rx $(B)/z.arc \
+    tools/mkimage \
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 
@@ -266,7 +268,7 @@ check: unit test test-286 check-286 check-image check-repro lint check-docs
 # whose images carry C programs, on Bochs; not part of make check, since it
 # needs gcc-ia16 in $(IA16) (docs/building.md).
 IA16_TESTS := tests/demo/demo.test tests/root/fault.test $(wildcard tests/threads/*.test) \
-    $(wildcard tests/services/*.test) tests/root/own-fault.test \
+    $(wildcard tests/services/*.test) $(wildcard tests/posix/*.test) tests/root/own-fault.test \
     tests/kernel/stretch-kill.test
 check-ia16: disks
 	$(PYTHON) tools/run-test --cc ia16 $(IA16_TESTS)

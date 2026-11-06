@@ -373,6 +373,32 @@ static int brk(rx_u16 n, rx_u16 bytes, rx_u16 to)
     return 0;
 }
 
+/* serve - ROOT_SERVE: a thread of the OS server's own and its notification,
+ * from a block of theirs that the server keeps for its life, the thread
+ * started at the server's entry with SP sp (os-server.md P6) */
+static int serve(rx_u16 sp, rx_u16 to)
+{
+    int block, status = E_NOMEM;
+    rx_u16 thread = 0, notify = 0;
+
+    if (services_space != server_space)
+        return E_INVAL;                 /* the server's alone */
+    block = buddy_alloc(OBJECT_PARAS);
+    if (block < 0)
+        return E_NOMEM;
+    thread = slot_take();
+    notify = slot_take();
+    if (thread && notify && retype(buddy_slot(block), CAP_THREAD, thread, 0, 0) == 0
+            && retype(buddy_slot(block), CAP_NOTIFY, notify, 0, 0) == 0) {
+        status = E_IO;
+        if (give(thread, to) == 0 && give(notify, (rx_u16)(to + 8)) == 0
+                && serve_thread(thread, sp) == 0)
+            return 0;
+    }
+    block_free(block, thread, notify);
+    return status;
+}
+
 /* exit_ - ROOT_EXIT: everything of a process gone */
 static int exit_(rx_u16 n)
 {
@@ -431,6 +457,9 @@ void service(int what, struct rx_kregs *r)
         break;
     case ROOT_UNLOAD:
         status = unload(r->bx);
+        break;
+    case ROOT_SERVE:
+        status = serve(r->cx, r->di);
         break;
     default:
         status = E_INVAL;

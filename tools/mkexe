@@ -152,7 +152,7 @@ def main(args):
     for field, value in (('RXH_VERSION', E['RX_VERSION']), ('RXH_FLAGS', 0),
                          ('RXH_CODE', len(code)), ('RXH_DATA', len(initial)),
                          ('RXH_BSS', bss), ('RXH_STACK', stack),
-                         ('RXH_DGROUP_MAX', stack + len(initial) + bss),
+                         ('RXH_DGROUP_MAX', 0),     # 64 KB: brk may grow it so far
                          ('RXH_ENTRY', entry)):
         struct.pack_into('<H', header, E[field], value)
     with open(out + '.tmp', 'wb') as f:

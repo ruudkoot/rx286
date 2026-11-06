@@ -1000,6 +1000,8 @@ boot_root_data:
         and cx, ~1
         mov ax, [boot_base]
         mov dl, [boot_base + 2]
+        add ax, [si + M_DATA_AT]        ; past the zeros the image leaves out
+        adc dl, 0
         call phys_copy
 .copied:
         mov ax, [boot_base]

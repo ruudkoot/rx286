@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/mkarchive
+# Builds /z, the archive of programs (roadmap os-server.md P6;
+# src/include/archive.inc): rx286 executables, each under its name, which
+# tools/mkimage puts in the boot image as an archive module's data.
+#
+#   tools/mkarchive OUT NAME=FILE.rx ...
+# ============================================================================
+
+import struct
+import sys
+
+import rxlib
+
+A = rxlib.include_constants('archive.inc')
+
+
+def main(args):
+    if len(args) < 1:
+        sys.exit('usage: mkarchive OUT NAME=FILE.rx ...')
+    out, specs = args[0], args[1:]
+    files = []
+    for spec in specs:
+        name, _, path = spec.partition('=')
+        if not name or len(name) >= A['AR_NAME_SIZE'] or '/' in name:
+            sys.exit('mkarchive: %s: a name of 1 to %d characters, without /'
+                     % (name, A['AR_NAME_SIZE'] - 1))
+        blob = open(path, 'rb').read()
+        if blob[0:2] != b'RX':
+            sys.exit('mkarchive: %s: not an rx286 executable' % path)
+        files.append((name, blob))
+    at = A['AR_HEADER_SIZE'] + A['AR_ENTRY_SIZE'] * len(files)
+    head = bytearray(b'RZ' + struct.pack('<H', len(files)) + bytes(A['AR_HEADER_SIZE'] - 4))
+    body = bytearray()
+    for name, blob in files:
+        at += -at % 16                  # each file from a paragraph
+        body += bytes(-len(body) % 16)
+        entry = bytearray(A['AR_ENTRY_SIZE'])
+        entry[0:len(name)] = name.encode('ascii')
+        struct.pack_into('<HH', entry, A['AR_OFFSET'], at + 0, len(blob))
+        head += entry
+        body += blob
+        at += len(blob)
+    head += bytes(-len(head) % 16)
+    archive = bytes(head + body)
+    if len(archive) > 0xFFFF:
+        sys.exit('mkarchive: %d bytes, more than a module\'s data holds' % len(archive))
+    with open(out, 'wb') as f:
+        f.write(archive)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
