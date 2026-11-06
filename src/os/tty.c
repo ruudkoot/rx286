@@ -13,6 +13,14 @@
  * waits, in its server thread, until there is enough: a line, or VMIN bytes
  * (VTIME is not kept: 0); the tty thread wakes it. termios is one for the
  * terminal: tcgetattr and tcsetattr (XBD 11).
+ *
+ * Job control (XBD 11.1.2-11.1.4): the terminal is a session's once that
+ * session's leader opens it (and none has it), its foreground group the
+ * leader's. INTR, QUIT and SUSP signal that group. A process of the session
+ * in another group gets SIGTTIN as it reads, and SIGTTOU as it writes with
+ * TOSTOP or sets termios, unless it ignores or blocks them: then a read is
+ * EIO, a write goes on. The leader's end hangs the terminal up: SIGHUP and
+ * SIGCONT for its foreground group, and no session.
  * ============================================================================ */
 
 #include <string.h>
@@ -28,13 +36,15 @@
 
 /* The terminal: its queue of input (a word a byte: EOF_MARK besides), the
  * complete lines in it and the bytes of the line still edited at its end;
- * termios; the process waiting to read */
+ * termios; the processes waiting to read; its session and foreground
+ * group */
 struct tty {
     rx_u16 q[QUEUE];
     rx_u16 head, count, lines, edit;
     rx_u16 iflag, oflag, cflag, lflag;
     rx_u8 cc[NCCS];
-    signed char reader;
+    rx_u16 readers;                     /* the entries waiting to read, a bit each */
+    pid_t session, pgrp;                /* its session (0: none), its foreground group */
 };
 
 static struct tty tty;
@@ -57,7 +67,6 @@ static void tty_init(void)
     tty.cc[VQUIT] = 0x1C;               /* ^\ */
     tty.cc[VSUSP] = 0x1A;               /* ^Z */
     tty.cc[VMIN] = 1;
-    tty.reader = -1;
 }
 
 /* tty_keys - do the processes have the keys? (no program the root builds
@@ -130,12 +139,12 @@ static void input(rx_u8 c)
         c = '\r';
     }
     if (tty.lflag & ISIG) {
-        if (is(c, VINTR) || is(c, VQUIT)) {
+        if (is(c, VINTR) || is(c, VQUIT) || is(c, VSUSP)) {
             if (tty.lflag & ECHO)
-                echo(is(c, VINTR) ? "^C\n" : "^\\\n", 3);
+                echo(is(c, VINTR) ? "^C\n" : is(c, VQUIT) ? "^\\\n" : "^Z\n", 3);
             if (!(tty.lflag & NOFLSH))
                 tty_flush();
-            proc_terminal(is(c, VINTR) ? SIGINT : SIGQUIT);
+            proc_terminal(is(c, VINTR) ? SIGINT : is(c, VQUIT) ? SIGQUIT : SIGTSTP);
             return;
         }
     }
@@ -209,8 +218,18 @@ static void key(rx_u16 k)
         }
 }
 
+/* wake_readers - the processes waiting to read woken, to look again */
+static void wake_readers(void)
+{
+    int i;
+
+    for (i = 0; i < PROCS; i++)
+        if (tty.readers & (1u << i))
+            proc_wake(i);
+}
+
 /* tty_thread - the tty thread (os_thread): each key through the discipline,
- * its reader woken */
+ * its readers woken */
 void tty_thread(void)
 {
     struct rx_kregs r;
@@ -224,8 +243,7 @@ void tty_thread(void)
         lock_take(TTY_NOTIFY);
         while ((k = key_take()) != 0)
             key(k);
-        if (tty.reader >= 0)
-            proc_wake(tty.reader);
+        wake_readers();
         lock_give();
         echo_flush();
     }
@@ -250,21 +268,26 @@ int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n)
     rx_u8 RX_FAR *to = (rx_u8 RX_FAR *)RX_MK_FP(data, at);
     rx_u16 k = 0, v;
 
+    int access;
+
     if (n == 0 || !tty_keys())
         return 0;
-    while (!enough(n)) {
-        tty.reader = (signed char)i;
+    for (;;) {
+        if ((access = tty_access(i, TTY_READ)) != 0)
+            return access;              /* a background group's: SIGTTIN, or EIO */
+        if (enough(n))
+            break;
+        tty.readers |= (rx_u16)(1u << i);
         test_reader(TEST_READER_FOREVER);       /* test builds type now */
         lock_give();
         proc_sleep(i);
         lock_take(PROC_NOTIFY(i));
-        if (tty.reader == i)
-            tty.reader = -1;
+        tty.readers &= (rx_u16)~(1u << i);
         if (!proc_alive(i))
             return VFS_GONE;
-        if (sig_ready(i)) {
+        if (sig_ready(i) || sig_stopped(i)) {
             test_reader(TEST_READER_NONE);
-            return VFS_INTR;
+            return sig_stopped(i) ? VFS_RESTART : VFS_INTR;
         }
     }
     test_reader(TEST_READER_NONE);
@@ -322,4 +345,85 @@ void tty_setattr(rx_u16 data, rx_u16 at, int action)
         tty.cc[k] = cc[k];
     if (!(tty.lflag & ICANON))
         tty.lines = tty.edit = 0;
+}
+
+/* tty_open - process i opens the terminal: a session's leader makes it its
+ * session's, if none has it (server.h; lock held) */
+void tty_open(int i)
+{
+    if (tty_keys() && !tty.session && proc_sid(i) == proc_pgid(i)
+            && proc_group_in(proc_sid(i), proc_sid(i))) {
+        tty.session = proc_sid(i);
+        tty.pgrp = proc_pgid(i);
+    }
+}
+
+/* tty_access - may process i read, write or set the terminal (TTY_*)? 0;
+ * else, for a background group of its session, SIGTTIN or SIGTTOU sent to
+ * it and VFS_RESTART (a handler's: VFS_INTR); a read that ignores or blocks
+ * SIGTTIN, VFS_EIO (server.h; lock held) */
+int tty_access(int i, int what)
+{
+    int sig = what == TTY_READ ? SIGTTIN : SIGTTOU;
+
+    if (!tty.session || proc_sid(i) != tty.session || proc_pgid(i) == tty.pgrp)
+        return 0;
+    if (what == TTY_WRITE && !(tty.lflag & TOSTOP))
+        return 0;
+    if (!sig_takes(i, sig))
+        return what == TTY_READ ? VFS_EIO : 0;
+    proc_group(proc_pgid(i), sig);
+    return sig_caught(i, sig) ? VFS_INTR : VFS_RESTART;
+}
+
+/* tty_pgrp - the terminal's foreground group, or 0 if no session has it
+ * (server.h) */
+pid_t tty_pgrp(void)
+{
+    return tty.session ? tty.pgrp : 0;
+}
+
+/* tty_getpgrp - PX_TCGETPGRP for process i: the foreground group, or
+ * ENOTTY if the terminal is not its session's (server.h) */
+int tty_getpgrp(int i, int *error)
+{
+    if (!tty.session || proc_sid(i) != tty.session) {
+        *error = ENOTTY;
+        return -1;
+    }
+    return tty.pgrp;
+}
+
+/* tty_setpgrp - PX_TCSETPGRP for process i: a group of its session the
+ * foreground; from the background, SIGTTOU first (server.h; lock held) */
+int tty_setpgrp(int i, pid_t pgid, int *error)
+{
+    int access;
+
+    if (!tty.session || proc_sid(i) != tty.session) {
+        *error = ENOTTY;
+        return -1;
+    }
+    if (pgid <= 0 || !proc_group_in(pgid, tty.session)) {
+        *error = pgid <= 0 ? EINVAL : EPERM;
+        return -1;
+    }
+    if ((access = tty_access(i, TTY_SET)) != 0)
+        return access;
+    tty.pgrp = pgid;
+    return 0;
+}
+
+/* tty_hangup - a session's leader ended: if the terminal is its session's,
+ * SIGHUP and SIGCONT for the foreground group, and no session (server.h;
+ * lock held) */
+void tty_hangup(pid_t sid)
+{
+    pid_t pgrp = tty.pgrp;
+
+    if (!tty.session || tty.session != sid)
+        return;
+    tty.session = tty.pgrp = 0;
+    proc_group(pgrp, SIGHUP);
+    proc_group(pgrp, SIGCONT);
 }

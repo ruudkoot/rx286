@@ -31,7 +31,7 @@ int main(void)
 #endif
 #if defined(TEST_POSIX_PROC) || defined(TEST_POSIX_FILES) || defined(TEST_POSIX_EXEC) \
     || defined(TEST_POSIX_PIPE) || defined(TEST_POSIX_KEYS) || defined(TEST_POSIX_SIGNAL) \
-    || defined(TEST_POSIX_SIGFPU) || defined(TEST_POSIX_TTY)
+    || defined(TEST_POSIX_SIGFPU) || defined(TEST_POSIX_TTY) || defined(TEST_POSIX_JOBS)
 #if defined(TEST_POSIX_PROC)
     static char *const argv[] = { "/z/proc", 0 };
 #elif defined(TEST_POSIX_FILES)
@@ -46,6 +46,8 @@ int main(void)
     static char *const argv[] = { "/z/sigfpu", 0 };
 #elif defined(TEST_POSIX_TTY)
     static char *const argv[] = { "/z/tty", 0 };
+#elif defined(TEST_POSIX_JOBS)
+    static char *const argv[] = { "/z/jobs", 0 };
 #else
     static char *const argv[] = { "/z/pipes", 0 };
 #endif

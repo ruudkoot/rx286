@@ -9,6 +9,7 @@
 
 #include "rx/compiler.h"
 #include "rx/rx286.h"
+#include "sys/types.h"
 #include "build.h"
 #include "kcalls.h"
 #include "syscalls.h"
@@ -117,6 +118,21 @@ int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n);
 void tty_getattr(rx_u16 data, rx_u16 at);
 void tty_setattr(rx_u16 data, rx_u16 at, int action);
 void tty_flush(void);
+/* Job control (tty.c; P11; lock held): tty_open - process i opens the
+ * terminal, which a session's leader makes its session's; tty_access - may
+ * it read, write or set it (TTY_*): 0, VFS_RESTART or VFS_INTR (SIGTTIN or
+ * SIGTTOU sent), VFS_EIO; tty_pgrp - the foreground group (0: no session);
+ * tty_getpgrp, tty_setpgrp - PX_TCGETPGRP, PX_TCSETPGRP; tty_hangup - a
+ * session's leader ended */
+#define TTY_READ 0
+#define TTY_WRITE 1
+#define TTY_SET 2
+void tty_open(int i);
+int tty_access(int i, int what);
+pid_t tty_pgrp(void);
+int tty_getpgrp(int i, int *error);
+int tty_setpgrp(int i, pid_t pgid, int *error);
+void tty_hangup(pid_t sid);
 /* proc_terminal - a signal for the terminal's processes: every process but
  * init and its children, until process groups (proc.c; lock held) */
 void proc_terminal(int sig);
@@ -153,6 +169,18 @@ void proc_end(int i, int sig);
 void proc_wake(int i);
 void proc_sleep(int i);
 rx_u16 proc_data_limit(int i);
+/* Job control (proc.c; P11; lock held): proc_is_init - is entry i init?
+ * proc_stopped, proc_continued - its stop or continue, for its parent's
+ * waitpid and SIGCHLD; proc_pgid, proc_sid - its group, its session;
+ * proc_group - a signal for every process of a group: how many there are;
+ * proc_group_in - is there a group of that id in a session? */
+int proc_is_init(int i);
+void proc_stopped(int i, int sig);
+void proc_continued(int i);
+pid_t proc_pgid(int i);
+pid_t proc_sid(int i);
+int proc_group(pid_t pgid, int sig);
+int proc_group_in(pid_t pgid, pid_t sid);
 
 /* The signals (signal.c; P10; lock held). sig_start - process i's as it
  * starts: from a parent's spawn (SIG_FROM_SPAWN; -1: none), a fork, or as it
@@ -163,7 +191,10 @@ rx_u16 proc_data_limit(int i);
  * pending if a handler takes it: 1, else 0 for its default action;
  * sig_ready - the lowest signal pending and not blocked, or 0; sig_interrupt
  * - why a call that waited ends for a signal: 0 if none is ready, EINTR, or
- * ERESTART; sig_step - its server thread's turn at the signals: a handler's
+ * ERESTART (stopped: ERESTART); sig_stopped - is it stopped? sig_takes -
+ * would it take a signal, neither ignored nor blocked? sig_caught - has it
+ * a handler for one? sig_nocldstop - SA_NOCLDSTOP for its SIGCHLD? sig_step
+ * - its server thread's turn at the signals: a handler's
  * frame, a default action; sig_call - PX_SIGACTION to PX_NANOSLEEP: the
  * result, or SIG_GONE if the process ended as it waited; sig_timers - the
  * deadlines that have come (alarm, nanosleep), the timer armed again */
@@ -177,6 +208,10 @@ void sig_send(int i, int sig);
 int sig_fault(int i, int sig);
 int sig_ready(int i);
 int sig_interrupt(int i, int restartable);
+int sig_stopped(int i);
+int sig_takes(int i, int sig);
+int sig_caught(int i, int sig);
+int sig_nocldstop(int i);
 void sig_step(int i);
 int sig_call(int i, struct rx_kregs *r, int *error);
 void sig_timers(void);

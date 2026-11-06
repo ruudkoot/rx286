@@ -46,6 +46,7 @@
 #define ARCHIVE_KEY 0x5A00              /* a code's key: this, the file's entry, its offset */
 
 enum { P_FREE, P_ALIVE, P_ZOMBIE };
+enum { R_NONE, R_STOP, R_CONT };        /* a stop or a continue its parent's waitpid has */
 
 /* A process: its state, ids, the root's number for it, its break and its
  * data segment's most, its wait status once a zombie, its file's name */
@@ -53,7 +54,9 @@ struct proc {
     rx_u8 state;
     rx_u8 waiting;                      /* its server thread waits for a child */
     rx_u8 served;                       /* entry i has its server thread (ROOT_SERVE) */
+    rx_u8 report, stopsig;              /* R_*, and the signal that stopped it (P11) */
     pid_t pid, ppid;
+    pid_t pgid, sid;                    /* its group and session (P11) */
     rx_u16 root;
     rx_u16 brk, brk_min, brk_max;
     int status;
@@ -414,17 +417,23 @@ static int entry_new(void)
     return -1;
 }
 
-/* entry_start - entry i's process alive, of an image's or its parent's, its
- * server thread woken and its thread started */
+/* entry_start - entry i's process alive, of an image's or its parent's, in
+ * its parent's group and session, its server thread woken and its thread
+ * started */
 static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 brk_min,
                         rx_u16 brk_max)
 {
     struct proc *p = &procs[i];
 
+    int parent = entry_of(ppid, P_ALIVE);
+
     p->state = P_ALIVE;
     p->waiting = 0;
+    p->report = R_NONE;
     p->pid = next_pid++;
     p->ppid = ppid;
+    p->pgid = parent >= 0 ? procs[parent].pgid : p->pid;     /* init's own */
+    p->sid = parent >= 0 ? procs[parent].sid : p->pid;
     p->brk = brk;
     p->brk_min = brk_min;
     p->brk_max = brk_max;
@@ -475,6 +484,8 @@ static void end(int i, int status, int revoke)
         root(ROOT_EXIT, p->root, 0, 0, 0, 0);
     vfs_exit(i);                        /* its files written, its descriptors closed */
     p->state = P_ZOMBIE;
+    if (p->sid == p->pid)
+        tty_hangup(p->sid);             /* a session's leader: its terminal hung up */
     p->status = status;
     for (k = 0; k < PROCS; k++) {
         if (procs[k].state == P_FREE || procs[k].ppid != p->pid || k == i)
@@ -597,10 +608,19 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
     for (;;) {
         any = 0;
         for (c = 0; c < PROCS; c++) {
-            if (procs[c].state == P_FREE || procs[c].ppid != procs[i].pid
-                    || (pid != -1 && procs[c].pid != pid) || c == i)
+            if (procs[c].state == P_FREE || procs[c].ppid != procs[i].pid || c == i
+                    || (pid > 0 && procs[c].pid != pid)
+                    || (pid == 0 && procs[c].pgid != procs[i].pgid)
+                    || (pid < -1 && procs[c].pgid != -pid))
                 continue;
             any = 1;
+            if ((procs[c].report == R_STOP && (options & WUNTRACED))
+                    || (procs[c].report == R_CONT && (options & WCONTINUED))) {
+                *status = procs[c].report == R_STOP ? (rx_u16)(procs[c].stopsig << 8 | 0x7F)
+                          : 0xFFFF;             /* (before its end, which came after) */
+                procs[c].report = R_NONE;
+                return procs[c].pid;
+            }
             if (procs[c].state == P_ZOMBIE) {
                 procs[c].state = P_FREE;
                 *status = (rx_u16)procs[c].status;
@@ -627,15 +647,30 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
     }
 }
 
-/* px_kill - PX_KILL: the signal sent (sig_send; lock held); init takes
- * none */
+/* px_kill - PX_KILL: the signal sent (sig_send; lock held) to a process,
+ * the caller's group (0), every process (-1) or a group (below -1); init
+ * takes none */
 static int px_kill(int i, pid_t pid, int sig, int *error)
 {
-    int t = pid > 0 ? entry_of(pid, P_ALIVE) : -1;
+    int t = pid > 0 ? entry_of(pid, P_ALIVE) : -1, c, n = 0;
 
     if (sig < 0 || sig > SIG_MAX) {
         *error = EINVAL;
         return -1;
+    }
+    if (pid <= 0) {                     /* a group: the caller's (0), every one (-1) */
+        for (c = 0; c < PROCS; c++)
+            if (procs[c].state == P_ALIVE && procs[c].pid != INIT_PID
+                    && (pid == -1 || procs[c].pgid == (pid ? -pid : procs[i].pgid))) {
+                n++;
+                if (sig)
+                    sig_send(c, sig);
+            }
+        if (n == 0) {
+            *error = ESRCH;
+            return -1;
+        }
+        return proc_alive(i) ? 0 : NO_REPLY;
     }
     if (t < 0) {
         *error = ESRCH;
@@ -668,6 +703,130 @@ static int px_brk(int i, rx_u16 end, int *error)
     }
     procs[i].brk = end;
     return end;
+}
+
+/* proc_group - a signal for every process of a group: how many (server.h;
+ * lock held) */
+int proc_group(pid_t pgid, int sig)
+{
+    int c, n = 0;
+
+    for (c = 0; c < PROCS; c++)
+        if (procs[c].state == P_ALIVE && procs[c].pgid == pgid) {
+            n++;
+            sig_send(c, sig);
+        }
+    return n;
+}
+
+/* proc_group_in - is there a group of that id in a session? (server.h; a
+ * zombie not yet waited for keeps its group) */
+int proc_group_in(pid_t pgid, pid_t sid)
+{
+    int c;
+
+    for (c = 0; c < PROCS; c++)
+        if (procs[c].state != P_FREE && procs[c].pgid == pgid && procs[c].sid == sid)
+            return 1;
+    return 0;
+}
+
+/* proc_pgid, proc_sid - process i's group, its session (server.h) */
+pid_t proc_pgid(int i)
+{
+    return procs[i].pgid;
+}
+
+/* proc_sid - process i's session (server.h) */
+pid_t proc_sid(int i)
+{
+    return procs[i].sid;
+}
+
+/* proc_is_init - is entry i init? (server.h) */
+int proc_is_init(int i)
+{
+    return procs[i].pid == INIT_PID;
+}
+
+/* report - process i's stop or continue for its parent: woken if it waits,
+ * and SIGCHLD unless SA_NOCLDSTOP (lock held) */
+static void report(int i, int what)
+{
+    int parent = entry_of(procs[i].ppid, P_ALIVE);
+
+    procs[i].report = (rx_u8)what;
+    if (parent < 0)
+        return;
+    if (procs[parent].waiting)
+        signal_entry((unsigned)parent);
+    if (!sig_nocldstop(parent))
+        sig_send(parent, SIGCHLD);
+}
+
+/* proc_stopped - process i stopped by a signal (server.h) */
+void proc_stopped(int i, int sig)
+{
+    procs[i].stopsig = (rx_u8)sig;
+    report(i, R_STOP);
+}
+
+/* proc_continued - process i continued (server.h) */
+void proc_continued(int i)
+{
+    report(i, R_CONT);
+}
+
+/* px_setpgid - PX_SETPGID: the caller or a child of its into a group of its
+ * session, or a group of its own (lock held) */
+static int px_setpgid(int i, pid_t pid, pid_t pgid, int *error)
+{
+    int t = pid ? entry_of(pid, P_ALIVE) : i;
+
+    if (pgid < 0) {
+        *error = EINVAL;
+        return -1;
+    }
+    if (t < 0 || (t != i && procs[t].ppid != procs[i].pid)) {
+        *error = ESRCH;
+        return -1;
+    }
+    if (pgid == 0)
+        pgid = procs[t].pid;
+    if (procs[t].sid != procs[i].sid || procs[t].sid == procs[t].pid
+            || (pgid != procs[t].pid && !proc_group_in(pgid, procs[i].sid))) {
+        *error = EPERM;                 /* another session's, a leader, no such group */
+        return -1;
+    }
+    procs[t].pgid = pgid;
+    return 0;
+}
+
+/* px_setsid - PX_SETSID: a session and a group of the caller's, unless it
+ * leads a group already (lock held) */
+static int px_setsid(int i, int *error)
+{
+    int c;
+
+    for (c = 0; c < PROCS; c++)
+        if (procs[c].state == P_ALIVE && procs[c].pgid == procs[i].pid) {
+            *error = EPERM;
+            return -1;
+        }
+    procs[i].sid = procs[i].pgid = procs[i].pid;
+    return procs[i].sid;
+}
+
+/* px_getsid - PX_GETSID: a process's session */
+static int px_getsid(int i, pid_t pid, int *error)
+{
+    int t = pid ? entry_of(pid, P_ALIVE) : i;
+
+    if (t < 0) {
+        *error = ESRCH;
+        return -1;
+    }
+    return procs[t].sid;
 }
 
 /* path_in - a call's path, from the process's data segment */
@@ -742,6 +901,18 @@ static int handle(int i, struct rx_kregs *r)
     case PX_BRK:
         result = px_brk(i, r->bx, &error);
         break;
+    case PX_SETPGID:
+        result = px_setpgid(i, (pid_t)r->bx, (pid_t)r->cx, &error);
+        break;
+    case PX_GETPGRP:
+        result = procs[i].pgid;
+        break;
+    case PX_SETSID:
+        result = px_setsid(i, &error);
+        break;
+    case PX_GETSID:
+        result = px_getsid(i, (pid_t)r->bx, &error);
+        break;
     case PX_SIGACTION:
     case PX_SIGPROCMASK:
     case PX_SIGPENDING:
@@ -754,7 +925,8 @@ static int handle(int i, struct rx_kregs *r)
         break;
     default:
         if (((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
-                || (r->ax & 0xFF) == PX_TCGETATTR || (r->ax & 0xFF) == PX_TCSETATTR)
+                || (r->ax & 0xFF) == PX_TCGETATTR || (r->ax & 0xFF) == PX_TCSETATTR
+                || (r->ax & 0xFF) == PX_TCGETPGRP || (r->ax & 0xFF) == PX_TCSETPGRP)
             result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
         else
             error = ENOSYS;
@@ -767,6 +939,14 @@ static int handle(int i, struct rx_kregs *r)
     if (result == VFS_INTR) {           /* a wait a signal broke off */
         result = -1;
         error = sig_interrupt(i, 1);
+    }
+    if (result == VFS_RESTART) {        /* a stop's: the call made again (P11) */
+        result = -1;
+        error = ERESTART;
+    }
+    if (result == VFS_EIO) {
+        result = -1;
+        error = EIO;
     }
     give();
     if (result == NO_REPLY || procs[i].state != P_ALIVE)
@@ -822,17 +1002,12 @@ void proc_timers(void)
     give();
 }
 
-/* proc_terminal - a signal for the terminal's processes: every process but
- * init and its children - the shell, and what it runs, until process
- * groups (server.h; lock held) */
+/* proc_terminal - a signal for the terminal's foreground group, if it has
+ * a session (server.h; lock held) */
 void proc_terminal(int sig)
 {
-    int c;
-
-    for (c = 0; c < PROCS; c++)
-        if (procs[c].state == P_ALIVE && procs[c].pid != INIT_PID
-                && procs[c].ppid != INIT_PID)
-            sig_send(c, sig);
+    if (tty_pgrp())
+        proc_group(tty_pgrp(), sig);
 }
 
 /* proc_interrupt - Ctrl+Break (server.h): the INTR character's SIGINT, and

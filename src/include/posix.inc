@@ -19,11 +19,13 @@ PX_FORK             equ 3       ; BX the child's IP, CX its SP (libc's return pa
 PX_EXECVE           equ 4       ; SI the path, DI argv, BX envp: the process runs the file
 PX_SPAWN            equ 5       ; SI the path, DI argv, BX envp -> a new process's pid
                                 ;    (posix_spawn without file actions or attributes)
-PX_WAITPID          equ 6       ; BX a pid (-1: any child), CX the options -> the pid, and
-                                ;    SI its status (0: WNOHANG and none has ended)
+PX_WAITPID          equ 6       ; BX a pid (-1: any child; below -1: of that group), CX the
+                                ;    options -> the pid, and SI its status (0: WNOHANG and
+                                ;    none has ended)
 PX_GETPID           equ 7       ; -> the pid
 PX_GETPPID          equ 8       ; -> the parent's pid
-PX_KILL             equ 9       ; BX a pid, CX a signal (0: only look)
+PX_KILL             equ 9       ; BX a pid (0: the caller's group; -1: all; below: a
+                                ;    group), CX a signal (0: only look)
 PX_BRK              equ 10      ; BX the break asked for (0: none) -> the break
 ; The files (P7): a path is SI, its zero at the end; buffers are SI or DI
 PX_OPEN             equ 11      ; SI the path, BX O_* flags -> a descriptor
@@ -63,7 +65,13 @@ PX_NANOSLEEP        equ 35      ; CX:SI ticks (TICKS_HZ a second) -> 0; or -1, E
 ; The terminal (P11)
 PX_TCGETATTR        equ 36      ; BX a descriptor, DI TC_SIZE bytes of room: its termios
 PX_TCSETATTR        equ 37      ; BX a descriptor, CX TCSA*, SI the termios
-PX_CALLS            equ 38
+PX_SETPGID          equ 38      ; BX a pid (0: the caller), CX a group (0: that pid)
+PX_GETPGRP          equ 39      ; -> the caller's group
+PX_SETSID           equ 40      ; -> a session of the caller's, its id the caller's pid
+PX_GETSID           equ 41      ; BX a pid (0: the caller) -> its session
+PX_TCGETPGRP        equ 42      ; BX the terminal's descriptor -> its foreground group
+PX_TCSETPGRP        equ 43      ; BX the terminal's descriptor, CX a group of the session
+PX_CALLS            equ 44
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
@@ -101,7 +109,8 @@ ERESTART            equ 85      ; never a program's: a call a signal's handler b
 PIPE_BUF            equ 512     ; a pipe's write of this many bytes or fewer is never split
 
 ; The signals (signal.h). Their default actions end a process, but
-; SIGCHLD's, which ignores it
+; SIGCHLD's, which ignores it, SIGCONT's, which continues it, and the stop
+; signals', which stop it (P11)
 SIGHUP              equ 1
 SIGINT              equ 2
 SIGQUIT             equ 3
@@ -117,12 +126,18 @@ SIGPIPE             equ 13
 SIGALRM             equ 14
 SIGTERM             equ 15
 SIGCHLD             equ 17
+SIGCONT             equ 18
+SIGSTOP             equ 19
+SIGTSTP             equ 20
+SIGTTIN             equ 21
+SIGTTOU             equ 22
 SIG_MAX             equ 31
 PX_SIG_DFL          equ 0       ; a handler: the default action (signal.h's SIG_DFL)
 PX_SIG_IGN          equ 1       ;    ignored (SIG_IGN); else its address
 SA_RESTART          equ 0x0001  ; sigaction's flags: a call it breaks off is made again
 SA_NODEFER          equ 0x0002  ;    the signal not blocked in its own handler
 SA_RESETHAND        equ 0x0004  ;    the default action again once it is caught
+SA_NOCLDSTOP        equ 0x0008  ;    SIGCHLD's: none for a child's stop or continue
 SIG_BLOCK           equ 0       ; sigprocmask's how
 SIG_UNBLOCK         equ 1
 SIG_SETMASK         equ 2
@@ -150,6 +165,9 @@ SF_SIZE             equ 36
 SF_287_SIZE         equ 94      ; FSAVE's bytes, which the trampoline keeps below the frame
 
 WNOHANG             equ 1       ; waitpid's options
+WUNTRACED           equ 2       ;    a child stopped, its status 7Fh and the signal in
+                                ;    bits 8-15 (P11)
+WCONTINUED          equ 4       ;    a child continued, its status FFFFh
 O_RDONLY            equ 0       ; open's flags (fcntl.h)
 O_WRONLY            equ 1
 O_RDWR              equ 2

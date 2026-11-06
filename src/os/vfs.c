@@ -842,6 +842,7 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
 {
     struct ofd *o = ofd_of(i, fd);
     struct rx_kregs r;
+    int access;
 
     if (!o || (o->flags & O_ACCMODE) == O_RDONLY) {
         *error = EBADF;
@@ -853,6 +854,8 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
     }
     switch (o->kind) {
     case K_TTY:
+        if ((access = tty_access(i, TTY_WRITE)) != 0)
+            return access;              /* the background's, with TOSTOP: SIGTTOU (P11) */
         return tty_write(i, data, at, n);
     case K_NULL:
         return n;
@@ -994,6 +997,8 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     }
     if (flags & O_CLOEXEC)
         files_of[i].cloexec[fd] = 1;
+    if (n.kind == K_TTY)
+        tty_open(i);                    /* a session's leader's: its terminal (P11) */
     return fd;
 }
 
@@ -1600,8 +1605,23 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = EINVAL;
             return -1;
         }
+        if ((fd = tty_access(i, TTY_SET)) != 0)
+            return fd;                  /* the background's: SIGTTOU first (P11) */
         tty_setattr(data, r->si, r->cx);
         return 0;
+    case PX_TCGETPGRP:
+    case PX_TCSETPGRP:                  /* job control's (P11; tty.c) */
+        if (!(o = ofd_of(i, r->bx))) {
+            *error = EBADF;
+            return -1;
+        }
+        if (o->kind != K_TTY) {
+            *error = ENOTTY;
+            return -1;
+        }
+        if ((r->ax & 0xFF) == PX_TCGETPGRP)
+            return tty_getpgrp(i, error);
+        return tty_setpgrp(i, (pid_t)r->cx, error);
     case PX_FSYNC:
         if (!(o = ofd_of(i, r->bx))) {
             *error = EBADF;

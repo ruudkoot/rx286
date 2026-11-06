@@ -129,7 +129,7 @@ What it rests on:
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
-| P11 | Terminals, the eight virtual terminals, job control | step 1 of 4 done (2026-11-06, branch `os-server`) |
+| P11 | Terminals, the eight virtual terminals, job control | steps 1 and 2 of 4 done (2026-11-06, branch `os-server`) |
 | P12 | The commands and the devices | not started |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
@@ -2402,6 +2402,23 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - **The programs:** the shell edits raw and runs its commands with the terminal as it was;
     `more` reads its key raw; `tests/posix/keys` asks for raw first.
   - **The tests:** `tests/posix/tty` on all three emulators.
+* **Step 2 done (2026-11-06): job control.**
+  - **The server:** each process's group and session (`setpgid`, `getpgrp`, `setsid`,
+    `getsid`); the terminal's session, which its leader takes by opening `/dev/tty`, and its
+    foreground group (`tcgetpgrp`, `tcsetpgrp`). INTR, QUIT and SUSP signal the foreground
+    group. A background reader gets SIGTTIN (`EIO` if it ignores it), a background writer
+    with `TOSTOP` SIGTTOU, as does `tcsetpgrp` or `tcsetattr` from the background. The
+    leader's end hangs the terminal up (SIGHUP, SIGCONT). `kill` reaches groups.
+  - **Stops:** a stop is a suspend the server holds. A wait the process was in ends with
+    `ERESTART`, so libc makes the call again once it continues. SIGCONT continues it as it
+    is sent, a handler first. `waitpid` sees stops and continues (`WUNTRACED`,
+    `WCONTINUED`), before an end that came after, with SIGCHLD unless `SA_NOCLDSTOP`. init
+    takes no default action. Orphaned groups are not yet told apart.
+  - **The shell:** a session's leader on its terminal; each pipeline a job and a group; `&`,
+    `jobs`, `fg`, `bg`; ^Z stops a job, ^C ends one, and at the prompt drops the line.
+  - **The tests:** `tests/posix/jobs` on all three emulators, `tests/sh/jobs` on Bochs and
+    MAME; `tests/posix/tty` and `keys` now lead a session and give their child the
+    foreground. The runner rejoins a line a kernel trace was written into.
 
 ### P12. The commands and the devices (M, about 1,500)
 

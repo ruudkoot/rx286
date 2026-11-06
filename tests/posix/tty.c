@@ -5,11 +5,14 @@
  * (PROGRAM=none), init starts it (TEST_POSIX_TTY) from /z as "tty". It
  * reads lines as they are typed, edited, killed, ended by EOF, read in two
  * parts; then raw, without echo, without ISIG; and a child reading is
- * interrupted by ^C.
+ * interrupted by ^C. It leads a session whose terminal it is (P11), and
+ * makes the child's group the foreground for ^C.
  * ============================================================================ */
 
 #include <stdio.h>
 #include "errno.h"
+#include "fcntl.h"
+#include "signal.h"
 #include "termios.h"
 #include "unistd.h"
 #include "sys/wait.h"
@@ -43,6 +46,9 @@ int main(void)
     int n, e, p[2], status = 0;
     pid_t pid;
 
+    setsid();                           /* the terminal's session (P11) */
+    close(open("/dev/tty", O_RDWR));
+    signal(SIGTTOU, SIG_IGN);           /* (to take the foreground back) */
     printf("tty: isatty(0) (1): %d\n", isatty(0));
     pipe(p);
     n = tcgetattr(p[0], &t);
@@ -81,11 +87,16 @@ int main(void)
     got("without echo", (int)read(0, buf, sizeof buf), buf);
     tcsetattr(0, TCSANOW, &cooked);
 
-    if ((pid = fork()) == 0) {          /* ^C: SIGINT for the reader */
+    if ((pid = fork()) == 0) {          /* ^C: SIGINT for the reader's group */
+        setpgid(0, 0);
+        tcsetpgrp(0, getpid());
         read(0, buf, sizeof buf);
         _exit(1);
     }
+    setpgid(pid, pid);
+    tcsetpgrp(0, pid);
     waitpid(pid, &status, 0);
+    tcsetpgrp(0, getpgrp());
     printf("tty: a reader at ^C (SIGINT 2): %d\n",
            WIFSIGNALED(status) ? WTERMSIG(status) : -1);
     printf("tty: done\n");

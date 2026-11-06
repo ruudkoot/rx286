@@ -82,6 +82,8 @@ void vfs_exit(int i);
 #define VFS_GONE (-2)                   /* vfs_call: the process ended as it waited */
 #define VFS_SIGPIPE (-3)                /*    a write to a pipe with no reader: SIGPIPE */
 #define VFS_INTR (-4)                   /*    a wait a signal broke off (sig_interrupt) */
+#define VFS_RESTART (-5)                /*    a stop's: ERESTART, made again (P11) */
+#define VFS_EIO (-6)                    /*    EIO (a background read, SIGTTIN not taken) */
 
 int pipes_init(void);
 /* (the terminal's reader is tty.c's: P11)

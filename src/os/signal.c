@@ -22,6 +22,12 @@
  * A call that waits (a pipe, the terminal, waitpid, sigsuspend) wakes for a
  * signal and ends with EINTR, or ERESTART if the handler has SA_RESTART,
  * which libc takes as the call to make again (sig_interrupt).
+ *
+ * A stop (P11: SIGSTOP, and SIGTSTP, SIGTTIN and SIGTTOU's default action)
+ * marks the thread to stop as for a handler, and then holds it stopped; a
+ * wait it was in ends with ERESTART, so that the call is made again once it
+ * continues. SIGCONT continues it, a handler first if it has one. init
+ * takes no default action.
  * ============================================================================ */
 
 #include <string.h>
@@ -40,10 +46,11 @@ struct action {
 
 /* A process's signals: pending, blocked; sigsuspend's mask for after the
  * handler; its alarm's and its sleep's ends, in ticks (0: none); whether
- * its thread is to stop; libc's trampoline; 287 or not */
+ * its thread is to stop, whether the process is stopped, and its thread
+ * held so; libc's trampoline; 287 or not */
 struct sigs {
     rx_u32 pending, blocked, restore, alarm_at, sleep_at;
-    rx_u8 restoring, suspending, fpu;
+    rx_u8 restoring, suspending, stopped, held, fpu;
     rx_u16 tramp;
     struct action act[SIG_MAX + 1];
 };
@@ -61,12 +68,20 @@ static rx_u32 bit(int sig)
     return b;
 }
 
-#define UNBLOCKABLE bit(SIGKILL)
+#define UNBLOCKABLE (bit(SIGKILL) | bit(SIGSTOP))
+#define STOPS (bit(SIGSTOP) | bit(SIGTSTP) | bit(SIGTTIN) | bit(SIGTTOU))
 
-/* ignores - does the signal's default action ignore it? */
+/* ignores - does the signal's default action ignore it? (SIGCONT's
+ * continues the process as the signal is sent) */
 static int ignores(int sig)
 {
-    return sig == SIGCHLD;
+    return sig == SIGCHLD || sig == SIGCONT;
+}
+
+/* stops - does the signal's default action stop the process? */
+static int stops(int sig)
+{
+    return sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU;
 }
 
 /* thread_call - KCALL_THREAD on process i's thread: its status, r back */
@@ -107,9 +122,70 @@ void sig_start(int i, int from, int how)
     }
     s->suspending = 0;
     s->restoring = 0;
+    s->stopped = s->held = 0;
     s->sleep_at = 0;
     if (how != SIG_FROM_FORK)
         s->tramp = 0;
+}
+
+/* stop - process i stopped by a signal: its thread to stop and be held so,
+ * its waits ended, its parent told (lock held) */
+static void stop(int i, int sig)
+{
+    struct sigs *s = &sigs[i];
+    struct rx_kregs r;
+
+    if (s->stopped)
+        return;
+    s->stopped = 1;
+    proc_stopped(i, sig);
+    if (!s->suspending && !s->held
+            && thread_call(i, THREAD_SUSPEND, 0, PROC_NOTIFY(i), 0, &r) == 0)
+        s->suspending = 1;
+    proc_wake(i);
+}
+
+/* cont - process i continued: its thread started again by its server
+ * thread, a handler first if one is due; its parent told (lock held) */
+static void cont(int i)
+{
+    struct sigs *s = &sigs[i];
+
+    if (!s->stopped)
+        return;
+    s->stopped = 0;
+    proc_continued(i);
+    if (s->held) {
+        s->held = 0;
+        s->suspending = 1;              /* (its thread stopped: sig_step takes it on) */
+    }
+    proc_wake(i);
+}
+
+/* sig_stopped - is process i stopped? (server.h) */
+int sig_stopped(int i)
+{
+    return sigs[i].stopped;
+}
+
+/* sig_takes - would process i take a signal now, neither ignored nor
+ * blocked? (server.h) */
+int sig_takes(int i, int sig)
+{
+    return !(sigs[i].blocked & bit(sig)) && sigs[i].act[sig].handler != PX_SIG_IGN;
+}
+
+/* sig_caught - has process i a handler for a signal? (server.h) */
+int sig_caught(int i, int sig)
+{
+    return sigs[i].act[sig].handler > PX_SIG_IGN;
+}
+
+/* sig_nocldstop - does process i want no SIGCHLD for its children's stops?
+ * (server.h) */
+int sig_nocldstop(int i)
+{
+    return (sigs[i].act[SIGCHLD].flags & SA_NOCLDSTOP) != 0;
 }
 
 /* sig_287 - whether process i's executable uses the 287 (server.h) */
@@ -177,12 +253,31 @@ void sig_send(int t, int sig)
         return;
     a = &s->act[sig];
     b = bit(sig);
-    if (sig == SIGKILL || (a->handler == PX_SIG_DFL && !ignores(sig) && !(s->blocked & b))) {
-        proc_end(t, sig);               /* the default action, at once */
+    if (sig == SIGKILL) {
+        proc_end(t, sig);
+        return;
+    }
+    if (proc_is_init(t) && a->handler <= PX_SIG_IGN)
+        return;                         /* init takes no default action */
+    if (sig == SIGCONT) {               /* (XSH 2.4.1: as it is sent) */
+        s->pending &= ~STOPS;
+        cont(t);
+    } else if (stops(sig)) {
+        s->pending &= ~bit(SIGCONT);
+    }
+    if (sig == SIGSTOP) {
+        stop(t, sig);
         return;
     }
     if (a->handler == PX_SIG_IGN || (a->handler == PX_SIG_DFL && ignores(sig)))
         return;
+    if (a->handler == PX_SIG_DFL && !(s->blocked & b)) {
+        if (stops(sig))                 /* the default action, at once */
+            stop(t, sig);
+        else
+            proc_end(t, sig);
+        return;
+    }
     s->pending |= b;
     proc_wake(t);                       /* its server thread, waiting or receiving */
 }
@@ -221,6 +316,8 @@ int sig_interrupt(int i, int restartable)
 {
     int sig = sig_ready(i);
 
+    if (sigs[i].stopped)
+        return ERESTART;                /* made again once it continues */
     if (sig == 0)
         return 0;
     return restartable && (sigs[i].act[sig].flags & SA_RESTART) ? ERESTART : EINTR;
@@ -249,6 +346,11 @@ static int deliver(int i)
         if (a->handler > PX_SIG_IGN)
             break;
         s->pending &= ~b;
+        if (a->handler == PX_SIG_DFL && stops(sig)) {
+            s->stopped = s->held = 1;   /* unblocked, a stop: its thread stopped already */
+            proc_stopped(i, sig);
+            return 0;
+        }
         if (a->handler == PX_SIG_DFL && !ignores(sig)) {
             proc_end(i, sig);           /* unblocked, its default action */
             return 0;
@@ -306,17 +408,36 @@ void sig_step(int i)
     int sig;
 
     while (proc_alive(i)) {
+        if (s->held)
+            return;                     /* stopped: until SIGCONT */
         if (s->suspending) {
             thread_call(i, THREAD_INFO, 0, 0, 0, &r);
-            if ((r.bx & 0xFF) != STATE_STOPPED || !deliver(i))
-                return;                 /* not yet stopped; or it ended */
+            if ((r.bx & 0xFF) != STATE_STOPPED)
+                return;                 /* not yet stopped */
+            if (s->stopped) {
+                s->suspending = 0;      /* a stop's: held so */
+                s->held = 1;
+                return;
+            }
+            if (!deliver(i))
+                return;                 /* it ended, or stopped */
             continue;                   /* another handler may be due: nested */
+        }
+        if (s->stopped) {               /* stopped, its thread not yet */
+            thread_call(i, THREAD_INFO, 0, 0, 0, &r);
+            if ((r.bx & 0xFF) == STATE_STOPPED)
+                s->held = 1;
+            else if (thread_call(i, THREAD_SUSPEND, 0, PROC_NOTIFY(i), 0, &r) == 0)
+                s->suspending = 1;
+            return;
         }
         if ((sig = sig_ready(i)) == 0)
             return;
         if (s->act[sig].handler <= PX_SIG_IGN) {
             s->pending &= ~bit(sig);
-            if (s->act[sig].handler == PX_SIG_DFL && !ignores(sig))
+            if (s->act[sig].handler == PX_SIG_DFL && stops(sig))
+                stop(i, sig);
+            else if (s->act[sig].handler == PX_SIG_DFL && !ignores(sig))
                 proc_end(i, sig);
             continue;
         }
@@ -366,7 +487,7 @@ int sig_call(int i, struct rx_kregs *r, int *error)
 
     switch (r->ax & 0xFF) {
     case PX_SIGACTION:
-        if (sig <= 0 || sig > SIG_MAX || (r->si && sig == SIGKILL)) {
+        if (sig <= 0 || sig > SIG_MAX || (r->si && (sig == SIGKILL || sig == SIGSTOP))) {
             *error = EINVAL;
             return -1;
         }

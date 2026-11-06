@@ -430,8 +430,22 @@ def substitute(test, line):
 
 def relevant(lines):
     """The lines a test compares: not the kernel's trace and register lines,
-    and not blank ones."""
-    return [l for l in lines if l and not l.startswith(IGNORED_PREFIXES)]
+    and not blank ones. A trace line the kernel wrote into another's middle
+    (a program's output before its newline, a prompt) is taken out, and the
+    line put together again."""
+    out, carry = [], ''
+    for l in lines:
+        at = l.find('[trace] ')
+        if at > 0:
+            carry += l[:at]
+            continue
+        l = carry + l
+        carry = ''
+        if l and not l.startswith(IGNORED_PREFIXES):
+            out.append(l)
+    if carry:
+        out.append(carry)
+    return out
 
 
 def for_emulator(lines):

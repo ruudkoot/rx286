@@ -3,16 +3,23 @@
  * The shell (roadmap os-server.md P9, D14): POSIX-like, in C, a process
  * that init starts from /z and starts again when it ends.
  *
- * It reads a line from the terminal, raw (P11 brings the line discipline):
- * it echoes what is typed, takes Backspace, and recalls its last lines on
- * the arrows Up and Down. A line is a list of pipelines joined by ;, && and
- * ||; a pipeline commands joined by |; a command words, with <, >, >> and
- * 2> redirections. Words are split at blanks; '...' quotes all, "..."
+ * It reads a line from the terminal, raw: it echoes what is typed, takes
+ * Backspace, recalls its last lines on the arrows Up and Down, and drops
+ * the line at ^C. A line is a list of pipelines joined by ;, &&, || and &
+ * (in the background); a pipeline commands joined by |; a command words,
+ * with <, >, >> and 2> redirections. Words are split at blanks; '...' quotes all, "..."
  * all but $, and \ the next character; $NAME, ${NAME} and $? are
  * replaced. The first word of a command may be an alias. The built-ins are
- * cd, pwd, exit, export, unset, set, alias, unalias, true and false; any
- * other command is a program, found along PATH (execvp), run in a child.
- * Paths may name a drive DOS's way: "c:/docs" is "/c/docs".
+ * cd, pwd, exit, export, unset, set, alias, unalias, true, false, jobs, fg
+ * and bg; any other command is a program, found along PATH (execvp), run in
+ * a child. Paths may name a drive DOS's way: "c:/docs" is "/c/docs".
+ *
+ * Job control (P11, XCU 2.11): at its start on a terminal the shell leads a
+ * session whose terminal it is. Each pipeline is a job, a process group of
+ * its own, which it makes the terminal's foreground while it waits for it.
+ * ^Z stops the job, which jobs lists, fg brings back and bg continues in the
+ * background; a job's stop or end in the background is said before the
+ * next prompt.
  * ============================================================================ */
 
 #include <limits.h>
@@ -21,6 +28,7 @@
 #include <string.h>
 #include "errno.h"
 #include "fcntl.h"
+#include "signal.h"
 #include "termios.h"
 #include "unistd.h"
 #include "sys/wait.h"
@@ -32,8 +40,10 @@
 #define VARS 24
 #define ALIASES 12
 #define HISTORY 8
+#define JOBS 8
 
-enum { T_WORD, T_PIPE, T_SEMI, T_AND, T_OR, T_IN, T_OUT, T_APPEND, T_ERR, T_END };
+enum { T_WORD, T_PIPE, T_SEMI, T_AND, T_OR, T_BG, T_IN, T_OUT, T_APPEND, T_ERR, T_END };
+enum { J_FREE, J_RUNNING, J_STOPPED, J_DONE };
 
 /* A token: its kind, its text (a word's, expanded), whether it was quoted */
 struct token {
@@ -59,6 +69,20 @@ static struct token tokens[WORDS + 1];
 static char pool[POOL];
 static unsigned pool_used;
 static struct command cmds[PIPELINE];
+
+/* A job: a pipeline's processes, in a group of their own; whether its
+ * state has been said; its last command's status; its text */
+struct job {
+    int state, said;
+    pid_t pgid, pids[PIPELINE];
+    int n, left, code;
+    char text[40];
+};
+
+static struct job jobs[JOBS + 1];       /* (the last: a foreground job without room) */
+static struct job *last_job;            /* fg's and bg's when none is named */
+static pid_t shell_pgid;
+static int job_control;                 /* the terminal's ours: jobs are groups */
 
 /* say - a text on descriptor 2 */
 static void say(const char *s)
@@ -353,6 +377,145 @@ static int redirect(struct command *c)
     return 0;
 }
 
+/* job_new - a job of a pipeline's processes: a free one of the table, or
+ * the spare for a foreground job without room */
+static struct job *job_new(pid_t pgid, const pid_t *pids, int n, const char *text)
+{
+    struct job *j = &jobs[JOBS];
+    int k;
+
+    for (k = 0; k < JOBS; k++)
+        if (jobs[k].state == J_FREE) {
+            j = &jobs[k];
+            break;
+        }
+    memset(j, 0, sizeof *j);
+    j->state = J_RUNNING;
+    j->pgid = pgid;
+    j->n = n;
+    for (k = 0; k < n; k++)
+        if ((j->pids[k] = pids[k] > 0 ? pids[k] : 0) != 0)
+            j->left++;
+    while (*text == ' ' || *text == '\t')
+        text++;
+    strncpy(j->text, text, sizeof j->text - 1);
+    for (k = (int)strlen(j->text); k > 0 && j->text[k - 1] == ' '; k--)
+        j->text[k - 1] = 0;
+    if (j != &jobs[JOBS])
+        last_job = j;
+    return j;
+}
+
+/* job_update - a child's news, waitpid's status, for its job */
+static void job_update(pid_t pid, int st)
+{
+    struct job *j;
+    int k;
+
+    for (j = jobs; j <= &jobs[JOBS]; j++) {
+        if (j->state == J_FREE || j->state == J_DONE)
+            continue;
+        for (k = 0; k < j->n && j->pids[k] != pid; k++)
+            ;
+        if (k == j->n)
+            continue;
+        if (WIFSTOPPED(st)) {
+            j->state = J_STOPPED;
+            j->code = 128 + WSTOPSIG(st);
+            j->said = 0;
+            if (j != &jobs[JOBS])
+                last_job = j;
+        } else if (WIFCONTINUED(st)) {
+            j->state = J_RUNNING;
+        } else {
+            if (k == j->n - 1)
+                j->code = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
+            j->pids[k] = 0;
+            if (--j->left == 0) {
+                j->state = J_DONE;
+                j->said = 0;
+            }
+        }
+        return;
+    }
+}
+
+/* job_say - a job, as jobs says it */
+static void job_say(struct job *j)
+{
+    static const char *const words[] = { "", "Running", "Stopped", "Done" };
+
+    printf("[%d] %s  %s\n", (int)(j - jobs) + 1, words[j->state], j->text);
+    j->said = 1;
+}
+
+/* job_reap - the children's news, without waiting; a job stopped or done
+ * since it was said, said if asked; the done ones said, forgotten */
+static void job_reap(int say)
+{
+    pid_t pid;
+    int st, k;
+
+    while ((pid = waitpid(-1, &st, WNOHANG | WUNTRACED)) > 0)
+        job_update(pid, st);
+    for (k = 0; k < JOBS; k++) {
+        if (jobs[k].state == J_FREE)
+            continue;
+        if (say && !jobs[k].said && jobs[k].state != J_RUNNING)
+            job_say(&jobs[k]);
+        if (jobs[k].state == J_DONE && jobs[k].said) {
+            jobs[k].state = J_FREE;
+            if (last_job == &jobs[k])
+                last_job = 0;
+        }
+    }
+}
+
+/* job_wait - a job in the terminal's foreground until it ends or stops:
+ * its status (128 and the signal for a stop) */
+static int job_wait(struct job *j)
+{
+    pid_t pid;
+    int st, code;
+
+    if (job_control)
+        tcsetpgrp(0, j->pgid);
+    while (j->state == J_RUNNING) {
+        pid = waitpid(-1, &st, WUNTRACED);
+        if (pid < 0) {
+            if (errno == EINTR)
+                continue;
+            j->state = J_DONE;          /* (its processes gone) */
+            break;
+        }
+        job_update(pid, st);
+    }
+    if (job_control)
+        tcsetpgrp(0, shell_pgid);
+    code = j->code;
+    if (j->state == J_STOPPED) {
+        job_say(j);
+    } else {
+        j->state = J_FREE;
+        if (last_job == j)
+            last_job = 0;
+    }
+    return code;
+}
+
+/* job_pick - the job "%n" names, or the last one */
+static struct job *job_pick(const char *name)
+{
+    int n;
+
+    if (!name)
+        return last_job;
+    n = atoi(name[0] == '%' ? name + 1 : name);
+    if (n < 1 || n > JOBS || jobs[n - 1].state == J_FREE || jobs[n - 1].state == J_DONE)
+        return 0;
+    return &jobs[n - 1];
+}
+
 /* builtin - a built-in command, run: its status; -1 if it is none */
 static int builtin(struct command *c)
 {
@@ -370,6 +533,30 @@ static int builtin(struct command *c)
             return 1;
         }
         return 0;
+    }
+    if (strcmp(name, "jobs") == 0) {
+        job_reap(0);
+        for (k = 0; k < JOBS; k++)
+            if (jobs[k].state != J_FREE)
+                job_say(&jobs[k]);
+        job_reap(0);                    /* (the done ones, said: forgotten) */
+        return 0;
+    }
+    if (strcmp(name, "fg") == 0 || strcmp(name, "bg") == 0) {
+        struct job *j;
+
+        job_reap(0);
+        if (!(j = job_pick(c->argc > 1 ? c->argv[1] : 0))) {
+            say("sh: no such job\n");
+            return 1;
+        }
+        if (name[0] == 'f')
+            printf("%s\n", j->text);
+        else
+            printf("[%d] %s &\n", (int)(j - jobs) + 1, j->text);
+        j->state = J_RUNNING;
+        kill(-j->pgid, SIGCONT);
+        return name[0] == 'f' ? job_wait(j) : 0;
     }
     if (strcmp(name, "pwd") == 0) {
         if (getcwd(cwd, sizeof cwd))
@@ -481,7 +668,7 @@ static void aliased(const char *s, char *out)
                 continue;
             }
         }
-        if (*s == '|' || *s == ';' || (*s == '&' && s[1] == '&'))
+        if (*s == '|' || *s == ';' || *s == '&')
             start = 1;
         if (*s == '\'' || *s == '"') {          /* a quote, whole */
             char q = *s;
@@ -513,15 +700,28 @@ static void run(struct command *c)
     _exit(errno == ENOENT ? 127 : 126);
 }
 
-/* pipeline - n commands, each in a child, joined by pipes: the last one's
- * status; a lone built-in in the shell itself, its descriptors as they
- * were after */
-static int pipeline(int n)
+/* defaults - the signals the shell ignores or catches, back to their
+ * defaults, in a child */
+static void defaults(void)
 {
-    pid_t pids[PIPELINE];
-    int fds[2], in = -1, k, w, code = 0, saved[3];
+    signal(SIGINT, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+    signal(SIGTSTP, SIG_DFL);
+    signal(SIGTTIN, SIG_DFL);
+    signal(SIGTTOU, SIG_DFL);
+}
 
-    if (n == 1 && cmds[0].argc) {
+/* pipeline - n commands, each in a child, joined by pipes, a job: in the
+ * foreground, the last one's status; in the background, 0. A lone built-in
+ * in the foreground runs in the shell itself, its descriptors as they were
+ * after */
+static int pipeline(int n, int background, const char *text)
+{
+    pid_t pids[PIPELINE], pgid = 0;
+    struct job *j;
+    int fds[2], in = -1, k, code = 0, saved[3];
+
+    if (n == 1 && cmds[0].argc && !background) {
         for (k = 0; k < 3; k++)
             saved[k] = dup(k);
         code = redirect(&cmds[0]) < 0 ? 1 : builtin(&cmds[0]);
@@ -540,6 +740,12 @@ static int pipeline(int n)
         }
         pids[k] = fork();
         if (pids[k] == 0) {
+            if (job_control) {          /* the job's group; the foreground's, unless & */
+                setpgid(0, pgid);
+                if (!background)
+                    tcsetpgrp(0, pgid ? pgid : getpid());
+            }
+            defaults();
             if (in >= 0) {
                 dup2(in, 0);
                 close(in);
@@ -553,6 +759,12 @@ static int pipeline(int n)
         }
         if (pids[k] < 0)
             complain(cmds[k].argv[0], errno);
+        if (pids[k] > 0) {
+            if (!pgid)
+                pgid = pids[k];
+            if (job_control)
+                setpgid(pids[k], pgid);
+        }
         if (in >= 0)
             close(in);
         if (fds[1] >= 0)
@@ -561,16 +773,18 @@ static int pipeline(int n)
     }
     if (in >= 0)
         close(in);
-    for (w = 0; w < k; w++)
-        if (pids[w] > 0) {
-            waitpid(pids[w], &code, 0);
-            status = WIFEXITED(code) ? WEXITSTATUS(code) : 128 + WTERMSIG(code);
-        }
-    return status;
+    if (!pgid)
+        return status;                  /* none started */
+    j = job_new(pgid, pids, k, text);
+    if (background) {
+        printf("[%d] %d\n", (int)(j - jobs) + 1, (int)pgid);
+        return 0;
+    }
+    return job_wait(j);
 }
 
-/* next_part - a list's next pipeline, up to a ;, && or || outside quotes,
- * into part: past it, its operator in *op (T_END at the line's end) */
+/* next_part - a list's next pipeline, up to a ;, &&, || or & outside
+ * quotes, into part: past it, its operator in *op (T_END at the line's end) */
 static const char *next_part(const char *s, char *part, int *op)
 {
     unsigned n = 0;
@@ -585,9 +799,9 @@ static const char *next_part(const char *s, char *part, int *op)
             quote = *s;
         } else if (*s == '\\' && s[1]) {
             part[n++] = *s++;
-        } else if (*s == ';' || (*s == '&' && s[1] == '&') || (*s == '|' && s[1] == '|')) {
-            *op = *s == ';' ? T_SEMI : *s == '&' ? T_AND : T_OR;
-            s += *s == ';' ? 1 : 2;
+        } else if (*s == ';' || *s == '&' || (*s == '|' && s[1] == '|')) {
+            *op = *s == ';' ? T_SEMI : *s == '|' ? T_OR : s[1] == '&' ? T_AND : T_BG;
+            s += *op == T_AND || *op == T_OR ? 2 : 1;
             break;
         }
         part[n++] = *s;
@@ -634,9 +848,9 @@ static void run_line(const char *line)
                     && assignments(&cmds[0]))
                 status = 0;
             else if (n)
-                status = pipeline(n);
+                status = pipeline(n, op == T_BG, part);
         }
-        kind = op;
+        kind = op == T_BG ? T_SEMI : op;
         if (op == T_END)
             break;
     }
@@ -662,6 +876,11 @@ static int line_read(char *line)
     printf("%s$ ", cwd);
     for (;;) {
         got = read(0, in, sizeof in);
+        if (got < 0 && errno == EINTR) {
+            write(1, "^C\n", 3);        /* ^C: the line dropped */
+            line[0] = 0;
+            return 0;
+        }
         if (got <= 0)
             return -1;
         if (got == 3 && in[0] == 0x1B && in[1] == '[' && (in[2] == 'A' || in[2] == 'B')) {
@@ -710,6 +929,34 @@ static void editing(int on)
         tcsetattr(0, TCSANOW, on ? &raw : &cooked);
 }
 
+/* on_interrupt - SIGINT's handler: the read it breaks off ends the line */
+static void on_interrupt(int sig)
+{
+    (void)sig;
+}
+
+/* take_terminal - at the start on a terminal: a session of the shell's
+ * whose terminal it is, and the job control signals ignored */
+static void take_terminal(void)
+{
+    struct sigaction act;
+    int fd;
+
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
+    signal(SIGTTIN, SIG_IGN);
+    signal(SIGTTOU, SIG_IGN);
+    act.sa_handler = on_interrupt;      /* (no SA_RESTART: the read ends) */
+    act.sa_mask = 0;
+    act.sa_flags = 0;
+    sigaction(SIGINT, &act, 0);
+    setsid();                           /* (a group's leader already: it stays) */
+    if ((fd = open("/dev/tty", O_RDWR)) >= 0)
+        close(fd);                      /* a session's leader's: its terminal */
+    shell_pgid = getpgrp();
+    job_control = tcgetpgrp(0) == shell_pgid;
+}
+
 /* main - the environment taken in, then line after line */
 int main(int argc, char **argv, char **envp)
 {
@@ -725,12 +972,14 @@ int main(int argc, char **argv, char **envp)
         chdir(var_get("HOME", 4));      /* (init's: /a, the boot drive) */
     if (tcgetattr(0, &cooked) == 0) {   /* the editor's: key by key, its own echo */
         terminal = 1;
+        take_terminal();
         raw = cooked;
         raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
         raw.c_cc[VMIN] = 1;
         raw.c_cc[VTIME] = 0;
     }
     for (;;) {
+        job_reap(1);                    /* the jobs' news, before the prompt */
         editing(1);
         n = line_read(line);
         editing(0);

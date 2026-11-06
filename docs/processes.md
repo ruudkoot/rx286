@@ -41,7 +41,7 @@ no transfer segment.
 | `PX_FORK` | BX the child's IP, CX its SP | the root copies the process (`ROOT_FORK`); the child starts at libc's return path with the parent's SP (`src/lib/posix/fork.asm`) and returns 0 |
 | `PX_EXECVE` | SI the path, DI `argv`, BX `envp` | the file is checked and its arguments taken first; then the old image goes and the new one takes its slots, the pid kept. Past that point a failure ends the process (`SIGKILL`) |
 | `PX_SPAWN` | SI the path, DI `argv`, BX `envp` | a new process of the file, without a copy (`posix_spawn` without file actions or attributes) |
-| `PX_WAITPID` | BX a pid or -1, CX the options (`WNOHANG`) | a zombie child taken: its pid, and its status in SI; else a sleep until a child ends; `ECHILD` with none. init waits even with none |
+| `PX_WAITPID` | BX a pid, -1 (any), 0 (the caller's group) or below -1 (a group), CX the options (`WNOHANG`, `WUNTRACED`, `WCONTINUED`) | a zombie child taken: its pid, and its status in SI; or a stop or continue not yet said, if asked (before the end, if it came first); else a sleep until a child ends; `ECHILD` with none. init waits even with none |
 | `PX_GETPID`, `PX_GETPPID` | | the pid, the parent's |
 | `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`) |
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
@@ -59,9 +59,10 @@ The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
 is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`. The signals: `SIGHUP`,
 `SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB, #BP), `SIGABRT`,
 `SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGUSR1`, `SIGSEGV` (any other
-fault), `SIGUSR2`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGCHLD`, up to
-`SIG_MAX`. A wait status is the exit's code in bits 8-15, or the signal in
-bits 0-6 (`sys/wait.h`).
+fault), `SIGUSR2`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGCHLD`, `SIGCONT`,
+`SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`, up to `SIG_MAX`. A wait status
+is the exit's code in bits 8-15, or the signal in bits 0-6; a stop is 7Fh
+and the signal in bits 8-15, a continue FFFFh (`sys/wait.h`).
 
 ## Signals
 
@@ -70,7 +71,10 @@ A process's signals are the server's (roadmap os-server.md P10, D7 A;
 `SIG_IGN`, the signals blocked while the handler runs, `SA_RESTART`,
 `SA_NODEFER`, `SA_RESETHAND`), and the process's mask and pending set.
 Every default action ends the process but `SIGCHLD`'s, which ignores the
-signal; `SIGKILL` is never caught, ignored or blocked. A fork keeps the
+signal, `SIGCONT`'s, which continues it, and the stop signals' (`SIGSTOP`,
+`SIGTSTP`, `SIGTTIN`, `SIGTTOU`), which stop it (*Job control* below);
+`SIGKILL` and `SIGSTOP` are never caught, ignored or blocked. init takes
+no default action. A fork keeps the
 actions and the mask; an exec puts back the default action of each signal
 caught; a spawn keeps the mask and what is ignored.
 
@@ -229,10 +233,42 @@ which drops the input; SI the termios) sets it: `tcgetattr`, `tcsetattr`
 and `isatty` (`termios.h`, `unistd.h`); `ENOTTY` for a descriptor not the
 terminal's. The defaults: `ICRNL`, `OPOST` and `ONLCR`, `ISIG`, `ICANON`,
 `ECHO`, `ECHOE`, `ECHOK` and `IEXTEN`, `VMIN` 1. What is echoed goes to
-the screen and the log, as a process's writes do. Ctrl+Break is INTR. The
-terminal's processes, for INTR and QUIT, are every process but init and
-init's children: what the shell runs, and not the shell, until process
-groups.
+the screen and the log, as a process's writes do. Ctrl+Break is INTR.
+
+## Job control
+
+Every process is in a process group and a session (roadmap os-server.md
+P11; XBD 11.1, XCU 2.11), at first its parent's; init's are its own.
+
+| Call | Arguments | What the server does |
+|---|---|---|
+| `PX_SETPGID` | BX a pid (0: the caller), CX a group (0: that pid) | the caller or a child of its into a group of its session, or one of its own; `EPERM` for another session's, a session's leader or no such group |
+| `PX_GETPGRP` | | the caller's group |
+| `PX_SETSID` | | a session and a group of the caller's, its pid; `EPERM` if it leads a group |
+| `PX_GETSID` | BX a pid (0: the caller) | its session |
+| `PX_TCGETPGRP`, `PX_TCSETPGRP` | BX the terminal's descriptor (CX a group of the session) | the terminal's foreground group, read or set; `ENOTTY` if the terminal is not the caller's session's |
+
+The terminal becomes a session's when that session's leader opens
+`/dev/tty` and no session has it; its foreground group is then the
+leader's. INTR (^C, and Ctrl+Break), QUIT (^\) and SUSP (^Z) signal the
+foreground group, each echoed with `ECHO`. A process of the session in
+another group gets `SIGTTIN` as it reads, and `SIGTTOU` as it writes with
+`TOSTOP` set or sets termios or the foreground group; if it ignores or
+blocks the signal, its read is `EIO` and the rest goes on. When the
+leader ends, the terminal is hung up: `SIGHUP` and `SIGCONT` for its
+foreground group, and no session has it. `kill` takes a pid, 0 for the
+caller's group, -1 for every process (init aside), or a group as a
+negative number.
+
+A stop marks the process's thread to stop, as for a handler, and then
+holds it stopped. A call it waits in (a pipe, the terminal, `waitpid`)
+ends with `ERESTART`, so that libc makes it again once the process
+continues: a stop is never `EINTR`. `SIGCONT` continues it, as it is
+sent, whatever its action, and runs its handler first if it has one; a
+stop signal drops a `SIGCONT` pending, and `SIGCONT` the stop signals
+pending. The parent's `waitpid` sees a stop with `WUNTRACED`, a continue
+with `WCONTINUED`, and gets `SIGCHLD` for each unless its action has
+`SA_NOCLDSTOP`. Orphaned process groups are not yet told apart.
 
 The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 `EMFILE` (no descriptor left), `ENOSPC`, `ESPIPE`, `EROFS` (`/`, `/z`, a
@@ -315,14 +351,23 @@ environment init gave it (`PATH=/z:/c/bin`, `HOME=/a`).
 
 | What | How |
 |---|---|
-| a line | pipelines joined by `;`, `&&` and `\|\|`; each expanded only when it runs, so `$?` is the status of the one before |
+| a line | pipelines joined by `;`, `&&`, `\|\|` and `&`, which runs the pipeline before it in the background ("[1] 5": its job's number and group); each expanded only when it runs, so `$?` is the status of the one before |
 | a pipeline | commands joined by `\|`, each a child, a pipe between each two; its status is the last's: its exit code, or 128 and the signal that ended it |
 | a command | words split at blanks; `'...'` quotes all, `"..."` all but `$`, `\` the next character; `$NAME`, `${NAME}` and `$?` are put in; redirections `<`, `>`, `>>` and `2>`; `NAME=value` words alone set a shell variable |
 | an alias | its text put in for a command's first word when the line is read, as POSIX has it: an alias made on a line is there from the next |
-| a built-in | `cd` (to `HOME` without an argument), `pwd`, `exit`, `export`, `unset`, `set` (the variables), `alias`, `unalias`, `true`, `false`; alone, it runs in the shell, its redirections undone after |
+| a built-in | `cd` (to `HOME` without an argument), `pwd`, `exit`, `export`, `unset`, `set` (the variables), `alias`, `unalias`, `true`, `false`, `jobs`, `fg` and `bg` (a job's number, `%1` or `1`; the last job without); alone, it runs in the shell, its redirections undone after |
 | a program | found along `PATH` (`execvp`); one not found is status 127 ("sh: nosuch: no such file or directory"), one not executable 126 |
 
-Ctrl+Break ends what the shell runs, not the shell: the status is 130.
+Job control: on a terminal the shell leads a session whose terminal it
+is, and ignores `SIGTSTP`, `SIGTTIN`, `SIGTTOU` and `SIGQUIT`. Each
+pipeline is a job, a process group of its own, which the shell makes the
+terminal's foreground while it waits for it; its children take the
+signals' default actions back. ^C and Ctrl+Break end the job, not the
+shell (status 130); at the prompt ^C drops the line. ^Z stops the job
+("[1] Stopped  cat"; status 148), which `jobs` lists, `fg` brings back to
+the foreground and `bg` continues in the background. A background job
+that stops (reading the terminal: `SIGTTIN`) or ends is said before the
+next prompt.
 The commands are programs of `/z`, in C (`src/bin/`):
 
 | Command | What |

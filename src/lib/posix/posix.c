@@ -179,3 +179,51 @@ void exit(int status)
 {
     _exit(status);
 }
+
+/* setpgid - PX_SETPGID: a process (0: the caller) into a group (0: its own) */
+int setpgid(pid_t pid, pid_t pgid)
+{
+    struct rx_kregs r;
+
+    return px(PX_SETPGID, (rx_u16)pid, (rx_u16)pgid, 0, 0, &r) < 0 ? -1 : 0;
+}
+
+/* getpgrp - PX_GETPGRP: the caller's group */
+pid_t getpgrp(void)
+{
+    struct rx_kregs r;
+
+    return px(PX_GETPGRP, 0, 0, 0, 0, &r);
+}
+
+/* setsid - PX_SETSID: a session of the caller's, and a group, its pid */
+pid_t setsid(void)
+{
+    struct rx_kregs r;
+
+    return px(PX_SETSID, 0, 0, 0, 0, &r);
+}
+
+/* getsid - PX_GETSID: a process's session (0: the caller's) */
+pid_t getsid(pid_t pid)
+{
+    struct rx_kregs r;
+
+    return px(PX_GETSID, (rx_u16)pid, 0, 0, 0, &r);
+}
+
+/* tcgetpgrp - PX_TCGETPGRP: the terminal's foreground group */
+pid_t tcgetpgrp(int fd)
+{
+    struct rx_kregs r;
+
+    return px(PX_TCGETPGRP, (rx_u16)fd, 0, 0, 0, &r);
+}
+
+/* tcsetpgrp - PX_TCSETPGRP: the terminal's foreground group set */
+int tcsetpgrp(int fd, pid_t pgid)
+{
+    struct rx_kregs r;
+
+    return px(PX_TCSETPGRP, (rx_u16)fd, (rx_u16)pgid, 0, 0, &r) < 0 ? -1 : 0;
+}

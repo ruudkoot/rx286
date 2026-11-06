@@ -1,8 +1,8 @@
 # The terminal's keys for processes (roadmap os-server.md P9): with no
 # program the root builds (program: none), the keyboard driver signals the
 # processes' notification, and tests/posix/keys.c reads keys from
-# /dev/tty, an arrow as ESC [ A; then Ctrl+Break gives the child of the
-# terminal's reader SIGINT. (Bytes are said last first.)
+# /dev/tty, an arrow as ESC [ A; then Ctrl+Break gives the child, the
+# terminal's foreground group, SIGINT. (Bytes are said last first.)
 program: none
 define: TEST_POSIX_KEYS
 keys: ab\n{up}{wait 20}{ctrl-break}
