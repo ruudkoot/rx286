@@ -128,7 +128,7 @@ What it rests on:
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
-| P10 | Signals | step 1 of 2 done (2026-11-06, branch `os-server`) |
+| P10 | Signals | done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | not started |
 | P12 | The commands and the devices | not started |
 | P13 | POSIX threads | not started |
@@ -2359,6 +2359,18 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - **The tests:** `tests/posix/signal` on Bochs and MAME, with both compilers.
   - **Left for step 2:** the 287 saved around a handler (`SF_287`, from the executable's
     `RXF_287`), and the frame attacks that need assembly (IOPL, NT).
+* **Step 2 done (2026-11-06): the 287 around a handler; IOPL and NT in a frame.**
+  - **The 287:** `tools/mkexe --287` sets `RXF_287` (the Makefile's `Z_287`). The server
+    notes it at spawn and exec, a fork's child inherits it, and the frame then asks the
+    trampoline for `FSAVE` and `FRSTOR`. `tests/posix/sigfpu` spoils the control word and
+    the stack in a handler and finds both kept, on Bochs and DOSBox-X (MAME has no 287).
+  - **The frame attacks:** IOPL 3 asked for in a frame stays 0. NT stays set, harmless
+    until the program's own `IRET`, a task's return through a back link of 0, which faults
+    (#TS) and ends the process with SIGSEGV. Both are in `tests/posix/signal`, with an
+    assembly helper (`tests/posix/sigasm.asm`). A `/z` program may now link several objects
+    (`name=a+b` in `c.mk`).
+  - **Still open:** an executable that says it needs a 287 is not refused where there is
+    none. The kernel does not detect the 287 yet. The roadmap's *Left open* keeps it.
 
 ### P11. Terminals, the four virtual terminals, job control (L, about 2,500)
 
@@ -2499,6 +2511,10 @@ Each needs a roadmap of its own when the time comes:
    owner may want more (`select`, scripts) or less (threads later).
 2. **A real AT,** as before: E4-E6's times are MAME's.
 3. **Whether a machine without a fixed disk matters.** D11 puts most programs on C.
+4. **An executable that needs a 287, where there is none** (P10). `RXF_287` makes the
+   trampoline save the 287 around a handler, but no exec refuses such a program on a machine
+   without one. The kernel would first have to detect the 287 (`FNINIT`, then `FNSTSW`) and
+   tell the server.
 
 Answered on 2026-11-06: the decisions (*Status*): every one as recommended but D4, D5, D9,
 D13, D15 and D18.

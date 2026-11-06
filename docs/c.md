@@ -109,8 +109,10 @@ is fixed by its slot.
 | 14 | `RXH_DGROUP_MAX` | the data segment's most bytes, for `brk` (0: 64 KB, which `tools/mkexe` writes) |
 | 16 | `RXH_ENTRY` | the IP of the start |
 
-`tools/mkexe` writes one from the linker's output, and a map in NASM's form
-beside it, so that `tools/run-test` (`{l:rx_ud2}`), `tools/map2sym` and
+`tools/mkexe` writes one from the linker's output (`--287` first sets
+`RXF_287`: the Makefile's `Z_287` names the programs of `/z` that use the
+287, whose state then survives a signal's handler, *docs/processes.md*),
+and a map in NASM's form beside it, so that `tools/run-test` (`{l:rx_ud2}`), `tools/map2sym` and
 `tools/sizes` read a C module as they read an assembled one; its symbols
 are C's names. `tools/mkimage` takes an executable as a module of the boot
 image (`clock=build/test/clock.rx:3:4`).

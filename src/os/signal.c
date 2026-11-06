@@ -126,6 +126,12 @@ void sig_start(int i, int from, int how)
         s->tramp = 0;
 }
 
+/* sig_287 - whether process i's executable uses the 287 (server.h) */
+void sig_287(int i, int uses)
+{
+    sigs[i].fpu = (rx_u8)(uses != 0);
+}
+
 /* timers_arm - the control notification's timer (OS_TIMER), for the
  * earliest end of an alarm or a sleep (lock held) */
 static void timers_arm(void)

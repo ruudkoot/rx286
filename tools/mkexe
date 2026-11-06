@@ -10,6 +10,10 @@
 #                                               `format raw bin`, its map
 #   tools/mkexe --elf ELF OUT.rx                gcc-ia16: ld's ELF output
 #
+# --287 first marks a program that uses the 287 (RXF_287): the OS server
+# then has libc's trampoline save its state around a signal's handler
+# (roadmap os-server.md P10).
+#
 # Both link the code from offset 0 of its own segment and the data group
 # from offset 0 of its own: the stack (crt0's _STACKBOT or .stackbot), the
 # initialised data, then .bss. wlink puts the data 64 KB past the code in
@@ -134,6 +138,10 @@ def write_map(path, code, data, symbols):
 
 
 def main(args):
+    flags = 0
+    if args and args[0] == '--287':
+        flags = E['RXF_287']
+        args = args[1:]
     if len(args) == 4 and args[0] == '--wlink':
         code, data, bss, stack, entry, symbols = wlink_parts(args[1], args[2])
         out = args[3]
@@ -141,7 +149,7 @@ def main(args):
         code, data, bss, stack, entry, symbols = elf_parts(args[1])
         out = args[2]
     else:
-        sys.exit('usage: mkexe --wlink RAW MAP OUT.rx | --elf ELF OUT.rx')
+        sys.exit('usage: mkexe [--287] --wlink RAW MAP OUT.rx | [--287] --elf ELF OUT.rx')
     if len(code) > 0xFFFF or stack + len(data[stack:]) + bss > 0xFFFF:
         sys.exit('mkexe: %s: a segment past 64 KB' % out)
     if any(data[:stack]):
@@ -149,7 +157,7 @@ def main(args):
     initial = data[stack:]
     header = bytearray(E['RX_HEADER_SIZE'])
     header[0:2] = b'RX'
-    for field, value in (('RXH_VERSION', E['RX_VERSION']), ('RXH_FLAGS', 0),
+    for field, value in (('RXH_VERSION', E['RX_VERSION']), ('RXH_FLAGS', flags),
                          ('RXH_CODE', len(code)), ('RXH_DATA', len(initial)),
                          ('RXH_BSS', bss), ('RXH_STACK', stack),
                          ('RXH_DGROUP_MAX', 0),     # 64 KB: brk may grow it so far

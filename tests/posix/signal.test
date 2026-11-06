@@ -32,4 +32,6 @@ signal: #DE to its handler (SIGFPE 8): exit 8
 signal: SIGTERM's default action (15): signal 15
 signal: SIGKILL, never caught (9): signal 9
 signal: a spoilt frame (SIGSEGV 11): signal 11
+signal: IOPL and NT asked for: IOPL 0 (0), NT 1
+signal: its own IRET with NT (SIGSEGV 11): signal 11
 signal: done

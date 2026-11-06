@@ -64,7 +64,12 @@ $(C_B)/%.$(OBJ): src/%.asm $(COMMON_SRC) src/include/cabi.inc $(wildcard src/use
 	@mkdir -p $(dir $@)
 	$(NASM) -f obj --gprefix _ $(NASM_C_FLAGS) -l $(@:.$(OBJ)=.lst) -o $@ $<
 
-# c_link NAME OBJECTS: an rx286 executable, code at 1000:0, data at 2000:0
+$(C_B)/tests/%.$(OBJ): tests/%.asm $(COMMON_SRC) src/include/cabi.inc
+	@mkdir -p $(dir $@)
+	$(NASM) -f obj --gprefix _ $(NASM_C_FLAGS) -l $(@:.$(OBJ)=.lst) -o $@ $<
+
+# c_link NAME OBJECTS [MKEXE_FLAGS]: an rx286 executable, code at 1000:0,
+# data at 2000:0
 define c_link
 	@mkdir -p $(C_B)
 	printf '%s\n' 'option quiet, nodefaultlibs, start=__start' 'option map=$(C_B)/$(1).wmap' \
@@ -74,7 +79,7 @@ define c_link
 	    'order clname CODE segaddr=0x1000 offset=0 clname DATA segaddr=0x2000 offset=0 segment _STACKBOT segment CONST segment CONST2 segment _DATA clname BSS noemit' \
 	    > $(C_B)/$(1).lnk
 	$(WLINK) @$(C_B)/$(1).lnk
-	$(PYTHON) tools/mkexe --wlink $(C_B)/$(1).raw $(C_B)/$(1).wmap $(B)/$(1).rx
+	$(PYTHON) tools/mkexe $(3) --wlink $(C_B)/$(1).raw $(C_B)/$(1).wmap $(B)/$(1).rx
 endef
 else ifeq ($(CC_KIND),ia16)
 OBJ := o
@@ -99,11 +104,15 @@ $(C_B)/%.$(OBJ): src/%.asm $(COMMON_SRC) src/include/cabi.inc $(wildcard src/use
 	@mkdir -p $(dir $@)
 	$(NASM) -f elf32 -dELF $(NASM_C_FLAGS) -l $(@:.$(OBJ)=.lst) -o $@ $<
 
+$(C_B)/tests/%.$(OBJ): tests/%.asm $(COMMON_SRC) src/include/cabi.inc
+	@mkdir -p $(dir $@)
+	$(NASM) -f elf32 -dELF $(NASM_C_FLAGS) -l $(@:.$(OBJ)=.lst) -o $@ $<
+
 define c_link
 	@mkdir -p $(C_B)
 	$(IA16_LD) -T tools/ia16.ld --no-check-sections -o $(C_B)/$(1).elf $(filter %.$(OBJ),$(2)) \
 	    --start-group $(filter %.lib,$(2)) --end-group
-	$(PYTHON) tools/mkexe --elf $(C_B)/$(1).elf $(B)/$(1).rx
+	$(PYTHON) tools/mkexe $(3) --elf $(C_B)/$(1).elf $(B)/$(1).rx
 endef
 else
 $(error CC_KIND must be watcom or ia16, not '$(CC_KIND)')
@@ -165,7 +174,10 @@ $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
 Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(OBJ) \
     files=$(C_B)/tests/posix/files.$(OBJ) execs=$(C_B)/tests/posix/exec.$(OBJ) \
     pipes=$(C_B)/tests/posix/pipe.$(OBJ) keys=$(C_B)/tests/posix/keys.$(OBJ) \
-    signals=$(C_B)/tests/posix/signal.$(OBJ)
+    signals=$(C_B)/tests/posix/signal.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
+    sigfpu=$(C_B)/tests/posix/sigfpu.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ)
+# The programs whose executables say they use the 287 (mkexe --287; P10)
+Z_287 := sigfpu
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
 # The shell and its commands (P9), where init runs the shell
 Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls cp mv rm mkdir rmdir wc lp more, \
@@ -179,9 +191,10 @@ DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p)))
 image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
 Z_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(Z_NAMES)))
+# A program of /z or the disks: NAME=OBJECT, or NAME=OBJECT+OBJECT...
 define z_program
-$(B)/z-$(1).rx: $(PROCESS_LIBS) $(2) tools/mkexe
-	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(2))
+$(B)/z-$(1).rx: $(PROCESS_LIBS) $(subst +, ,$(2)) tools/mkexe
+	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(subst +, ,$(2)),$(if $(filter $(1),$(Z_287)),--287))
 endef
 $(foreach p,$(Z_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
     $(subst =, ,$(p))),$(lastword $(subst =, ,$(p))))))

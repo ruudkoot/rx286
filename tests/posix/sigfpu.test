@@ -1,0 +1,15 @@
+# The 287 around a signal's handler (roadmap os-server.md P10): init starts
+# tests/posix/sigfpu.c (TEST_POSIX_SIGFPU), an executable marked as using
+# the 287 (mkexe --287, RXF_287), whose handler spoils the 287's control
+# word and stack; the trampoline's FSAVE and FRSTOR keep them. (MAME has
+# no 287.)
+program: idle
+define: TEST_POSIX_SIGFPU
+keys: {wait 250}
+match: contains
+timeout: 120
+emulators: bochs dosbox-x
+---
+sigfpu: spoilt by a call (0): 0
+sigfpu: around a handler, the control word and pi kept (3): 3
+sigfpu: done

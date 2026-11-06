@@ -106,8 +106,14 @@ aside). The trampoline calls the handler with the signal, 0 and the frame
 (`PX_SIGRETURN`; a signal pending runs its handler first), and returns
 with the frame's `POPA` and `IRET`. At ring 3 `IRET` takes back IP, CS and
 FLAGS but not IOPL; a frame the handler spoilt faults there, and ends the
-process (`SIGSEGV`). A signal due as a handler runs nests, on its stack.
-The 287 is not saved around a handler yet (`SF_287`).
+process (`SIGSEGV`). NT set in the frame stays set, and does nothing until
+the program's own `IRET`, a task's return through a back link of 0, which
+faults (#TS, `SIGSEGV`): the kernel clears NT whenever it writes a frame.
+A signal due as a handler runs nests, on its stack. The 287 is saved
+around a handler (`SF_287`: `FSAVE`, which leaves it as `FNINIT` does,
+then `FRSTOR`) when the process's executable says it uses it (`RXF_287`,
+`tools/mkexe --287`; a fork's child inherits it); else a handler that uses
+the 287 leaves it as it left it.
 
 | `struct sigaction` | | The frame | |
 |---|---|---|---|

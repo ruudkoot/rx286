@@ -67,6 +67,7 @@ struct image {
     rx_u16 data, stack, entry;          /* its initialised data's bytes, its stack's, IP */
     rx_u16 args_at, args_size, argc;    /* argv and environ: at the first break */
     rx_u16 bytes, most;                 /* the data segment's bytes, and its most */
+    rx_u16 flags;                       /* RXF_* */
     char name[AR_NAME_SIZE];
 };
 
@@ -314,6 +315,7 @@ static int image_take(struct image *img, int i, const char *path, rx_u16 segment
     img->stack = head[RXH_STACK / 2];
     img->entry = head[RXH_ENTRY / 2];
     img->most = head[RXH_DGROUP_MAX / 2];
+    img->flags = head[RXH_FLAGS / 2];
     end = ((rx_u32)img->stack + img->data + bss + 1) & ~1ul;
     if (head[RXH_MAGIC / 2] != RX_MAGIC || head[RXH_VERSION / 2] != RX_VERSION
             || (head[RXH_FLAGS / 2] & ~RXF_287) || img->code_bytes == 0
@@ -455,6 +457,7 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
     procs[i].root = n;
     vfs_spawned(i, parent);
     sig_start(i, parent, SIG_FROM_SPAWN);
+    sig_287(i, img.flags & RXF_287);
     entry_start(i, ppid, img.name, img.bytes, img.bytes, img.most);
     return procs[i].pid;
 }
@@ -575,6 +578,7 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
     procs[i].root = n;
     vfs_exec(i);
     sig_start(i, i, SIG_FROM_EXEC);
+    sig_287(i, img.flags & RXF_287);
     memcpy(procs[i].name, img.name, AR_NAME_SIZE);
     procs[i].brk = procs[i].brk_min = img.bytes;
     procs[i].brk_max = img.most;

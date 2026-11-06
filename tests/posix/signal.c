@@ -17,6 +17,13 @@
 #include "rx/compiler.h"
 #include "rx/rx286.h"
 
+/* sigasm.asm's */
+unsigned rx_test_flags(void);
+void rx_test_iret(void);
+
+#define FLAG_IOPL 0x3000
+#define FLAG_NT 0x4000
+
 static volatile sig_atomic_t got, count;
 static char order[8];
 static volatile int at;
@@ -59,6 +66,15 @@ static void spoil(int sig, void *info, unsigned *frame)
     (void)sig;
     (void)info;
     frame[SF_CS / 2] = 0x0008;
+}
+
+/* taint - a handler that sets IOPL 3 and NT in its frame's FLAGS, its
+ * third argument: IRET at ring 3 leaves IOPL as it was */
+static void taint(int sig, void *info, unsigned *frame)
+{
+    (void)sig;
+    (void)info;
+    frame[SF_FLAGS / 2] |= FLAG_IOPL | FLAG_NT;
 }
 
 /* catch - a handler for sig, its flags */
@@ -265,6 +281,17 @@ int main(void)
         _exit(1);
     }
     show("a spoilt frame (SIGSEGV 11)", pid);
+
+    if ((pid = fork()) == 0) {          /* IOPL and NT in the frame */
+        signal(SIGUSR1, (void (*)(int))(void (*)(void))taint);
+        raise(SIGUSR1);
+        n = (int)rx_test_flags();
+        printf("signal: IOPL and NT asked for: IOPL %d (0), NT %d\n", (n & FLAG_IOPL) >> 12,
+               (n & FLAG_NT) != 0);
+        rx_test_iret();                 /* a task's return, through a back link of 0 */
+        _exit(1);
+    }
+    show("its own IRET with NT (SIGSEGV 11)", pid);
 
     printf("signal: done\n");
     for (;;)

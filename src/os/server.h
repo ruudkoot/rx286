@@ -137,8 +137,10 @@ rx_u16 proc_data_limit(int i);
 
 /* The signals (signal.c; P10; lock held). sig_start - process i's as it
  * starts: from a parent's spawn (SIG_FROM_SPAWN; -1: none), a fork, or as it
- * execs; sig_send - a signal for process i: ignored, its default action at
- * once, or pending, its server thread woken; sig_fault - a fault's signal,
+ * execs; sig_287 - whether its executable uses the 287 (RXF_287), whose
+ * state the trampoline then saves around a handler; sig_send - a signal for
+ * process i: ignored, its default action at once, or pending, its server
+ * thread woken; sig_fault - a fault's signal,
  * pending if a handler takes it: 1, else 0 for its default action;
  * sig_ready - the lowest signal pending and not blocked, or 0; sig_interrupt
  * - why a call that waited ends for a signal: 0 if none is ready, EINTR, or
@@ -151,6 +153,7 @@ rx_u16 proc_data_limit(int i);
 #define SIG_FROM_EXEC 2
 #define SIG_GONE (-2)                   /* (proc.c's NO_REPLY, fs.h's VFS_GONE) */
 void sig_start(int i, int from, int how);
+void sig_287(int i, int uses);
 void sig_send(int i, int sig);
 int sig_fault(int i, int sig);
 int sig_ready(int i);
