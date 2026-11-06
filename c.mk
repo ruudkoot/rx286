@@ -116,7 +116,8 @@ CRT_OBJS := $(addprefix $(C_B)/lib/crt/,memory.$(OBJ) setjmp.$(OBJ) helpers.$(OB
 LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ))
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
-POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ))
+POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
+    files.$(OBJ) dirent.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -148,7 +149,8 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 
 # The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
 # (start.asm), a thread a program, each on its part of the stacks
-SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ))
+SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ) \
+    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ))
 $(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
 
@@ -157,7 +159,7 @@ $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)
 Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) proc=$(C_B)/tests/posix/proc.$(OBJ) \
-    child=$(C_B)/tests/posix/child.$(OBJ)
+    child=$(C_B)/tests/posix/child.$(OBJ) files=$(C_B)/tests/posix/files.$(OBJ)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
 Z_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(Z_NAMES)))
 define z_program

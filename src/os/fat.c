@@ -17,7 +17,7 @@
  * the files segment of the program it works for (fat.h).
  * ============================================================================ */
 
-#include "fat.h"
+#include "fs.h"
 
 #define MBR_SIGNATURE 0x1FE             /* the word 0AA55h */
 #define MBR_PARTITIONS 0x1BE            /* four entries */
@@ -39,13 +39,27 @@ static rx_u16 w16(const rx_u8 RX_FAR *p)
     return (rx_u16)(p[0] | (p[1] << 8));
 }
 
-/* fat_read - a sector of a drive into the files segment, through the
- * drive's driver, after the checks of SYS_DISK_READ: 0 or the error */
+/* fat_read - a sector of a drive into the files segment, after the checks
+ * of SYS_DISK_READ: through the processes' cache, which may hold what they
+ * wrote and the disk not yet (os-server.md P7), or the drive's driver if
+ * there is no cache: 0 or the error */
 static rx_u16 fat_read(fs_ptr f, unsigned drive, rx_u16 sector, rx_u16 offset)
 {
+    rx_u8 RX_FAR *to = (rx_u8 RX_FAR *)f + offset;
+    const rx_u8 RX_FAR *from;
+    rx_u16 error;
+    int slot, k;
+
     if (drive >= DRIVES || sector >= drive_sectors(drive))
         return E_INVAL;
-    return disk_call(DRV_DISK_READ, drive, sector, f->self, offset);
+    if (!cache_ready())
+        return disk_call(DRV_DISK_READ, drive, sector, f->self, offset);
+    if ((error = cache_get(drive, sector, 1, &slot)) != 0)
+        return error;
+    from = cache_bytes(slot);
+    for (k = 0; k < SECTOR_SIZE; k++)
+        to[k] = from[k];
+    return 0;
 }
 
 /* vol_read - a sector of the volume, from its first, into the files segment */

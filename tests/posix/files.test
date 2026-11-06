@@ -1,0 +1,55 @@
+# The processes' files (roadmap os-server.md P7): init starts
+# tests/posix/files.c (TEST_POSIX_FILES), which writes and reads files on B,
+# the 360 KB diskette, makes, lists and removes a directory, renames a file
+# out of it, reads the server's own directories, shares a description by
+# dup and fork, and is refused what it may not do. After the run fsck.fat
+# finds B sound, and mtools reads the files as the program left them.
+# MAME's diskette takes the AT's time: half a minute of waiting for it.
+program: idle
+define: TEST_POSIX_FILES
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+emulators: bochs mame
+fsck: B
+file: B /MOVED.TXT inner\n
+file: B /NEW.TXT hello, files\nmore\n
+file: B /SHARED.TXT child,parent\n
+---
+files: make /b/new.txt (3): 3
+files: write 13 bytes (13): 13
+files: close (0): 0
+files: read it back in capitals: 13 bytes, the same: yes
+files: write 5000 bytes over five clusters (5000): 5000
+files: its size (5000): 5000, a file: yes
+files: lseek to 4090 (4090): 4090
+files: 20 bytes from there: 20, right
+files: lseek past its end (5000): 5000
+files: read at the end (0): 0
+files: appended to (18): 18
+files: mkdir /b/dir (0): 0
+files: mkdir it again (-1, EEXIST 17): -1, errno 17
+files: chdir to it (0): 0
+files: getcwd: /b/dir
+files: . holds: . .. INNER.TXT
+files: rmdir it, not empty (-1, ENOTEMPTY 39): -1, errno 39
+files: rename the file out of it (0): 0
+files: stat the old name (-1, ENOENT 2): -1, errno 2
+files: rmdir it, now empty (0): 0
+files: unlink big.dat (0): 0
+files: / holds: a b c d dev z
+files: /dev holds: null tty lpt1 lpt2
+files: /z holds: init proc child files
+files: /dev/null takes 7 bytes (7): 7
+files: open no file (-1, ENOENT 2): -1, errno 2
+files: write a file of /z (-1, EROFS 30): -1, errno 30
+files: open / to write (-1, EISDIR 21): -1, errno 21
+files: rename to another drive (-1, EXDEV 18): -1, errno 18
+files: a name past 8.3 (-1, ENAMETOOLONG 36): -1, errno 36
+files: lseek the console (-1, ESPIPE 29): -1, errno 29
+files: close no descriptor (-1, EBADF 9): -1, errno 9
+files: dup (4): 4
+files: F_GETFD (0): 0
+files: F_GETFD after F_SETFD (1): 1
+files: a description shared by fork and dup: one offset
+files: done

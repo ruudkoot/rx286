@@ -90,6 +90,20 @@ void overflowed(unsigned n, rx_u16 notify);
  * entry i; init's start, from the control thread */
 void proc_thread(unsigned i);
 void proc_boot(void);
+/* lock_take, lock_give - the tables' and the files' lock (proc.c, D17): a
+ * thread that finds it taken sleeps a tick on its notification */
+void lock_take(rx_u16 notify);
+void lock_give(void);
+
+/* Process entry i's slots of the server's (proc.c) */
+#define P_SLOT(i, k) SLOT(PROC_SLOT0 + 8 * (i) + (k))
+#define PK_EP 0                         /* the process's endpoint, */
+#define PK_THREAD 1                     /* thread, */
+#define PK_SPACE 2                      /* space, */
+#define PK_DATA 3                       /* data segment, */
+#define PK_SERVER 4                     /* the server's thread for it, */
+#define PK_NOTIFY 5                     /* and that thread's notification */
+#define PROC_NOTIFY(i) P_SLOT(i, PK_NOTIFY)
 /* os_stack_ok, os_stack_used - thread n's part of the stacks (start.asm):
  * is its guard there; the bytes it has used at most */
 int os_stack_ok(unsigned n);

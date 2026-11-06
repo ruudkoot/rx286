@@ -21,6 +21,16 @@ int execv(const char *path, char *const argv[]);
 pid_t getpid(void);
 pid_t getppid(void);
 ssize_t write(int fd, const void *bytes, size_t n);
+ssize_t read(int fd, void *room, size_t n);
+int close(int fd);
+off_t lseek(int fd, off_t offset, int whence);
+int dup(int fd);
+int dup2(int fd, int to);
+int unlink(const char *path);
+int rmdir(const char *path);
+int chdir(const char *path);
+char *getcwd(char *room, size_t n);
+int fsync(int fd);
 int brk(void *end);
 void *sbrk(int increment);
 

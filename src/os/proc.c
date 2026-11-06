@@ -32,18 +32,12 @@
 #include <string.h>
 #include "sys/types.h"
 #include "server.h"
+#include "fs.h"
 #include "posix.h"
 #include "archive.h"
 #include "exe.h"
 #include "vectors.h"
 
-#define P_SLOT(i, k) SLOT(PROC_SLOT0 + 8 * (i) + (k))
-#define PK_EP 0                         /* entry i's slots: the process's endpoint, */
-#define PK_THREAD 1                     /* thread, */
-#define PK_SPACE 2                      /* space, */
-#define PK_DATA 3                       /* data segment, */
-#define PK_SERVER 4                     /* the server's thread for it, */
-#define PK_NOTIFY 5                     /* and that thread's notification */
 #define NEW_SLOT0 168                   /* exec's new image, before it takes the old's slots */
 #define LOAD_SLOT SLOT(172)             /* a load, while code is read into it */
 #define ARCHIVE SLOT(OS_SLOT_ARCHIVE)
@@ -165,19 +159,21 @@ static void sleep_on(rx_u16 notify, int tick)
     rx_kcall(&r);
 }
 
-/* take - the tables' lock: a thread that finds it taken sleeps a tick on
- * its own notification */
-static void take(rx_u16 notify)
+/* lock_take - the lock (server.h) */
+void lock_take(rx_u16 notify)
 {
     while (rx_xchg(&lock, 1))
         sleep_on(notify, 1);
 }
 
-/* give - the lock given up */
-static void give(void)
+/* lock_give - the lock given up */
+void lock_give(void)
 {
     lock = 0;
 }
+
+#define take lock_take
+#define give lock_give
 
 /* entry_of - the entry of a pid in a state, or -1 */
 static int entry_of(pid_t pid, int state)
@@ -410,9 +406,10 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
 }
 
 /* spawn - a new process of a file of /z, argv and environ from a segment:
- * its pid, or -1 and the error (lock held) */
+ * its pid, or -1 and the error (lock held); its files its parent's (entry
+ * `parent`; -1: init's own, the console) */
 static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid_t ppid,
-                 int *error)
+                 int parent, int *error)
 {
     struct image img;
     rx_u16 n;
@@ -428,6 +425,7 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
     if (*error)
         return -1;
     procs[i].root = n;
+    vfs_spawned(i, parent);
     entry_start(i, ppid, img.name, img.bytes, img.bytes, img.most);
     return procs[i].pid;
 }
@@ -443,6 +441,7 @@ static void end(int i, int status, int revoke)
 
     if (revoke)
         root(ROOT_EXIT, p->root, 0, 0, 0, 0);
+    vfs_exit(i);                        /* its files written, its descriptors closed */
     p->state = P_ZOMBIE;
     p->status = status;
     for (k = 0; k < PROCS; k++) {
@@ -482,32 +481,6 @@ static unsigned fault(int i, struct rx_kregs *r, char *line, unsigned size)
     return n;
 }
 
-/* px_write - PX_WRITE: descriptors 0 to 2 are the console, as a foreground
- * program's SYS_WRITE: the log and the main screen */
-static int px_write(int i, rx_u16 fd, rx_u16 at, rx_u16 n, int *error)
-{
-    rx_u16 data = P_SLOT(i, PK_DATA), done = 0, chunk;
-    int written;
-
-    if (fd > 2) {
-        *error = EBADF;
-        return -1;
-    }
-    if (n && (rx_u32)at + n - 1 > limit(data)) {
-        *error = EFAULT;
-        return -1;
-    }
-    while (done < n) {
-        chunk = n - done > LOG_MAX ? LOG_MAX : (rx_u16)(n - done);
-        written = rx_log_far(data, (rx_u16)(at + done), chunk);
-        if (written <= 0)
-            break;
-        console(data, (rx_u16)(at + done), (unsigned)written, CON_MAIN, 0);
-        done = (rx_u16)(done + written);
-    }
-    return done;
-}
-
 /* px_fork - PX_FORK: a child, the root's copy, its thread at the IP and SP
  * libc gave (lock held) */
 static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
@@ -529,6 +502,7 @@ static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
         return -1;
     }
     procs[c].root = n;
+    vfs_forked(c, i);
     entry_start(c, procs[i].pid, procs[i].name, procs[i].brk, procs[i].brk_min,
                 procs[i].brk_max);
     return procs[c].pid;
@@ -551,6 +525,7 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
         return NO_REPLY;
     }
     procs[i].root = n;
+    vfs_exec(i);
     memcpy(procs[i].name, img.name, AR_NAME_SIZE);
     procs[i].brk = procs[i].brk_min = img.bytes;
     procs[i].brk_max = img.most;
@@ -676,9 +651,8 @@ static int handle(int i, struct rx_kregs *r)
         result = NO_REPLY;
         break;
     case PX_WRITE:
-        give();                         /* (the console may wait) */
-        result = px_write(i, r->bx, r->si, r->cx, &error);
-        take(notify);
+    case PX_READ:
+        result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
         break;
     case PX_FORK:
         result = px_fork(i, r->bx, r->cx, &error);
@@ -691,7 +665,8 @@ static int handle(int i, struct rx_kregs *r)
     case PX_SPAWN:
         result = path_in(i, r->si, path, &error);
         if (result == 0)
-            result = spawn(path, P_SLOT(i, PK_DATA), r->di, r->bx, procs[i].pid, &error);
+            result = spawn(path, P_SLOT(i, PK_DATA), r->di, r->bx, procs[i].pid, i,
+                           &error);
         break;
     case PX_WAITPID:
         result = px_wait(i, (int)r->bx, r->cx, &status, &error);
@@ -709,7 +684,10 @@ static int handle(int i, struct rx_kregs *r)
         result = px_brk(i, r->bx, &error);
         break;
     default:
-        error = ENOSYS;
+        if ((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_FSYNC)
+            result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
+        else
+            error = ENOSYS;
     }
     give();
     if (result == NO_REPLY || procs[i].state != P_ALIVE)
@@ -760,7 +738,9 @@ void proc_boot(void)
     int error;
 
     take(OS_CONTROL);
-    if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, &error) < 0) {
+    cache_init();                       /* the files' cache (P7) */
+    if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, -1,
+              &error) < 0) {
         char line[40];
 
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: no init: error %d\n",

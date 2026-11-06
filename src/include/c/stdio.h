@@ -17,5 +17,6 @@ int snprintf(char *buf, size_t size, const char *fmt, ...);
 int printf(const char *fmt, ...);
 int puts(const char *text);
 int putchar(int c);
+int rename(const char *from, const char *to);
 
 #endif

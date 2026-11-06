@@ -679,9 +679,11 @@ static void forward(struct session *s, int function)
         sys_root(x, ROOT_START);
         break;
     default:
-        if (function >= SYS_FIND && function <= SYS_FREE)
-            files(s, function);         /* the file calls: the server's own */
-        else
+        if (function >= SYS_FIND && function <= SYS_FREE) {
+            lock_take(SLOT(OS_SLOT_SLEEP + s->n));  /* the file calls: the server's own, */
+            files(s, function);                     /* on the processes' cache too (P7) */
+            lock_give();
+        } else
             failed(x, E_NOSYS);
     }
 }

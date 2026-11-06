@@ -125,7 +125,7 @@ What it rests on:
 | P4 | The root in C; its allocator and its services | done (2026-11-06, branch `os-server`) |
 | P5 | The OS server in C, serving today's calls | done (2026-11-06, branch `os-server`) |
 | P6 | Processes: fork, exec, exit, wait | done (2026-11-06, branch `os-server`) |
-| P7 | Files: descriptors, writable FAT12, the cache, `/dev` | not started |
+| P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
 | P8 | Programs from disk | not started |
 | P9 | Pipes and the shell in C | not started |
 | P10 | Signals | not started |
@@ -2197,6 +2197,31 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - `tests/drives` passes unchanged;
   - reading 16 KB from A takes under a second on MAME's AT.
 * **Decisions:** D13, D16.
+* **Done (2026-11-06), but for the diskette driver:**
+  - **The tree and the descriptors** (`src/os/vfs.c`; *docs/processes.md*): `/` the
+    server's, `/a`-`/d` the volumes, `/z`, `/dev` (`null`, `tty`, `lpt1`, `lpt2`); a current
+    directory a process; `OPEN_MAX` descriptors a process naming 32 open file descriptions,
+    shared by `dup` and `fork`, kept by `exec` but for `FD_CLOEXEC`; init's 0 to 2 are
+    `/dev/tty`. The calls `open` to `fsync`, and `opendir`/`readdir` in libc over
+    `PX_GETDENTS`.
+  - **FAT12 written** (`src/os/vol.c`): clusters taken and freed in every copy of the FAT,
+    directories searched and grown, `mkdir`, `rmdir`, `rename` within a volume.
+  - **The cache** (`src/os/cache.c`): 32 sectors in a segment of the server's from
+    `ROOT_LOAD`. Otherwise than planned, the FAT and directory sectors are written at the end
+    of each call that changed them, each once, not at each change: on MAME's diskette eight
+    writes a cluster taken did not end in the test's half minute. A file's data goes at its
+    close, its fsync or its eviction. Today's file calls read through the same cache, so the
+    shell sees what processes wrote; their DOS-like reader (`fat.c`) stays.
+  - **One lock** guards the tables and the files, held across the drivers' calls: the file
+    code has no lock of its own yet (X9). vfs.c's paths and nodes are static, since the
+    lock lets one thread in at a time: on a thread's 1 KB of stack a rename overflowed.
+  - **`tests/posix/files`** passes on Bochs and MAME, `fsck.fat` finding B sound after it
+    and mtools reading the files it left (run-test's new `fsck:` and `file:` lines);
+    `tests/drives` passes unchanged.
+  - **Left to the disk subsystem** (the owner's `roadmaps/disk-scheduler.md`, begun the same
+    day, which redesigns the drivers and puts the cache in a disk scheduler): the diskette
+    driver's track transfers and change line, a diskette changed mid-run on MAME, and the 16
+    KB from A in under a second.
 
 ### P8. Programs from disk (M, about 800)
 

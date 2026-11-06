@@ -37,6 +37,10 @@
 #   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
 #                               or D) must hold text, then each byte its own
 #                               offset (storage.asm's fill); may repeat
+#   fsck: B                     after the run, fsck.fat finds drive B's volume
+#                               (its partition's, on C or D) sound; may repeat
+#   file: B /MOVED.TXT text     after the run, that file of drive B's volume
+#                               holds the text (\n a new line), by mtools
 #   ---
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
 #   {c:name} the counter's, {r:name} the root's, {z:program.name} a program of
@@ -114,6 +118,8 @@ class Test:
         self.modem = None
         self.printed = {}                   # 'lpt1' -> the lines it must print
         self.sectors = []                   # (drive, sector, text)
+        self.fscks = []                     # drives whose volumes fsck.fat checks
+        self.files = []                     # (drive, path, text)
         self.expected = []
         self.parse(open(path, encoding='utf-8').read())
 
@@ -162,6 +168,15 @@ class Test:
                 self.media.append(value)
             elif key in ('lpt1', 'lpt2'):
                 self.printed.setdefault(key, []).append(line.partition(':')[2].strip())
+            elif key == 'fsck':
+                if value not in DRIVE_IMAGES:
+                    raise ValueError('%s: bad fsck line %r' % (self.path, line))
+                self.fscks.append(value)
+            elif key == 'file':
+                drive, path, text = (value.split(None, 2) + [''])[:3]
+                if drive not in DRIVE_IMAGES or not path.startswith('/'):
+                    raise ValueError('%s: bad file line %r' % (self.path, line))
+                self.files.append((drive, path, text.replace('\\n', '\n')))
             elif key == 'sector':
                 drive, number, text = (value.split(None, 2) + [''])[:3]
                 if drive not in DRIVE_IMAGES or not number.isdigit() or not text:
@@ -245,7 +260,8 @@ def build(test):
         for name in ('kernel.bin', 'user.bin', 'user.rx', 'root.rx', 'os.rx', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
-                     'rtc.bin', 'clock.rx', 'z.arc', 'z-init.rx', 'z-proc.rx', 'z-child.rx'):
+                     'rtc.bin', 'clock.rx', 'z.arc', 'z-init.rx', 'z-proc.rx', 'z-child.rx',
+                     'z-files.rx'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them
@@ -481,6 +497,38 @@ def check_sectors(test):
     return None
 
 
+def volume_image(test, drive):
+    """A drive's volume as an image of its own: the floppies' whole, a fixed
+    disk's first FAT12 partition copied out (mtools and fsck.fat want one)."""
+    path = os.path.join(test.build_dir, DRIVE_IMAGES[drive])
+    if drive in 'AB':
+        return path
+    data = open(path, 'rb').read()
+    for k in range(4):
+        entry = data[0x1BE + 16 * k:0x1CE + 16 * k]
+        if entry[4] == 1:
+            start, count = struct.unpack_from('<II', entry, 8)
+            out = os.path.join(test.build_dir, 'volume-%s.img' % drive)
+            with open(out, 'wb') as f:
+                f.write(data[start * SECTOR_SIZE:(start + count) * SECTOR_SIZE])
+            return out
+    return path
+
+
+def check_volumes(test):
+    """Each fsck: and file: line against the drives' images after the run."""
+    for drive in test.fscks:
+        done = subprocess.run(['fsck.fat', '-n', volume_image(test, drive)],
+                              capture_output=True, text=True)
+        if done.returncode != 0:
+            return 'fsck.fat finds drive %s unsound:\n%s' % (drive, done.stdout.strip())
+    for drive, path, text in test.files:
+        done = mtools('mtype', '-i', volume_image(test, drive), '::' + path)
+        if done.returncode != 0 or done.stdout != text:
+            return 'drive %s\'s %s holds %r, not %r' % (drive, path, done.stdout, text)
+    return None
+
+
 def diff(expected, got):
     out = []
     for k in range(max(len(expected), len(got))):
@@ -555,7 +603,7 @@ def run(test):
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
         if os.path.exists(dbglog) else []
     error = compare(test, transcript, debugger_lines) or check_printers(test, printers) \
-        or check_sectors(test)
+        or check_sectors(test) or check_volumes(test)
     if status == 'timeout':
         error = 'timed out after %.0f s; %s' % (timeout, error or 'the transcript matched')
     return test, error, time.monotonic() - started

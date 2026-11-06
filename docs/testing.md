@@ -72,7 +72,9 @@ echoes, and answers `AT` and `ATI`; Bochs then runs on real time, so its
 answers come in the ticks they would),
 `lpt1` and `lpt2` (what each printer must
 have printed, line by line), `sector` (what a sector of a drive's image must
-hold after the run, read on the host: a text, then each byte its offset). In expected lines, `{name}` is
+hold after the run, read on the host: a text, then each byte its offset),
+`fsck` (a drive whose volume `fsck.fat` must find sound after the run) and
+`file` (a file of a drive's volume and the text it must hold, by mtools). In expected lines, `{name}` is
 a program symbol's offset, `{k:name}` a kernel one, `{c:name}` the
 counter's and `{r:name}` the root's; `{m:module.base}`, `{m:module.limit}`,
 `{m:module.codesum}` and `{m:module.datasum}` say where a module's code is
@@ -109,7 +111,7 @@ The suites:
 | `tests/demo` | the demonstration (roadmap l4.md L11): the clock and the counter on the status line while the shell works, the clock's fault reported and the clock started again, `ps`, `kill` and `start`, the clock ticking while the shell spins |
 | `tests/revoke` | delete and revoke (roadmap l4.md L12): a revoked copy in DS null on the way back, memory given back and made again at the same base, an endpoint's queued caller failed with `KE_CAP`, a worker's space and thread gone with their untyped, E3's ABA case, a worker that deletes its own stack stopped after its way back fails (L13), and copies of untyped and of a saved reply refused |
 | `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; the root's own fault, a panic (os-server.md D8); a boot image without a root, or with a module outside it, refused by the loader |
-| `tests/posix` | the processes (roadmap os-server.md P6; *docs/processes.md*): init starts `tests/posix/proc.c` from `/z`, which forks, execs and spawns `tests/posix/child.c` with arguments, waits, takes a child's fault and a kill as their signals, uses the heap, and is refused a fork once the table is full |
+| `tests/posix` | the processes (roadmap os-server.md P6, P7; *docs/processes.md*): init starts `tests/posix/proc.c` from `/z`, which forks, execs and spawns `tests/posix/child.c` with arguments, waits, takes a child's fault and a kill as their signals, uses the heap, and is refused a fork once the table is full; and `tests/posix/files.c`, which writes, reads, appends, makes, lists, renames and removes on B, reads `/`, `/dev` and `/z`, shares a description by `dup` and `fork`, and is refused what it may not do, after which `fsck.fat` finds B sound and mtools reads its files (Bochs and MAME) |
 | `tests/services` | the root's services for processes (roadmap os-server.md P4; `tests/programs/services.c`, a C test program): a code loaded, sealed and found, a process spawned, forked, grown and given a thread, both ended, every refusal; a thousand spawns and exits, after which the memory gives the same segments of 64 KB; a thread at the drivers' priority missing no tick while the root forks 64 KB four times (Bochs and MAME) |
 | `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break and Ctrl+Alt+Del, through the keyboard driver and the OS server (`tests/programs/keys.asm`), the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC, the longest stretch with interrupts off (`stretch.test`, and across a kill and a start, `stretch-kill.test`; roadmaps/realtime.md R0) |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
