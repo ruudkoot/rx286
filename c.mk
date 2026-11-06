@@ -119,7 +119,7 @@ LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ) stdlib.$(OBJ)
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
-    files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ))
+    files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -152,7 +152,7 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 # The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
 # (start.asm), a thread a program, each on its part of the stacks
 SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ) \
-    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ))
+    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ))
 $(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
 
@@ -164,7 +164,8 @@ $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
 # (TEST_POSIX_*), so that /z and the image stay small (64 KB at most)
 Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(OBJ) \
     files=$(C_B)/tests/posix/files.$(OBJ) execs=$(C_B)/tests/posix/exec.$(OBJ) \
-    pipes=$(C_B)/tests/posix/pipe.$(OBJ) keys=$(C_B)/tests/posix/keys.$(OBJ)
+    pipes=$(C_B)/tests/posix/pipe.$(OBJ) keys=$(C_B)/tests/posix/keys.$(OBJ) \
+    signals=$(C_B)/tests/posix/signal.$(OBJ)
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
 # The shell and its commands (P9), where init runs the shell
 Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls cp mv rm mkdir rmdir wc lp more, \

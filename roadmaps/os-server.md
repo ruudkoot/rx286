@@ -128,7 +128,7 @@ What it rests on:
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
-| P10 | Signals | not started |
+| P10 | Signals | step 1 of 2 done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | not started |
 | P12 | The commands and the devices | not started |
 | P13 | POSIX threads | not started |
@@ -2334,6 +2334,31 @@ The largest change to the kernel since l4.md, in three steps, each with every su
 * **Done when:** `tests/posix/signal` passes on Bochs and MAME: a handler in a busy loop, in a
   blocked read, and nested; a bad frame killed; the 287 kept around a handler (Bochs).
 * **Decisions:** D7.
+* **Step 1 done (2026-11-06): the signals, their handlers, the timers.**
+  - **The server** (`src/os/signal.c`): each process's actions, mask and pending set;
+    `sigaction`, `sigprocmask`, `sigpending`, `sigsuspend`, `kill` with handlers, and
+    `alarm` and `nanosleep`. A process's server thread looks at its signals after every call
+    and whenever its notification fires. The notification is now bound to it, so a signal
+    wakes it while it waits for a call. For a handler it suspends the process's thread
+    (`THREAD_SUSPEND`), writes the frame (`SF_*`) below its SP, and starts it at libc's
+    trampoline (`src/lib/posix/sigtramp.asm`). The trampoline returns through
+    `PX_SIGRETURN`, `POPA` and `IRET`.
+  - **The behaviour:** `EINTR` for a wait a handler breaks off, and `ERESTART`, which libc
+    makes again, with `SA_RESTART`. Faults go to handlers, SIGCHLD at a child's end, and
+    SIGPIPE caught gives `EPIPE`. Ctrl+Break and `kill` go through the same path.
+  - **The timers:** one, on the control notification. The root gives the server a copy
+    badged `CONTROL_TIMER` (`OS_SLOT_TIMER`), so that no tick of its looks like Ctrl+Break.
+  - **The kernel:** a `THREAD_SUSPEND` on a thread already marked that faulted before it
+    stopped now stops it at its fault. The mark alone would have left it waiting for its
+    fault's reply for ever.
+  - **Found on the way:** crt0 makes SS the data selector (0Fh), and a forked child keeps
+    the stack's copy (17h). The frame's check takes both.
+  - **The handler's third argument is the frame**, where `SA_SIGINFO`'s context would be.
+    That lets `tests/posix/signal` spoil one without guessing where it is: gcc-ia16
+    optimised away a search past the argument.
+  - **The tests:** `tests/posix/signal` on Bochs and MAME, with both compilers.
+  - **Left for step 2:** the 287 saved around a handler (`SF_287`, from the executable's
+    `RXF_287`), and the frame attacks that need assembly (IOPL, NT).
 
 ### P11. Terminals, the four virtual terminals, job control (L, about 2,500)
 

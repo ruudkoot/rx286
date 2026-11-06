@@ -2,7 +2,7 @@
  * rx286 - src/os/proc.c
  * The processes (roadmap os-server.md P6): POSIX's fork, exec, posix_spawn,
  * exit, wait, kill and brk, for programs run from /z, beside today's
- * programs, which the root builds.
+ * programs, which the root builds. Their signals are signal.c's (P10).
  *
  * A process is the root's (ROOT_SPAWN, ROOT_FORK): a space of PROC_SLOTS
  * with its code, its data segment (in slots 1 and 2) and its endpoint. The
@@ -41,7 +41,6 @@
 #define NEW_SLOT0 168                   /* exec's new image, before it takes the old's slots */
 #define LOAD_SLOT SLOT(172)             /* a load, while code is read into it */
 #define ARCHIVE SLOT(OS_SLOT_ARCHIVE)
-#define PROC_PRIORITY 3                 /* the processes': today's programs' */
 #define INIT_PID 1
 #define NO_REPLY (-2)                   /* a call that ends its process: no answer */
 #define ARCHIVE_KEY 0x5A00              /* a code's key: this, the file's entry, its offset */
@@ -141,7 +140,9 @@ static void signal_entry(unsigned i)
     rx_kcall(&r);
 }
 
-/* sleep_on - until a notification is signalled; with a tick, at most one */
+/* sleep_on - until a notification is signalled; with a tick, at most one
+ * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
+ * a Ctrl+Break) */
 static void sleep_on(rx_u16 notify, int tick)
 {
     struct rx_kregs r;
@@ -149,7 +150,7 @@ static void sleep_on(rx_u16 notify, int tick)
     if (tick) {
         r.ax = KCALL_TIMER << 8;
         r.cx = 1;
-        r.dx = notify;
+        r.dx = notify == OS_CONTROL ? OS_TIMER : notify;
         r.bp = 0;
         rx_kcall(&r);
     }
@@ -163,6 +164,24 @@ static void sleep_on(rx_u16 notify, int tick)
 int proc_alive(int i)
 {
     return procs[i].state == P_ALIVE;
+}
+
+/* proc_wake - entry i's server thread woken (server.h) */
+void proc_wake(int i)
+{
+    signal_entry((unsigned)i);
+}
+
+/* proc_sleep - entry i's server thread sleeps until woken (server.h) */
+void proc_sleep(int i)
+{
+    sleep_on(P_SLOT(i, PK_NOTIFY), 0);
+}
+
+/* proc_data_limit - process i's data segment's last offset (server.h) */
+rx_u16 proc_data_limit(int i)
+{
+    return limit(P_SLOT(i, PK_DATA));
 }
 
 /* lock_take - the lock (server.h) */
@@ -384,6 +403,8 @@ static int entry_new(void)
         if (!procs[i].served) {
             if (root(ROOT_SERVE, 0, (rx_u16)((PROC_N0 + i) * 4), 0, P_SLOT(i, PK_SERVER), 0))
                 return -1;
+            /* its notification bound to it: a signal wakes it as it receives (P10) */
+            thread_op(P_SLOT(i, PK_SERVER), THREAD_BIND, P_SLOT(i, PK_NOTIFY), 0, 0);
             procs[i].served = 1;
         }
         return i;
@@ -433,13 +454,14 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
         return -1;
     procs[i].root = n;
     vfs_spawned(i, parent);
+    sig_start(i, parent, SIG_FROM_SPAWN);
     entry_start(i, ppid, img.name, img.bytes, img.bytes, img.most);
     return procs[i].pid;
 }
 
 /* end - process i ends with a wait status: everything of it revoked (unless
  * it is already), a zombie; its children init's; its parent woken if it
- * waits (lock held) */
+ * waits, and sent SIGCHLD (lock held) */
 static void end(int i, int status, int revoke)
 {
     struct proc *p = &procs[i];
@@ -461,25 +483,41 @@ static void end(int i, int status, int revoke)
     parent = entry_of(p->ppid, P_ALIVE);
     if (parent >= 0 && procs[parent].waiting)
         signal_entry((unsigned)parent);
+    if (parent >= 0)
+        sig_send(parent, SIGCHLD);
     if (p->pid == INIT_PID)             /* D8: nothing would wait for the orphans */
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: init ended\n"));
 }
 
-/* fault - a process's fault: the default action of its signal (SIGFPE,
- * SIGILL, SIGTRAP or SIGSEGV) ends it; its report as the kernel's, with its
- * pid, into line (lock held): the report's bytes, 0 if the fuzzer counts it */
+/* proc_end - process i ends by a signal's default action, its server thread
+ * woken (server.h; lock held) */
+void proc_end(int i, int sig)
+{
+    end(i, sig, 1);
+    signal_entry((unsigned)i);
+}
+
+/* fault_signal - a fault's signal: SIGFPE, SIGILL, SIGTRAP or SIGSEGV */
+static int fault_signal(int vector)
+{
+    if (vector == VEC_DE || vector == VEC_MF || vector == VEC_MP)
+        return SIGFPE;
+    if (vector == VEC_UD)
+        return SIGILL;
+    if (vector == VEC_BP || vector == VEC_DB)
+        return SIGTRAP;
+    return SIGSEGV;
+}
+
+/* fault - a process's fault that no handler takes: the default action of
+ * its signal ends it; its report as the kernel's, with its pid, into line
+ * (lock held): the report's bytes, 0 if the fuzzer counts it */
 static unsigned fault(int i, struct rx_kregs *r, char *line, unsigned size)
 {
-    int vector = r->ax & 0xFF, sig = SIGSEGV;
+    int vector = r->ax & 0xFF, sig = fault_signal(vector);
     char who[AR_NAME_SIZE + 12];
     unsigned n = 0;
 
-    if (vector == VEC_DE || vector == VEC_MF || vector == VEC_MP)
-        sig = SIGFPE;
-    else if (vector == VEC_UD)
-        sig = SIGILL;
-    else if (vector == VEC_BP || vector == VEC_DB)
-        sig = SIGTRAP;
     if (!(r->di & FAULT_COUNTED)) {
         snprintf(who, sizeof who, "%s[%d]", procs[i].name, procs[i].pid);
         n = fault_text(line, size, who, vector, r->bx, r->cx, r->si);
@@ -510,6 +548,7 @@ static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
     }
     procs[c].root = n;
     vfs_forked(c, i);
+    sig_start(c, i, SIG_FROM_FORK);
     entry_start(c, procs[i].pid, procs[i].name, procs[i].brk, procs[i].brk_min,
                 procs[i].brk_max);
     return procs[c].pid;
@@ -535,6 +574,7 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
     }
     procs[i].root = n;
     vfs_exec(i);
+    sig_start(i, i, SIG_FROM_EXEC);
     memcpy(procs[i].name, img.name, AR_NAME_SIZE);
     procs[i].brk = procs[i].brk_min = img.bytes;
     procs[i].brk_max = img.most;
@@ -544,7 +584,8 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
 
 /* px_wait - PX_WAITPID: a zombie child taken, its status in *status; else
  * a sleep until a child ends (init waits even with no child, for the
- * orphans to come); 0 with WNOHANG (lock held, given up while it sleeps) */
+ * orphans to come), or a signal's handler is due (EINTR, ERESTART); 0 with
+ * WNOHANG (lock held, given up while it sleeps) */
 static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
 {
     int c, any;
@@ -570,6 +611,8 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
             *status = 0;
             return 0;
         }
+        if ((*error = sig_interrupt(i, 1)) != 0)
+            return -1;
         procs[i].waiting = 1;
         give();
         sleep_on(P_SLOT(i, PK_NOTIFY), 0);
@@ -580,8 +623,8 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
     }
 }
 
-/* px_kill - PX_KILL: the signal's default action, which ends the process
- * (lock held); init takes none */
+/* px_kill - PX_KILL: the signal sent (sig_send; lock held); init takes
+ * none */
 static int px_kill(int i, pid_t pid, int sig, int *error)
 {
     int t = pid > 0 ? entry_of(pid, P_ALIVE) : -1;
@@ -600,9 +643,8 @@ static int px_kill(int i, pid_t pid, int sig, int *error)
     }
     if (sig == 0)
         return 0;
-    end(t, sig, 1);
-    signal_entry((unsigned)t);          /* its thread, if it waits, wakes to see it */
-    return t == i ? NO_REPLY : 0;
+    sig_send(t, sig);
+    return t == i && !proc_alive(i) ? NO_REPLY : 0;
 }
 
 /* px_brk - PX_BRK: the data segment as long as the break, by the root (lock
@@ -646,6 +688,10 @@ static int handle(int i, struct rx_kregs *r)
         return 0;
     }
     if (r->dx & FAULT_BADGE) {
+        if (sig_fault(i, fault_signal(r->ax & 0xFF))) {
+            give();                     /* a handler's: no reply, the thread stops */
+            return 0;
+        }
         n = fault(i, r, line, sizeof line);
         give();                         /* then the report: the console may wait */
         if (n) {
@@ -692,15 +738,30 @@ static int handle(int i, struct rx_kregs *r)
     case PX_BRK:
         result = px_brk(i, r->bx, &error);
         break;
+    case PX_SIGACTION:
+    case PX_SIGPROCMASK:
+    case PX_SIGPENDING:
+    case PX_SIGSUSPEND:
+    case PX_SIGRETURN:
+    case PX_ALARM:
+    case PX_NANOSLEEP:
+        result = sig_call(i, r, &error);
+        status = r->si;
+        break;
     default:
         if ((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
             result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
         else
             error = ENOSYS;
     }
-    if (result == VFS_SIGPIPE) {        /* its default action, until handlers (P10) */
-        end(i, SIGPIPE, 1);
-        result = NO_REPLY;
+    if (result == VFS_SIGPIPE) {        /* SIGPIPE, and EPIPE if it lives on */
+        sig_send(i, SIGPIPE);
+        result = -1;
+        error = EPIPE;
+    }
+    if (result == VFS_INTR) {           /* a wait a signal broke off */
+        result = -1;
+        error = sig_interrupt(i, 1);
     }
     give();
     if (result == NO_REPLY || procs[i].state != P_ALIVE)
@@ -712,34 +773,48 @@ static int handle(int i, struct rx_kregs *r)
 }
 
 /* proc_thread - the server's thread for entry i (os_thread): its process's
- * calls and faults while there is one, else a sleep until there is */
+ * calls and faults while there is one, else a sleep until there is. Its
+ * notification, bound to it, wakes it as it receives (NOTIFY_LABEL); after
+ * each call and each such wake it takes its turn at the process's signals
+ * (sig_step), which may mark the process's thread to stop for a handler */
 void proc_thread(unsigned i)
 {
     rx_u16 notify = P_SLOT(i, PK_NOTIFY), ep = P_SLOT(i, PK_EP);
     struct rx_kregs r;
+    int reply;
 
     for (;;) {
         if (procs[i].state != P_ALIVE) {
             sleep_on(notify, 0);        /* until a process is in entry i */
             continue;
         }
+        take(notify);                   /* (a wake a sleep took: looked at here) */
+        sig_step((int)i);
+        give();
         r.ax = KCALL_RECV << 8;
         r.dx = ep;
         r.bp = 0;
-        if (rx_kcall(&r)) {
-            sleep_on(notify, 1);        /* its endpoint gone: it ended */
-            continue;
-        }
-        while (handle((int)i, &r)) {
+        while (rx_kcall(&r) == 0) {
+            reply = (r.ax & 0xFF) != NOTIFY_LABEL && handle((int)i, &r);
             if (!os_stack_ok(PROC_N0 + i))
                 overflowed(PROC_N0 + i, notify);
-            r.ax = KCALL_REPLY_RECV << 8;
+            take(notify);
+            sig_step((int)i);
+            give();
+            r.ax = (rx_u16)((reply ? KCALL_REPLY_RECV : KCALL_RECV) << 8);
             r.dx = ep;
             r.bp = 0;
-            if (rx_kcall(&r))
-                break;
         }
+        sleep_on(notify, 1);            /* its endpoint gone: it ended */
     }
+}
+
+/* proc_timers - the processes' timers (server.h; the control thread) */
+void proc_timers(void)
+{
+    take(OS_CONTROL);
+    sig_timers();
+    give();
 }
 
 /* proc_interrupt - Ctrl+Break (server.h): SIGINT's default action to every
@@ -752,10 +827,8 @@ void proc_interrupt(void)
     take(OS_CONTROL);
     for (c = 0; c < PROCS; c++)
         if (procs[c].state == P_ALIVE && procs[c].pid != INIT_PID
-                && procs[c].ppid != INIT_PID) {
-            end(c, SIGINT, 1);
-            signal_entry((unsigned)c);
-        }
+                && procs[c].ppid != INIT_PID)
+            sig_send(c, SIGINT);
     give();
 }
 

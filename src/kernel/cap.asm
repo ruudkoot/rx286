@@ -1564,7 +1564,7 @@ kc_thread:
         cmp byte [es:T_STATE], TS_STOPPED
         je kc_done.state
         test byte [es:T_FLAGS], TF_SUSPEND
-        jnz kc_done.state
+        jnz .suspend_marked
         xor dx, dx                      ; DX:CX = the notification and badge, or 0
         xor cx, cx
         mov ax, [bp + FRAME_SI]
@@ -1592,6 +1592,18 @@ kc_thread:
         mov al, KE_SUSPENDED            ; waiting for its fault's reply: it
         call ipc_fail                   ; stops at once, at the fault
         jmp kc_done.ok
+.suspend_marked:
+        ; marked already: KE_STATE, unless it faulted before it stopped and
+        ; waits for its fault's reply, which a mark alone never ends; then it
+        ; stops at once, at the fault, for the notification first named
+        ; (os-server.md P10)
+        test byte [es:T_IPC], TI_FAULT
+        jz kc_done.state
+        cmp byte [es:T_STATE], TS_SEND
+        je .fault_wait
+        cmp byte [es:T_STATE], TS_REPLY
+        je .fault_wait
+        jmp kc_done.state
 .frame:
         ; the frame of a suspended thread - in its control block, since it
         ; does not run - to or from the caller's bytes, checked as the log's

@@ -697,12 +697,14 @@ static void forward(struct session *s, int function)
 /* control - the control thread: Ctrl+Break, which the keyboard driver
  * signals, ends a sound and restarts the foreground program (and its thread
  * here with it); with no such program, the processes the terminal's reader
- * runs get SIGINT (os-server.md P9; process groups come with P11) */
+ * runs get SIGINT (os-server.md P9; process groups come with P11). The
+ * processes' timers ring here too (CONTROL_TIMER, P10) */
 static void control(void)
 {
     struct rx_kregs r;
 
     for (;;) {
+        proc_timers();                  /* the processes' (P10): at every wake */
         r.ax = KCALL_RECV << 8;
         r.dx = OS_CONTROL;
         r.bp = 0;

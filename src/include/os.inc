@@ -52,6 +52,8 @@ OS_SLOT_ARCHIVE     equ 161     ; the server's: /z, the archive module's bytes (
 OS_SLOT_KEYS        equ 162     ;    a notification the keyboard driver signals, when no
                                 ;    program the root builds has the keys: the processes'
                                 ;    (os-server.md P9)
+OS_SLOT_TIMER       equ 163     ;    the control notification, badged CONTROL_TIMER: the
+                                ;    processes' timers on it (os-server.md P10)
 ROOT_INFO           equ 1       ; BX a module's number -> BX 0 or E_INVAL (no such module);
                                 ;    CL its kind (PS_*), CH its main thread's state
                                 ;    (STATE_*), SI its priority, DI the times it ran

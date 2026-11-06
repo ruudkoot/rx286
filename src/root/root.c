@@ -595,6 +595,8 @@ static void serve_program(unsigned module)
 static void server_control(void)
 {
     give_server(CONTROL, W_CONTROL);
+    must(copy(server_space, CONTROL, OS_SLOT_TIMER * 8 + 4, COPY_MINT, CONTROL_TIMER,
+              RIGHT_SEND));             /* the processes' timers (os-server.md P10) */
     if (foreground) {
         program_slots(foreground);
         give_server(s.thread, W_FOREGROUND);

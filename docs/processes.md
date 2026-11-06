@@ -43,7 +43,7 @@ no transfer segment.
 | `PX_SPAWN` | SI the path, DI `argv`, BX `envp` | a new process of the file, without a copy (`posix_spawn` without file actions or attributes) |
 | `PX_WAITPID` | BX a pid or -1, CX the options (`WNOHANG`) | a zombie child taken: its pid, and its status in SI; else a sleep until a child ends; `ECHILD` with none. init waits even with none |
 | `PX_GETPID`, `PX_GETPPID` | | the pid, the parent's |
-| `PX_KILL` | BX a pid, CX a signal | its default action, which ends the process (handlers come with P10); 0 only looks; init takes none (`EPERM`) |
+| `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`) |
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
 
 The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts
@@ -56,11 +56,82 @@ names a file of `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and
 
 The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
 `EINTR`, `EIO`, `E2BIG`, `ENOEXEC`, `EBADF`, `ECHILD`, `EAGAIN` (the table
-is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`. The signals so far end a
-process: `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB,
-#BP), `SIGABRT`, `SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGSEGV` (any other
-fault), `SIGPIPE`, `SIGTERM`, `SIGCHLD`, up to `SIG_MAX`. A wait status is
-the exit's code in bits 8-15, or the signal in bits 0-6 (`sys/wait.h`).
+is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`. The signals: `SIGHUP`,
+`SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB, #BP), `SIGABRT`,
+`SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGUSR1`, `SIGSEGV` (any other
+fault), `SIGUSR2`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGCHLD`, up to
+`SIG_MAX`. A wait status is the exit's code in bits 8-15, or the signal in
+bits 0-6 (`sys/wait.h`).
+
+## Signals
+
+A process's signals are the server's (roadmap os-server.md P10, D7 A;
+`src/os/signal.c`): for each signal its action (a handler, `SIG_DFL` or
+`SIG_IGN`, the signals blocked while the handler runs, `SA_RESTART`,
+`SA_NODEFER`, `SA_RESETHAND`), and the process's mask and pending set.
+Every default action ends the process but `SIGCHLD`'s, which ignores the
+signal; `SIGKILL` is never caught, ignored or blocked. A fork keeps the
+actions and the mask; an exec puts back the default action of each signal
+caught; a spawn keeps the mask and what is ignored.
+
+| Call | Arguments | What the server does |
+|---|---|---|
+| `PX_SIGACTION` | BX the signal, SI the new action or 0, DI room for the old or 0, CX libc's trampoline | the action, as `struct sigaction` (below); a pending signal now ignored is dropped |
+| `PX_SIGPROCMASK` | BX `SIG_BLOCK`, `SIG_UNBLOCK` or `SIG_SETMASK`, CX:SI the set | the mask before, SI:DI. A signal it unblocks is delivered before the call returns |
+| `PX_SIGPENDING` | | the pending set, SI:DI |
+| `PX_SIGSUSPEND` | CX:SI a mask | the mask while it waits; -1 and `EINTR` once a handler has run, the mask as before |
+| `PX_SIGRETURN` | CX:SI the mask | a handler's end: the mask back (libc's trampoline) |
+| `PX_ALARM` | BX seconds, 0 for none | `SIGALRM` then; the seconds the alarm before had left |
+| `PX_NANOSLEEP` | CX:SI ticks | a sleep; -1, `EINTR` and the ticks left in SI:DI if a handler ran |
+
+A signal sent (`kill`, a fault, a pipe without a reader, Ctrl+Break, a
+child's end, an alarm) is dropped if ignored; its default action ends the
+process at once unless it is blocked; else it is pending, and the
+process's server thread is woken. That thread looks at the signals at
+every turn: after each call, and whenever its notification fires, which is
+bound to it (`THREAD_BIND`) so that it wakes as it waits for a call. For a
+signal pending and not blocked with a handler, it marks the process's
+thread to stop (`THREAD_SUSPEND`). The mark takes effect on the thread's
+way back to ring 3, after the reply to any call it is in. Then the server
+thread reads its frame (`THREAD_FRAME`), and writes the signal's frame
+below its SP (`SF_*`, `src/include/posix.inc`): the signal, the handler,
+the mask for after it, and the registers ES, DS, `PUSHA`'s eight words,
+IP, CS and FLAGS. Its SS must be the process's data (0Fh, which crt0
+takes) or its stack's copy (17h, a forked child's), with room below SP
+above the guard word, or `SIGSEGV` ends it. Then the thread starts again at
+libc's trampoline (`src/lib/posix/sigtramp.asm`), with DS and ES the data
+and DF clear, and the signal blocked while its handler runs (`SA_NODEFER`
+aside). The trampoline calls the handler with the signal, 0 and the frame
+(where `SA_SIGINFO`'s arguments would be), gives the mask back
+(`PX_SIGRETURN`; a signal pending runs its handler first), and returns
+with the frame's `POPA` and `IRET`. At ring 3 `IRET` takes back IP, CS and
+FLAGS but not IOPL; a frame the handler spoilt faults there, and ends the
+process (`SIGSEGV`). A signal due as a handler runs nests, on its stack.
+The 287 is not saved around a handler yet (`SF_287`).
+
+| `struct sigaction` | | The frame | |
+|---|---|---|---|
+| `SAC_HANDLER` (0) | the handler: `PX_SIG_DFL` (0), `PX_SIG_IGN` (1) or its address | `SF_SIG` (0), `SF_HANDLER` (2) | the signal, the handler |
+| `SAC_MASK` (2) | a dword: blocked while it runs | `SF_MASK` (4) | a dword: the mask once the handler is done |
+| `SAC_FLAGS` (6) | `SA_*` | `SF_287` (8) | 1: the trampoline saves the 287 (`SF_287_SIZE` bytes below the frame) |
+| `SAC_SIZE` (8) | | `SF_ES`, `SF_DS` (10, 12) | as the thread stopped |
+| | | `SF_DI` to `SF_AX` (14-28) | `PUSHA`'s eight words |
+| | | `SF_IP`, `SF_CS`, `SF_FLAGS` (30-34) | `IRET`'s three; `SF_SIZE` (36) in all |
+
+A call that waits - a pipe's read or write, the terminal, `waitpid`,
+`sigsuspend`, `nanosleep` - wakes for a signal with a handler and ends
+with `EINTR`; or, if the handler has `SA_RESTART` and the call is a read,
+a write or a `waitpid`, with `ERESTART`, which libc takes as the call to
+make again once the handler has run. A pipe's write that moved some bytes
+returns them. A fault whose signal has a handler, neither blocked nor
+ignored, runs it with the frame of the fault: returning from it faults
+again. A fault's signal blocked or ignored takes its default action.
+
+The timers: an alarm's or a sleep's end is a tick count of the process's.
+The server's control thread keeps one timer for them all, on its
+notification badged `CONTROL_TIMER` (`OS_SLOT_TIMER`), for the earliest:
+at an alarm's end it sends `SIGALRM`, at a sleep's end it wakes the
+sleeper. A fork's child has no alarm; an exec keeps it.
 
 ## Programs from disk
 
@@ -119,9 +190,9 @@ A pipe holds 1 KB, in a segment of the server's; eight may be open at
 once. A read of an empty pipe waits, in the reader's server thread, until a
 writer's thread signals it, and returns 0 once no writer is left; a write
 waits for room, and one of `PIPE_BUF` (512) bytes or fewer is never split
-among others. A write with no reader left ends the writer with `SIGPIPE`,
-its default action (handlers come with P10), or is `EPIPE` once some of
-it went. `fstat` says `S_IFIFO`.
+among others. A write with no reader left sends the writer `SIGPIPE`,
+whose default action ends it; caught, ignored or blocked, the write is
+`EPIPE`. `fstat` says `S_IFIFO`.
 
 The terminal's keys (P9): when no program the root builds has them (an
 image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
@@ -154,7 +225,10 @@ its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
 `dup`, `dup2`, `unlink`, `rmdir`, `chdir`, `getcwd`, `fsync`, `brk`,
 `sbrk`), `fcntl.h` (`open`, `fcntl`), `sys/stat.h` (`stat`, `fstat`,
 `mkdir`), `dirent.h`, `stdio.h`'s `rename`, `sys/wait.h`, `spawn.h`,
-`signal.h`, `errno.h` and `limits.h`; `stdio.h`'s `printf`,
+`signal.h` (`kill`, `raise`, `signal`, `sigaction`, `sigprocmask`,
+`sigpending`, `sigsuspend` and the sets' calls, a set a dword), `unistd.h`'s
+`pause`, `alarm` and `sleep`, `time.h`'s `nanosleep` (to the tick, rounded
+up), `errno.h` and `limits.h`; `stdio.h`'s `printf`,
 `puts` and `putchar`, unbuffered, on descriptor 1, and `perror`;
 `string.h`'s `strerror`; `stdlib.h`'s `malloc` and `free` on `sbrk`,
 `exit`, `getenv` and `atoi`; `execvp` and `posix_spawnp` (P8). `environ` is the crt's (`src/lib/crt/start.c`).

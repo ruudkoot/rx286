@@ -81,6 +81,7 @@ void vfs_exec(int i);
 void vfs_exit(int i);
 #define VFS_GONE (-2)                   /* vfs_call: the process ended as it waited */
 #define VFS_SIGPIPE (-3)                /*    a write to a pipe with no reader: SIGPIPE */
+#define VFS_INTR (-4)                   /*    a wait a signal broke off (sig_interrupt) */
 
 int pipes_init(void);
 /* vfs_tty_reader - the entry of the process that last read the terminal, or

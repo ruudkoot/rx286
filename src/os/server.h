@@ -100,6 +100,10 @@ void test_reader(int how);
 int proc_alive(int i);
 void proc_interrupt(void);
 #define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */
+#define OS_TIMER SLOT(OS_SLOT_TIMER)    /* the control notification, CONTROL_TIMER (P10) */
+/* proc_timers - the processes' timers, at the control thread's every wake:
+ * SIGALRM, a sleep's end, the timer armed for the next (proc.c, signal.c) */
+void proc_timers(void);
 
 /* lock_take, lock_give - the tables' and the files' lock (proc.c, D17): a
  * thread that finds it taken sleeps a tick on its notification */
@@ -115,6 +119,45 @@ void lock_give(void);
 #define PK_SERVER 4                     /* the server's thread for it, */
 #define PK_NOTIFY 5                     /* and that thread's notification */
 #define PROC_NOTIFY(i) P_SLOT(i, PK_NOTIFY)
+#define PROC_PRIORITY 3                 /* the processes': today's programs' */
+#define PROC_DS 0x0F                    /* a process's data and its copy for the stack, */
+#define PROC_SS 0x17                    /*    as its selectors (root/services.c): crt0 */
+                                        /*    takes DS for SS, a forked child keeps 17h */
+#define FLAG_TF 0x0100                  /* FLAGS's trap and direction flags */
+#define FLAG_DF 0x0400
+
+/* proc_end - process i ends by a signal's default action, its server thread
+ * woken; proc_wake - its server thread woken; proc_sleep - its server thread
+ * sleeps until woken; proc_data_limit - its data segment's last offset (proc.c;
+ * lock held, but proc_sleep) */
+void proc_end(int i, int sig);
+void proc_wake(int i);
+void proc_sleep(int i);
+rx_u16 proc_data_limit(int i);
+
+/* The signals (signal.c; P10; lock held). sig_start - process i's as it
+ * starts: from a parent's spawn (SIG_FROM_SPAWN; -1: none), a fork, or as it
+ * execs; sig_send - a signal for process i: ignored, its default action at
+ * once, or pending, its server thread woken; sig_fault - a fault's signal,
+ * pending if a handler takes it: 1, else 0 for its default action;
+ * sig_ready - the lowest signal pending and not blocked, or 0; sig_interrupt
+ * - why a call that waited ends for a signal: 0 if none is ready, EINTR, or
+ * ERESTART; sig_step - its server thread's turn at the signals: a handler's
+ * frame, a default action; sig_call - PX_SIGACTION to PX_NANOSLEEP: the
+ * result, or SIG_GONE if the process ended as it waited; sig_timers - the
+ * deadlines that have come (alarm, nanosleep), the timer armed again */
+#define SIG_FROM_SPAWN 0
+#define SIG_FROM_FORK 1
+#define SIG_FROM_EXEC 2
+#define SIG_GONE (-2)                   /* (proc.c's NO_REPLY, fs.h's VFS_GONE) */
+void sig_start(int i, int from, int how);
+void sig_send(int i, int sig);
+int sig_fault(int i, int sig);
+int sig_ready(int i);
+int sig_interrupt(int i, int restartable);
+void sig_step(int i);
+int sig_call(int i, struct rx_kregs *r, int *error);
+void sig_timers(void);
 /* os_stack_ok, os_stack_used - thread n's part of the stacks (start.asm):
  * is its guard there; the bytes it has used at most */
 int os_stack_ok(unsigned n);

@@ -23,7 +23,7 @@ PX_WAITPID          equ 6       ; BX a pid (-1: any child), CX the options -> th
                                 ;    SI its status (0: WNOHANG and none has ended)
 PX_GETPID           equ 7       ; -> the pid
 PX_GETPPID          equ 8       ; -> the parent's pid
-PX_KILL             equ 9       ; BX a pid, CX a signal: its default action (0: only look)
+PX_KILL             equ 9       ; BX a pid, CX a signal (0: only look)
 PX_BRK              equ 10      ; BX the break asked for (0: none) -> the break
 ; The files (P7): a path is SI, its zero at the end; buffers are SI or DI
 PX_OPEN             equ 11      ; SI the path, BX O_* flags -> a descriptor
@@ -46,7 +46,21 @@ PX_GETDENTS         equ 26      ; BX a directory's descriptor, DI the room, CX i
                                 ;    bytes of whole DE_SIZE records written (0: the end)
 PX_FSYNC            equ 27      ; BX a descriptor: its file's data and entry on the disk
 PX_PIPE             equ 28      ; -> the read end's descriptor, and SI the write end's
-PX_CALLS            equ 29
+; The signals (P10): a set is a dword, CX its low word and SI its high one
+; going in, SI and DI coming back
+PX_SIGACTION        equ 29      ; BX a signal, SI its new action (SAC_*; 0: none), DI room for
+                                ;    the old (0: none), CX libc's trampoline (rx_sigtramp)
+PX_SIGPROCMASK      equ 30      ; BX SIG_BLOCK, SIG_UNBLOCK or SIG_SETMASK, CX:SI the set ->
+                                ;    the mask before, SI:DI
+PX_SIGPENDING       equ 31      ; -> the signals pending, SI:DI
+PX_SIGSUSPEND       equ 32      ; CX:SI the mask while it waits -> -1, EINTR, once a handler
+                                ;    has run; the mask as before
+PX_SIGRETURN        equ 33      ; CX:SI the mask again: a handler's end, libc's trampoline's
+PX_ALARM            equ 34      ; BX seconds (0: none): SIGALRM then -> the seconds the alarm
+                                ;    before had left (0: none)
+PX_NANOSLEEP        equ 35      ; CX:SI ticks (TICKS_HZ a second) -> 0; or -1, EINTR, and the
+                                ;    ticks left, SI:DI
+PX_CALLS            equ 36
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
@@ -78,10 +92,12 @@ ENAMETOOLONG        equ 36
 ENOSYS              equ 38
 ENOTEMPTY           equ 39
 EPIPE               equ 32
+ERESTART            equ 85      ; never a program's: a call a signal's handler broke off,
+                                ;    which libc makes again (SA_RESTART)
 PIPE_BUF            equ 512     ; a pipe's write of this many bytes or fewer is never split
 
-; The signals, as their default actions end a process (signal.h; P10 adds
-; the handlers)
+; The signals (signal.h). Their default actions end a process, but
+; SIGCHLD's, which ignores it
 SIGHUP              equ 1
 SIGINT              equ 2
 SIGQUIT             equ 3
@@ -90,11 +106,44 @@ SIGTRAP             equ 5
 SIGABRT             equ 6
 SIGFPE              equ 8
 SIGKILL             equ 9
+SIGUSR1             equ 10
 SIGSEGV             equ 11
+SIGUSR2             equ 12
 SIGPIPE             equ 13
+SIGALRM             equ 14
 SIGTERM             equ 15
 SIGCHLD             equ 17
 SIG_MAX             equ 31
+PX_SIG_DFL          equ 0       ; a handler: the default action (signal.h's SIG_DFL)
+PX_SIG_IGN          equ 1       ;    ignored (SIG_IGN); else its address
+SA_RESTART          equ 0x0001  ; sigaction's flags: a call it breaks off is made again
+SA_NODEFER          equ 0x0002  ;    the signal not blocked in its own handler
+SA_RESETHAND        equ 0x0004  ;    the default action again once it is caught
+SIG_BLOCK           equ 0       ; sigprocmask's how
+SIG_UNBLOCK         equ 1
+SIG_SETMASK         equ 2
+; struct sigaction, as PX_SIGACTION reads and writes it (signal.h)
+SAC_HANDLER         equ 0       ; word
+SAC_MASK            equ 2       ; dword: blocked while the handler runs
+SAC_FLAGS           equ 6       ; word: SA_*
+SAC_SIZE            equ 8
+; The frame the server writes below a process's SP for a handler, which
+; libc's trampoline (rx_sigtramp) reads, and passes to the handler as its
+; third argument; from SF_ES on, the registers as the thread stopped, which
+; its POPA and IRET take back
+SF_SIG              equ 0       ; word: the signal, the handler's argument
+SF_HANDLER          equ 2       ; word: the handler
+SF_MASK             equ 4       ; dword: the mask once the handler is done
+SF_287              equ 8       ; word: 1 if the trampoline saves the 287 around it
+SF_ES               equ 10
+SF_DS               equ 12
+SF_DI               equ 14      ; PUSHA's eight words, to SF_AX
+SF_AX               equ 28
+SF_IP               equ 30
+SF_CS               equ 32
+SF_FLAGS            equ 34
+SF_SIZE             equ 36
+SF_287_SIZE         equ 94      ; FSAVE's bytes, which the trampoline keeps below the frame
 
 WNOHANG             equ 1       ; waitpid's options
 O_RDONLY            equ 0       ; open's flags (fcntl.h)

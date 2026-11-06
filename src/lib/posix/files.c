@@ -12,27 +12,19 @@
 #include "rx/rx286.h"
 #include "os.h"
 
-/* px - a call on the OS server: its result, or -1 and errno; SI out in *si */
+/* rx_px - posix.c's call on the OS server */
+int rx_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs *r);
+
+/* px - a call on the OS server (rx_px, posix.c): its result, or -1 and
+ * errno; SI out in *si */
 static int px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, rx_u16 *si_out)
 {
     struct rx_kregs r;
+    int result = rx_px(call, bx, cx, si, di, &r);
 
-    r.ax = (rx_u16)((KCALL_CALL << 8) | call);
-    r.bx = bx;
-    r.cx = cx;
-    r.dx = OS_EP;
-    r.si = si;
-    r.di = di;
-    r.bp = 0;
-    if (rx_kcall(&r)) {
-        errno = ENOSYS;
-        return -1;
-    }
-    if ((int)r.bx == -1)
-        errno = r.cx;
     if (si_out)
         *si_out = r.si;
-    return (int)r.bx;
+    return result;
 }
 
 #define P(x) ((rx_u16)(unsigned)(x))

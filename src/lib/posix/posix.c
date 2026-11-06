@@ -16,24 +16,30 @@
 
 int errno;
 
-/* px - a call on the OS server: its result, or -1 and errno */
-static int px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs *r)
+/* rx_px - a call on the OS server: its result, or -1 and errno; made again
+ * while the server says ERESTART, a wait a handler broke off (SA_RESTART;
+ * the handler has run by then) */
+int rx_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs *r)
 {
-    r->ax = (rx_u16)((KCALL_CALL << 8) | call);
-    r->bx = bx;
-    r->cx = cx;
-    r->dx = OS_EP;
-    r->si = si;
-    r->di = di;
-    r->bp = 0;
-    if (rx_kcall(r)) {
-        errno = ENOSYS;                 /* no OS server answers */
-        return -1;
-    }
+    do {
+        r->ax = (rx_u16)((KCALL_CALL << 8) | call);
+        r->bx = bx;
+        r->cx = cx;
+        r->dx = OS_EP;
+        r->si = si;
+        r->di = di;
+        r->bp = 0;
+        if (rx_kcall(r)) {
+            errno = ENOSYS;             /* no OS server answers */
+            return -1;
+        }
+    } while ((int)r->bx == -1 && r->cx == ERESTART);
     if ((int)r->bx == -1)
         errno = r->cx;
     return (int)r->bx;
 }
+
+#define px rx_px
 
 /* _exit - PX_EXIT: the process ends with its status */
 void _exit(int status)
@@ -85,7 +91,7 @@ pid_t wait(int *status)
     return waitpid(-1, status, 0);
 }
 
-/* kill - PX_KILL: the signal's default action, which ends the process */
+/* kill - PX_KILL: a signal for a process (signal.c has the rest) */
 int kill(pid_t pid, int sig)
 {
     struct rx_kregs r;

@@ -271,10 +271,11 @@ def build(test):
         for name in ('kernel.bin', 'user.bin', 'user.rx', 'root.rx', 'os.rx', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
-                     'rtc.bin', 'clock.rx', 'z.arc', 'z-init.rx', 'z-proc.rx', 'z-child.rx',
-                     'z-files.rx', 'z-execs.rx', 'z-codes.rx', 'z-pipes.rx', 'z-keys.rx'):
+                     'rtc.bin', 'clock.rx', 'z.arc'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
+        for name in glob.glob(os.path.join(b, 'z-*.rx')):     # /z's programs
+            os.remove(name)
         shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them
         with open(stamp, 'w', encoding='utf-8') as f:
             f.write(wanted)

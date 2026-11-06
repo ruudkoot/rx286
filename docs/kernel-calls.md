@@ -179,7 +179,10 @@ E6, D7):
   signalled with its capability's badge (1 if none). A thread waiting for
   its fault's reply stops at once instead, its wait ended and its registers
   as they were at the fault; the handler's reply then finds nobody
-  (`KE_STATE`). A thread stopped, free or marked already: `KE_STATE`.
+  (`KE_STATE`). A thread stopped, free or marked already: `KE_STATE`;
+  but one marked that faulted before it stopped, and so waits for its
+  fault's reply, stops at once at the fault, for the notification first
+  named (roadmap os-server.md P10).
 - **`THREAD_FRAME`** reads or writes a suspended thread's whole frame,
   `TFR_SIZE` bytes at SI:DI of the caller's, checked as `KCALL_LOG` checks
   its buffer (`KE_CAP`): ES, DS, `PUSHA`'s eight words, the vector and

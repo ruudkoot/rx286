@@ -43,6 +43,7 @@ SERVICE_SOUND       equ 8
 SERVICE_CLOCK       equ 9
 OS_SLOT_SERVICE     equ 3
 CONTROL_BREAK       equ 1       ; the control notification's bits: Ctrl+Break
+CONTROL_TIMER       equ 2       ;    the processes' timers (OS_SLOT_TIMER; os-server.md P10)
 
 ; The printer driver: one call
 DRV_PRINT           equ 1       ; BX the printer, CX bytes, SI their offset in the segment

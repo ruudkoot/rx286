@@ -483,7 +483,8 @@ static void wake(int i)
 }
 
 /* pipe_wait - process i's thread waits, the lock given up, until another
- * signals it; 0 if the process ended meanwhile */
+ * signals it: 1; 0 if the process ended meanwhile; -1 if a signal is ready
+ * for it (P10) */
 static int pipe_wait(int i, signed char *who)
 {
     struct rx_kregs r;
@@ -497,7 +498,9 @@ static int pipe_wait(int i, signed char *who)
     lock_take(PROC_NOTIFY(i));
     if (*who == i)
         *who = -1;
-    return proc_alive(i);
+    if (!proc_alive(i))
+        return 0;
+    return sig_ready(i) ? -1 : 1;
 }
 
 /* ofd_drop - a reference to a description gone; at the last, a file's
@@ -581,12 +584,15 @@ static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
     rx_u8 RX_FAR *buf = (rx_u8 RX_FAR *)RX_MK_FP(PIPE_SEG, o->unit * PIPE_SIZE);
     rx_u8 RX_FAR *to = (rx_u8 RX_FAR *)RX_MK_FP(data, at);
     rx_u16 k;
+    int w;
 
     while (p->count == 0) {
         if (p->writers == 0)
             return 0;
-        if (!pipe_wait(i, &p->reader))
+        if ((w = pipe_wait(i, &p->reader)) == 0)
             return VFS_GONE;
+        if (w < 0 && p->count == 0)
+            return VFS_INTR;
     }
     if (n > p->count)
         n = p->count;
@@ -606,6 +612,7 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
     rx_u8 RX_FAR *buf = (rx_u8 RX_FAR *)RX_MK_FP(PIPE_SEG, o->unit * PIPE_SIZE);
     const rx_u8 RX_FAR *from = (const rx_u8 RX_FAR *)RX_MK_FP(data, at);
     rx_u16 done = 0, room, take, k;
+    int w;
 
     while (done < n) {
         if (p->readers == 0)
@@ -613,8 +620,10 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
         room = (rx_u16)(PIPE_SIZE - p->count);
         if (room < (n <= PIPE_BUF && done == 0 ? n : 1)) {
             wake(p->reader);
-            if (!pipe_wait(i, &p->writer))
+            if ((w = pipe_wait(i, &p->writer)) == 0)
                 return VFS_GONE;
+            if (w < 0)
+                return done ? (int)done : VFS_INTR;
             continue;
         }
         take = n - done < room ? (rx_u16)(n - done) : room;
@@ -656,6 +665,11 @@ static int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n)
             if (!proc_alive(i)) {
                 lock_take(PROC_NOTIFY(i));
                 return VFS_GONE;
+            }
+            if (sig_ready(i)) {         /* a signal's handler is due (P10) */
+                test_reader(TEST_READER_NONE);
+                lock_take(PROC_NOTIFY(i));
+                return VFS_INTR;
             }
         }
         if (key & 0xFF) {
