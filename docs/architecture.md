@@ -9,8 +9,8 @@ L5):
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
 | kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 8.9 KB of code, 2.6 KB of data |
-| the root | `src/root/` | a module of the image, ring 2 | about 2.9 KB of code |
-| the OS server | `src/os/` | a module of the image, ring 2, a thread for each program; the files, in DOS's way | about 4.2 KB of code |
+| the root | `src/root/` | a C module of the image, ring 2; the processes' services | about 9 KB of code |
+| the OS server | `src/os/` | a C module of the image, ring 2, a thread for each program; the files, in DOS's way | about 8.7 KB of code; its threads' stacks, 15 KB, in its data |
 | the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
 | the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
 | the clock | `src/userland/clock.c` | a C module of the image (*docs/c.md*), ring 3, beside the shell, above it | about 900 bytes |
@@ -185,8 +185,8 @@ memory of its own, which `kill` revokes and `start` builds it again from.
 
 ## The OS server
 
-*docs/os-server.md* has the details. The OS server (`src/os/os.asm`;
-roadmap l4.md L6, D16) serves the
+*docs/os-server.md* has the details. The OS server (`src/os/`, in C since
+roadmap os-server.md P5; roadmap l4.md L6, D16) serves the
 programs' system calls as messages, with a thread for each program that
 serves it alone, so that one program's wait holds up no other (l4.md X13).
 The `sys` macro calls a stub that puts the registers and a buffer in the

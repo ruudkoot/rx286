@@ -141,6 +141,14 @@ $(B)/root.rx: $(C_LIB_OBJS) $(ROOT_OBJS) tools/mkexe
 
 $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 
+# The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
+# (start.asm), a thread a program, each on its part of the stacks
+SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) files.$(OBJ) fat.$(OBJ))
+$(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
+	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
+
+$(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
+
 # A test program in C (tests/programs/*.c), the program module of its build
 $(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe
 	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ))

@@ -2,13 +2,12 @@
 # Sys Req key: every thread, its state and priority, and how much of the
 # kernel's one stack has been used (roadmap os-server.md P3). The keyboard
 # driver asks for the dump (roadmap l4.md L8), and is running; the shell
-# waits for the reply of the OS server's thread, which looks for a key once
-# a tick; the OS server's control thread awaits Ctrl+Break; the mouse's
+# waits for the reply of the OS server's thread, which sleeps until the
+# keyboard driver signals (roadmap os-server.md P5); the OS server's control
+# thread awaits Ctrl+Break; the mouse's
 # driver is still in the mouse's reset (roadmap l4.md L7), but on MAME,
 # where the drivers, at 7 above the root at 6 (roadmap os-server.md P4),
-# have run long enough to finish it. Whether the
-# shell's OS thread is in its tick's sleep or just out of it depends on the
-# emulator's timing.
+# have run long enough to finish it.
 program: shell
 keys: {sysrq}
 match: contains
@@ -28,8 +27,6 @@ rx286: thread rtc receiving priority 7
 rx286: thread program awaiting its reply priority 3
 rx286: thread counter ready priority 1
 rx286: thread os awaiting a notification priority 5
-@bochs rx286: thread os ready priority 5
-@mame rx286: thread os ready priority 5
-@dosbox-x rx286: thread os awaiting a notification priority 5
+rx286: thread os awaiting a notification priority 5
 rx286: thread os receiving priority 5
 rx286: the kernel's stack used

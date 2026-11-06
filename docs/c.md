@@ -1,6 +1,6 @@
 # C
 
-rx286's programs, its root, and in time its OS server, are C, built
+rx286's programs, its root and its OS server are C, built
 against rx286's own crt and libc (roadmap os-server.md P1, D1, D22). The
 kernel and the drivers stay assembly. This document is the toolchain, the
 conventions C and NASM meet by, and rx286's executable format.
@@ -120,7 +120,11 @@ image (`clock=build/test/clock.rx:3:4`).
   program; `tests/unit/test_helpers.py` runs the 32-bit helpers in Unicorn
   against Python's arithmetic.
 - **On rx286:** the root (`src/root/root.c`, roadmap os-server.md P4), the
-  clock and the counter are C (`src/userland/clock.c`, `counter.c`), so
-  every suite tests the crt and the libraries in every `make check`.
+  OS server (`src/os/`, P5), the clock and the counter are C
+  (`src/userland/clock.c`, `counter.c`), and so is the services' test
+  program (`tests/programs/services.c`), so every suite tests the crt and
+  the libraries in every `make check`. The OS server starts each of its
+  threads with its own start (`src/os/start.asm`), not crt0: a part of the
+  stacks in its data segment for each (*docs/os-server.md*).
 - **The second compiler:** `make check-ia16` runs those suites with every C
   module built by gcc-ia16, and check-286 over its objects.

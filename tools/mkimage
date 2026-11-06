@@ -95,7 +95,7 @@ def main(args):
     names = [spec.partition('=')[0] for spec in specs]
     if 'os' in names and names.index('os') != 1:
         # its programs' slots are 8n to 8n + 7 of its space: n = 1 would be
-        # its own fixed slots (src/os/os.asm; roadmap l4.md L13)
+        # its own fixed slots (src/os/os.c; roadmap l4.md L13)
         sys.exit('mkimage: the OS server, os, must be the second module, after the root')
     image = bytearray(kernel + bytes(L['MODULES_OFF'] - len(kernel)))
     entries = []

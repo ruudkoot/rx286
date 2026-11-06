@@ -1,6 +1,7 @@
 # The OS server
 
-The OS server (`src/os/`; roadmap l4.md L6, L9, D16) is rx286's
+The OS server (`src/os/`, in C since roadmap os-server.md P5; roadmap
+l4.md L6, L9, D16) is rx286's
 "msdos.sys": a module in ring 2 that serves the programs' system calls as
 messages (*docs/syscalls.md*), through the drivers of the devices, the
 kernel's log and ticks, or by itself; keeps each program's files in DOS's
@@ -11,17 +12,29 @@ way; and handles the programs' faults. The root builds it
 
 | Thread | Its stack | What |
 |---|---|---|
-| program n's | the n-th `OS_STACK` (512 bytes) of its stack segment, n the program's module number | serves program n alone: its calls and its faults |
-| the control thread | part 16, the last | Ctrl+Break: the keyboard driver signals the control notification; the thread ends a sound, drops the keys waiting and restarts the foreground program |
+| program n's | part n - 1 of the stacks in its data segment, n the program's module number | serves program n alone: its calls and its faults |
+| the control thread | part 15, the last (n = 16) | Ctrl+Break: the keyboard driver signals the control notification; the thread ends a sound, drops the keys waiting and restarts the foreground program |
 
-A thread knows its program by where its stack is (`program_number`). Each
-serves one program, so one program's wait for a key or a tick holds up no
+The root starts each thread with SP = 4n in the server's small stack
+segment; that is how a thread knows its program. Its start
+(`src/os/start.asm`), in place of C's crt0, moves it to its part of the
+stacks at the bottom of the data segment, 1 KB each, since C's small model
+wants SS = DS, and calls `os_thread(n)` (`src/os/os.c`). Each part's lowest
+word is a guard, which the thread checks after every message: a thread
+that overflowed its part says so on the log and serves no more. On a
+thread's first start its part is filled with the guard's word, so that
+`os_stack_used` can tell how deep it has gone (`tests/shell/stacks.test`).
+The threads share no table: each works on its own program's segments.
+
+Each thread serves one program, so one program's wait for a key or a tick holds up no
 other (roadmap l4.md X13); and since it was started with `START_SESSION`, a
 restart of its program restarts it too, and a wait on the program's behalf
 is given up with it. A driver still serves one call at a time: a program's
 sound or sector waits for another's on the same driver, and the joystick
 for the sound driver's tone to end. A key waits only for the keyboard
-driver's answer, which never waits.
+driver's answer, which never waits; and the driver signals the foreground
+program's thread's notification whenever the keyboard sent it something
+(below).
 
 ## Its slots
 
@@ -34,7 +47,7 @@ driver's answer, which never waits.
 | 14 | the control notification |
 | 15 | the foreground program's thread, which Ctrl+Break restarts |
 | 8n to 8n + 7 | program n's: the endpoint it calls on, its thread, its space, its code, data and stack, its transfer segment and its files segment (`OS_K_*`) |
-| 128 + n | a notification program n's thread sleeps on (`OS_SLOT_SLEEP`) |
+| 128 + n | a notification program n's thread sleeps on (`OS_SLOT_SLEEP`): the kernel's timer signals it with bit 1; the foreground program's, the keyboard driver too, whenever the keyboard sent something (`KEY_SIGNAL_BIT`) |
 | 160 | the root's fault endpoint, badged `ROOT_BADGE_OS` (`OS_SLOT_ROOT`) |
 
 Its space has 256 slots.
@@ -48,7 +61,7 @@ function as the label. The program's thread here (`forward`):
 | Calls | Where they go |
 |---|---|
 | `SYS_WRITE` | the kernel's log (`KCALL_LOG`) and the console driver's main area; a background program's only to its field of the status line |
-| `SYS_READ_KEY` | the keyboard driver's ring, once a tick while it waits |
+| `SYS_READ_KEY` | the keyboard driver's ring; a wait sleeps until the driver signals |
 | `SYS_TICKS` | the kernel's count (`KCALL_TICKS`) |
 | `SYS_TIME` | the RTC driver |
 | `SYS_DISK_READ`, `SYS_DISK_WRITE` | the diskette driver (A, B) or the fixed disk driver (C, D), the transfer segment passed |
@@ -56,7 +69,7 @@ function as the label. The program's thread here (`forward`):
 | `SYS_SOUND`, `SYS_JOYSTICK` | the sound driver; the joystick's five results in the block of the transfer segment passed |
 | `SYS_MOUSE` | the mouse driver |
 | `SYS_SERIAL_WRITE`, `SYS_SERIAL_READ` | the serial driver, the transfer segment passed (`E_BUSY` in builds where COM2 is the log) |
-| `SYS_WAIT` | the keyboard's, the mouse's and the serial line's drivers, asked once a tick |
+| `SYS_WAIT` | the keyboard's, the mouse's and the serial line's drivers, asked once a tick, and at once when the keyboard driver signals |
 | `SYS_FIND` to `SYS_FREE` | its own: the files (below) |
 | `SYS_PS`, `SYS_KILL`, `SYS_START` | the root (*docs/root.md*) |
 | `SYS_EXIT` | `THREAD_RESTART` of the program, and with it this thread |
@@ -64,15 +77,22 @@ function as the label. The program's thread here (`forward`):
 Before a call goes to a driver the server makes the checks the kernel made
 when the call was its own, in the kernel's order: the arguments, then the
 buffer (the stub's `XFER_BAD` is `E_FAULT`). It puts the results back in
-the block, and replies. A call that waits sleeps a tick at a time on the
-thread's own notification and the kernel's timer (`tick`). In test builds
+the block, and replies. `SYS_WAIT` sleeps a tick at a time on the
+thread's own notification and the kernel's timer (`tick`); a wait for a key
+sleeps on the notification alone, which the keyboard driver signals after
+every byte it takes - a key, a release, a modifier - so nothing asks the
+keyboard once a tick any more (roadmap os-server.md P5). A byte that comes
+between the look and the sleep leaves its bit set, and the sleep ends at
+once. (A release or a modifier gives no key, but the thread must look
+again: in test builds it tells the kernel's typing again that it waits, and
+the next key is typed.) In test builds
 it tells the kernel's typing when the program waits for a key
 (`KCALL_TEST`'s `TEST_READER`).
 
 ## The files
 
-The file calls are the server's own (`files.asm`, `fat.asm`; roadmap l4.md
-L9, *docs/storage.md*). Each program has a files segment of its own,
+The file calls are the server's own (`src/os/files.c`, `src/os/fat.c`;
+roadmap l4.md L9, *docs/storage.md*). Each program has a files segment of its own,
 which the root gives only to the server: its current drive and each
 drive's current directory, and the FAT12 library's state and buffers.
 The thread for a program works in that segment alone, so no program's

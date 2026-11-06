@@ -11,6 +11,11 @@
 ; right Ctrl and Alt, the arrows, Delete and Ctrl+Pause; the E1h sequence
 ; (Pause) is skipped. The keyboard's LEDs are left alone.
 ;
+; Whatever the keyboard sent - a key, a release, a modifier - is signalled
+; on the notification of the OS server's thread for the foreground program
+; (DRV_SLOT_KEYS), which then looks for a key again: a wait for a key sleeps
+; until the keyboard does something (os-server.md P5).
+;
 ; Ctrl+Break (Ctrl+Scroll Lock on the AT keyboard, Ctrl+Pause on an
 ; enhanced one) is never a call (l4.md X13): the driver signals the OS
 ; server's control notification, and the OS server restarts the foreground
@@ -38,6 +43,7 @@ EP                  equ SLOT(DRV_SLOT_EP)
 NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
 IRQ                 equ SLOT(DRV_SLOT_IRQ)
 CONTROL             equ SLOT(DRV_SLOT_DEVICE)
+KEYS                equ SLOT(DRV_SLOT_KEYS)
 KBD_RING_SIZE       equ 16              ; a power of two
 KBD_E1_SEQUENCE     equ 5               ; the bytes after E1h in Pause's sequence
 KBD_IRQ_BYTES       equ 16              ; bytes taken at most in one look
@@ -132,6 +138,8 @@ serve:
 .news:
         push bx                         ; the bits
         call kbd_take
+        mov dx, KEYS                    ; the OS server looks again (no OS server:
+        kcall KCALL_SIGNAL              ; KE_CAP, nothing)
         pop bx
         test bx, DRV_IRQ_BIT
         jz serve

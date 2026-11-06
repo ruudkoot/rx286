@@ -23,7 +23,7 @@ KR_SI               equ 8
 KR_DI               equ 10
 KR_BP               equ 12
 
-global rx_kcall, rx_ticks, rx_log, rx_ud2, rx_verr
+global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr
 
 code_section
 
@@ -118,6 +118,33 @@ rx_log:
         jnc .done
         mov ax, -1
 .done:
+        pop si
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_log_far - int rx_log_far(unsigned segment, unsigned offset, unsigned n):
+; bytes of another segment to the kernel's log (KCALL_LOG): a server's,
+; from its client's transfer segment
+;   In:       the stack: segment, offset, n
+;   Out:      AX = the bytes written (fewer if the thread is to restart), or
+;             -1
+;   Destroys: BX, CX, DX
+; ----------------------------------------------------------------------------
+rx_log_far:
+        push bp
+        mov bp, sp
+        push si
+        push ds
+        mov si, ARG(1)
+        mov cx, ARG(2)
+        mov ds, ARG(0)
+        mov ah, KCALL_LOG
+        int KCALL_VECTOR
+        jnc .done
+        mov ax, -1
+.done:
+        pop ds
         pop si
         pop bp
         ret

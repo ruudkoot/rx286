@@ -190,8 +190,9 @@ it alone. `src/include/os.inc` holds the interface:
   `SYS_JOYSTICK`, `SYS_MOUSE`, `SYS_SERIAL_WRITE` and `SYS_SERIAL_READ` go
   to their drivers; `SYS_TICKS` is the kernel's count (`KCALL_TICKS`); and
   `SYS_WAIT` asks the keyboard's, the mouse's and the serial line's drivers
-  once a tick (*docs/drivers.md*). The file calls are the server's own
-  (`src/os/files.asm`), each program's in a files segment of its own
+  once a tick, and a wait for a key sleeps until the keyboard driver
+  signals (*docs/drivers.md*). The file calls are the server's own
+  (`src/os/files.c`), each program's in a files segment of its own
   (`FILES_SIZE` bytes), which the program never sees.
 - **Faults:** a program's fault comes to the OS server on the same
   endpoint, badged `FAULT_BADGE`; it reports it as the kernel did and

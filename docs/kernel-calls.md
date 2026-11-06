@@ -410,7 +410,8 @@ slot 2. The OS server's module ("os") gets a space of 256 slots and a
 thread for each program, which serves it alone (`START_SESSION`), with the
 program's capabilities in slots 8n to 8n + 7 (*docs/syscalls.md*), among
 them a files segment of `FILES_SIZE` bytes that is the server's alone, and
-in slot 128 + n a notification the thread sleeps on, a tick at a time. A
+in slot 128 + n a notification the thread sleeps on, a tick at a time or,
+the foreground program's, until the keyboard driver signals. A
 driver (`MF_DRIVER`) gets a space of `DRV_SLOTS` slots, a thread with
 IOPL, an endpoint, a notification and its interrupt line
 (*docs/drivers.md*). Every other module is a program: a thread, an

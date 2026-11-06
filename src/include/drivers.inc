@@ -21,10 +21,16 @@ DRV_SLOT_RECV       equ 6       ;    where a segment passed to it lands
 DRV_SLOT_DEVICE     equ 7       ;    the console's: the screen's text page; the keyboard's:
                                 ;    the OS server's control notification, to signal; the
                                 ;    diskette's: its DMA buffer (512 bytes within 64 KB)
-DRV_SLOTS           equ 8       ; a driver's space
+DRV_SLOT_KEYS       equ 8       ;    the keyboard's: the notification of the OS server's
+                                ;    thread for the foreground program, badged
+                                ;    KEY_SIGNAL_BIT, signalled whenever the keyboard sent
+                                ;    something (os-server.md P5)
+DRV_SLOTS           equ 16      ; a driver's space
 DRV_TIMER_BIT       equ 1       ; the notification's bits: its timer (its own capability)
 DRV_IRQ_BIT         equ 2       ;    its interrupt (the root binds a copy badged so)
 DRV_STOP_BIT        equ 4       ;    the sound driver's: Ctrl+Break, from the OS server
+KEY_SIGNAL_BIT      equ 2       ; the keyboard, on that notification of the OS server's
+                                ;    (its timer's bit is 1)
 
 SERVICE_PRINTER     equ 1       ; M_SERVICE: what a driver serves; the OS server
 SERVICE_MOUSE       equ 2       ;    holds its endpoint in slot OS_SLOT_SERVICE + service

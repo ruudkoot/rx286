@@ -129,7 +129,7 @@ The shell's drive commands (`drives.asm`) are the OS server's file calls
 `SYS_DIR_NEXT` to the directory's end and `SYS_FREE`; `cd` is `SYS_GETCWD`
 or `SYS_CHDIR`; `type` and `print` are `SYS_FIND`, then `SYS_FILE_NEXT` a
 sector at a time; the prompt is `SYS_DRIVE` and `SYS_GETCWD`. The FAT12
-library that was the shell's is the server's now (`src/os/fat.asm`,
+library that was the shell's is the server's now (`src/os/fat.c`,
 *docs/storage.md*): it reads; it does not write. It checks a volume's BPB
 before it uses it: 512-byte sectors, clusters of a power of two sectors,
 one or two FATs, whole sectors of root entries, and fewer than 4,085

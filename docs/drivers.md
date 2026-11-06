@@ -26,7 +26,7 @@ builds, its log (D15).
 
 A driver's module table entry has `MF_DRIVER`, and perhaps an interrupt
 line (`M_IRQ`) and a service (`M_SERVICE`; *docs/memory-map.md*). The root
-(*docs/kernel-calls.md*) gives it a space of `DRV_SLOTS` slots and,
+(*docs/kernel-calls.md*) gives it a space of `DRV_SLOTS` (16) slots and,
 besides its code, data and stack:
 
 | Slot | Constant | What |
@@ -36,6 +36,7 @@ besides its code, data and stack:
 | 5 | `DRV_SLOT_IRQ` | its interrupt line, which the root bound to that notification with `DRV_IRQ_BIT` |
 | 6 | `DRV_SLOT_RECV` | empty: where a segment passed to it lands |
 | 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK`; the diskettes', a 512-byte DMA buffer that crosses no 64 KB boundary |
+| 8 | `DRV_SLOT_KEYS` | the keyboard's: the notification of the OS server's thread for the foreground program, badged `KEY_SIGNAL_BIT`, which it signals after every byte it takes, so that a wait for a key sleeps until the keyboard does something (roadmap os-server.md P5) |
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
@@ -109,7 +110,9 @@ It owns the 8042 and IRQ1 (roadmap l4.md L8): the modifiers, a ring of
 keys, Ctrl+Break, Ctrl+Alt+Del and Sys Req, as the kernel did. The OS
 server takes a key with `DRV_KBD_GET`, looks with `DRV_KBD_PEEK`, and drops
 the keys waiting with `DRV_KBD_CLEAR` when it starts the foreground program
-again; it asks once a tick while a program waits for a key. Ctrl+Break is
+again. While the foreground program waits for a key, the server's thread
+sleeps until the driver signals it (`DRV_SLOT_KEYS`), which the driver does
+after every byte the keyboard sends (roadmap os-server.md P5). Ctrl+Break is
 never a call (l4.md X13): the driver signals the OS server's control
 notification, whose control thread restarts the foreground program.
 Ctrl+Alt+Del: the driver says so on the log and resets the machine through

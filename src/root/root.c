@@ -8,8 +8,9 @@
  * code, as the kernel gave it; a data segment of the module's room,
  * initialised from the module's data as assembled; a stack. The OS server's
  * module ("os") gets a space of OS_SLOTS and, for each program, a thread
- * that serves that program alone (START_SESSION), on its own part of the
- * server's stack, with the program's capabilities in its slots (os.asm).
+ * that serves that program alone (START_SESSION), started with SP = 4n,
+ * which tells it its program (src/os/start.asm), with the program's
+ * capabilities in its slots (src/os/os.c).
  * Every other module is a program: it gets a thread, an endpoint to the OS
  * server badged with its module's number (OS_SLOT_EP) and a transfer
  * segment it shares with the server (OS_SLOT_XFER; os.inc); the server
@@ -77,15 +78,17 @@ RX_STATIC_ASSERT(CHILD_SLOT + 2 * PROGRAMS_MAX <= ROOT_SLOT_LOW_UNTYPED, child_s
 #define W_DRV_NOTIFY (DRV_SLOT_NOTIFY * 8 + 4)
 #define W_DRV_IRQ (DRV_SLOT_IRQ * 8 + 4)
 #define W_DRV_DEVICE (DRV_SLOT_DEVICE * 8 + 4)
+#define W_DRV_KEYS (DRV_SLOT_KEYS * 8 + 4)
 #define W_SOUND_STOP (13 * 8 + 4)               /* the OS server's: the sound driver's
                                                    notification, */
 #define W_CONTROL (14 * 8 + 4)                  /* its control notification, */
 #define W_FOREGROUND (15 * 8 + 4)               /* the foreground program's thread */
-#define OS_CONTROL_N 16                         /* its control thread's part of its stack */
+#define OS_CONTROL_N 16                         /* its control thread's number */
 #define OS_SLOTS 256                            /* the OS server's space: 8n + k for program
                                                    n, */
 #define OS_SLOT_SLEEP 128                       /* and n's thread's notification at 128 + n */
-#define OS_STACK 512                            /* each of its threads' part of its stack */
+#define OS_STACK 4                              /* each of its threads' SP at a start: 4n,
+                                                   n its program (src/os/start.asm) */
 #ifdef TEST_CAPS
 #define CAPS_SLOTS 64                           /* the program's, with what TEST_CAPS gives: */
 #define CAPS_UNTYPED (10 * 8 + 4)               /* the memory for segments */
@@ -523,15 +526,30 @@ static void server_params(void)
     m_priority = ENTRY_B(e, M_PRIORITY);
 }
 
+/* keyboard_space - the keyboard driver's space, of the root's, or 0 */
+static rx_u16 keyboard_space(void)
+{
+    unsigned module;
+    entry_ptr e;
+
+    for (module = 1; module <= programs; module++) {
+        e = entry_of(module);
+        if ((ENTRY_B(e, M_FLAGS) & MF_DRIVER) && ENTRY_B(e, M_SERVICE) == SERVICE_KEYBOARD)
+            return (rx_u16)(SLOT(PROGRAM_SLOT) + (module - 1) * 64);
+    }
+    return 0;
+}
+
 /* serve_program - the OS server's thread for one program, and the program's
- * capabilities in the server's slots for it */
+ * capabilities in the server's slots for it; for the foreground program, the
+ * keyboard driver gets its thread's notification to signal each key on */
 static void serve_program(unsigned module)
 {
-    rx_u16 top = (rx_u16)(module * OS_STACK);   /* its part's top */
+    rx_u16 top = (rx_u16)(module * OS_STACK);   /* its SP at a start */
     rx_u16 to = (rx_u16)(module * 64 + 4);      /* the server's slots 8n + k */
 
     if (top > m_stack)
-        return;                         /* no room on the server's stack: unserved */
+        return;                         /* past the server's stack: unserved */
     program_slots(module);
     give_server(s.ep, to);
     give_server(s.thread, (rx_u16)(to + 8));
@@ -544,6 +562,9 @@ static void serve_program(unsigned module)
     /* its thread's notification, to sleep on: made in the scratch slot, moved
      * to the server's OS_SLOT_SLEEP + n */
     must(retype(ut_arena, CAP_NOTIFY, SCRATCH, 0, 0));
+    if (module == foreground && keyboard_space())
+        must(copy(keyboard_space(), SCRATCH, W_DRV_KEYS, COPY_MINT, KEY_SIGNAL_BIT,
+                  RIGHT_SEND));
     must(copy(server_space, SCRATCH, (rx_u16)((OS_SLOT_SLEEP + module) * 8 + 4), COPY_MOVE,
               0, 0));
     /* its thread */
@@ -554,8 +575,9 @@ static void serve_program(unsigned module)
                      (rx_u16)(m_priority | (START_SESSION << 8))));
 }
 
-/* server_control - the OS server's control thread, on the last part of its
- * stack, with the control notification and the foreground program's thread */
+/* server_control - the OS server's control thread, started as program
+ * OS_CONTROL_N's would be, with the control notification and the foreground
+ * program's thread */
 static void server_control(void)
 {
     give_server(CONTROL, W_CONTROL);
@@ -564,7 +586,7 @@ static void server_control(void)
         give_server(s.thread, W_FOREGROUND);
     }
     if (OS_CONTROL_N * OS_STACK > m_stack)
-        return;                         /* no room on its stack */
+        return;                         /* past its stack */
     program_slots(server);              /* its thread: the server module's slot */
     must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
     fault_to(s.thread, FAULT_EP, (rx_u16)server);
@@ -587,8 +609,8 @@ static void give_service(unsigned module, int service)
 }
 
 /* build_server - the OS server's threads: one for each program, which
- * serves it alone, on its own part of the server's stack, with the
- * program's capabilities in the server's slots 8n to 8n + 7 */
+ * serves it alone, with the program's capabilities in the server's slots
+ * 8n to 8n + 7 */
 static void build_server(void)
 {
     unsigned module;

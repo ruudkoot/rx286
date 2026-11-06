@@ -22,6 +22,8 @@ int rx_kcall(struct rx_kregs *r);
 rx_u32 rx_ticks(void);
 /* rx_log - bytes to the kernel's log: how many were written, or -1 */
 int rx_log(const void *bytes, unsigned n);
+/* rx_log_far - bytes of another segment to the kernel's log: as rx_log */
+int rx_log_far(unsigned segment, unsigned offset, unsigned n);
 /* rx_ud2 - an invalid opcode on purpose, for the tests of faults */
 void rx_ud2(void);
 /* rx_verr - may the caller read through a selector (VERR)? 1 or 0 */

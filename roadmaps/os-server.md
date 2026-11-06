@@ -123,7 +123,7 @@ What it rests on:
 | P2 | The kernel's additions; the list of children | done (2026-11-06, branch `os-server`) |
 | P3 | The kernel's memory: one kernel stack, objects anywhere, extended memory | done (2026-11-06, branch `os-server`) |
 | P4 | The root in C; its allocator and its services | done (2026-11-06, branch `os-server`) |
-| P5 | The OS server in C, serving today's calls | not started |
+| P5 | The OS server in C, serving today's calls | done (2026-11-06, branch `os-server`) |
 | P6 | Processes: fork, exec, exit, wait | not started |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | not started |
 | P8 | Programs from disk | not started |
@@ -2102,6 +2102,28 @@ The largest change to the kernel since l4.md, in three steps, each with every su
 * **Done when:** every suite passes unchanged, the attack suite and the fuzzer included, on
   all three emulators. With today's threads kept, the transcripts that show them hold too.
 * **Decisions:** D4, D19.
+* **Done (2026-11-06):**
+  - **The port:** `src/os/os.c` (the calls, the faults, the control thread), `files.c` and
+    `fat.c` (the file calls and the FAT12 reader), `start.asm` (each thread's start); the
+    assembly server is deleted. Every suite passes on all three emulators; the only
+    transcripts that changed are the segment bases after the server's, 608 bytes lower.
+    Its code is 8.7 KB, the C library's `snprintf` among it, against the assembly server's
+    4.2 KB.
+  - **Otherwise than planned:** no lock yet. The threads share no table: each works on its
+    own program's transfer and files segments; the lock comes with P6's process table.
+  - **The stacks:** 1 KB a thread at the bottom of the data segment (C wants SS = DS). The
+    root starts each thread with SP = 4n in a stack segment of 64 bytes, n its program,
+    which `start.asm` turns into its part. A guard word at each part's bottom is checked
+    after every message, and the part is filled at the thread's first start: after a
+    directory of two clusters, a file through the FAT, `cd`, `ps` and a fault reported, the
+    shell's thread had used 256 bytes (`tests/shell/stacks.test`).
+  - **The keyboard** signals the notification of the server's thread for the foreground
+    program (`DRV_SLOT_KEYS`; drivers' spaces have 16 slots) after every byte it takes, not
+    only after a key: a release or a modifier gives no key, but the thread must look again,
+    and the kernel's test typing waits for the reader to say it waits once more. A wait for
+    a key sleeps until then; `SYS_WAIT` still asks the mouse and the serial line once a
+    tick.
+  - `lib/rx286` gains `rx_log_far`, for a client's bytes in its transfer segment.
 
 ### P6. Processes (L, about 2,500)
 

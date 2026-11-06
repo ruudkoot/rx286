@@ -53,8 +53,8 @@ reply finds no one waiting. Ctrl+Alt+Del does not wait.
 ## The files
 
 The file calls (`SYS_FIND` to `SYS_FREE`, *docs/syscalls.md*) are the OS
-server's (`src/os/files.asm`), on the FAT12 library that was the shell's
-(`src/os/fat.asm`; storage roadmap D7). As DOS does, the server keeps each
+server's (`src/os/files.c`), on the FAT12 library that was the shell's
+(`src/os/fat.c`, in C since roadmap os-server.md P5; storage roadmap D7). As DOS does, the server keeps each
 program's current drive and each drive's current directory. Each call
 mounts its drive afresh: on a fixed disk, the master boot record's first
 FAT12 partition; then the volume's boot sector, whose BPB says where the
