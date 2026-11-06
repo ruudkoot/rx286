@@ -742,16 +742,17 @@ void proc_thread(unsigned i)
     }
 }
 
-/* proc_interrupt - Ctrl+Break (server.h): SIGINT's default action to the
- * children of the terminal's last reader */
+/* proc_interrupt - Ctrl+Break (server.h): SIGINT's default action to every
+ * process but init and its children - the shell, and what it runs, until
+ * process groups (P11) */
 void proc_interrupt(void)
 {
-    int t, c;
+    int c;
 
     take(OS_CONTROL);
-    t = vfs_tty_reader();
-    for (c = 0; t >= 0 && c < PROCS; c++)
-        if (procs[c].state == P_ALIVE && procs[c].ppid == procs[t].pid && c != t) {
+    for (c = 0; c < PROCS; c++)
+        if (procs[c].state == P_ALIVE && procs[c].pid != INIT_PID
+                && procs[c].ppid != INIT_PID) {
             end(c, SIGINT, 1);
             signal_entry((unsigned)c);
         }
@@ -763,7 +764,7 @@ void proc_boot(void)
 {
     static const char path[] = "/z/init";
     static const char *const argv[] = { path, 0 };
-    static const char *const envp[] = { "PATH=/z:/c/bin", 0 };
+    static const char *const envp[] = { "PATH=/z:/c/bin", "HOME=/a", 0 };
     int error;
 
     take(OS_CONTROL);

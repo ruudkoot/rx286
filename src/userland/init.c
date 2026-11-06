@@ -4,17 +4,31 @@
  * /z at boot, beside today's programs, which the root builds. It waits for
  * ever, for its children and for the orphans that become its own; the
  * server keeps it waiting even while it has none. The TEST_POSIX_* builds
- * start a test first (tests/posix).
+ * start a test first (tests/posix); the builds with the shell in C
+ * (INIT_SHELL, PROGRAM=sh) start it, and again whenever it ends.
  * ============================================================================ */
 
 #include "spawn.h"
 #include "unistd.h"
 #include "sys/wait.h"
 
-/* main - wait, for ever */
+/* main - wait, for ever; in a build with the shell in C, start it, and
+ * start it again whenever it ends */
 int main(void)
 {
     int status;
+#ifdef INIT_SHELL
+    static char *const shell[] = { "sh", 0 };
+    pid_t sh = -1, got;
+
+    for (;;) {
+        if (sh < 0)
+            posix_spawn(&sh, "/z/sh", 0, 0, shell, environ);
+        got = wait(&status);
+        if (got == sh || got < 0)
+            sh = -1;
+    }
+#endif
 #if defined(TEST_POSIX_PROC) || defined(TEST_POSIX_FILES) || defined(TEST_POSIX_EXEC) \
     || defined(TEST_POSIX_PIPE) || defined(TEST_POSIX_KEYS)
 #if defined(TEST_POSIX_PROC)

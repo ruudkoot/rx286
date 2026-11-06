@@ -21,6 +21,7 @@ char *strcpy(char *to, const char *from);
 char *strncpy(char *to, const char *from, size_t n);
 char *strcat(char *to, const char *from);
 char *strchr(const char *s, int c);
+char *strerror(int e);
 char *strrchr(const char *s, int c);
 
 #endif

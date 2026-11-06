@@ -49,6 +49,7 @@
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
 #   {c:name} the counter's, {r:name} the root's, {z:program.name} a program of
 #   /z's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   {{ and }} a brace itself;
 #   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
 #   {m:module.codesum}, {m:module.datasum} sums of its code and data;
 #   {image_sum} entry.asm's Fletcher sum of the image's words; {image_size}
@@ -421,7 +422,9 @@ def substitute(test, line):
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
-    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    line = line.replace('{{', '\x00').replace('}}', '\x01')    # {{ and }}: braces themselves
+    line = re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    return line.replace('\x00', '{').replace('\x01', '}')
 
 
 def relevant(lines):

@@ -150,6 +150,12 @@ static int string_of(rx_u16 data, rx_u16 at, char *to)
     return ENAMETOOLONG;
 }
 
+/* lower - a character in lower case */
+static char lower(char c)
+{
+    return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
+}
+
 /* path_make - a path made absolute against a directory, "." and ".." taken
  * out: 0 or the error */
 static int path_make(const char *cwd, const char *in, struct path *p)
@@ -159,12 +165,23 @@ static int path_make(const char *cwd, const char *in, struct path *p)
 
     if (in[0] == 0)
         return ENOENT;
+    if (lower(in[0]) >= 'a' && lower(in[0]) < 'a' + DRIVES && in[1] == ':') {
+        n = 2;                          /* a drive DOS's way: "c:/docs" is "/c/docs" */
+        p->copy[0] = '/';
+        p->copy[1] = lower(in[0]);
+        if (n + 1 + strlen(in + 2) >= PX_PATH_MAX)
+            return ENAMETOOLONG;
+        p->copy[2] = '/';
+        strcpy(p->copy + 3, in + 2);
+        goto split;
+    }
     n = in[0] == '/' ? 0 : strlen(cwd);
     if (n + 1 + strlen(in) >= PX_PATH_MAX)
         return ENAMETOOLONG;
     memcpy(p->copy, cwd, n);
     p->copy[n] = '/';
     strcpy(p->copy + n + 1, in);
+split:
     p->parts = 0;
     for (s = p->copy; *s; s = e) {
         while (*s == '/')
@@ -195,12 +212,6 @@ static int path_make(const char *cwd, const char *in, struct path *p)
         n += strlen(p->part[k]);
     }
     return 0;
-}
-
-/* lower - a character in lower case */
-static char lower(char c)
-{
-    return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
 }
 
 /* same - two names alike in any case */

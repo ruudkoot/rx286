@@ -18,5 +18,6 @@ int printf(const char *fmt, ...);
 int puts(const char *text);
 int putchar(int c);
 int rename(const char *from, const char *to);
+void perror(const char *what);
 
 #endif

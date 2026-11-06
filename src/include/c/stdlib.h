@@ -15,6 +15,7 @@
 
 void *malloc(size_t size);
 char *getenv(const char *name);
+int atoi(const char *s);
 void free(void *p);
 RX_NORETURN void exit(int status);
 

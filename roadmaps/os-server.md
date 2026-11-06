@@ -127,7 +127,7 @@ What it rests on:
 | P6 | Processes: fork, exec, exit, wait | done (2026-11-06, branch `os-server`) |
 | P7 | Files: descriptors, writable FAT12, the cache, `/dev` | done but for the diskette driver (2026-11-06, branch `os-server`) |
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
-| P9 | Pipes and the shell in C | step 1 of 3 done (2026-11-06, branch `os-server`) |
+| P9 | Pipes and the shell in C | steps 1 and 2 of 3 done (2026-11-06, branch `os-server`) |
 | P10 | Signals | not started |
 | P11 | Terminals, the eight virtual terminals, job control | not started |
 | P12 | The commands and the devices | not started |
@@ -2279,6 +2279,26 @@ The largest change to the kernel since l4.md, in three steps, each with every su
     (`OS_SLOT_KEYS`), and `/dev/tty` reads keys, raw: an arrow as ESC [ A to D. Ctrl+Break
     gives the children of the terminal's last reader `SIGINT` (process groups come with
     P11). `tests/posix/keys` on all three emulators.
+* **Step 2 done (2026-11-06): the shell in C and the first commands.**
+  - **The shell** (`src/bin/sh/sh.c`, 720 lines; 9.5 KB as an executable): a process of `/z`
+    that init starts in an image built with `PROGRAM=sh`, and again when it ends. A raw line
+    editor with Backspace and a history on Up and Down; lists, pipelines, `<`, `>`, `>>`,
+    `2>`, quoting, `$NAME`, `${NAME}`, `$?`, assignments, aliases (put in when a line is read,
+    as POSIX has it), and the built-ins `cd`, `pwd`, `exit`, `export`, `unset`, `set`,
+    `alias`, `unalias`, `true`, `false`. Each part of a list is expanded only when it runs.
+  - **The commands** (`src/bin/`, 450 lines): `echo`, `cat`, `ls`, `cp`, `mv`, `rm`, `mkdir`,
+    `rmdir`, `wc`, `lp`, `more`, in `/z` beside the shell. libc gained `strerror`, `perror`
+    and `atoi`.
+  - **Drive letters:** the server takes `c:/docs` as `/c/docs`.
+  - **Ctrl+Break** now gives every process but init and init's children `SIGINT`: what the
+    shell runs, not the shell (status 130).
+  - **`ls c:/docs | wc -l > c:/n.txt`** works, and `cat c:/n.txt` shows 2
+    (`tests/sh/basics.test`).
+  - **The tests:** `tests/sh` on Bochs and MAME (`lp` on Bochs alone, since MAME's printers
+    are not captured). DOSBox-X has no disk controller rx286 can use, so no test of a shell
+    that reads the drives runs there. That is also true of today's `tests/drives`.
+  - **Left for step 3:** today's 34 tests of the assembly shell rewritten for this one,
+    `PROGRAM=shell` made this shell, and the assembly shell deleted.
 
 ### P10. Signals (M, about 1,500)
 

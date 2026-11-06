@@ -30,8 +30,10 @@ $(INC_H)/%.h: src/include/%.inc tools/inc2h
 	@mkdir -p $(dir $@)
 	$(PYTHON) tools/inc2h $< $@
 
-# The flavour and the test's NASM defines, as the C compiler takes them
-C_DEFINES := $(patsubst -d%,-D%,$(FLAVOUR_DEFINE) $(TEST_DEFINES))
+# The flavour and the test's NASM defines, as the C compiler takes them;
+# INIT_SHELL where init runs the shell (PROGRAM=sh)
+C_DEFINES := $(patsubst -d%,-D%,$(FLAVOUR_DEFINE) $(TEST_DEFINES)) \
+    $(if $(filter sh,$(PROGRAM)),-DINIT_SHELL)
 NASM_C_FLAGS := -w+all -w+error -Isrc/include/ -Isrc/userland/ -Isrc/lib/ $(FLAVOUR_DEFINE) \
     $(TEST_DEFINES)
 
@@ -113,11 +115,11 @@ endif
 # system calls)
 START_OBJS := $(addprefix $(C_B)/lib/crt/,crt0.$(OBJ) start.$(OBJ))
 CRT_OBJS := $(addprefix $(C_B)/lib/crt/,memory.$(OBJ) setjmp.$(OBJ) helpers.$(OBJ))
-LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ))
+LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ) stdlib.$(OBJ))
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
-    files.$(OBJ) dirent.$(OBJ) path.$(OBJ))
+    files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -164,7 +166,11 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     files=$(C_B)/tests/posix/files.$(OBJ) execs=$(C_B)/tests/posix/exec.$(OBJ) \
     pipes=$(C_B)/tests/posix/pipe.$(OBJ) keys=$(C_B)/tests/posix/keys.$(OBJ)
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
-Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS))
+# The shell and its commands (P9), where init runs the shell
+Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls cp mv rm mkdir rmdir wc lp more, \
+    $(c)=$(C_B)/bin/$(c).$(OBJ))
+Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS)) \
+    $(if $(filter sh,$(PROGRAM)),$(Z_SHELL))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
 # install: lines put them on a run's drive C
 DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ))

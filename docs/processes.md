@@ -85,7 +85,8 @@ build made in C's `/BIN` (`tools/install-programs`), and run-test's
 The tree is one (D13 C, `src/os/vfs.c`): `/` is the server's own and
 read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
 programs and `/dev` the devices (`null`, `tty`, the console, and `lpt1`,
-`lpt2`). A path is made absolute against the process's current directory,
+`lpt2`). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A
+path is made absolute against the process's current directory,
 which starts at its parent's (`/` for init), and its "." and ".." taken out
 before it is followed; within a volume a name is 8.3, matched in any case
 and kept upper case. A process has `OPEN_MAX` (20) descriptors, each naming
@@ -123,8 +124,9 @@ image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
 signals a notification of the processes' (`OS_SLOT_KEYS`), and a read of
 `/dev/tty` waits for a key, the lock given up: a key's ASCII, an arrow as
 ESC [ A to D. The terminal is raw until P11's line discipline. Ctrl+Break
-gives the children of the terminal's last reader `SIGINT`, whose default
-action ends them (process groups come with P11).
+gives every process but init and init's children `SIGINT`, whose default
+action ends them: what the shell runs, and not the shell (process groups
+come with P11).
 
 The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 `EMFILE` (no descriptor left), `ENOSPC`, `ESPIPE`, `EROFS` (`/`, `/z`, a
@@ -149,8 +151,9 @@ its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
 `sbrk`), `fcntl.h` (`open`, `fcntl`), `sys/stat.h` (`stat`, `fstat`,
 `mkdir`), `dirent.h`, `stdio.h`'s `rename`, `sys/wait.h`, `spawn.h`,
 `signal.h` and `errno.h`; `stdio.h`'s `printf`,
-`puts` and `putchar`, unbuffered, on descriptor 1; `stdlib.h`'s `malloc` and
-`free` on `sbrk`, and `exit`. `environ` is the crt's (`src/lib/crt/start.c`).
+`puts` and `putchar`, unbuffered, on descriptor 1, and `perror`;
+`string.h`'s `strerror`; `stdlib.h`'s `malloc` and `free` on `sbrk`,
+`exit`, `getenv` and `atoi`; `execvp` and `posix_spawnp` (P8). `environ` is the crt's (`src/lib/crt/start.c`).
 fork keeps C's registers on the stack, which the root copies; the 287's
 state is not kept yet.
 
@@ -165,7 +168,9 @@ read-only (`OS_SLOT_ARCHIVE`). It starts with the magic `AR_MAGIC` ("RZ",
 name (`AR_NAME`, `AR_NAME_SIZE` bytes, zero-padded), where it starts
 (`AR_OFFSET`) and its bytes (`AR_SIZE`); then the files, each from a
 paragraph. All of it fits a module's data, 64 KB. The Makefile puts `init`
-and the processes' test programs there (`Z_PROGRAMS`, `c.mk`).
+there, the processes' test programs in the builds of their tests, and the
+shell and its commands in those with the shell in C (`Z_PROGRAMS`,
+`c.mk`).
 
 ## The table
 
@@ -183,6 +188,43 @@ child and before the console.
 init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
-process that ends become its own. Today's shell is still a program the root
-builds, beside it, until the shell in C (P9). In `TEST_POSIX_PROC` builds
-init starts `tests/posix/proc.c` (`tests/posix/proc.test`).
+process that ends become its own. In an image built with `PROGRAM=sh` it
+starts the shell in C, `/z/sh`, and starts it again whenever it ends; in
+the others today's shell is still a program the root builds, beside it,
+until P9's last step. In `TEST_POSIX_*` builds init starts a test of
+`tests/posix` instead (`tests/posix/proc.test`).
+
+## The shell
+
+The shell (roadmap os-server.md P9, D14; `src/bin/sh/sh.c`) is a process
+in C, POSIX-like. It reads a line from `/dev/tty`, raw: it echoes what is
+typed, takes Backspace, and recalls its last 8 lines on Up and Down. Its
+prompt is the current directory and `$`. It starts in `HOME`, with the
+environment init gave it (`PATH=/z:/c/bin`, `HOME=/a`).
+
+| What | How |
+|---|---|
+| a line | pipelines joined by `;`, `&&` and `\|\|`; each expanded only when it runs, so `$?` is the status of the one before |
+| a pipeline | commands joined by `\|`, each a child, a pipe between each two; its status is the last's: its exit code, or 128 and the signal that ended it |
+| a command | words split at blanks; `'...'` quotes all, `"..."` all but `$`, `\` the next character; `$NAME`, `${NAME}` and `$?` are put in; redirections `<`, `>`, `>>` and `2>`; `NAME=value` words alone set a shell variable |
+| an alias | its text put in for a command's first word when the line is read, as POSIX has it: an alias made on a line is there from the next |
+| a built-in | `cd` (to `HOME` without an argument), `pwd`, `exit`, `export`, `unset`, `set` (the variables), `alias`, `unalias`, `true`, `false`; alone, it runs in the shell, its redirections undone after |
+| a program | found along `PATH` (`execvp`); one not found is status 127 ("sh: nosuch: no such file or directory"), one not executable 126 |
+
+Ctrl+Break ends what the shell runs, not the shell: the status is 130.
+The commands are programs of `/z`, in C (`src/bin/`):
+
+| Command | What |
+|---|---|
+| `echo` | its arguments, a space between, then a new line |
+| `cat` | each file, or descriptor 0, to descriptor 1 |
+| `ls` | a directory's names, or a file's own, one a line; names that start with "." left out; a header before each when there are several |
+| `cp` | a file to a file, or into a directory |
+| `mv` | `rename`: within a drive (across drives: "across drives") |
+| `rm`, `mkdir`, `rmdir` | each path |
+| `wc` | lines, words and bytes, of each file or descriptor 0; `-l`, `-w`, `-c` for one |
+| `lp` | each file, or descriptor 0, to `/dev/lpt1`; `-d lpt2` to the other |
+| `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, `q` to stop |
+
+A command's error is its name, the path and `strerror`'s text, on
+descriptor 2, and status 1.

@@ -1,0 +1,46 @@
+# The shell's syntax (roadmap os-server.md P9): quoting, variables and $?,
+# lists, redirection of input, output and errors, cd (and to HOME) and pwd,
+# aliases, a command not found, and a line recalled with Up. An alias is put
+# in when its line is read, as POSIX has it: on its own line it is not there
+# yet.
+program: sh
+# DOSBox-X has no disk controller rx286 can use (docs/emulators.md).
+emulators: bochs mame
+keys: echo 'a  b' "home: $HOME" \\$HOME\nX=1; echo $X $\{X}y\nexport X; set\n
+keys: true && echo yes; false || echo no; false && echo never; echo $?\n
+keys: nosuch; echo $?\necho one > /b/t.txt; echo two >> /b/t.txt; wc -l < /b/t.txt\n
+keys: cat /b/nothing 2> /b/err.txt; cat /b/err.txt\ncd /b; pwd; cd ..; pwd\n
+keys: alias ll='ls /c'; ll\n{up}\ncd; pwd\n
+---
+rx286, test build
+/a$ echo 'a  b' "home: $HOME" \$HOME
+a  b home: /a $HOME
+/a$ X=1; echo $X ${{X}}y
+1 1y
+/a$ export X; set
+PATH=/z:/c/bin
+HOME=/a
+X=1
+/a$ true && echo yes; false || echo no; false && echo never; echo $?
+yes
+no
+1
+/a$ nosuch; echo $?
+sh: nosuch: no such file or directory
+127
+/a$ echo one > /b/t.txt; echo two >> /b/t.txt; wc -l < /b/t.txt
+2
+/a$ cat /b/nothing 2> /b/err.txt; cat /b/err.txt
+/b/nothing: no such file or directory
+/a$ cd /b; pwd; cd ..; pwd
+/b
+/
+/$ alias ll='ls /c'; ll
+sh: ll: no such file or directory
+/$ alias ll='ls /c'; ll
+README.TXT
+DOCS
+NUMBERS.TXT
+/$ cd; pwd
+/a
+/a$

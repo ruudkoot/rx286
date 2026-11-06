@@ -63,11 +63,13 @@ program_main_keys := tests/programs/keys.asm
 program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
 program_main_services := tests/programs/services.c
-# PROGRAM=none: no program the root builds; the processes have the keys (P9)
+# PROGRAM=none: no program the root builds; the processes have the keys (P9);
+# PROGRAM=sh: no program the root builds either, and init runs the shell in C
 program_main_none := none
+program_main_sh := none
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The program's module: assembled, or a C program linked (c.mk)
-PROGRAM_BIN := $(if $(filter none,$(PROGRAM)),,$(if $(filter %.c,$(PROGRAM_MAIN)),$(B)/user.rx,$(B)/user.bin))
+PROGRAM_BIN := $(if $(filter none,$(PROGRAM_MAIN)),,$(if $(filter %.c,$(PROGRAM_MAIN)),$(B)/user.rx,$(B)/user.bin))
 # The counter runs beside the shell; beside a test program only if the test
 # asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
 # timings stay their own. Its priority is below the program's (3), or as a
@@ -272,8 +274,8 @@ check: unit test test-286 check-286 check-image check-repro lint check-docs
 # whose images carry C programs, on Bochs; not part of make check, since it
 # needs gcc-ia16 in $(IA16) (docs/building.md).
 IA16_TESTS := tests/demo/demo.test tests/root/fault.test $(wildcard tests/threads/*.test) \
-    $(wildcard tests/services/*.test) $(wildcard tests/posix/*.test) tests/root/own-fault.test \
-    tests/kernel/stretch-kill.test
+    $(wildcard tests/services/*.test) $(wildcard tests/posix/*.test) $(wildcard tests/sh/*.test) \
+    tests/root/own-fault.test tests/kernel/stretch-kill.test
 check-ia16: disks
 	$(PYTHON) tools/run-test --cc ia16 $(IA16_TESTS)
 	$(MAKE) FLAVOUR=release B=build/release-ia16 CC_KIND=ia16 image

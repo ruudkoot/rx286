@@ -58,7 +58,8 @@ rx286>
 ```
 
 Header lines (`tools/run-test` documents them all): `program` (shell,
-attack, fuzz, storage), `keys` (what to type), `define` (a NASM define for
+attack, fuzz, storage, `none` for no program module, `sh` for the shell in
+C), `keys` (what to type), `define` (a NASM define for
 the test image), `image` (a fragmented, missing, truncated or oversized
 `KERNEL.BIN`, one past 64 KB, one whose first module is not the root or
 whose table places a module outside it, a disk without a loader),
@@ -80,7 +81,8 @@ a program symbol's offset, `{k:name}` a kernel one, `{c:name}` the
 counter's and `{r:name}` the root's; `{m:module.base}`, `{m:module.limit}`,
 `{m:module.codesum}` and `{m:module.datasum}` say where a module's code is
 in the boot image and what it and its data sum to; `{image_sum}`,
-`{image_size}` and `{image_free}` describe `KERNEL.BIN` and the floppy.
+`{image_size}` and `{image_free}` describe `KERNEL.BIN` and the floppy;
+`{{` and `}}` are braces themselves.
 
 Every run gets its own copies of drives B, C and D (`make disks`,
 *docs/storage.md*), and its printers print into files of its directory, so
@@ -113,6 +115,7 @@ The suites:
 | `tests/revoke` | delete and revoke (roadmap l4.md L12): a revoked copy in DS null on the way back, memory given back and made again at the same base, an endpoint's queued caller failed with `KE_CAP`, a worker's space and thread gone with their untyped, E3's ABA case, a worker that deletes its own stack stopped after its way back fails (L13), and copies of untyped and of a saved reply refused |
 | `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; the root's own fault, a panic (os-server.md D8); a boot image without a root, or with a module outside it, refused by the loader |
 | `tests/posix` | the processes (roadmap os-server.md P6, P7; *docs/processes.md*): init starts `tests/posix/proc.c` from `/z`, which forks, execs and spawns `tests/posix/child.c` with arguments, waits, takes a child's fault and a kill as their signals, uses the heap, and is refused a fork once the table is full; and `tests/posix/files.c`, which writes, reads, appends, makes, lists, renames and removes on B, reads `/`, `/dev` and `/z`, shares a description by `dup` and `fork`, and is refused what it may not do, after which `fsck.fat` finds B sound and mtools reads its files; and `tests/posix/exec.c` (P8), which runs programs installed on C, finds them along PATH, sees two copies share their code, is refused a program at every corruption of its header, and times an exec from C (Bochs and MAME); `tests/posix/pipe.c` (P9), bytes through pipes, past their 1 KB, a child's standard output, writes of `PIPE_BUF` never split, `SIGPIPE`; and `tests/posix/keys.c`, in an image with no program module, keys read from `/dev/tty` and Ctrl+Break's `SIGINT` |
+| `tests/sh` | the shell in C and its commands (roadmap os-server.md P9; *docs/processes.md*): a pipeline into a file, quoting, variables, `$?`, lists, redirections, `cd` and `pwd`, aliases, a command not found, a line recalled; making, copying, moving, listing, counting and removing on B, and the refusals, after which `fsck.fat` finds B sound; `more`'s pages; Ctrl+Break ending a command and not the shell; `lp` on both printers (Bochs) |
 | `tests/services` | the root's services for processes (roadmap os-server.md P4; `tests/programs/services.c`, a C test program): a code loaded, sealed and found, a process spawned, forked, grown and given a thread, both ended, every refusal; a thousand spawns and exits, after which the memory gives the same segments of 64 KB; a thread at the drivers' priority missing no tick while the root forks 64 KB four times (Bochs and MAME) |
 | `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break and Ctrl+Alt+Del, through the keyboard driver and the OS server (`tests/programs/keys.asm`), the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC, the longest stretch with interrupts off (`stretch.test`, and across a kill and a start, `stretch-kill.test`; roadmaps/realtime.md R0) |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task |
