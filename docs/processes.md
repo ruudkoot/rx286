@@ -193,7 +193,9 @@ case, as the server or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A
 process has `OPEN_MAX` (20) descriptors, each naming
 an open file description of the server's (32 in all): its kind, its flags,
 its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
-`FD_CLOEXEC`. init's descriptors 0 to 2 are `/dev/tty`.
+`FD_CLOEXEC`. Every description of one file has its first cluster and
+size, as the last change through any of them left them: the file's entry
+is written at each one's last close (P15). init's descriptors 0 to 2 are `/dev/tty`.
 
 | Call | Arguments | What the server does |
 |---|---|---|
@@ -206,7 +208,7 @@ its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 | `PX_STAT`, `PX_FSTAT` | SI the path or BX the descriptor, DI `ST_BYTES` of room | `ST_MODE` (`S_IFREG`, `S_IFDIR` or `S_IFCHR` within `S_IFMT`, and 0644, 0444 for a read-only file, 0755 for a directory), `ST_INO` (the entry's place: its directory's cluster and its index), `ST_NLINK` (1), `ST_SIZE`, `ST_MTIME` (DOS's time stamp, as seconds since 1970), `ST_DEV` (the drive) |
 | `PX_UNLINK`, `PX_RMDIR` | SI the path | a file's, or an empty directory's (`ENOTEMPTY`), entry and clusters gone; `EBUSY` while open |
 | `PX_MKDIR` | SI the path | a cluster with "." and "..", and its entry |
-| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): the entry made anew in the new directory, the old deleted, a file of the new name replaced, a directory's ".." its new parent |
+| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): the entry made anew in the new directory, the old deleted, a file of the new name replaced, a directory's ".." its new parent; a directory into itself or one inside it is `EINVAL` |
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short) |
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end. libc's `opendir` and `readdir` read through it (`dirent.h`) |
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk |

@@ -754,6 +754,32 @@ void vfs_exit(int i)
             fd_close(i, fd);
 }
 
+/* same_file - do two descriptions name one volume's file (its entry)? */
+static int same_file(const struct ofd *a, const struct ofd *b)
+{
+    return a != b && a->kind == K_FILE && b->kind == K_FILE && a->drive == b->drive
+           && a->where.sector == b->where.sector && a->where.at == b->where.at;
+}
+
+/* file_share - a file's first cluster and size, as one description has
+ * them, given to every other description of the file: one file, however
+ * many descriptions name it (XSH 2.5.1), whose entry is written at each
+ * one's last close. A description whose chain changed under it forgets
+ * its cursor */
+static void file_share(const struct ofd *o)
+{
+    int k;
+
+    for (k = 0; k < OFDS; k++)
+        if (same_file(&ofds[k], o)) {
+            if (ofds[k].first != o->first)
+                ofds[k].cursor = 0;
+            ofds[k].first = o->first;
+            ofds[k].size = o->size;
+            ofds[k].changed |= o->changed;
+        }
+}
+
 /* file_cluster - a file's cluster of an index, from its cursor or its
  * first; grown, if asked, by clusters taken; 0 in *c past its chain */
 static rx_u16 file_cluster(struct ofd *o, rx_u16 index, int grow, rx_u16 *c)
@@ -813,6 +839,8 @@ static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, i
         within = o->offset % bytes;
         e = file_cluster(o, (rx_u16)(o->offset / bytes), write, &cluster);
         if (e || cluster == 0) {
+            if (write)
+                file_share(o);          /* (a first cluster taken before the error) */
             *error = e ? errno_of(e) : EIO;
             return done ? (int)done : -1;
         }
@@ -847,6 +875,8 @@ static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, i
         if (write)
             o->changed = 1;
     }
+    if (write && done)
+        file_share(o);                  /* (its first cluster, its size) */
     return done;
 }
 
@@ -971,7 +1001,7 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     static struct node n;
     struct ofd *o;
     rx_u16 e, index;
-    int k, fd, access = flags & O_ACCMODE, dir;
+    int k, j, fd, access = flags & O_ACCMODE, dir;
 
     if ((*error = resolve(i, data, at, &p, &n)) != 0)
         return -1;
@@ -1032,11 +1062,18 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     o->index = n.index;
     if (n.kind == K_FILE) {
         o->size = w16(n.entry + DIR_FILE_SIZE) | (rx_u32)w16(n.entry + DIR_FILE_SIZE + 2) << 16;
+        for (j = 0; j < OFDS; j++)      /* open already: its entry is written at the */
+            if (same_file(&ofds[j], o)) {   /* last close, so the file is as its */
+                o->first = ofds[j].first;   /* descriptions have it */
+                o->size = ofds[j].size;
+                break;
+            }
         if ((flags & O_TRUNC) && access != O_RDONLY && (o->first || o->size)) {
             vol_free_chain(&vols[n.drive], o->first);
             o->first = 0;
             o->size = 0;
             o->changed = 1;
+            file_share(o);
         }
     }
     if (flags & O_CLOEXEC)
@@ -1234,9 +1271,32 @@ static int px_mkdir(int i, rx_u16 data, rx_u16 at, int *error)
     return 0;
 }
 
+/* inside - is directory `cluster` inside directory `dir`, or `dir` itself?
+ * Its ".." entries followed up to the root, as many as the volume has
+ * clusters at most: 1 if so, 0 if not; or the error, negated */
+static int inside(struct vol *v, rx_u16 cluster, rx_u16 dir)
+{
+    rx_u8 dots[DIR_ENTRY_SIZE];
+    struct place where;
+    rx_u16 steps, e;
+    int end;
+
+    for (steps = 0; cluster != 0 && steps <= v->clusters; steps++) {
+        if (cluster == dir)
+            return 1;
+        if ((e = vol_dir_entry(v, cluster, 1, &where, dots, &end)) != 0)
+            return -(int)e;
+        if (end)
+            return -(int)E_BROKEN;      /* no "..": not a directory of this volume */
+        cluster = w16(dots + DIR_FIRST_CLUSTER);
+    }
+    return cluster == 0 ? 0 : -(int)E_BROKEN;  /* (a loop) */
+}
+
 /* px_rename - PX_RENAME, within a volume: the entry made anew in the new
  * name's directory, the old one deleted; a file of the new name replaced;
- * a directory's ".." its new parent */
+ * a directory's ".." its new parent; a directory into itself, or into one
+ * inside it, refused (EINVAL, XSH rename) */
 static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
 {
     static struct path p, q;            /* (the lock is held: static) */
@@ -1263,6 +1323,10 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
         return -1;
     }
     v = &vols[a.drive];
+    if (a.kind == K_DIR && (k = inside(v, b.parent, a.first)) != 0) {
+        *error = k > 0 ? EINVAL : errno_of((rx_u16)-k);
+        return -1;
+    }
     if (b.exists) {
         if (b.where.sector == a.where.sector && b.where.at == a.where.at)
             return 0;

@@ -5,8 +5,9 @@
  * B, the 360 KB diskette, one of several clusters too; appends; a
  * directory made, entered, listed, a file renamed out of it, the directory
  * removed; the server's own directories; a description shared by dup and
- * fork; and every refusal. The test checks B's image on the host after the
- * run (fsck.fat, and a file's text).
+ * fork; one file written through two descriptions; and every refusal, a
+ * directory renamed into its own subdirectory among them. The test checks
+ * B's image on the host after the run (fsck.fat, and a file's text).
  * ============================================================================ */
 
 #include <stdio.h>
@@ -138,6 +139,25 @@ int main(void)
     close(fd);
     same = n == 13 && memcmp(buf, "child,parent\n", 13) == 0;
     printf("files: a description shared by fork and dup: %s\n", same ? "one offset" : "two");
+
+    fd = open("/b/two.txt", O_WRONLY | O_CREAT | O_TRUNC);  /* two descriptions, */
+    fd2 = open("/b/two.txt", O_WRONLY | O_APPEND);          /* one file */
+    write(fd, "first\n", 6);
+    write(fd2, "second\n", 7);
+    close(fd);
+    close(fd2);
+    fd = open("/b/two.txt", O_RDONLY);
+    n = read(fd, buf, sizeof buf);
+    close(fd);
+    same = n == 13 && memcmp(buf, "first\nsecond\n", 13) == 0;
+    printf("files: two descriptions of one file, both written: %s\n",
+           same ? "one file" : "two chains");
+    mkdir("/b/p", 0755);
+    mkdir("/b/p/q", 0755);
+    check("rename a directory into its own (-1, EINVAL 22)", rename("/b/p", "/b/p/q/r"));
+    check("into itself (-1, EINVAL 22)", rename("/b/p", "/b/p/r"));
+    rmdir("/b/p/q");
+    rmdir("/b/p");
     printf("files: done\n");
     return 0;
 }

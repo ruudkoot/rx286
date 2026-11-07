@@ -2,7 +2,9 @@
 # tests/posix/files.c (TEST_POSIX_FILES), which writes and reads files on B,
 # the 360 KB diskette, makes, lists and removes a directory, renames a file
 # out of it, reads the server's own directories, shares a description by
-# dup and fork, and is refused what it may not do. After the run fsck.fat
+# dup and fork, writes one file through two descriptions (P15: each took a
+# chain of its own), and is refused what it may not do, a directory renamed
+# into one inside it among them (P15: it was cut off). After the run fsck.fat
 # finds B sound, and mtools reads the files as the program left them.
 # MAME's diskette takes the AT's time: half a minute of waiting for it.
 program: idle
@@ -15,6 +17,7 @@ fsck: B
 file: B /MOVED.TXT inner\n
 file: B /NEW.TXT hello, files\nmore\n
 file: B /SHARED.TXT child,parent\n
+file: B /TWO.TXT first\nsecond\n
 ---
 files: make /b/new.txt (3): 3
 files: write 13 bytes (13): 13
@@ -52,4 +55,7 @@ files: dup (4): 4
 files: F_GETFD (0): 0
 files: F_GETFD after F_SETFD (1): 1
 files: a description shared by fork and dup: one offset
+files: two descriptions of one file, both written: one file
+files: rename a directory into its own (-1, EINVAL 22): -1, errno 22
+files: into itself (-1, EINVAL 22): -1, errno 22
 files: done
