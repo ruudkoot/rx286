@@ -135,9 +135,8 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
   `PTHREAD_THREADS_MAX` (the table above): the server's data segment, which
   holds every thread's stack, is the bound (roadmap os-server.md, D4).
 - **Signals:** 20 of them (*docs/processes.md*); no real-time or queued
-  signals, no `SA_SIGINFO`'s information, no `sigaltstack`. Orphaned
-  process groups are not told apart. A thread other than the main one may
-  not `sigsuspend` (`ENOSYS`).
+  signals, no `SA_SIGINFO`'s information, no `sigaltstack`. A thread
+  other than the main one may not `sigsuspend` (`ENOSYS`).
 - **Time:** the real-time clock is taken as UTC; there are no time zones.
 - **Terminals:** `VTIME` is not kept; the control modes are kept and do
   nothing.
