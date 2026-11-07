@@ -50,6 +50,8 @@ enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_
 #define PIPES 8                         /* the pipes at once (P9) */
 #define PIPE_SIZE 1024                  /* each one's buffer, in the server's segment */
 #define PIPE_SEG SLOT(150)
+#define CWD_SEG SLOT(151)               /* the current directories (cwds_init) */
+#define CWD(j) ((char RX_FAR *)RX_MK_FP(CWD_SEG, (unsigned)(j) * PX_PATH_MAX))
 
 /* A pipe: its ends' descriptions, its bytes, the entries whose threads wait
  * to read or write (-1: none) */
@@ -81,11 +83,11 @@ struct ofd {
     rx_u16 unit;                        /* a printer, a file of /z's entry */
 };
 
-/* A process's files: its descriptors, which close on exec, its directory */
+/* A process's files: its descriptors, which close on exec; its directory
+ * is CWD(i), in a segment of its own (P15) */
 struct files {
     rx_u8 fd[OPEN_MAX];
     rx_u8 cloexec[OPEN_MAX];            /* (bytes: no 32-bit shifts for gcc-ia16) */
-    char cwd[PX_PATH_MAX];
 };
 
 /* A path made absolute, and its components */
@@ -176,6 +178,32 @@ static int string_of(rx_u16 data, rx_u16 at, char *to)
     return ENAMETOOLONG;
 }
 
+/* far_len - a current directory's length */
+static size_t far_len(const char RX_FAR *s)
+{
+    size_t n = 0;
+
+    while (s[n])
+        n++;
+    return n;
+}
+
+/* far_put - a text, its zero too, into a current directory */
+static void far_put(char RX_FAR *to, const char *from)
+{
+    while ((*to++ = *from++) != 0)
+        ;
+}
+
+/* far_starts - does a current directory start with n bytes of a text? */
+static int far_starts(const char RX_FAR *s, const char *text, size_t n)
+{
+    while (n--)
+        if (*s++ != *text++)
+            return 0;
+    return 1;
+}
+
 /* lower - a character in lower case */
 static char lower(char c)
 {
@@ -199,7 +227,7 @@ static void path_text(struct path *p)
 
 /* path_make - a path made absolute against a directory, "." and ".." taken
  * out: 0 or the error */
-static int path_make(const char *cwd, const char *in, struct path *p)
+static int path_make(const char RX_FAR *cwd, const char *in, struct path *p)
 {
     char *s, *e;
     unsigned n, over = 0;               /* names past PARTS, for a ".." to take (P15) */
@@ -217,10 +245,17 @@ static int path_make(const char *cwd, const char *in, struct path *p)
         strcpy(p->copy + 3, in + 2);
         goto split;
     }
-    n = in[0] == '/' ? 0 : strlen(cwd);
+    if (in[0] == '/') {                 /* absolute: its PX_PATH_MAX bytes, its zero */
+        if (strlen(in) >= PX_PATH_MAX)  /*    too (P15) */
+            return ENAMETOOLONG;
+        strcpy(p->copy, in);
+        goto split;
+    }
+    n = (unsigned)far_len(cwd);
     if (n + 1 + strlen(in) >= PX_PATH_MAX)
         return ENAMETOOLONG;
-    memcpy(p->copy, cwd, n);
+    for (s = p->copy; s < p->copy + n; s++)
+        *s = *cwd++;
     p->copy[n] = '/';
     strcpy(p->copy + n + 1, in);
 split:
@@ -459,7 +494,7 @@ static int resolve(int i, rx_u16 data, rx_u16 at, struct path *p, struct node *n
     int error = string_of(data, at, in);
 
     if (!error)
-        error = path_make(FILES(i).cwd, in, p);
+        error = path_make(CWD(proc_leader(i)), in, p);
     if (!error)
         error = lookup(p, n);
     if (!error && p->slash && n->exists && !(n->kind == K_TOP || n->kind == K_DEVDIR
@@ -485,8 +520,8 @@ static int cwd_of(const char *text, int inside)
     int j;
 
     for (j = 0; j < PROCS; j++)
-        if (proc_alive(j) && proc_leader(j) == j && strncmp(files_of[j].cwd, text, n) == 0
-                && (files_of[j].cwd[n] == 0 || (inside && files_of[j].cwd[n] == '/')))
+        if (proc_alive(j) && proc_leader(j) == j && far_starts(CWD(j), text, n)
+                && (CWD(j)[n] == 0 || (inside && CWD(j)[n] == '/')))
             return j;
     return -1;
 }
@@ -642,6 +677,18 @@ int pipes_init(void)
     if (call(OS_ROOT, ROOT_LOAD, PIPES * PIPE_SIZE, 0, 0, PIPE_SEG, 0, &r) || r.bx)
         return E_NOMEM;
     pipes_ready = 1;
+    return 0;
+}
+
+/* cwds_init - the current directories' segment, from the root (at boot;
+ * fs.h): PX_PATH_MAX bytes for each entry of the table, out of the data
+ * segment, which holds the threads' stacks (P15) */
+int cwds_init(void)
+{
+    struct rx_kregs r;
+
+    if (call(OS_ROOT, ROOT_LOAD, PROCS * PX_PATH_MAX, 0, 0, CWD_SEG, 0, &r) || r.bx)
+        return E_NOMEM;
     return 0;
 }
 
@@ -807,10 +854,12 @@ void vfs_spawned(int i, int parent)
 {
     struct files *f = &FILES(i);
     int fd, k;
+    char RX_FAR *cwd = CWD(proc_leader(i));
+    const char RX_FAR *from;
 
     memset(f->fd, NO_FD, sizeof f->fd);
     memset(f->cloexec, 0, sizeof f->cloexec);
-    strcpy(f->cwd, "/");
+    far_put(cwd, "/");
     if (parent < 0) {
         if ((k = ofd_new(K_TTY)) >= 0) {
             ofds[k].refs = 3;
@@ -820,7 +869,8 @@ void vfs_spawned(int i, int parent)
         }
         return;
     }
-    strcpy(f->cwd, files_of[parent].cwd);
+    for (from = CWD(parent); (*cwd++ = *from++) != 0; )
+        ;
     for (fd = 0; fd < OPEN_MAX; fd++)
         if (files_of[parent].fd[fd] != NO_FD && !files_of[parent].cloexec[fd]) {
             f->fd[fd] = files_of[parent].fd[fd];
@@ -828,12 +878,17 @@ void vfs_spawned(int i, int parent)
         }
 }
 
-/* vfs_forked - a child's files: its parent's, the descriptions shared */
+/* vfs_forked - a child's files: its parent's, the descriptions shared, and
+ * its directory */
 void vfs_forked(int child, int parent)
 {
+    char RX_FAR *to = CWD(child);
+    const char RX_FAR *from = CWD(parent);
     int fd;
 
     files_of[child] = files_of[parent];
+    while ((*to++ = *from++) != 0)
+        ;
     for (fd = 0; fd < OPEN_MAX; fd++)
         if (files_of[child].fd[fd] != NO_FD)
             ofds[files_of[child].fd[fd]].refs++;
@@ -1603,11 +1658,15 @@ static void cwds_moved(const char *old, struct path *q, struct node *b)
     name_text(b->entry, q->part[q->parts - 1]);     /* (never longer) */
     path_text(q);
     for (j = 0; j < PROCS; j++)         /* (each fits: cwds_fit) */
-        if (proc_alive(j) && proc_leader(j) == j && strncmp(files_of[j].cwd, old, n) == 0
-                && (files_of[j].cwd[n] == 0 || files_of[j].cwd[n] == '/')) {
+        if (proc_alive(j) && proc_leader(j) == j && far_starts(CWD(j), old, n)
+                && (CWD(j)[n] == 0 || CWD(j)[n] == '/')) {
+            char *to = moved + strlen(q->text);
+            const char RX_FAR *from = CWD(j) + n;
+
             strcpy(moved, q->text);
-            strcat(moved, files_of[j].cwd + n);
-            strcpy(files_of[j].cwd, moved);
+            while ((*to++ = *from++) != 0)
+                ;
+            far_put(CWD(j), moved);
         }
 }
 
@@ -1617,16 +1676,16 @@ static void cwds_moved(const char *old, struct path *q, struct node *b)
 static int cwds_fit(const char *old, const struct path *q)
 {
     size_t n = strlen(old), m = strlen(q->text);
-    const char *c;
+    const char RX_FAR *c;
     unsigned names;
     int j;
 
     for (j = 0; j < PROCS; j++)
-        if (proc_alive(j) && proc_leader(j) == j && strncmp(files_of[j].cwd, old, n) == 0
-                && (files_of[j].cwd[n] == 0 || files_of[j].cwd[n] == '/')) {
-            for (names = q->parts, c = files_of[j].cwd + n; *c; c++)
+        if (proc_alive(j) && proc_leader(j) == j && far_starts(CWD(j), old, n)
+                && (CWD(j)[n] == 0 || CWD(j)[n] == '/')) {
+            for (names = q->parts, c = CWD(j) + n; *c; c++)
                 names += *c == '/';
-            if (m + strlen(files_of[j].cwd + n) >= PX_PATH_MAX || names > PARTS)
+            if (m + far_len(CWD(j) + n) >= PX_PATH_MAX || names > PARTS)
                 return ENAMETOOLONG;
         }
     return 0;
@@ -1964,7 +2023,8 @@ int vfs_exe_open(int i, const char *path, struct exe_file *f)
     const char *last;
     int error, k;
 
-    if ((error = path_make(i < 0 ? "/" : FILES(i).cwd, path, &p)) != 0
+    if ((error = path_make(i < 0 ? (const char RX_FAR *)"/" : CWD(proc_leader(i)), path, &p))
+            != 0
             || (error = lookup(&p, &n)) != 0)
         return error;
     if (!n.exists)
@@ -2273,7 +2333,7 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         return px_rename(i, data, r->si, r->di, error);
     case PX_CHDIR:
         if ((*error = string_of(data, r->si, in)) != 0
-                || (*error = path_make(FILES(i).cwd, in, &p)) != 0
+                || (*error = path_make(CWD(proc_leader(i)), in, &p)) != 0
                 || (*error = lookup(&p, &n)) != 0)
             return -1;
         if (!n.exists || !(n.kind == K_TOP || n.kind == K_DEVDIR || n.kind == K_ZDIR
@@ -2282,15 +2342,15 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             return -1;
         }
         path_text(&p);                  /* each name in its own case: "/c/DOCS" */
-        strcpy(FILES(i).cwd, p.text);
+        far_put(CWD(proc_leader(i)), p.text);
         return 0;
     case PX_GETCWD:
-        len = strlen(FILES(i).cwd) + 1;
+        len = far_len(CWD(proc_leader(i))) + 1;
         if (r->cx == 0 || len > r->cx || !in_segment(data, r->di, (rx_u16)len)) {
             *error = r->cx == 0 ? EINVAL : len > r->cx ? ERANGE : EFAULT;  /* (XSH; P15) */
             return -1;
         }
-        far_bytes(data, r->di, (const rx_u8 *)FILES(i).cwd, (rx_u16)len);
+        far_bytes(data, r->di, (const rx_u8 RX_FAR *)CWD(proc_leader(i)), (rx_u16)len);
         return 0;
     case PX_GETDENTS:
         return px_getdents(i, data, r->bx, r->di, r->cx, error);

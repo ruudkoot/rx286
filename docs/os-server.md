@@ -59,6 +59,7 @@ program's thread's notification whenever the keyboard sent it something
 | 148 | a load, while code is read into it |
 | 149 | the files' cache, 32 sectors (*docs/processes.md*, *Files*) |
 | 150 | the pipes' buffers, eight of 1 KB |
+| 151 | the current directories, `PX_PATH_MAX` bytes for each entry of the table (P15) |
 | 160 | the root's fault endpoint, badged `ROOT_BADGE_OS` (`OS_SLOT_ROOT`) |
 | 161 | `/z`, the archive of programs, read-only (`OS_SLOT_ARCHIVE`; *docs/processes.md*) |
 | 162 | the processes' keys' notification, when no program the root builds has the keys (`OS_SLOT_KEYS`) |

@@ -1,12 +1,13 @@
 # Deep paths (roadmap os-server.md P9; rxlib.DEEP_PATH): every path DOS
 # reaches, its 64 characters behind "/b", and the one of 66 beyond DOS's
-# reach; a path of PX_PATH_MAX (80) bytes, its zero too, is one too long.
+# reach; and a path of 82 bytes, past the 80 that were PX_PATH_MAX until
+# P15 (256 now: tests/posix/files.c, whose paths need no key script).
 program: sh
 media: B deep
 emulators: bochs mame
 keys: cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd\n
 keys: cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..\n
-keys: ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy\n
+keys: ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits\n
 ---
 rx286, test build
 /a$ cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd
@@ -14,7 +15,7 @@ rx286, test build
 /b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..
 /b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/ABCDEFG.X
 /b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/ABCDEFGH.XY
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy
+/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits
 fits
-./././././././abcdefgh.xy: name too long
+fits
 /b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$

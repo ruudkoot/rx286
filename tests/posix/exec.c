@@ -150,10 +150,10 @@ int main(void)
     printf("exec: a file open for writing (-1, ETXTBSY 26): %d, %d\n", n2, errno);
     close(fd);
     {
-        static char long_path[96] = "PATH=/c/";
+        static char long_path[272] = "PATH=/c/";      /* past PATH_MAX, 256 */
         char *env[2], **saved = environ;
 
-        for (k = 0; k < 75; k++)
+        for (k = 0; k < 255; k++)
             strcat(long_path, "a");
         strcat(long_path, "z");         /* its tail "z", from /: /z, which has child */
         env[0] = long_path;

@@ -1308,7 +1308,8 @@ static int path_in(int i, rx_u16 at, char *path, int *error)
 static int handle(int i, struct rx_kregs *r)
 {
     rx_u16 notify = P_SLOT(i, PK_NOTIFY), status = 0;
-    char path[PX_PATH_MAX], line[64];
+    static char path[PX_PATH_MAX];      /* (the lock is held: static, P15) */
+    char line[64];
     int result = -1, error = 0, unit, p;
     unsigned n;
     rx_u32 seconds = 0;
@@ -1534,6 +1535,8 @@ void proc_boot(void)
     take(OS_CONTROL);
     cache_init();                       /* the files' cache (P7) */
     pipes_init();                       /* the pipes' buffers (P9) */
+    if (cwds_init())                    /* the current directories (P15) */
+        rx_log("os: no room for the current directories\n", 40);
     if (tty_keys())                     /* the terminal's thread (P11) */
         root(ROOT_SERVE, 0, TTY_N * 4, 0, TTY_THREAD, 0);
     if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, -1,

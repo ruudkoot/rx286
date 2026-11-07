@@ -54,9 +54,11 @@ no transfer segment (*docs/syscalls.md*).
 
 The files' calls, `read` and `write` among them (roadmap os-server.md P7),
 are below; *docs/posix.md* lists every call. `PX_CALLS` is one past the
-last call's number. A path has `PX_PATH_MAX` (80) bytes at most, its zero
-too, so that every path DOS reaches, its 64 characters, fits behind its
-drive's `/b`; `limits.h` calls it `PATH_MAX`. A program's names a file of
+last call's number. A path has `PX_PATH_MAX` (256, POSIX's least since
+roadmap os-server.md P15; 80 before) bytes at most, its zero too;
+`limits.h` calls it `PATH_MAX`. The current directories are kept out of
+the server's data segment, `PX_PATH_MAX` bytes for each entry in a segment
+of their own (slot 151). A program's names a file of
 `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and `environ`
 together, their pointers too, have `PX_ARG_MAX` bytes at most (`E2BIG`).
 

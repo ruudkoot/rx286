@@ -15,6 +15,7 @@
 #include "dirent.h"
 #include "errno.h"
 #include "fcntl.h"
+#include "limits.h"
 #include "unistd.h"
 #include "sys/stat.h"
 #include "sys/wait.h"
@@ -238,6 +239,19 @@ int main(void)
     check("13 names, then 12 ..: /b (0)",
           stat("/b/q/q/q/q/q/q/q/q/q/q/q/q/../../../../../../../../../../../..", &st));
     check("13 names (-1, ENAMETOOLONG 36)", stat("/b/q/q/q/q/q/q/q/q/q/q/q/q", &st));
+    {
+        static char path[PATH_MAX + 1]; /* PATH_MAX, 256, its zero too (P15) */
+        int k;
+
+        strcpy(path, "/b");
+        for (k = 0; k < 122; k++)
+            strcat(path, "/.");
+        strcat(path, "//pad.txt");      /* 255 bytes */
+        check("a path of 255 bytes, its zero the 256th (0)", stat(path, &st));
+        path[strlen(path) - 9] = 0;
+        strcat(path, "/./pad.txt");     /* 256 */
+        check("of 256 (-1, ENAMETOOLONG 36)", stat(path, &st));
+    }
 
     check("a file renamed to a name and a slash (-1, ENOTDIR 20)",   /* the second review */
           rename("/b/pad.txt", "/b/pad2/"));
@@ -275,18 +289,21 @@ int main(void)
     printf("files: getcwd with no room (NULL, EINVAL 22): %s, ",
            getcwd(cwd, 0) ? "a text" : "NULL");
     printf("%d\n", errno);
-    mkdir("/b/AAAAAAAA", 0755);         /* a rename that would take a current */
-    mkdir("/b/AAAAAAAA/BBBBBBBB", 0755);    /*    directory past 80 bytes */
-    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC", 0755);
-    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD", 0755);
-    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE", 0755);
-    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF", 0755);
-    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/GGGGGGGG", 0755);
-    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/GGGGGGGG/HHHHHHHH", 0755);
-    mkdir("/b/XXXXXXXX", 0755);         /* (74 bytes, 87 once renamed) */
-    chdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/GGGGGGGG/HHHHHHHH");
-    check("a rename that would take my directory past 80 bytes (-1, ENAMETOOLONG 36)",
-          rename("/b/AAAAAAAA", "/b/XXXXXXXX/AAAAAAAA.ABC"));
+    mkdir("/b/A", 0755);                /* a rename that would take a current */
+    mkdir("/b/A/B", 0755);              /*    directory past 12 names: no path of */
+    mkdir("/b/A/B/C", 0755);            /*    12 names of 8.3 reaches PATH_MAX, 256 */
+    mkdir("/b/A/B/C/D", 0755);          /*    (P15) */
+    mkdir("/b/A/B/C/D/E", 0755);
+    mkdir("/b/A/B/C/D/E/F", 0755);
+    mkdir("/b/A/B/C/D/E/F/G", 0755);
+    mkdir("/b/A/B/C/D/E/F/G/H", 0755);
+    mkdir("/b/A/B/C/D/E/F/G/H/I", 0755);
+    mkdir("/b/A/B/C/D/E/F/G/H/I/J", 0755);
+    mkdir("/b/A/B/C/D/E/F/G/H/I/J/K", 0755);
+    mkdir("/b/X", 0755);                /* (12 names, 13 once renamed) */
+    chdir("/b/A/B/C/D/E/F/G/H/I/J/K");
+    check("a rename that would take my directory past 12 names (-1, ENAMETOOLONG 36)",
+          rename("/b/A", "/b/X/A"));
     chdir("/");
     printf("files: done\n");
     return 0;

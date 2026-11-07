@@ -94,6 +94,8 @@ void vfs_exit(int i);
 
 /* pipes_init - the pipes' segment, from the root (at boot) */
 int pipes_init(void);
+/* cwds_init - the current directories' segment, from the root (at boot) */
+int cwds_init(void);
 
 /* vfs_call - a file call (PX_WRITE, PX_READ, PX_OPEN to PX_FSYNC): its
  * result, or -1 and the error; SI out in *si_out. The FAT and directory

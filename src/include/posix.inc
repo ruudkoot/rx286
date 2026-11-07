@@ -312,6 +312,6 @@ TCSADRAIN           equ 1
 TCSAFLUSH           equ 2
 MAX_CANON           equ 255     ; a line's bytes
 PX_ARG_MAX          equ 4096    ; ARG_MAX: argv's and environ's bytes, and their pointers
-PX_PATH_MAX         equ 80      ; a path's bytes, its zero too: DOS's 64 behind "/b" fit
+PX_PATH_MAX         equ 256     ; a path's bytes, its zero too: POSIX's least (P15)
 
 %endif

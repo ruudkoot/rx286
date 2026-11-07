@@ -102,7 +102,7 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 | open file descriptions, in all | 32 | |
 | `PIPE_BUF`: a pipe's write never split | 512 | 512 |
 | a pipe's room; pipes at once | 1 KB; 8 | |
-| `PATH_MAX`: a path's bytes, its zero too | 80 (`PX_PATH_MAX`) | 256 |
+| `PATH_MAX`: a path's bytes, its zero too | 256 (`PX_PATH_MAX`) | 256 |
 | `ARG_MAX`: `argv` and `environ` | 4,096 (`PX_ARG_MAX`) | 4,096 |
 | `CHILD_MAX`: processes and threads at once | 25 (`PROCS`, `OS_PROCS`), init and the shells among them | 25 |
 | `PTHREAD_THREADS_MAX`: a process's threads | 8 | 64 |
@@ -131,12 +131,13 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 - **Paths at their limits:** a directory renamed deeper may leave files
   in it past `PATH_MAX` or 12 names, which nothing reaches until it is
   moved back (a current directory in it is refused, `ENAMETOOLONG`).
-- **Below the least limits:** `PATH_MAX` and `PTHREAD_THREADS_MAX` (the
-  table above): the server's data segment, which holds every thread's
-  stack, is the bound (roadmap os-server.md, D4); a thread is an entry of
-  the table, with a server thread and 1 KB of stack of its own. Both
-  compilers' small model keeps it to 64 KB: gcc-ia16 has no model with
-  more than one data segment (P15).
+- **Below the least limits:** `PTHREAD_THREADS_MAX` (the table above):
+  the server's data segment, which holds every thread's stack, is the
+  bound (roadmap os-server.md, D4); a thread is an entry of the table,
+  with a server thread and 1 KB of stack of its own. Both compilers' small
+  model keeps it to 64 KB: gcc-ia16 has no model with more than one data
+  segment (P15). A path's 12 names at most bind before `PATH_MAX` with
+  names of 8.3.
 - **Signals:** 20 of them (*docs/processes.md*); no real-time or queued
   signals, no `SA_SIGINFO`'s information, no `sigaltstack`. A thread
   other than the main one may not `sigsuspend` (`ENOSYS`).

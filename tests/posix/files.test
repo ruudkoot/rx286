@@ -81,6 +81,8 @@ files: two files' inodes differ (1): 1
 files: readdir's d_ino is stat's (1): 1
 files: 13 names, then 12 ..: /b (0): 0
 files: 13 names (-1, ENAMETOOLONG 36): -1, errno 36
+files: a path of 255 bytes, its zero the 256th (0): 0
+files: of 256 (-1, ENAMETOOLONG 36): -1, errno 36
 files: a file renamed to a name and a slash (-1, ENOTDIR 20): -1, errno 20
 files: getdents with room for less than a record (-1, EINVAL 22): -1, errno 22
 files: getdents of /dev past 64 K names (0): 0
@@ -90,5 +92,5 @@ files: a directory made in / (-1, EROFS 30): -1, errno 30
 files: lseek past 2 GB (-1, EOVERFLOW 75): -1, 75
 files: open with access mode 3 (-1, EINVAL 22): -1, errno 22
 files: getcwd with no room (NULL, EINVAL 22): NULL, 22
-files: a rename that would take my directory past 80 bytes (-1, ENAMETOOLONG 36): -1, errno 36
+files: a rename that would take my directory past 12 names (-1, ENAMETOOLONG 36): -1, errno 36
 files: done
