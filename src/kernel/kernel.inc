@@ -46,7 +46,7 @@ T_STATE             equ 4       ; byte: TS_*
 T_PRIO              equ 5       ; byte: 0, the lowest, to PRIORITIES - 1
 T_NEXT              equ 6       ; the next of its ready queue
 T_LDT               equ 8       ; its LDT's selector
-T_ZERO_PARAS        equ 10      ; KCALL_RETYPE: a segment's paragraphs, while it is zeroed
+T_ZERO_PARAS        equ 10      ; KCALL_RETYPE, _RESIZE: paragraphs, while they are zeroed
 T_USTACK_TOP        equ 12      ; its program's SP at a start
 T_RESTART           equ 14      ; byte: restart_pending, kept while another runs
 T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state (FPU_GIVEN: given
@@ -79,11 +79,11 @@ T_SUSPEND_BADGE     equ 152     ;    and the badge to signal with
 T_REFS              equ 154     ; the capabilities to it: it dies with the last (revoke.asm)
 T_SAVED_SPACE       equ 156     ; the slot of the saved reply owed to it, or 0 (ipc.asm)
 T_SAVED_SLOT        equ 158
-T_ZERO_DONE         equ 160     ; KCALL_RETYPE: its paragraphs zeroed so far
-T_ZERO_BASE         equ 162     ;    its base, in paragraphs
+T_ZERO_DONE         equ 160     ; KCALL_RETYPE, _RESIZE: the paragraphs zeroed so far
+T_ZERO_BASE         equ 162     ;    the first, in paragraphs
 T_ZERO_SLOT         equ 164     ;    its untyped's slot
 T_FAULT_REGS        equ 166     ; 16 bytes: the registers its fault's message overwrote
-T_ZERO_HIGH         equ 182     ; byte: KCALL_RETYPE: T_ZERO_BASE's bits 16-19
+T_ZERO_HIGH         equ 182     ; byte: KCALL_RETYPE, _RESIZE: T_ZERO_BASE's bits 16-19
 T_REVOKE_TYPE       equ 183     ; byte: KCALL_REVOKE: the type and the object of what it
 T_FRAME             equ 184     ;    revokes (P15); its frame while it does not run
 T_REVOKE_OBJECT     equ T_FRAME + FRAME_SIZE_USER

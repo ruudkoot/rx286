@@ -81,6 +81,7 @@ milestone.
 | 17 | `KCALL_LOG` | DS:SI bytes, CX how many (`LOG_MAX` at most) | AX the bytes written to the kernel's log (fewer if the thread is to restart); or `KE_ARG`, `KE_CAP` (a buffer the caller may not read) |
 | 18 | `KCALL_TICKS` | | DX:AX the ticks since the start, `TICKS_HZ` (50) a second |
 | 19 | `KCALL_SEAL` | DX a data segment of DPL 3, retyped from untyped, with no other capability to it | the segment readable code of DPL 3 (*Code from data*, below) |
+| 20 | `KCALL_RESIZE` | DX a data segment retyped from an untyped of the caller's, the last thing carved there; CX bytes, 1 to 65,535 | it and every copy of it so long, in place, new bytes zeroed (*A segment in place*, below) |
 
 ### Retype
 
@@ -163,6 +164,28 @@ lives (`KE_STATE`). It becomes readable code of DPL 3, non-conforming, at
 the same selector: a write through it faults from then on, and the root
 moves it into the program's slot 0. A segment of any other DPL, code, an
 endpoint, a segment sealed already: `KE_ARG`, `KE_CAP` or `KE_STATE`.
+
+### A segment in place
+
+`KCALL_RESIZE` (roadmap os-server.md P15) makes a data segment longer or
+shorter without moving it, so that a process's heap grows without a copy
+and without new capabilities: the root's `ROOT_BRK` uses it while the
+process's block has room. The segment must be data, expand-up, a direct
+child of an untyped in the caller's own space - a segment moved to another
+space takes no more of its untyped's memory - and the last thing carved
+there, its end the untyped's watermark (`KE_STATE` otherwise; `KE_ARG`
+for code, `KE_MEM` past the untyped). A longer segment's new paragraphs
+are carved first, so that nothing else takes them, then zeroed 2 KB at a
+time with windows, as a retype's are; afterwards the call checks that the
+segment and its untyped are as they were (`KE_STATE` if not; a revoke of
+the untyped meanwhile cancels the zeroing). A shorter one gives its end
+back to the untyped. Every capability derived from the segment - its
+copies, and theirs - gets the new limit, in a walk of its children with
+an interrupt window every `CHILDREN_WINDOW` (16), where no thread gives
+way. A thread that holds a copy in a segment register loads it again on
+its way back to its ring, as after every kernel entry, so it sees the new
+limit; a kernel call that reads a caller's buffer across windows checks it
+again after each (`recheck_buffer`).
 
 ### Suspending a thread
 

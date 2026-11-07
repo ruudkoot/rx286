@@ -364,15 +364,22 @@ static int more_thread(rx_u16 n, rx_u16 badge, rx_u16 to, rx_u16 *out)
     return 0;
 }
 
-/* brk - ROOT_BRK: the data segment replaced by one of another size */
+/* brk - ROOT_BRK: the data segment made so many bytes: in place, with
+ * every copy, if its block has room and needs no smaller one (KCALL_RESIZE,
+ * P15); else replaced by a segment of a block of its own, the bytes copied */
 static int brk(rx_u16 n, rx_u16 bytes, rx_u16 to)
 {
     struct process *p = proc_of(n);
-    rx_u16 segment, old;
+    rx_u16 segment, old, need, have;
     int block, status;
 
-    if (!p)
+    if (!p || bytes == 0)
         return E_INVAL;
+    need = paragraphs(bytes);
+    have = buddy_paras(p->data);
+    if (need <= have && (need > have / 2 || have == BUDDY_MIN_PARAS)
+            && kcall(KCALL_RESIZE, 0, 0, bytes, p->segment, 0, 0) == 0)
+        return 0;
     if ((status = block_segment(bytes, &block, &segment)) != 0)
         return status;
     old = segment_bytes(p->segment);

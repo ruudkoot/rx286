@@ -52,7 +52,10 @@ KCALL_TICKS         equ 18  ; -> DX:AX the ticks since the start (TICKS_HZ a sec
 KCALL_SEAL          equ 19  ; DX a data segment of DPL 3 that no copy of remains, retyped
                             ;    from untyped: it becomes readable code of DPL 3
                             ;    (os-server.md P2, E5)
-KCALL_COUNT         equ 20
+KCALL_RESIZE        equ 20  ; DX a data segment retyped from an untyped of the caller's,
+                            ;    the last carved there; CX bytes (1 to 65,535): it and
+                            ;    every copy so long, in place, new bytes zeroed (P15)
+KCALL_COUNT         equ 21
 LOG_MAX             equ 4096
 TICKS_HZ            equ 50
 

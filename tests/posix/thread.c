@@ -5,7 +5,8 @@
  * the main one too, on a shared counter under a mutex; joins and their
  * results; a condition between a producer and a consumer; each thread's
  * errno; a mutex waited for in the server; trylock; keys and once; the most a process may have; a fork from
- * a thread; and a thread's fault, which ends its process.
+ * a thread; a thread's fault, which ends its process; and a break raised
+ * in place while a thread waits (P15).
  * ============================================================================ */
 
 #include <stdio.h>
@@ -31,6 +32,19 @@ static volatile int item, have, sum, onces, inners, destroyed, got, piped;
 static char *high;                      /* a buffer past a break lowered meanwhile */
 static char hundred[100] = "a hundred bytes";
 static int pfd[2];
+
+/* data_base - the data segment's base, as the kernel says (KCALL_SEGMENT) */
+static unsigned long data_base(void)
+{
+    struct rx_kregs r;
+
+    r.ax = KCALL_SEGMENT << 8;
+    r.dx = rx_ds();
+    r.bp = 0;
+    if (rx_kcall(&r))
+        return 0;
+    return (unsigned long)(r.dx & 0xFF) << 16 | r.ax;
+}
 
 /* add - ROUNDS increments of the counter under the lock, each a while
  * inside it so that the others find it taken */
@@ -175,6 +189,17 @@ static void *late(void *arg)
     return 0;
 }
 
+/* top_writer - a byte past the break the main thread raises while this
+ * one waits, through the DS it loaded before (P15) */
+static void *top_writer(void *arg)
+{
+    char c;
+
+    read(pfd[0], &c, 1);
+    *(volatile char *)arg = 'T';
+    return 0;
+}
+
 /* high_reader - a read from a pipe into `high`, which waits (P15) */
 static void *high_reader(void *arg)
 {
@@ -314,6 +339,31 @@ int main(void)
         pthread_key_create(&k2, 0);
         printf("thread: a new key in a deleted one's place, its value (none): %s\n",
                pthread_getspecific(k2) ? "the old one's" : "none");
+    }
+    {
+        unsigned long before, size, room;   /* P15: a break raised to its block's */
+        char *top;                          /*    end, in place, as a thread waits */
+
+        size = (unsigned long)rx_lsl(rx_ds()) + 1;
+        for (room = 1024; room < size; room <<= 1)
+            ;
+        if (room > 0xFFF0UL)
+            room = 0xFFF0UL;
+        before = data_base();
+        result = sbrk(0);
+        top = (char *)(unsigned)(room - 1);
+        pipe(pfd);
+        pthread_create(&t[0], 0, top_writer, top);
+        nanosleep(&nap, 0);
+        n = brk((void *)(unsigned)room);
+        write(pfd[1], "x", 1);
+        pthread_join(t[0], 0);
+        printf("thread: the break raised to its block's end as a thread waits (0): %d;"
+               " in place (1): %d; its write past the old end: %c\n",
+               n, data_base() == before && before != 0, *top);
+        brk(result);
+        close(pfd[0]);
+        close(pfd[1]);
     }
     printf("thread: done\n");
     return 0;

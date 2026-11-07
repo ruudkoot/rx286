@@ -55,10 +55,11 @@ ROOT_THREAD         equ 9       ; BX a process; SI a badge; DI two slots -> CX i
                                 ;    another thread in its space and an endpoint badged SI
                                 ;    (its slot OS_SLOT_EP + n); the server's copies of the
                                 ;    endpoint and the thread at DI, DI + 8
-ROOT_BRK            equ 10      ; BX a process; CX bytes; DI a slot -> its data replaced by
-                                ;    a segment of so many bytes, the bytes kept, in its slots
-                                ;    1 and 2 and the server's DI; every copy of the old
-                                ;    revoked
+ROOT_BRK            equ 10      ; BX a process; CX bytes; DI a slot -> its data so many
+                                ;    bytes, the bytes kept: in place, every copy with it, if
+                                ;    its block has room (KCALL_RESIZE, P15); else replaced
+                                ;    by a new segment in its slots 1 and 2 and the server's
+                                ;    DI, every copy of the old revoked
 ROOT_EXIT           equ 11      ; BX a process: everything of it revoked, its memory free,
                                 ;    its code's count lowered (the code gone at 0; with CX
                                 ;    1, kept, sealed, for an exec of the same file: P12)

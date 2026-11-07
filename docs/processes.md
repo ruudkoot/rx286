@@ -373,8 +373,8 @@ One lock guards the table, taken with XCHG (`rx_xchg`), and given up before
 a wait for a child and before the console (but for `/dev/status`'s short
 writes to the status line, and its last close, which keep it). While a call
 lends the process's data segment to a driver with the lock given up (a
-terminal's write, COM2's), a `brk` that would replace the segment waits for
-it. A wait that gives it up asks, once it has it again, whether its process
+terminal's write, COM2's), a `brk` that may replace the segment waits for
+it (one within the segment's block keeps it, with every copy: `ROOT_BRK`). A wait that gives it up asks, once it has it again, whether its process
 is still the one whose call it serves: the process may have ended and a new
 one taken its entry meanwhile (`proc_still`).
 

@@ -128,8 +128,8 @@ initialises what it needs.
 
 **A process's memory** (roadmap os-server.md P4, P6) is the root's buddy
 allocator's (*docs/root.md*): its data segment, which holds its stack,
-data and heap, 64 KB at most, and grows by a larger one taking its place
-(`brk`); its code, read from its file into a load the root seals, shared
+data and heap, 64 KB at most, and grows in place within its block, else
+by a larger one taking its place (`brk`; os-server.md P15); its code, read from its file into a load the root seals, shared
 by every process of the file; its space, thread and endpoint, a block of
 1 KB. *docs/root.md* says which memory the allocator has, with extended
 memory and without.

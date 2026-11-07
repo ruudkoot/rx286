@@ -34,6 +34,12 @@
 ;                     endpoint (the other 1,536 adopted at once);
 ;                     TEST_STRETCH measures: no stretch grows with the list
 ;                     (os-server.md P15)
+;   TEST_ADD_RESIZE   KCALL_RESIZE (os-server.md P15): a segment made longer
+;                     in place over memory a revoke left written, its copy
+;                     with it, its bytes kept and the new ones zeroed in
+;                     pieces; shorter, its end retyped next; every refusal;
+;                     at last a read past a shorter end through ES, loaded
+;                     before the call: #GP
 ; Its lines come through uprint; the workers' through KCALL_LOG.
 ; ============================================================================
 
@@ -110,6 +116,7 @@ threads             dw 0
 line                times 64 db 0
 role                dw 0
 inside              dw 0
+rz_base             dw 0, 0             ; resize_part's segment's base
 end_udata
 
 ; report "what" - "additions: what: " and AX in decimal
@@ -191,6 +198,8 @@ entry:
         jmp rv_leak_part
 %elifdef TEST_ADD_SIBLINGS
         jmp siblings_part
+%elifdef TEST_ADD_RESIZE
+        jmp resize_part
 %else
         jmp pools_part
 %endif
@@ -1546,6 +1555,187 @@ many_spaces:
         mov dx, S_EP
         kcall KCALL_REVOKE
         status "their copies of an endpoint revoked (0)"
+        ret
+
+; ============================================================================ the resize
+RZ_UNTYPED_PARAS    equ 0x200           ; 8 KB of untyped
+RZ_FIRST            equ 1000            ; the segment's bytes at first
+RZ_GROWN            equ 8000            ;    made longer: zeroed in four pieces
+RZ_SHORT            equ 100             ;    and shorter
+ACC_DATA3           equ 0xF2            ; present, DPL 3, data, writable
+
+; ----------------------------------------------------------------------------
+; resize_part - KCALL_RESIZE: longer in place, its copy too, the new bytes
+; zeroed; every refusal; shorter, its end given back; then a read past a
+; shorter end through ES, which was loaded before the call: #GP
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+resize_part:
+        mov dx, UT_MEMORY
+        mov al, CAP_UNTYPED
+        mov si, UT_SEG
+        mov cx, RZ_UNTYPED_PARAS
+        kcall KCALL_RETYPE
+        must
+        call rz_dirty
+        call rz_first
+        mov dx, S_SEG
+        mov cx, RZ_GROWN
+        kcall KCALL_RESIZE
+        status "make it 8,000 bytes (0)"
+        mov ax, S_COPY
+        lsl ax, ax
+        report "its copy's limit (7999)"
+        mov dx, S_SEG
+        kcall KCALL_SEGMENT
+        xor bx, bx
+        cmp ax, [rz_base]
+        jne .moved
+        cmp dx, [rz_base + 2]
+        jne .moved
+        inc bx
+.moved:
+        mov ax, bx
+        report "its base kept (1)"
+        mov ax, S_COPY
+        mov es, ax
+        mov ax, [es:RZ_FIRST - 2]
+        report "the word at its old end, through the copy (4660)"
+        mov ax, S_COPY
+        mov es, ax
+        xor ax, ax
+        mov si, RZ_FIRST
+.new:
+        or ax, [es:si]
+        add si, 2
+        cmp si, RZ_GROWN
+        jb .new
+        report "its new bytes, ORed (0)"
+        mov dx, S_COPY
+        mov cx, 2000
+        kcall KCALL_RESIZE
+        status "resize the copy (6)"
+        mov dx, S_SEG
+        mov cx, RZ_UNTYPED_PARAS * 16 + 16
+        kcall KCALL_RESIZE
+        status "past its untyped (3)"
+        mov dx, S_SEG
+        xor cx, cx
+        kcall KCALL_RESIZE
+        status "to 0 bytes (2)"
+        mov dx, MY_DATA
+        mov cx, 2000
+        kcall KCALL_RESIZE
+        status "its own data, of the root's untyped (6)"
+        mov dx, UT_SEG
+        mov cx, 2000
+        kcall KCALL_RESIZE
+        status "an untyped (1)"
+        mov si, S_SEG2
+        call data64
+        mov dx, S_SEG2
+        kcall KCALL_SEAL
+        must
+        mov dx, S_SEG2
+        mov cx, 128
+        kcall KCALL_RESIZE
+        status "sealed code (2)"
+        mov dx, S_SEG
+        mov cx, RZ_SHORT
+        kcall KCALL_RESIZE
+        status "make it 100 bytes (0)"
+        mov ax, S_COPY
+        lsl ax, ax
+        report "its copy's limit (99)"
+        mov dx, UT_SEG
+        mov al, CAP_SEGMENT
+        mov si, SCRATCH
+        mov cx, 64
+        mov bl, ACC_DATA3
+        kcall KCALL_RETYPE
+        must
+        mov dx, SCRATCH
+        kcall KCALL_SEGMENT
+        sub ax, [rz_base]
+        report "the next retype's base, from its (112: its end given back)"
+        mov dx, S_SEG
+        mov cx, RZ_FIRST
+        kcall KCALL_RESIZE
+        status "longer, with that carved after it (6)"
+        mov dx, UT_SEG                  ; again, for the read through ES
+        kcall KCALL_REVOKE
+        must
+        call rz_first
+        PRINT "additions: a read past a shorter end, through ES loaded before", CHAR_LF
+        mov ax, S_COPY
+        mov es, ax
+        mov dx, S_SEG
+        mov cx, RZ_SHORT
+        kcall KCALL_RESIZE
+.read_f: mov al, [es:RZ_SHORT + 10]
+        PRINT "additions: the read went through", CHAR_LF
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rz_dirty - UT_SEG's memory written all over: a segment over all of it,
+; filled with FFh, then revoked
+;   In:       nothing
+;   Out:      nothing (the end on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+rz_dirty:
+        mov dx, UT_SEG
+        mov al, CAP_SEGMENT
+        mov si, S_SEG
+        mov cx, RZ_UNTYPED_PARAS * 16
+        mov bl, ACC_DATA3
+        kcall KCALL_RETYPE
+        must
+        mov ax, S_SEG
+        mov es, ax
+        xor di, di
+        mov cx, RZ_UNTYPED_PARAS * 8
+        mov ax, 0xFFFF
+        rep stosw
+        push ds
+        pop es
+        mov dx, UT_SEG
+        kcall KCALL_REVOKE
+        must
+        ret
+
+; ----------------------------------------------------------------------------
+; rz_first - S_SEG: RZ_FIRST bytes from UT_SEG, 4660 in its last word, its
+; base in rz_base; a copy of it in S_COPY
+;   In:       nothing
+;   Out:      nothing (the end on a failure)
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+rz_first:
+        mov dx, UT_SEG
+        mov al, CAP_SEGMENT
+        mov si, S_SEG
+        mov cx, RZ_FIRST
+        mov bl, ACC_DATA3
+        kcall KCALL_RETYPE
+        must
+        mov ax, S_SEG
+        mov es, ax
+        mov word [es:RZ_FIRST - 2], 0x1234
+        push ds
+        pop es
+        mov dx, MY_SPACE
+        mov si, S_SEG
+        mov di, S_COPY
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        mov dx, S_SEG
+        kcall KCALL_SEGMENT
+        mov [rz_base], ax
+        mov [rz_base + 2], dx
         ret
 
 ; ============================================================================ review tests

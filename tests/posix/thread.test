@@ -31,4 +31,5 @@ thread: a write while a read waits on an end closed under it (1, then 0): 1, 0
 thread: a thread after the main one's pthread_exit, then the end
 thread: the process's end after it (exit 0): 0
 thread: a new key in a deleted one's place, its value (none): none
+thread: the break raised to its block's end as a thread waits (0): 0; in place (1): 1; its write past the old end: T
 thread: done

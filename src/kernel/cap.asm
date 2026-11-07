@@ -76,9 +76,16 @@ kcall_table:
         dw kc_log                                   ; KCALL_LOG (log.asm)
         dw kc_ticks                                 ; KCALL_TICKS
         dw kc_seal                                  ; KCALL_SEAL
+        dw kc_resize                                ; KCALL_RESIZE
 kcall_table_end:
 msg_thread_made     db "thread", 0
 ; Temporaries of the calls: no kernel call waits, so none is ever two deep.
+zero_place          dw 0                ; zero_pieces': its window's place
+resize_slot         dw 0                ; kc_resize's: the segment's slot
+resize_offset       dw 0                ;    its paragraphs from its untyped's start
+resize_space        dw 0                ;    the caller's space, where the walk ends
+resize_paras        dw 0                ;    its new size, in paragraphs
+resize_limit        dw 0                ;    and as a limit
 copy_shadow         dw 0
 copy_descriptor     dw 0
 copy_slot           dw 0
@@ -438,24 +445,21 @@ phys_zero:
         ret
 
 ; ----------------------------------------------------------------------------
-; retype_zero - the running thread's new segment zeroed (T_ZERO_BASE,
+; zero_pieces - the running thread's carved paragraphs zeroed (T_ZERO_BASE,
 ; T_ZERO_PARAS), a piece of RETYPE_PIECE bytes at a time with a window after
-; each when it is larger, so that a stretch with interrupts off stays short
+; each when they are more, so that a stretch with interrupts off stays short
 ; (os-server.md P2, X7: 64 KB at once took about 26 ms, E4). Its progress is
-; T_ZERO_DONE, where the call resumes if the thread gives way (kpreempt).
-; After the windows the retype goes on only if the caller's space lives, its
-; slot is still empty and the untyped still holds what was carved; a revoke
-; that gives the untyped's memory back meanwhile cancels it before it
-; writes another byte (retypes_cancel, os-server.md P15)
-;   In:       BP = the frame (DX the untyped, SI the slot); the running
-;             thread's T_ZERO_*
-;   Out:      CF set if the retype cannot go on
-;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; T_ZERO_DONE, where the call resumes if the thread gives way (kpreempt). A
+; revoke that gives the untyped's memory back meanwhile cancels it before
+; it writes another byte (retypes_cancel, os-server.md P15)
+;   In:       BP = the frame (its AH the call); the running thread's T_ZERO_*
+;   Out:      CF set if cancelled; ES = the running thread
+;   Destroys: AX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
-retype_zero:
+zero_pieces:
         mov es, [cur_thread]
         cmp word [es:T_ZERO_SLOT], ZERO_CANCELLED
-        je .changed                     ; its memory given back meanwhile (P15)
+        je .cancelled                   ; its memory given back meanwhile (P15)
         mov cx, [es:T_ZERO_PARAS]
         sub cx, [es:T_ZERO_DONE]        ; CX = paragraphs left
         jz .zeroed
@@ -475,9 +479,30 @@ retype_zero:
         mov ax, [es:T_ZERO_DONE]
         cmp ax, [es:T_ZERO_PARAS]
         jae .zeroed
-        KWINDOW (VEC_KCALL << 8) | KCALL_RETYPE
-        jmp retype_zero
+        mov al, [bp + FRAME_AX + 1]     ; the call, for a stretch's place
+        mov ah, VEC_KCALL
+        mov [zero_place], ax
+        KWINDOW [zero_place]
+        jmp zero_pieces
 .zeroed:
+        clc
+        ret
+.cancelled:
+        stc
+        ret
+
+; ----------------------------------------------------------------------------
+; retype_zero - the running thread's new segment zeroed (zero_pieces); then
+; the retype goes on only if the caller's space lives, its slot is still
+; empty and the untyped still holds what was carved
+;   In:       BP = the frame (DX the untyped, SI the slot); the running
+;             thread's T_ZERO_*
+;   Out:      CF set if the retype cannot go on
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+retype_zero:
+        call zero_pieces
+        jc .changed
         mov ax, [es:T_SPACE]            ; everything as it was?
         test ax, ax
         jz .changed
@@ -1801,6 +1826,231 @@ kc_seal:
         jne kc_done.state               ; its parent must be the untyped it came from
         mov byte [es:di + 5], ACC_UCODE ; present, DPL 3, code, readable, accessed
         jmp kc_done.ok
+
+; ----------------------------------------------------------------------------
+; kc_resize - KCALL_RESIZE: a data segment made longer or shorter in place,
+; within the untyped it was retyped from, the last thing carved there, with
+; every copy of it, so that a process's heap grows without a copy
+; (os-server.md P15). The untyped must be the caller's: a segment alone,
+; moved to another space, takes no more of it. New bytes are zeroed a piece
+; at a time, as a retype's (zero_pieces), carved first so that nothing else
+; takes them meanwhile; a shorter segment gives its end back to the
+; untyped. A thread that holds a copy in a segment register loads it again
+; on its way back to its ring, as after every kernel entry
+;   In:       BP = the frame (DX the segment, CX its bytes)
+;   Out:      the frame's status
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+kc_resize:
+        mov es, [cur_thread]
+        cmp byte [es:T_CONT], CONT_RESUMED
+        jne .fresh
+        cmp word [es:T_ZERO_PARAS], 0
+        jne resize_grow                 ; it gave way while its new bytes were zeroed
+.fresh:
+        call resize_find                ; ES:SI the segment, ES:BX its untyped
+        jc kc_done
+        mov cx, [bp + FRAME_CX]
+        test cx, cx
+        jz kc_done.arg
+        add cx, 15
+        rcr cx, 1                       ; (a carry is bit 16)
+        shr cx, 3                       ; CX = its new paragraphs
+        mov ax, [resize_offset]
+        add ax, [es:si + SH_SIZE]       ; its end, in the untyped
+        cmp ax, [es:bx + SH_WATERMARK]
+        jne kc_done.state               ; something carved after it
+        mov ax, [resize_offset]
+        add ax, cx
+        jc kc_done.mem
+        cmp ax, [es:bx + SH_SIZE]
+        ja kc_done.mem
+        mov [es:bx + SH_WATERMARK], ax  ; its new end: carved, or given back
+        mov ax, [es:si + SH_SIZE]
+        cmp cx, ax
+        jbe resize_set                  ; no longer: nothing to zero
+        sub cx, ax                      ; CX = the paragraphs it gains
+        mov dx, [es:si + SH_OBJECT]
+        mov bl, [es:si + SH_HIGH]
+        add dx, ax
+        adc bl, 0                       ; BL:DX = its old end
+        mov ax, [es:si + SH_PARENT_SLOT]
+        mov es, [cur_thread]
+        mov [es:T_ZERO_BASE], dx
+        mov [es:T_ZERO_HIGH], bl
+        mov [es:T_ZERO_PARAS], cx
+        mov word [es:T_ZERO_DONE], 0
+        mov [es:T_ZERO_SLOT], ax
+        ; fall through
+
+; ----------------------------------------------------------------------------
+; resize_grow - the rest of a longer segment's KCALL_RESIZE: its new
+; paragraphs zeroed, then, if everything is as it was - the segment where
+; it was, as long, its untyped's watermark still past what it gains - it
+; and its copies made longer; where a resumed call goes on
+;   In:       BP = the frame; the running thread's T_ZERO_*
+;   Out:      the frame's status
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+resize_grow:
+        call zero_pieces                ; ES = the running thread
+        mov dx, [es:T_ZERO_BASE]
+        mov cl, [es:T_ZERO_HIGH]
+        mov di, [es:T_ZERO_PARAS]
+        mov word [es:T_ZERO_PARAS], 0
+        jc kc_done.state                ; its untyped revoked meanwhile
+        push cx
+        push dx
+        push di
+        call resize_find                ; ES:SI the segment, ES:BX its untyped
+        pop di
+        pop dx
+        pop cx
+        jc kc_done.state
+        mov ax, [es:si + SH_OBJECT]     ; its end where the new bytes start?
+        mov ch, [es:si + SH_HIGH]
+        add ax, [es:si + SH_SIZE]
+        adc ch, 0
+        cmp ax, dx
+        jne kc_done.state
+        cmp ch, cl
+        jne kc_done.state
+        mov cx, [es:si + SH_SIZE]       ; CX = its new paragraphs
+        add cx, di
+        mov ax, [resize_offset]
+        add ax, cx
+        cmp ax, [es:bx + SH_WATERMARK]
+        jne kc_done.state               ; its untyped's watermark moved meanwhile
+        ; fall through
+
+; ----------------------------------------------------------------------------
+; resize_set - a segment's new size, in it and in each capability derived
+; from it: a walk down SH_CHILD, across SH_NEXT and back up SH_PARENT, with
+; an interrupt window every CHILDREN_WINDOW, where no thread gives way
+; (IWINDOW), so that nothing changes the tree meanwhile
+;   In:       BP = the frame (CX bytes); ES = the caller's space; CX = the
+;             new paragraphs; resize_slot
+;   Out:      the frame's status, KE_OK
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+resize_set:
+        mov [resize_paras], cx
+        mov ax, [bp + FRAME_CX]
+        dec ax
+        mov [resize_limit], ax
+        mov bx, es
+        mov [resize_space], bx
+        mov ax, [resize_slot]
+        call resize_one
+        xor cx, cx                      ; capabilities since the last window
+.down:
+        call shadow_at                  ; ES:SI = this one's
+        mov dx, [es:si + SH_CHILD]
+        test dx, dx
+        jz .across
+        mov ax, [es:si + SH_CHILD_SLOT]
+        mov bx, dx
+        jmp .visit
+.across:
+        cmp bx, [resize_space]          ; its children done: back at the segment?
+        jne .sibling
+        cmp ax, [resize_slot]
+        je kc_done.ok
+.sibling:
+        mov dx, [es:si + SH_NEXT]
+        test dx, dx
+        jz .up
+        mov ax, [es:si + SH_NEXT_SLOT]
+        mov bx, dx
+        jmp .visit
+.up:
+        mov ax, [es:si + SH_PARENT_SLOT]
+        mov bx, [es:si + SH_PARENT]
+        call shadow_at
+        jmp .across
+.visit:
+        call resize_one
+        inc cx
+        cmp cx, CHILDREN_WINDOW
+        jb .down
+        xor cx, cx
+        IWINDOW (VEC_KCALL << 8) | KCALL_RESIZE
+        jmp .down
+
+; ----------------------------------------------------------------------------
+; resize_one - one capability of the segment's given its new size: its
+; shadow entry's paragraphs, its descriptor's limit
+;   In:       BX = the space; AX = the slot; resize_paras, resize_limit
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+resize_one:
+        push ax
+        push si
+        push di
+        push es
+        call slot_at                    ; ES:SI the shadow entry, ES:DI the descriptor
+        cmp byte [es:si + SH_TYPE], CAP_SEGMENT
+        jne .done                       ; (every copy of a segment is one)
+        mov ax, [resize_paras]
+        mov [es:si + SH_SIZE], ax
+        mov ax, [resize_limit]
+        mov [es:di], ax
+.done:
+        pop es
+        pop di
+        pop si
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; resize_find - the segment a KCALL_RESIZE names: data, expand-up, its
+; parent an untyped in the caller's own space, which it lies in
+;   In:       BP = the frame (DX the segment)
+;   Out:      CF clear: ES = the caller's space, SI = the segment's shadow
+;             entry, BX = its untyped's, resize_slot, resize_offset; CF set:
+;             AL = the status
+;   Destroys: AX, DI
+; ----------------------------------------------------------------------------
+resize_find:
+        push cx
+        mov ax, [bp + FRAME_DX]
+        mov cl, CAP_SEGMENT
+        call cap_get                    ; ES:SI, ES:DI, AX the slot
+        mov cl, KE_CAP
+        jc .refuse
+        mov [resize_slot], ax
+        mov al, [es:di + 5]
+        and al, ACC_PRESENT | ACC_SEGMENT | ACC_CODE | ACC_EXPAND_DOWN
+        mov cl, KE_ARG
+        cmp al, ACC_PRESENT | ACC_SEGMENT
+        jne .refuse                     ; data, expand-up
+        mov cl, KE_STATE
+        mov ax, es
+        cmp [es:si + SH_PARENT], ax
+        jne .refuse                     ; its parent in another space, or none
+        push si
+        mov bx, ax
+        mov ax, [es:si + SH_PARENT_SLOT]
+        call slot_at                    ; ES:SI = its parent's
+        mov bx, si
+        pop si
+        cmp byte [es:bx + SH_TYPE], CAP_UNTYPED
+        jne .refuse                     ; a copy of another segment
+        mov ax, [es:si + SH_OBJECT]     ; its paragraphs from the untyped's start
+        mov ch, [es:si + SH_HIGH]
+        sub ax, [es:bx + SH_OBJECT]
+        sbb ch, [es:bx + SH_HIGH]
+        jnz .refuse                     ; (never: it lies in its untyped)
+        mov [resize_offset], ax
+        pop cx
+        clc
+        ret
+.refuse:
+        mov al, cl
+        pop cx
+        stc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; thread_module_name - a thread named after the module whose code its space's

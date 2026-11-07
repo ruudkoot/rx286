@@ -1,0 +1,29 @@
+# KCALL_RESIZE (roadmap os-server.md P15): a segment made longer in place
+# over memory a revoke left written, its copy with it, its bytes kept and
+# the new ones zeroed in pieces; every refusal; shorter, its end retyped
+# next; a read past a shorter end through ES, loaded before the call, is
+# the program's fault. tests/programs/additions.asm, TEST_ADD_RESIZE.
+program: additions
+define: TEST_CAPS
+define: TEST_ADD_RESIZE
+match: contains
+timeout: 60
+---
+additions: make it 8,000 bytes (0): 0
+additions: its copy's limit (7999): 7999
+additions: its base kept (1): 1
+additions: the word at its old end, through the copy (4660): 4660
+additions: its new bytes, ORed (0): 0
+additions: resize the copy (6): 6
+additions: past its untyped (3): 3
+additions: to 0 bytes (2): 2
+additions: its own data, of the root's untyped (6): 6
+additions: an untyped (1): 1
+additions: sealed code (2): 2
+additions: make it 100 bytes (0): 0
+additions: its copy's limit (99): 99
+additions: the next retype's base, from its (112: its end given back): 112
+additions: longer, with that carved after it (6): 6
+additions: a read past a shorter end, through ES loaded before
+rx286: program fault #GP(0000) at 0007:{resize_part.read_f}
+additions: done
