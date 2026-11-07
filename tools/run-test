@@ -51,9 +51,6 @@
 #   {{ and }} a brace itself;
 #   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
 #   {m:module.codesum}, {m:module.datasum} sums of its code and data;
-#   {u:OFFSET.high}, {u:OFFSET.low} where the memory for programs starts
-#   (the module table's end of the image, on a kilobyte: umem_size) plus OFFSET
-#   in hex, its bits 16-23 and its low word in decimal;
 #   {image_sum} entry.asm's Fletcher sum of the image's words; {image_size}
 #   KERNEL.BIN's bytes ({image_size8} right in 8 columns, as ls -l puts
 #   them), {image_free} the boot floppy's free bytes. A line that starts with
@@ -420,16 +417,7 @@ def substitute(test, line):
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
-    def umem(m):
-        L = rxlib.LAYOUT
-        image = open(booted_image(test), 'rb').read()
-        paragraphs = struct.unpack_from('<H', image, L['MODULE_TABLE_OFF'] + L['MH_PARAGRAPHS'])[0]
-        align = L['UMEM_ALIGN'] // 16
-        start = (L['KERNEL_PHYS'] // 16 + paragraphs + align - 1) // align * align * 16
-        at = start + int(m.group(1), 16)
-        return '%d' % (at >> 16 if m.group(2) == 'high' else at & 0xFFFF)
     line = line.replace('{{', '\x00').replace('}}', '\x01')    # {{ and }}: braces themselves
-    line = re.sub(r'\{u:([0-9A-Fa-f]+)\.(high|low)\}', umem, line)
     line = re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
     return line.replace('\x00', '{').replace('\x01', '}')
 

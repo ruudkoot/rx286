@@ -85,8 +85,6 @@ counter's and `{r:name}` the root's; `{m:module.base}`, `{m:module.limit}`,
 `{m:module.codesum}` and `{m:module.datasum}` say where a module's code is
 in the boot image and what it and its data sum to; `{image_sum}`,
 `{image_size}` and `{image_free}` describe `KERNEL.BIN` and the floppy;
-`{u:OFFSET.high}` and `{u:OFFSET.low}` are where the memory for programs
-starts, at the image's end (*docs/memory-map.md*), plus `OFFSET` in hex;
 `{{` and `}}` are braces themselves.
 
 Every run gets its own copies of drives B, C and D (`make disks`,

@@ -47,6 +47,7 @@ NEW_ENDPOINT        equ 0x1F
 
 begin_udata
 started             db 0
+base                dw 0, 0             ; the first segment's base: DL:AX
 end_udata
 
 ; report "what" - "caps: what: " and AX, the status, in decimal
@@ -85,13 +86,37 @@ entry:
         report "the segment, zeroed, reads back (4660)"
         mov dx, MY_SLOT3
         kcall KCALL_SEGMENT
-        mov bx, ax
-        mov ax, dx
-        report "its base, high byte"
-        mov ax, bx                      ; past the others' segments, and its own
-        report "its base, low word"
-        mov ax, cx
+        mov [base], ax
+        mov [base + 2], dx
+        push cx
+        mov dx, MY_CODE                 ; past its own code, in the boot image
+        kcall KCALL_SEGMENT
+        xor bx, bx
+        cmp dx, [base + 2]
+        ja .before
+        jb .past
+        cmp ax, [base]
+        jae .before
+.past:
+        inc bx
+.before:
+        mov ax, bx
+        report "its base, past the program's code in the image (1)"
+        pop ax
         report "its limit (255)"
+        mov dx, UT_MEMORY               ; the next: its base 256 bytes on
+        mov al, CAP_SEGMENT
+        mov si, MY_SLOT4
+        mov cx, NEW_SIZE
+        mov bl, ACC_DATA3
+        kcall KCALL_RETYPE
+        mov dx, MY_SLOT4
+        kcall KCALL_SEGMENT
+        sub ax, [base]
+        sbb dx, [base + 2]
+        report "the next segment's base, from its (256)"
+        mov dx, MY_SLOT4
+        kcall KCALL_DELETE
         mov dx, UT_ARENA
         mov al, CAP_SPACE
         mov si, MY_SLOT4

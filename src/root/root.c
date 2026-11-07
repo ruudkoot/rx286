@@ -396,7 +396,9 @@ static void build(unsigned module)
 #endif
         }
     }
-    must(retype(ARENA, CAP_SPACE, s.space, slots, 0));
+    /* (the server's, 16 KB, from the memory for segments: the arena keeps
+     * its room for the others' objects, and a TEST_CAPS program's, P15) */
+    must(retype(module == server ? UNTYPED : ARENA, CAP_SPACE, s.space, slots, 0));
     if (module != server)
         must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
     /* its code, as the kernel gave it */
