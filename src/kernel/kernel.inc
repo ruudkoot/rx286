@@ -70,6 +70,7 @@ T_CALLS             equ 46      ; the calls it has made: a stale reply cannot an
 T_FPU               equ 48      ; its 287's state (FNSAVE: 94 bytes) while not the owner
 T_FAULT_BADGE       equ 142     ; the badge of the fault endpoint's capability
 T_WAY_BACK          equ 144     ; byte: faults reported on this way back (isr_exit)
+T_FPU_ERROR         equ 145     ; byte: its 287's error, its fault #MF on its way back
 T_REVOKE_SPACE      equ 146     ; what its KCALL_REVOKE revokes, across its windows
 T_REVOKE_SLOT       equ 148
 T_SUSPEND_NOTIFY    equ 150     ; THREAD_SUSPEND's notification, signalled once it stopped

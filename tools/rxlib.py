@@ -339,7 +339,8 @@ SC_LSHIFT, SC_CTRL, SC_ALT = 0x2A, 0x1D, 0x38
 SC_SCROLL_LOCK, SC_DELETE = 0x46, 0x53
 NAMED = {'up': 0x48, 'down': 0x50, 'left': 0x4B, 'right': 0x4D,
          'esc': 0x01, 'enter': 0x1C, 'bs': 0x0E, 'caps': 0x3A,
-         'scroll-lock': 0x46, 'del': 0x53, 'sysrq': 0x54}
+         'scroll-lock': 0x46, 'del': 0x53, 'sysrq': 0x54, 'home': 0x47, 'end': 0x4F,
+         'pgup': 0x49, 'pgdn': 0x51, 'ins': 0x52}
 NAMED.update({'f%d' % n: 0x3A + n for n in range(1, 11)})   # F1 3Bh to F10 44h
 
 
@@ -348,20 +349,23 @@ def compile_keys(script):
 
     Plain characters are typed as the US keyboard types them; escapes are
     \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc). Braces name others:
-    {up}, {down}, {left}, {right}, {esc}, {f1} to {f10}, {caps},
-    {scroll-lock}, {del}, {sysrq} (the kernel's thread dump, in debug and
-    test builds; {dump} the same at once, waiting or not), {ctrl-X} and {alt-X} for a key X or a named one ({alt-f2}),
-    {ctrl-break}, {ctrl-alt-del} (typed at once, even if the program does
-    not wait), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's
+    {up}, {down}, {left}, {right}, {home}, {end}, {pgup}, {pgdn}, {ins},
+    {del}, {esc}, {f1} to {f10}, {caps}, {scroll-lock}, {sysrq} (the
+    kernel's thread dump, in debug and test builds; {dump} the same at
+    once, waiting or not), {ctrl-X} and {alt-X} for a key X or a named one
+    ({alt-f2}), {ctrl-break}, {ctrl-alt-del} (typed at once, even if the
+    program does not wait), {now K}: the key {K} typed at once, as ^C for a
+    program that never reads ({now ctrl-c}), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's
     packet, DX right and DY down (-128 to 127), B the buttons down (L, R, LR
     or -), and {mouse-bytes A B C}: three bytes from the mouse as they are,
     in hexadecimal."""
     out = []
+    when = [OP_WHEN_WAITING]            # {now K}'s: OP_NOW for its key alone
 
-    def press(code, op=OP_WHEN_WAITING):
+    def press(code):
         # A release gives no ASCII, so it is typed at once: the program may
         # not wait again (a key that starts a loop).
-        out.extend([op, code, OP_NOW, code | 0x80])
+        out.extend([when[0], code, OP_NOW, code | 0x80])
 
     i = 0
     while i < len(script):
@@ -376,6 +380,10 @@ def compile_keys(script):
             end = script.index('}', i)
             name = script[i + 1:end]
             i = end + 1
+            when[0] = OP_WHEN_WAITING
+            if name.startswith('now '):
+                when[0] = OP_NOW
+                name = name[4:]
             if name in NAMED:
                 press(NAMED[name])
             elif name.startswith('mouse-bytes '):
@@ -404,16 +412,17 @@ def compile_keys(script):
             elif (name.startswith('ctrl-') and len(name) == 6 or
                   name.startswith('alt-') and len(name) == 5) and name[-1] in KEYS:
                 modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
-                out.extend([OP_WHEN_WAITING, modifier])
+                out.extend([when[0], modifier])
                 press(KEYS[name[-1]][0])
                 out.extend([OP_NOW, modifier | 0x80])
             elif name.startswith(('ctrl-', 'alt-')) and name.split('-', 1)[1] in NAMED:
                 modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
-                out.extend([OP_WHEN_WAITING, modifier])
+                out.extend([when[0], modifier])
                 press(NAMED[name.split('-', 1)[1]])
                 out.extend([OP_NOW, modifier | 0x80])
             else:
                 raise ValueError('key script: unknown key {%s}' % name)
+            when[0] = OP_WHEN_WAITING
             continue
         else:
             i += 1

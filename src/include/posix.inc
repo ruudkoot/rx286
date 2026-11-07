@@ -71,7 +71,12 @@ PX_SETSID           equ 40      ; -> a session of the caller's, its id the calle
 PX_GETSID           equ 41      ; BX a pid (0: the caller) -> its session
 PX_TCGETPGRP        equ 42      ; BX the terminal's descriptor -> its foreground group
 PX_TCSETPGRP        equ 43      ; BX the terminal's descriptor, CX a group of the session
-PX_CALLS            equ 44
+; The commands' (P12)
+PX_TIME             equ 44      ; -> 0, and the seconds since 1970-01-01 00:00:00, SI:DI: the
+                                ;    real-time clock's, taken as UTC
+PX_PS               equ 45      ; BX a table entry, DI PI_BYTES of room: the first process
+                                ;    from that entry on -> its entry + 1; or -1, ESRCH, none
+PX_CALLS            equ 46
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
@@ -104,6 +109,7 @@ ENOSYS              equ 38
 ENOTEMPTY           equ 39
 EPIPE               equ 32
 ENOTTY              equ 25
+EOVERFLOW           equ 75      ; a time before 1970 for gmtime (P12)
 ERESTART            equ 85      ; never a program's: a call a signal's handler broke off,
                                 ;    which libc makes again (SA_RESTART)
 PIPE_BUF            equ 512     ; a pipe's write of this many bytes or fewer is never split
@@ -195,6 +201,16 @@ ST_SIZE             equ 6       ; dword
 ST_MTIME            equ 10      ; dword: seconds since 1970, from DOS's time stamp
 ST_DEV              equ 14      ; word: the drive
 ST_BYTES            equ 16
+; A process, as PX_PS gives it (rx/ps.h): rx286's own, as POSIX has no call
+PI_PID              equ 0       ; word
+PI_PPID             equ 2       ; word
+PI_PGID             equ 4       ; word: its group
+PI_SID              equ 6       ; word: its session
+PI_STATE            equ 8       ; byte: 'R' running or ready, 'S' waiting in a call, 'T'
+                                ;    stopped, 'Z' a zombie
+PI_TTY              equ 9       ; byte: its session's terminal, 0 to 7, or FFh: none
+PI_COMMAND          equ 10      ; its file's name, zero-padded (AR_NAME_SIZE)
+PI_BYTES            equ 22
 S_IFMT              equ 0xF000
 S_IFDIR             equ 0x4000
 S_IFCHR             equ 0x2000

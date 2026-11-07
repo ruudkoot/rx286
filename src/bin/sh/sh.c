@@ -10,9 +10,10 @@
  * with <, >, >> and 2> redirections. Words are split at blanks; '...' quotes all, "..."
  * all but $, and \ the next character; $NAME, ${NAME} and $? are
  * replaced. The first word of a command may be an alias. The built-ins are
- * cd, pwd, exit, export, unset, set, alias, unalias, true, false, jobs, fg
- * and bg; any other command is a program, found along PATH (execvp), run in
- * a child. Paths may name a drive DOS's way: "c:/docs" is "/c/docs".
+ * cd, pwd, exit, export, unset, set, alias, unalias, true, false, jobs, fg,
+ * bg and help (P12); any other command is a program, found along PATH
+ * (execvp), run in a child. Paths may name a drive DOS's way: "c:/docs" is
+ * "/c/docs".
  *
  * Job control (P11, XCU 2.11): at its start on a terminal the shell leads a
  * session whose terminal it is. Each pipeline is a job, a process group of
@@ -401,8 +402,6 @@ static struct job *job_new(pid_t pgid, const pid_t *pids, int n, const char *tex
     strncpy(j->text, text, sizeof j->text - 1);
     for (k = (int)strlen(j->text); k > 0 && j->text[k - 1] == ' '; k--)
         j->text[k - 1] = 0;
-    if (j != &jobs[JOBS])
-        last_job = j;
     return j;
 }
 
@@ -515,6 +514,19 @@ static struct job *job_pick(const char *name)
         return 0;
     return &jobs[n - 1];
 }
+
+/* help's: the built-ins, the programs (in /z and /c/bin), the keys */
+static const char help_text[] =
+    "Built in:  cd [DIR], pwd, exit [STATUS], export NAME=VALUE, unset NAME, set,\n"
+    "           alias NAME=VALUE, unalias NAME, jobs, fg [%N], bg [%N], true,\n"
+    "           false, help\n"
+    "Files:     ls [-l], cat, head [-n N], wc, cp, mv, rm, mkdir, rmdir, more,\n"
+    "           lp (to the printer), echo\n"
+    "Processes: ps [-e], kill [-SIGNAL] PID, sleep SECONDS, env [NAME=VALUE] [CMD]\n"
+    "Machine:   date [+FORMAT], uptime, clear, keys, mem, fpu, crash KIND, spin\n"
+    "Lines:     CMD | CMD, CMD; CMD, && ||, & (in the background), < > >> 2>\n"
+    "Keys:      Backspace, Up and Down (the last lines), ^C (stop), ^Z (stop a\n"
+    "           job), ^D (the end), Alt+F1 to F8 (the terminals)\n";
 
 /* builtin - a built-in command, run: its status; -1 if it is none */
 static int builtin(struct command *c)
@@ -643,6 +655,8 @@ static int builtin(struct command *c)
         return 0;
     if (strcmp(name, "false") == 0)
         return 1;
+    if (strcmp(name, "help") == 0)
+        return write(1, help_text, sizeof help_text - 1) < 0;
     return -1;
 }
 
@@ -779,6 +793,8 @@ static int pipeline(int n, int background, const char *text)
         return status;                  /* none started */
     j = job_new(pgid, pids, k, text);
     if (background) {
+        if (j != &jobs[JOBS])
+            last_job = j;               /* the current job, as one stopped is */
         printf("[%d] %d\n", (int)(j - jobs) + 1, (int)pgid);
         return 0;
     }

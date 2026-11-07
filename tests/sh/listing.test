@@ -8,7 +8,7 @@ keys: ls -l b:/many\nls / /dev /z\n
 ---
 rx286, test build
 /a$ ls -l /a; ls -l b:/; ls -l c:/docs C:/DOCS/HELLO.TXT; ls -l /d
--rw-r--r--   {image_size} KERNEL.BIN
+-rw-r--r-- {image_size8} KERNEL.BIN
 -rw-r--r--       79 README.TXT
 -rw-r--r--     3136 FRAG.TXT
 -rw-r--r--       50 PAD.TXT
@@ -87,12 +87,4 @@ sh
 echo
 cat
 ls
-cp
-mv
-rm
-mkdir
-rmdir
-wc
-lp
-more
 /a$

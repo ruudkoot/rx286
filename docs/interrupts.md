@@ -69,7 +69,13 @@ What happens next depends on who was running (the frame's CS):
   single-step trap (on a 286 the program's pending trap arrives at the first
   instruction of a fault's handler, Intel 9.7.1: dropped), and vector 9, the
   287 overrunning a segment after the CPU moved on (Intel 9.6.3: the program
-  is restarted on its way back, like IRQ13).
+  is restarted on its way back).
+- **IRQ13, the 287's error,** is its owner's, whichever thread runs (Intel
+  11.4). An owner with a fault endpoint, a process or a program the root
+  builds, has it as its fault #MF (vector 16, which the AT never raises
+  itself) on its way back to its ring, at the IP it has then; the OS server
+  makes it `SIGFPE` for a process (os-server.md P12). Another is
+  restarted.
 - **The way back checks the segments** (roadmap l4.md L1, X3). Before the
   POPs and the `IRET` load them, the kernel checks each of the frame's
   segment registers for its own use (`way_back_check`), since the

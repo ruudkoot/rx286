@@ -3,6 +3,7 @@
  * The processes (roadmap os-server.md P6): POSIX's fork, exec, posix_spawn,
  * exit, wait, kill and brk, for programs run from /z, beside today's
  * programs, which the root builds. Their signals are signal.c's (P10).
+ * Also the time of day, and a listing of the processes for ps (P12).
  *
  * A process is the root's (ROOT_SPAWN, ROOT_FORK): a space of PROC_SLOTS
  * with its code, its data segment (in slots 1 and 2) and its endpoint. The
@@ -54,9 +55,10 @@ struct proc {
     rx_u8 waiting;                      /* its server thread waits for a child */
     rx_u8 served;                       /* entry i has its server thread (ROOT_SERVE) */
     rx_u8 report, stopsig;              /* R_*, and the signal that stopped it (P11) */
+    rx_u8 asleep;                       /* its server thread waits in a call (P12's ps) */
     pid_t pid, ppid;
     pid_t pgid, sid;                    /* its group and session (P11) */
-    rx_u16 root;
+    rx_u16 root, code;                  /* the root's numbers for it and its code */
     rx_u16 brk, brk_min, brk_max;
     int status;
     char name[AR_NAME_SIZE];
@@ -187,7 +189,9 @@ void proc_wake(int i)
 /* proc_sleep - entry i's server thread sleeps until woken (server.h) */
 void proc_sleep(int i)
 {
+    procs[i].asleep = 1;
     sleep_on(P_SLOT(i, PK_NOTIFY), 0);
+    procs[i].asleep = 0;
 }
 
 /* proc_data_limit - process i's data segment's last offset (server.h) */
@@ -436,7 +440,7 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
     int parent = entry_of(ppid, P_ALIVE);
 
     p->state = P_ALIVE;
-    p->waiting = 0;
+    p->waiting = p->asleep = 0;
     p->report = R_NONE;
     p->pid = next_pid++;
     p->ppid = ppid;
@@ -472,6 +476,7 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
     if (*error)
         return -1;
     procs[i].root = n;
+    procs[i].code = img.code;
     vfs_spawned(i, parent);
     sig_start(i, parent, SIG_FROM_SPAWN);
     sig_287(i, img.flags & RXF_287);
@@ -569,6 +574,7 @@ static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
         return -1;
     }
     procs[c].root = n;
+    procs[c].code = procs[i].code;
     vfs_forked(c, i);
     sig_start(c, i, SIG_FROM_FORK);
     entry_start(c, procs[i].pid, procs[i].name, procs[i].brk, procs[i].brk_min,
@@ -583,18 +589,23 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
 {
     struct image img;
     rx_u16 n;
+    int same;
 
     *error = image_take(&img, i, path, P_SLOT(i, PK_DATA), argv, envp);
     if (*error)
         return -1;
-    root(ROOT_EXIT, procs[i].root, 0, 0, 0, 0);     /* its thread, in this call, too */
+    same = img.code == procs[i].code;   /* its own file again: its code kept (P12) */
+    root(ROOT_EXIT, procs[i].root, (rx_u16)same, 0, 0, 0);  /* its thread, in this call, too */
     *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
     image_done(&img);
     if (*error) {
+        if (same)
+            root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);
         end(i, SIGKILL, 0);
         return NO_REPLY;
     }
     procs[i].root = n;
+    procs[i].code = img.code;
     vfs_exec(i);
     sig_start(i, i, SIG_FROM_EXEC);
     sig_287(i, img.flags & RXF_287);
@@ -647,7 +658,7 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
             return -1;
         procs[i].waiting = 1;
         give();
-        sleep_on(P_SLOT(i, PK_NOTIFY), 0);
+        proc_sleep(i);
         take(P_SLOT(i, PK_NOTIFY));
         procs[i].waiting = 0;
         if (!proc_still(i))
@@ -837,6 +848,51 @@ static int px_getsid(int i, pid_t pid, int *error)
     return procs[t].sid;
 }
 
+/* px_time - PX_TIME: the real-time clock's seconds since 1970, taken as
+ * UTC, in *seconds; or -1, EIO, if it does not answer */
+static int px_time(rx_u32 *seconds, int *error)
+{
+    unsigned t[6];
+
+    if (!vol_clock(t) || (*seconds = vol_seconds(t)) == 0) {
+        *error = EIO;
+        return -1;
+    }
+    return 0;
+}
+
+/* px_ps - PX_PS: the first process from table entry k on, its record (PI_*)
+ * into process i's segment at `at`: its entry + 1; or -1, ESRCH, none */
+static int px_ps(int i, rx_u16 k, rx_u16 at, int *error)
+{
+    rx_u16 data = P_SLOT(i, PK_DATA);
+    rx_u8 RX_FAR *b;
+    int t;
+
+    for (; k < PROCS && procs[k].state == P_FREE; k++)
+        ;
+    if (k >= PROCS) {
+        *error = ESRCH;
+        return -1;
+    }
+    if ((rx_u32)at + PI_BYTES - 1 > limit(data)) {
+        *error = EFAULT;
+        return -1;
+    }
+    b = (rx_u8 RX_FAR *)RX_MK_FP(data, at);
+    *(pid_t RX_FAR *)(b + PI_PID) = procs[k].pid;
+    *(pid_t RX_FAR *)(b + PI_PPID) = procs[k].ppid;
+    *(pid_t RX_FAR *)(b + PI_PGID) = procs[k].pgid;
+    *(pid_t RX_FAR *)(b + PI_SID) = procs[k].sid;
+    b[PI_STATE] = procs[k].state == P_ZOMBIE ? 'Z' : sig_stopped(k) ? 'T'
+        : procs[k].waiting || procs[k].asleep ? 'S' : 'R';
+    t = procs[k].state == P_ZOMBIE ? -1 : tty_controlling(k);
+    b[PI_TTY] = (rx_u8)t;
+    for (t = 0; t < AR_NAME_SIZE; t++)
+        b[PI_COMMAND + t] = (rx_u8)procs[k].name[t];
+    return k + 1;
+}
+
 /* path_in - a call's path, from the process's data segment */
 static int path_in(int i, rx_u16 at, char *path, int *error)
 {
@@ -844,14 +900,15 @@ static int path_in(int i, rx_u16 at, char *path, int *error)
 }
 
 /* handle - a message on process i's endpoint: a call, its reply in r (BX
- * the result, CX the error, SI more); or a fault. 0 if it ended the process
- * and there is no one to answer */
+ * the result, CX the error, SI and DI more); or a fault. 0 if it ended the
+ * process and there is no one to answer */
 static int handle(int i, struct rx_kregs *r)
 {
     rx_u16 notify = P_SLOT(i, PK_NOTIFY), status = 0;
     char path[PX_PATH_MAX], line[64];
-    int result = -1, error = 0;
+    int result = -1, error = 0, unit;
     unsigned n;
+    rx_u32 seconds = 0;
 
     take(notify);
     if (procs[i].state != P_ALIVE) {
@@ -864,11 +921,13 @@ static int handle(int i, struct rx_kregs *r)
             give();                     /* a handler's: no reply, the thread stops */
             return 0;
         }
+        if ((unit = tty_controlling(i)) < 0)
+            unit = 0;                   /* on its terminal (P12), the first's if none */
         n = fault(i, r, line, sizeof line);
         give();                         /* then the report: the console may wait */
         if (n) {
             rx_log(line, n);
-            console(OS_DATA, (rx_u16)(unsigned)line, n, CON_MAIN, 0);
+            console(OS_DATA, (rx_u16)(unsigned)line, n, CON_MAIN | (unit << 8), 0);
         }
         return 0;
     }
@@ -921,6 +980,14 @@ static int handle(int i, struct rx_kregs *r)
         break;
     case PX_GETSID:
         result = px_getsid(i, (pid_t)r->bx, &error);
+        break;
+    case PX_TIME:
+        result = px_time(&seconds, &error);
+        status = (rx_u16)seconds;
+        r->di = (rx_u16)(seconds >> 16);
+        break;
+    case PX_PS:
+        result = px_ps(i, r->bx, r->di, &error);
         break;
     case PX_SIGACTION:
     case PX_SIGPROCMASK:

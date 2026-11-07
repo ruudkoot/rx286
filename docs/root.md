@@ -134,7 +134,8 @@ names:
   `PROC_THREADS`); **`ROOT_BRK`:** the data replaced by a segment of
   another size, its bytes kept, every copy of the old revoked;
   **`ROOT_EXIT`:** everything of a process revoked, its memory free, its
-  code's count lowered, the code gone at none.
+  code's count lowered, the code gone at none; with CX 1 kept, for an
+  exec of the same file, whose `ROOT_SPAWN` runs it again (P12).
 - **`ROOT_SERVE`:** a thread of the server's own, at its entry with the SP
   asked for, and its notification, from a block of theirs the server keeps:
   the server's thread for each entry of its table of processes

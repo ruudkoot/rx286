@@ -130,7 +130,8 @@ LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ) stdlib.$(OBJ)
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
-    files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ))
+    files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ) \
+    time.$(OBJ) ps.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -181,16 +182,22 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     tty=$(C_B)/tests/posix/tty.$(OBJ) jobs=$(C_B)/tests/posix/jobs.$(OBJ) \
     console=$(C_B)/tests/posix/console.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
-Z_287 := sigfpu
+Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
-# The shell and its commands (P9), where init runs the shell
-Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls cp mv rm mkdir rmdir wc lp more, \
-    $(c)=$(C_B)/bin/$(c).$(OBJ))
+# The shell and its first commands (P9), where init runs the shell
+Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls,$(c)=$(C_B)/bin/$(c).$(OBJ))
 Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS)) \
     $(if $(filter sh,$(PROGRAM)),$(Z_SHELL))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
-# install: lines put them on a run's drive C
-DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ))
+# install: lines put them on a run's drive C, `make run` all of them in
+# /c/bin (tools/install-programs). The shell's commands but its first
+# three are there, as D11 has it (P12): the image holds 128 KB
+BIN_COMMANDS := $(foreach c,cp mv rm mkdir rmdir wc lp more clear uptime date sleep env head \
+    kill ps spin keys mem, \
+    $(c)=$(C_B)/bin/$(c).$(OBJ)) crash=$(C_B)/bin/crash.$(OBJ)+$(C_B)/bin/crashes.$(OBJ) \
+    fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ)
+DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ)) \
+    $(if $(filter sh,$(PROGRAM)),$(BIN_COMMANDS))
 DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p))).rx)
 image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))

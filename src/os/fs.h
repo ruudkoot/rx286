@@ -54,6 +54,8 @@ rx_u16 vol_dir_add(struct vol *v, rx_u16 dir, const rx_u8 *entry, struct place *
 rx_u16 vol_entry_put(struct vol *v, const struct place *where, const rx_u8 *entry);
 rx_u16 vol_dir_empty(struct vol *v, rx_u16 dir, int *empty);
 void vol_now(rx_u16 *date, rx_u16 *time);
+int vol_clock(unsigned *t);
+rx_u32 vol_seconds(const unsigned *t);
 
 /* An executable's file, open for exec (vfs.c): a description of the
  * server's own, the key the root's code table knows its code by, its bytes,

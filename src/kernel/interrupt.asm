@@ -62,9 +62,9 @@ isr_common:
 
 ; ----------------------------------------------------------------------------
 ; isr_exit - the way back: to the kernel, or to ring 3 through a switch to a
-; more urgent thread, a pending restart and the checks of the frame. A
-; thread that stops or gives way here goes the way back afresh when it runs
-; again (dispatch)
+; more urgent thread, a pending restart, a 287's error and the checks of
+; the frame. A thread that stops or gives way here goes the way back afresh
+; when it runs again (dispatch)
 ;   In:       BP = the frame (the running thread's, from rings 1-3: KFRAME);
 ;             DS = SEL_KDATA; interrupts off
 ;   Out:      IRET to the frame
@@ -105,6 +105,18 @@ isr_exit:
 .checks:
         mov es, [cur_thread]
         mov byte [es:T_WAY_BACK], 0
+        cmp byte [es:T_FPU_ERROR], 0
+        je .segments
+        ; Its 287's error (IRQ13, fpu_irq): its fault #MF, at where it is now,
+        ; for its fault endpoint, which only a thread with one has
+        mov byte [es:T_FPU_ERROR], 0
+        push ds
+        pop es
+        mov word [bp + FRAME_VECTOR], VEC_MF
+        mov word [bp + FRAME_ERROR], 0
+        mov al, CONT_FAULT_WAY
+        call fault_program              ; does not return (with no endpoint after
+.segments:                              ;    all: reported, and restarted)
         push ds
         pop es
 .check_segments:

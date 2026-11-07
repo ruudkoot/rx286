@@ -23,7 +23,7 @@ KR_SI               equ 8
 KR_DI               equ 10
 KR_BP               equ 12
 
-global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_xchg
+global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_xchg, rx_lsl, rx_cs, rx_ds, rx_ss
 
 code_section
 
@@ -86,6 +86,55 @@ rx_verr:
         inc ax
 .done:
         pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_lsl - unsigned rx_lsl(unsigned selector): a segment's limit as the CPU
+; sees it (LSL, at the caller's privilege), or 0 if the caller may not
+;   In:       the stack: the selector
+;   Out:      AX = the limit, or 0
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_lsl:
+        push bp
+        mov bp, sp
+        mov ax, ARG(0)
+        lsl ax, ax
+        jz .done
+        xor ax, ax
+.done:
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_cs - unsigned rx_cs(void): the caller's code selector
+;   In:       nothing
+;   Out:      AX = CS
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_cs:
+        mov ax, cs
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_ds - unsigned rx_ds(void): the caller's data selector
+;   In:       nothing
+;   Out:      AX = DS
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_ds:
+        mov ax, ds
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_ss - unsigned rx_ss(void): the caller's stack selector (a process's is
+; its data's: its stack is at the data segment's bottom, os-server.md E7)
+;   In:       nothing
+;   Out:      AX = SS
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_ss:
+        mov ax, ss
         ret
 
 ; ----------------------------------------------------------------------------

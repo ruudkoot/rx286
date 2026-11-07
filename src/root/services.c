@@ -183,12 +183,13 @@ static int find(const rx_u16 *key, rx_u16 *out)
     return E_NOT_FOUND;
 }
 
-/* code_unused - one process fewer runs a code: at none, the code goes */
-static void code_unused(int n)
+/* code_unused - one process fewer runs a code: at none, the code goes,
+ * unless kept (an exec of the same file runs it again) */
+static void code_unused(int n, int keep)
 {
     struct code *c = &codes[n];
 
-    if (--c->count == 0) {
+    if (--c->count == 0 && !keep) {
         block_free(c->block, c->segment, 0);
         c->state = NONE;
     }
@@ -399,8 +400,8 @@ static int serve(rx_u16 sp, rx_u16 to)
     return status;
 }
 
-/* exit_ - ROOT_EXIT: everything of a process gone */
-static int exit_(rx_u16 n)
+/* exit_ - ROOT_EXIT: everything of a process gone, its code kept if asked */
+static int exit_(rx_u16 n, int keep)
 {
     struct process *p = proc_of(n);
     int t;
@@ -412,7 +413,7 @@ static int exit_(rx_u16 n)
     thread_free(p, 0);                  /* its space, which held every copy */
     slot_give(p->space);
     block_free(p->data, p->segment, 0);
-    code_unused(p->code);
+    code_unused(p->code, keep);
     p->used = 0;
     return 0;
 }
@@ -453,7 +454,7 @@ void service(int what, struct rx_kregs *r)
         status = brk(r->bx, r->cx, r->di);
         break;
     case ROOT_EXIT:
-        status = exit_(r->bx);
+        status = exit_(r->bx, r->cx == 1);
         break;
     case ROOT_UNLOAD:
         status = unload(r->bx);

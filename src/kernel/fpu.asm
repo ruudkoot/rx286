@@ -6,7 +6,9 @@
 ; mode once (Intel's 80287 part); on Bochs' FPU it does nothing. MP is set
 ; and EM clear (entry.asm), so ESC and WAIT run. On the AT an unmasked 287
 ; error raises IRQ13 and latches BUSY until port F0h is written (IBM 2-4);
-; the error is the program's, since the kernel computes nothing with it.
+; the error is the program's, since the kernel computes nothing with it: a
+; program with a fault endpoint (a process) has it as its fault #MF on its
+; way back to its ring (isr_exit; os-server.md P12), another starts again.
 ; ============================================================================
 
 ; ----------------------------------------------------------------------------
@@ -111,7 +113,8 @@ fpu_reset_thread:
 ; (Intel 11.4: "the numerics error from one task may not be recorded until
 ; the 286 is running a different task"; roadmap l4.md X5)
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      the owner's program to restart
+;   Out:      the owner's fault to report (T_FPU_ERROR), or its program to
+;             restart
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 fpu_irq:
@@ -124,17 +127,26 @@ fpu_irq:
         test al, FPU_STATUS_ES
         jz .stale                       ; no error left: a restart's FNINIT cleared
         fnclex                          ; it after the PIC had latched the request
+        mov bx, [fpu_owner]
+        test bx, bx
+        jnz .owner
+        mov bx, [cur_thread]            ; no owner: the kernel's own test
+.owner:
+        push es
+        mov es, bx
+        cmp word [es:T_FAULT], 0
+        je .restart
+        mov byte [es:T_FPU_ERROR], 1    ; its fault endpoint's, on its way back
+        pop es
+        jmp .stale
+.restart:
+        pop es
 %ifdef TEST_FUZZ
         inc word [fuzz_fpu_errors]      ; the fuzzer counts, quietly
 %else
         mov si, msg_fpu_error
         call klog
 %endif
-        mov bx, [fpu_owner]
-        test bx, bx
-        jnz .owner
-        mov bx, [cur_thread]            ; no owner: the kernel's own test
-.owner:
         call thread_restart
 .stale:
         pop ax

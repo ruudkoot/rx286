@@ -85,7 +85,7 @@ attack: loadall
 @bochs rx286: program fault #UD at 0007:{attacks.loadall}
 @mame rx286: program fault #GP(0000) at 0007:{attacks.loadall}
 attack: 287 error
-@bochs rx286: the 287 reported an error (IRQ13)
+@bochs rx286: program fault #MF at 0007:{attacks.fpu_f}
 @mame attack: no 287 error arrived (no 287 emulated?)
 attack: write past the limit
 attack: refused, error 1

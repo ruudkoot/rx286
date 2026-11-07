@@ -3,6 +3,7 @@
 # captured (docs/emulators.md).
 program: sh
 emulators: bochs
+install: C /BIN/LP z-lp.rx
 keys: echo one > /b/p.txt; lp /b/p.txt c:/docs/printme.txt; echo two | lp -d lpt2\n
 lpt1: one
 lpt1: rx286 printer test page

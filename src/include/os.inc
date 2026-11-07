@@ -91,7 +91,8 @@ ROOT_BRK            equ 10      ; BX a process; CX bytes; DI a slot -> its data 
                                 ;    1 and 2 and the server's DI; every copy of the old
                                 ;    revoked
 ROOT_EXIT           equ 11      ; BX a process: everything of it revoked, its memory free,
-                                ;    its code's count lowered (the code gone at 0)
+                                ;    its code's count lowered (the code gone at 0; with CX
+                                ;    1, kept, sealed, for an exec of the same file: P12)
 ROOT_UNLOAD         equ 12      ; BX a load, or a code no process runs: gone, its memory free
 ROOT_SERVE          equ 13      ; CX an SP; DI two slots -> a thread of the server's own, at
                                 ;    its entry with that SP and its priority, started, its

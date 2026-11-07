@@ -53,8 +53,8 @@
 #   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
 #   {m:module.codesum}, {m:module.datasum} sums of its code and data;
 #   {image_sum} entry.asm's Fletcher sum of the image's words; {image_size}
-#   KERNEL.BIN's bytes, {image_free} the boot floppy's free bytes. A line that
-#   starts with
+#   KERNEL.BIN's bytes ({image_size8} right in 8 columns, as ls -l puts
+#   them), {image_free} the boot floppy's free bytes. A line that starts with
 #   @bochs, @dosbox-x or @mame counts on that emulator only: where they
 #   differ (docs/emulators.md).
 #
@@ -394,8 +394,9 @@ def substitute(test, line):
         which, name = m.group(1) or '', m.group(2)
         if name == 'image_sum':     # entry.asm's Fletcher sum of the image's words
             return '%04X' % rxlib.fletcher(open(booted_image(test), 'rb').read())
-        if name == 'image_size':    # KERNEL.BIN's bytes, as dir lists them
-            return '%d' % os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
+        if name in ('image_size', 'image_size8'):   # KERNEL.BIN's bytes, as dir lists
+            size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))   # them, or ls -l
+            return ('%8d' if name == 'image_size8' else '%d') % size
         if name == 'image_free':    # the boot floppy's free bytes, beside KERNEL.BIN
             size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
             return '%d' % (FLOPPY_DATA_BYTES - (size + 511) // 512 * 512)

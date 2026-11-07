@@ -2,7 +2,8 @@
  * rx286 - src/lib/posix/path.c
  * Finding programs (roadmap os-server.md P8): getenv, and execvp and
  * posix_spawnp, which look for a name without a slash in each directory of
- * PATH, POSIX's colon-separated list (init's: /z:/c/bin).
+ * PATH, POSIX's colon-separated list (init's: /z:/c/bin); without PATH, in
+ * DEFAULT_PATH's (P12: XSH exec leaves that search to the system).
  * ============================================================================ */
 
 #include <stdlib.h>
@@ -11,6 +12,8 @@
 #include "posix.h"
 #include "spawn.h"
 #include "unistd.h"
+
+#define DEFAULT_PATH "/z:/c/bin"
 
 /* getenv - an environment variable's value, or NULL */
 char *getenv(const char *name)
@@ -49,7 +52,9 @@ int execvp(const char *name, char *const argv[])
     const char *list = getenv("PATH");
     int error = ENOENT;
 
-    if (strchr(name, '/') || !list)
+    if (!list)
+        list = DEFAULT_PATH;
+    if (strchr(name, '/'))
         return execv(name, argv);
     while (list) {
         list = found(list, name, path);
@@ -71,7 +76,9 @@ int posix_spawnp(pid_t *pid, const char *name, const posix_spawn_file_actions_t 
     const char *list = getenv("PATH");
     int error = ENOENT, e;
 
-    if (strchr(name, '/') || !list)
+    if (!list)
+        list = DEFAULT_PATH;
+    if (strchr(name, '/'))
         return posix_spawn(pid, name, actions, attributes, argv, envp);
     while (list) {
         list = found(list, name, path);

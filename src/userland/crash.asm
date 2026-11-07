@@ -84,8 +84,8 @@ crash_kinds:
         fld1
         fldz
         fdivp st1, st0
-        fwait                           ; the 287's error: IRQ13
-        fninit
+        fwait                           ; the 287's error: IRQ13, the fault #MF
+.fpu_f: fninit                          ;    here (os-server.md P12)
         PRINT "crash: no 287 error arrived; is there a 287?", CHAR_LF
         ret
 .tf:    pushf

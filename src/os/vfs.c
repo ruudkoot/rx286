@@ -507,14 +507,9 @@ static void wake(int i)
  * for it (P10) */
 static int pipe_wait(int i, signed char *who)
 {
-    struct rx_kregs r;
-
     *who = (signed char)i;
     lock_give();
-    r.ax = KCALL_RECV << 8;
-    r.dx = PROC_NOTIFY(i);
-    r.bp = 0;
-    rx_kcall(&r);
+    proc_sleep(i);
     lock_take(PROC_NOTIFY(i));
     if (*who == i)
         *who = -1;
@@ -1037,16 +1032,15 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
 /* dos_seconds - DOS's date and time as seconds since 1970 */
 static rx_u32 dos_seconds(rx_u16 date, rx_u16 time)
 {
-    static const rx_u16 before[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-    unsigned year = 1980 + (date >> 9), month = (date >> 5) & 15, day = date & 31;
-    rx_u32 days;
+    unsigned t[6];
 
-    if (month < 1 || month > 12 || day < 1)
-        return 0;
-    days = (rx_u32)(year - 1970) * 365 + (year - 1969) / 4 + before[month - 1] + day - 1;
-    if (month > 2 && year % 4 == 0)
-        days++;
-    return days * 86400ul + (time >> 11) * 3600ul + ((time >> 5) & 63) * 60 + (time & 31) * 2;
+    t[0] = 1980 + (date >> 9);
+    t[1] = (date >> 5) & 15;
+    t[2] = date & 31;
+    t[3] = time >> 11;
+    t[4] = (time >> 5) & 63;
+    t[5] = (time & 31) * 2;
+    return vol_seconds(t);
 }
 
 /* stat_put - a node's or a description's struct stat, into a process's
@@ -1486,8 +1480,11 @@ int vfs_exe_open(int i, const char *path, struct exe_file *f)
                              ^ w16(n.entry + DIR_TIME));
     }
     last = p.parts ? p.part[p.parts - 1] : "";
-    for (k = 0; k < (int)sizeof f->name - 1 && last[k]; k++)
+    for (k = 0; k < (int)sizeof f->name - 1 && last[k]; k++) {
         f->name[k] = last[k];
+        if (n.kind == K_FILE && last[k] >= 'A' && last[k] <= 'Z')
+            f->name[k] += 'a' - 'A';    /* FAT's names in lower case, as ps says them */
+    }
     f->name[k] = 0;
     return 0;
 }

@@ -345,20 +345,49 @@ static unsigned bcd(rx_u16 b)
     return (b >> 4 & 15) * 10 + (b & 15);
 }
 
+/* vol_clock - the RTC driver's date and time (fs.h): t the year, month,
+ * day, hours, minutes and seconds; 0 if it does not answer */
+int vol_clock(unsigned *t)
+{
+    struct rx_kregs r;
+
+    if (call(OS_SERVICE(SERVICE_CLOCK), DRV_CLOCK_TIME, 0, 0, 0, 0, 0, &r))
+        return 0;
+    t[0] = bcd(r.cx >> 8) * 100 + bcd(r.cx & 0xFF);
+    t[1] = bcd(r.si >> 8);
+    t[2] = bcd(r.si & 0xFF);
+    t[3] = bcd(r.bx >> 8);
+    t[4] = bcd(r.bx & 0xFF);
+    t[5] = bcd(r.di & 0xFF);
+    return 1;
+}
+
+/* vol_seconds - a date and time as vol_clock gives them, as seconds since
+ * 1970-01-01 00:00:00 (fs.h): the years 1970 to 2099, whose every fourth is
+ * a leap year; 0 for one out of range */
+rx_u32 vol_seconds(const unsigned *t)
+{
+    static const rx_u16 before[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    rx_u32 days;
+
+    if (t[0] < 1970 || t[0] > 2099 || t[1] < 1 || t[1] > 12 || t[2] < 1)
+        return 0;
+    days = (rx_u32)(t[0] - 1970) * 365 + (t[0] - 1969) / 4 + before[t[1] - 1] + t[2] - 1;
+    if (t[1] > 2 && t[0] % 4 == 0)
+        days++;
+    return days * 86400ul + t[3] * 3600ul + t[4] * 60u + t[5];
+}
+
 /* vol_now - DOS's date and time stamps, from the RTC driver; 1980-01-01 if
  * it does not answer */
 void vol_now(rx_u16 *date, rx_u16 *time)
 {
-    struct rx_kregs r;
-    unsigned year;
+    unsigned t[6];
 
     *date = (1 << 5) | 1;
     *time = 0;
-    if (call(OS_SERVICE(SERVICE_CLOCK), DRV_CLOCK_TIME, 0, 0, 0, 0, 0, &r))
+    if (!vol_clock(t) || t[0] < 1980 || t[0] > 2107)
         return;
-    year = bcd(r.cx >> 8) * 100 + bcd(r.cx & 0xFF);
-    if (year < 1980 || year > 2107)
-        return;
-    *date = (rx_u16)(((year - 1980) << 9) | (bcd(r.si >> 8) << 5) | bcd(r.si & 0xFF));
-    *time = (rx_u16)((bcd(r.bx >> 8) << 11) | (bcd(r.bx & 0xFF) << 5) | (bcd(r.di) / 2));
+    *date = (rx_u16)(((t[0] - 1980) << 9) | (t[1] << 5) | t[2]);
+    *time = (rx_u16)((t[3] << 11) | (t[4] << 5) | (t[5] / 2));
 }

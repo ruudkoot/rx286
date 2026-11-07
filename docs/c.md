@@ -84,8 +84,9 @@ every rx286 program does.
 | `src/include/c/` | the standard headers: `stddef.h`, `stdint.h`, `stdarg.h`, `string.h`, `stdio.h`, `setjmp.h`, `unistd.h` |
 | `src/lib/crt/` | crt0; `start.c`; the compilers' helpers (32-bit multiply and divide); `memcpy`, `memmove`, `memset`, `memcmp`; `setjmp`, `longjmp` |
 | `src/lib/c/` | ISO C: the string functions, `snprintf` and `vsnprintf` |
-| `src/lib/rx286/` | the kernel's calls (`src/include/rx/rx286.h`): `rx_kcall`, `rx_ticks`, `rx_log`; `rx_ud2`, a fault on purpose for the tests |
+| `src/lib/rx286/` | the kernel's calls (`src/include/rx/rx286.h`): `rx_kcall`, `rx_ticks`, `rx_log`; `rx_ud2`, a fault on purpose for the tests; `rx_verr`, `rx_lsl`, `rx_cs`, `rx_ds`, `rx_ss`, `rx_xchg` |
 | `src/lib/os/` | the system calls (`src/include/rx/oscall.h`): today's, by the stub of `src/userland/stub.asm` (`os_call_regs`, `os_write`, `os_wait`, `_exit`), until the POSIX calls replace them |
+| `src/lib/posix/` | a process's libc (*docs/processes.md*): the POSIX calls (`unistd.h`, `fcntl.h`, `dirent.h`, `signal.h`, `termios.h`, `sys/wait.h`, `spawn.h`); `stdio.h`'s output, unbuffered; `malloc`; `time.h`: `nanosleep`, `time`, `clock_gettime`, `gmtime`, `localtime` (as `gmtime`: no time zones) and `strftime` (P12); `rx/ps.h`'s `rx_ps`, the processes for `ps` |
 
 The numbers are the NASM include files'. `tools/inc2h` makes a C header of
 each (`$(B)/inc/syscalls.h`, `kcalls.h`, ...), so each number is written

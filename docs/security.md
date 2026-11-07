@@ -143,7 +143,7 @@ that faulted:
 | IOPL 3 through `POPF`, then `CLI` | ignored, then #GP(0000) |
 | `LOCK` | runs on Bochs; #GP(0000) on MAME's 286 |
 | `LOADALL` (0Fh 05h) | #UD on Bochs; #GP(0000) on MAME's 286 |
-| a 287 error, unmasked | IRQ13: reported, the program restarted (MAME has no 287) |
+| a 287 error, unmasked | IRQ13: the owner's fault #MF on its way back to its ring, where it then is (os-server.md P12); a thread without a fault endpoint reported and restarted (MAME has no 287) |
 | a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
 | `INT 31h` as the code segment's last two bytes | #GP(0000) at 0007:2000: the return IP is past the limit |
 | `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |

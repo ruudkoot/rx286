@@ -1,0 +1,18 @@
+# mem as a program (roadmap os-server.md P12): its code and data segments,
+# where the root put them (KCALL_SEGMENT), with the limits the CPU gives
+# (LSL); its stack, at the data segment's bottom through the same selector;
+# its break. (Where they are, and their limits, change with the build: only
+# the selectors are checked.)
+program: sh
+emulators: bochs mame
+install: C /BIN/MEM z-mem.rx
+keys: mem\n
+match: contains
+---
+/a$ mem
+code:  selector 0007h, base
+data:  selector 000Fh, base
+stack: selector 000Fh, base
+break:
+Nothing else is reachable: the kernel's selectors fault here.
+/a$

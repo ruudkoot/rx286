@@ -23,7 +23,9 @@ the server put three words, `main`'s argc, argv and envp, which crt0 passes
 on (`src/lib/crt/crt0.asm`). Its faults come to the server on the same
 endpoint, badged `FAULT_BADGE`: the default action of the fault's signal
 ends it, with today's report and its pid ("rx286: proc[7] fault #UD at
-0007:091F").
+0007:091F"), in the log and on its terminal (P12; the first if it has
+none). The 287's error is its fault #MF too (*docs/interrupts.md*), whose
+signal is `SIGFPE`.
 
 ## Its calls
 
@@ -45,6 +47,8 @@ no transfer segment.
 | `PX_GETPID`, `PX_GETPPID` | | the pid, the parent's |
 | `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`) |
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
+| `PX_TIME` | | the seconds since 1970-01-01 00:00:00 in SI:DI: the real-time clock's (the RTC driver's), taken as UTC; `EIO` if it does not answer (P12) |
+| `PX_PS` | BX a table entry, DI room for `PI_BYTES` | the first process from that entry on, as `struct rx_ps` (`rx/ps.h`): its pid, its parent's, its group and session (words `PI_PID`, `PI_PPID`, `PI_PGID`, `PI_SID`), its state (byte `PI_STATE`: `R` running or ready, `S` waiting in a call, `T` stopped, `Z` a zombie), its session's terminal (byte `PI_TTY`: 0 to 7, or FFh) and its file's name (`PI_COMMAND`, 12 bytes); the entry after it, or `ESRCH` past the last. rx286's own, for `ps` (P12) |
 
 The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts
 them all. A path has `PX_PATH_MAX` (80) bytes at most, its zero too, so
@@ -56,7 +60,8 @@ names a file of `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and
 
 The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
 `EINTR`, `EIO`, `E2BIG`, `ENOEXEC`, `EBADF`, `ECHILD`, `EAGAIN` (the table
-is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`. The signals: `SIGHUP`,
+is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`, `EOVERFLOW` (`gmtime` of a
+time before 1970). The signals: `SIGHUP`,
 `SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB, #BP), `SIGABRT`,
 `SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGUSR1`, `SIGSEGV` (any other
 fault), `SIGUSR2`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGCHLD`, `SIGCONT`,
@@ -158,10 +163,17 @@ stack too small for `main`'s three words, data past a segment, or more data
 than its own most. A directory is `EACCES`.
 
 init's environment is `PATH=/z:/c/bin`, which its children inherit; libc's
-`execvp` and `posix_spawnp` look for a name without a slash along it
-(`src/lib/posix/path.c`, with `getenv`). `make run` puts the programs a
-build made in C's `/BIN` (`tools/install-programs`), and run-test's
-`install:` lines put them on a run's drive.
+`execvp` and `posix_spawnp` look for a name without a slash along it, or
+along `/z:/c/bin` without one (`src/lib/posix/path.c`, with `getenv`; XSH
+exec leaves that to the system). `make run` puts the programs a build made
+in C's `/BIN` (`tools/install-programs`), and run-test's `install:` lines
+put them on a run's drive. A process is named by its file's last name, a
+volume's in lower case ("ps").
+
+An exec of the process's own file (`env` running `env`) finds its code in
+the table, still the old image's: the server tells the root to keep it
+when the old image goes (`ROOT_EXIT` with CX 1), and the new image takes it
+again (P12).
 
 ## Files
 
@@ -220,8 +232,10 @@ attributes (*docs/drivers.md*). `/dev/tty` is the caller's session's
 terminal, or the first if it has none. Alt+F1 to F8 show a terminal
 (`DRV_CON_SHOW`). The server's tty thread (`TTY_N`, its slots 164 and 165
 from `ROOT_SERVE`) takes each key as the keyboard driver signals it, and
-puts it through the shown terminal's discipline. An arrow, which has no
-ASCII, is ESC [ A to D. A queue holds `MAX_CANON` (255) bytes. A
+puts it through the shown terminal's discipline. A key with no ASCII
+sends what an xterm sends: an arrow ESC [ A to D, Home and End ESC [ H
+and F, Insert, Delete, Page Up and Page Down ESC [ 2 ~, 3 ~, 5 ~ and 6 ~,
+F1 to F4 ESC O P to S, F5 to F10 ESC [ 15 ~ and 17 ~ to 21 ~. A queue holds `MAX_CANON` (255) bytes. A
 process's read waits in its server thread until there is enough, which
 the tty thread wakes it for; a signal's handler breaks the wait off
 (`EINTR`). The first terminal's output and echo go to the kernel's log
@@ -372,7 +386,7 @@ environment init gave it (`PATH=/z:/c/bin`, `HOME=/a`).
 | a pipeline | commands joined by `\|`, each a child, a pipe between each two; its status is the last's: its exit code, or 128 and the signal that ended it |
 | a command | words split at blanks; `'...'` quotes all, `"..."` all but `$`, `\` the next character; `$NAME`, `${NAME}` and `$?` are put in; redirections `<`, `>`, `>>` and `2>`; `NAME=value` words alone set a shell variable |
 | an alias | its text put in for a command's first word when the line is read, as POSIX has it: an alias made on a line is there from the next |
-| a built-in | `cd` (to `HOME` without an argument), `pwd`, `exit`, `export`, `unset`, `set` (the variables), `alias`, `unalias`, `true`, `false`, `jobs`, `fg` and `bg` (a job's number, `%1` or `1`; the last job without); alone, it runs in the shell, its redirections undone after |
+| a built-in | `cd` (to `HOME` without an argument), `pwd`, `exit`, `export`, `unset`, `set` (the variables), `alias`, `unalias`, `true`, `false`, `jobs`, `fg` and `bg` (a job's number, `%1` or `1`; without, the job stopped or started in the background last), `help` (the commands and the keys); alone, it runs in the shell, its redirections undone after |
 | a program | found along `PATH` (`execvp`); one not found is status 127 ("sh: nosuch: no such file or directory"), one not executable 126 |
 
 Job control: on a terminal the shell leads a session whose terminal it
@@ -385,7 +399,10 @@ shell (status 130); at the prompt ^C drops the line. ^Z stops the job
 the foreground and `bg` continues in the background. A background job
 that stops (reading the terminal: `SIGTTIN`) or ends is said before the
 next prompt.
-The commands are programs of `/z`, in C (`src/bin/`):
+The commands are programs in C (`src/bin/`). `echo`, `cat` and `ls` are
+in `/z` with the shell; the others in C's `/BIN` (D11, P12: the boot image
+holds 128 KB, and `/z` had grown to 54 KB of it), so a machine without
+drive C has those three alone:
 
 | Command | What |
 |---|---|
@@ -396,8 +413,21 @@ The commands are programs of `/z`, in C (`src/bin/`):
 | `mv` | `rename`: within a drive (across drives: "across drives") |
 | `rm`, `mkdir`, `rmdir` | each path |
 | `wc` | lines, words and bytes, of each file or descriptor 0; `-l`, `-w`, `-c` for one |
+| `head` | the first 10 lines, or `-n N` (or `-N`), of each file or descriptor 0; of several files each under "==> NAME <==" |
 | `lp` | each file, or descriptor 0, to `/dev/lpt1`; `-d lpt2` to the other |
 | `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, without Enter, `q` to stop |
+| `ps` | the processes of the caller's terminal, or `-e` all: pid, parent, group, session, terminal, state, name (`PX_PS`) |
+| `kill` | `SIGTERM`, or `-s NAME`, `-NAME`, `-NUMBER`, to each pid (below -1: a group); `-l` the signals' names, `-l STATUS` the one that ended a process |
+| `sleep` | a wait of so many seconds |
+| `env` | the environment; with a command, that command run in it, changed by the `NAME=VALUE` before it, emptied first with `-i` |
+| `date` | the date and time, the real-time clock's as UTC (`time`, `gmtime`); `+FORMAT` in `strftime`'s conversions; it cannot set the clock |
+| `uptime` | the time since the start, to the tick: "up 0:01:23.45" (`CLOCK_MONOTONIC`) |
+| `clear` | a form feed, which the console takes as a clear screen |
+| `keys` | each key's bytes from the terminal, raw, in hexadecimal and as they read ("1Bh 5Bh 41h: ESC [ A"), until ^D |
+| `mem` | its own segments: selector, base (`KCALL_SEGMENT`), limit (`LSL`), and its break |
+| `fpu` | the square root of 2 and pi to 18 digits, by the 287 (`FBSTP`) |
+| `crash` | what no process may do, one kind a time (`crash` lists them): jumps past its code, an instruction that does not exist, a divide by zero, a push past its stack, a port, `CLI`, `HLT`, `INT 32h`, the kernel's selectors, a write over its code, the 287's error, the trap flag, NT and `IRET`. Each ends it with its fault's signal, the shell going on |
+| `spin` | a loop for ever; ^C ends it, and the shell and the other processes run meanwhile |
 
 A command's error is the path and `strerror`'s text, on descriptor 2
 ("c:/docs: is a directory"), and status 1; a read's error too.

@@ -2,6 +2,7 @@
 # time, a key from /dev/tty between: a space for the next page, q to stop.
 program: sh
 emulators: bochs mame
+install: C /BIN/MORE z-more.rx
 keys: more /c/numbers.txt\n q
 match: contains
 ---

@@ -153,7 +153,9 @@ untyped memory and a space can make more with the kernel's calls.
 - **The 287** is switched lazily (l4.md D17): TS is set at a switch to a
   thread that does not own it, and its first 287 instruction raises #NM,
   which saves the owner's state in the owner's control block and restores
-  its own. IRQ13 is charged to the 287's owner, whichever thread runs.
+  its own. IRQ13 is charged to the 287's owner, whichever thread runs:
+  its fault #MF, for its fault endpoint, on its way back to its ring
+  (os-server.md P12); without one, it is restarted.
 - **IPC** (`ipc.asm`; roadmap l4.md L4): threads call each other through
   endpoints and signal notifications (*docs/kernel-calls.md*). A thread
   waiting in IPC has nothing left to do in the kernel: whoever ends its wait

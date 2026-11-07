@@ -59,7 +59,7 @@ rx286: program fault #GP(0000) at 0007:{crash_kinds.write}
 rx286 shell, started again
 A:\>crash fpu
 crash: divide by zero on the 287, unmasked
-@bochs rx286: the 287 reported an error (IRQ13)
+@bochs rx286: program fault #MF at 0007:{crash_kinds.fpu_f}
 @bochs rx286 shell, started again
 @mame crash: no 287 error arrived; is there a 287?
 A:\>crash tf

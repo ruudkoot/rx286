@@ -1,0 +1,69 @@
+# ps, kill, sleep and env as programs (roadmap os-server.md P12). (Pids:
+# init 1, its children for the eight terminals 2 to 9, the shell on the
+# first; then each command.) ps lists the first terminal's processes, -e
+# all: the other terminals' children of init wait for Enter, the shell for
+# its child, sleep in its call, and one stopped. kill sends SIGTERM, or the
+# signal named; kill -l names them. env sets, empties, and runs a command
+# found along PATH, or along /z:/c/bin without one.
+program: sh
+emulators: bochs mame
+install: C /BIN/SLEEP z-sleep.rx
+install: C /BIN/PS z-ps.rx
+install: C /BIN/KILL z-kill.rx
+install: C /BIN/ENV z-env.rx
+install: C /BIN/HEAD z-head.rx
+keys: sleep 50 &\n{wait 10}ps\nkill 10\nps -e\nsleep 30 &\nkill -s STOP 14; ps\n
+keys: kill -CONT 14; kill -9 14\nkill -l; kill -l 130; kill 999; kill -s NOPE 1; kill\n
+keys: env -i A=1 B=2; env -i A=1 env; env -i A=1 A=2; env nothing; echo $?\n
+keys: env | head -n 1; sleep x\n
+timeout: 60
+---
+rx286, test build
+/a$ sleep 50 &
+[1] 10
+/a$ ps
+  PID  PPID  PGID   SID TTY  S COMMAND
+    2     1     2     2 tty1 S sh
+   10     2    10     2 tty1 S sleep
+   11     2    11     2 tty1 R ps
+/a$ kill 10
+[1] Done  sleep 50
+/a$ ps -e
+  PID  PPID  PGID   SID TTY  S COMMAND
+    1     0     1     1 -    S init
+    2     1     2     2 tty1 S sh
+    3     1     3     3 tty2 S init
+    4     1     4     4 tty3 S init
+    5     1     5     5 tty4 S init
+    6     1     6     6 tty5 S init
+    7     1     7     7 tty6 S init
+    8     1     8     8 tty7 S init
+    9     1     9     9 tty8 S init
+   13     2    13     2 tty1 R ps
+/a$ sleep 30 &
+[1] 14
+/a$ kill -s STOP 14; ps
+  PID  PPID  PGID   SID TTY  S COMMAND
+    2     1     2     2 tty1 S sh
+   14     2    14     2 tty1 T sleep
+   16     2    16     2 tty1 R ps
+[1] Stopped  sleep 30
+/a$ kill -CONT 14; kill -9 14
+[1] Done  sleep 30
+/a$ kill -l; kill -l 130; kill 999; kill -s NOPE 1; kill
+HUP INT QUIT ILL TRAP ABRT FPE KILL USR1 SEGV USR2 PIPE ALRM TERM CHLD CONT STOP TSTP TTIN TTOU
+INT
+kill: 999: no such process
+kill: no such signal
+usage: kill [-s NAME | -NAME | -NUMBER] PID...; kill -l [STATUS]
+/a$ env -i A=1 B=2; env -i A=1 env; env -i A=1 A=2; env nothing; echo $?
+A=1
+B=2
+A=1
+A=2
+env: nothing: no such file or directory
+127
+/a$ env | head -n 1; sleep x
+PATH=/z:/c/bin
+usage: sleep SECONDS
+/a$

@@ -30,5 +30,12 @@ void rx_ud2(void);
 int rx_verr(unsigned selector);
 /* rx_xchg - a word swapped with a value at once (XCHG): its old value */
 int rx_xchg(int *word, int value);
+/* rx_lsl - a segment's limit as the CPU sees it (LSL), or 0 if the caller
+ * may not see it */
+unsigned rx_lsl(unsigned selector);
+/* rx_cs, rx_ds, rx_ss - the caller's code, data and stack selectors */
+unsigned rx_cs(void);
+unsigned rx_ds(void);
+unsigned rx_ss(void);
 
 #endif

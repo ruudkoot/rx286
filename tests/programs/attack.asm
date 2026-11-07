@@ -169,7 +169,8 @@ attacks:
         fld1
         fldz
         fdivp st1, st0
-        fwait                           ; Bochs raises IRQ13 here
+        fwait                           ; Bochs raises IRQ13 here: the fault #MF
+.fpu_f:                                 ;    here (os-server.md P12)
         PRINT "attack: no 287 error arrived (no 287 emulated?)", CHAR_LF
         jmp entry
 .write: mov si, UDATA_ROOM - 2

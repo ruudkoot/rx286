@@ -9,12 +9,13 @@
  * shown: Enter's CR becomes LF (ICRNL); with ISIG the INTR, QUIT and SUSP
  * characters are signals for its foreground group; with ICANON the line is
  * edited (ERASE, KILL) and a read gets it whole once LF, EOL or EOF ends
- * it; with ECHO what is typed is echoed. An arrow, which has no ASCII, is
- * ESC [ A to D; Alt+F1 to F8 show another terminal, its page of the screen
- * (DRV_CON_SHOW). There are as many terminals as the EGA holds pages: eight,
- * or four. A queue holds MAX_CANON bytes. A process's read waits, in its
- * server thread, until there is enough: a line, or VMIN bytes (VTIME is not
- * kept: 0); the tty thread wakes it. termios is a terminal's: tcgetattr and
+ * it; with ECHO what is typed is echoed. A key with no ASCII sends what an
+ * xterm sends: an arrow ESC [ A to D, F1 ESC O P (P12). Alt+F1 to F8 show
+ * another terminal, its page of the screen (DRV_CON_SHOW). There are as
+ * many terminals as the EGA holds pages: eight, or four. A queue holds
+ * MAX_CANON bytes. A process's read waits, in its server thread, until
+ * there is enough: a line, or VMIN bytes (VTIME is not kept: 0); the tty
+ * thread wakes it. termios is a terminal's: tcgetattr and
  * tcsetattr (XBD 11). A terminal's output and echo go to its page; the
  * first terminal's to the kernel's log too, the transcript the tests read.
  *
@@ -248,13 +249,23 @@ static void input(rx_u8 c)
     }
 }
 
-/* key - a key from the keyboard driver: its ASCII, an arrow's escape, or
- * Alt+F1-F8, another terminal shown (lock held) */
+/* key - a key from the keyboard driver: its ASCII; the escape an xterm
+ * sends for an arrow, Home, End, Insert, Delete, Page Up, Page Down or F1
+ * to F10 (P12); or Alt+F1-F8, another terminal shown (lock held) */
 static void key(rx_u16 k)
 {
-    static const rx_u8 arrows[4][2] = { { 0x48, 'A' }, { 0x50, 'B' }, { 0x4D, 'C' },
-                                        { 0x4B, 'D' } };
-    int a;
+    static const struct {
+        rx_u8 scancode;
+        char rest[5];                   /* what follows ESC */
+    } escapes[] = {
+        { 0x48, "[A" }, { 0x50, "[B" }, { 0x4D, "[C" }, { 0x4B, "[D" }, { 0x47, "[H" },
+        { 0x4F, "[F" }, { 0x52, "[2~" }, { 0x53, "[3~" }, { 0x49, "[5~" }, { 0x51, "[6~" },
+        { 0x3B, "OP" }, { 0x3C, "OQ" }, { 0x3D, "OR" }, { 0x3E, "OS" }, { 0x3F, "[15~" },
+        { 0x40, "[17~" }, { 0x41, "[18~" }, { 0x42, "[19~" }, { 0x43, "[20~" },
+        { 0x44, "[21~" }
+    };
+    const char *e;
+    unsigned a;
 
     if (k & 0xFF) {
         input((rx_u8)k);
@@ -264,11 +275,11 @@ static void key(rx_u16 k)
         to_show = shown = (k >> 8) - KEY_ALT_F1;
         return;
     }
-    for (a = 0; a < 4; a++)
-        if (arrows[a][0] == k >> 8) {
+    for (a = 0; a < sizeof escapes / sizeof escapes[0]; a++)
+        if (escapes[a].scancode == k >> 8) {
             input(0x1B);
-            input('[');
-            input(arrows[a][1]);
+            for (e = escapes[a].rest; *e; e++)
+                input((rx_u8)*e);
         }
 }
 

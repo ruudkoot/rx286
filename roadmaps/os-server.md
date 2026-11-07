@@ -130,7 +130,7 @@ What it rests on:
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
-| P12 | The commands and the devices | not started |
+| P12 | The commands and the devices | in progress (step 1 of 4, branch `os-server`) |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
 | P15 | The documents, a review, the release | not started |
@@ -2484,6 +2484,37 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   built-in), with its test. `start` goes: a daemon is run again by name. No test runs the
   assembly shell, and it is gone.
 * **Decisions:** D13, D14.
+* **Step 1 done (2026-11-07): the commands without devices.**
+  - **The programs** (`src/bin/`): `clear`, `uptime`, `date`, `sleep`, `env`, `head`, `kill`,
+    `ps`, `spin`, `keys`, `mem`, `fpu` and `crash` (each kind in `crashes.asm`), and `help` a
+    built-in of the shell. `keys` shows the terminal's bytes, as a process sees them, not
+    scancodes.
+  - **Two calls:** `PX_TIME`, the real-time clock as seconds since 1970 (taken as UTC), and
+    `PX_PS`, the processes one by one (`rx/ps.h`), with a state: running, waiting in a call,
+    stopped, a zombie. libc gained `time`, `clock_gettime`, `gmtime`, `localtime` and
+    `strftime`.
+  - **The terminal:** the keys without ASCII send xterm's escapes (Home, End, Insert,
+    Delete, the pages, F1-F10), not the arrows alone. A process's fault is reported on its
+    own terminal.
+  - **Where they live:** in C's `/BIN`, with `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `wc`, `lp`
+    and `more`, which leave `/z` (D11 as decided). The image had 2 KB left of its 128 KB
+    with them in `/z`; now it has 28 KB. `/z` keeps `init`, `sh`, `echo`, `cat` and `ls`.
+  - **The tests:** `tests/sh/{help,clock,procs,head,keys,mem,fpu,crash,spin}`, on Bochs and
+    MAME (`fpu` on Bochs, as MAME has no 287), each installing its commands on C.
+    run-test's key scripts gained `{now K}`, a key typed though nobody reads.
+  - **Found on the way:**
+    - **A 287 error restarted the process.** The kernel restarted the 287's owner at IRQ13,
+      which for a process is its entry again: `crash fpu` ran for ever. An owner with a
+      fault endpoint now has the error as its fault #MF on its way back to its ring, which
+      the server makes `SIGFPE`. The old shell's and the attack program's tests say so too.
+    - **An exec of the process's own file was killed.** The server found the code in the
+      root's table, then ended the old image, whose code went with its last user, then
+      spawned the new image on a code no longer there (`SIGKILL`). `ROOT_EXIT` can now keep
+      the code for such an exec.
+    - **`fg` without a job forgot one.** A foreground job became the current job, and
+      clearing it at its end left none: `spin &`, `echo`, `fg` said "no such job".
+    - **`execvp` without `PATH`** ran the name as a path. It now looks along `/z:/c/bin`.
+    - **`printf` stops at 128 bytes,** which cut `help` short: it writes its text whole.
 
 ### P13. POSIX threads (M, about 1,200)
 

@@ -4,6 +4,7 @@
 program: sh
 # DOSBox-X has no disk controller rx286 can use (docs/emulators.md).
 emulators: bochs mame
+install: C /BIN/WC z-wc.rx
 keys: echo hello\nls c:/docs\nls c:/docs | wc -l > c:/n.txt\ncat c:/n.txt\n
 ---
 rx286, test build

@@ -39,6 +39,9 @@ char *strerror(int e)
     case ENAMETOOLONG: return "name too long";
     case ENOSYS: return "not implemented";
     case ENOTEMPTY: return "directory not empty";
+    case EINTR: return "interrupted";
+    case ENOTTY: return "not a terminal";
+    case EOVERFLOW: return "too large";
     }
     return "unknown error";
 }
