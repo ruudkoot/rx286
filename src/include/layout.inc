@@ -27,7 +27,7 @@ LOADER_BUF_END      equ 0x10000
 ; ---------------------------------------------------------------- the boot image
 KERNEL_PHYS         equ 0x10000     ; KERNEL.BIN, the boot image, is loaded here (64 KB aligned)
 KERNEL_SEG          equ KERNEL_PHYS >> 4    ; the same place as a real-mode segment
-IMAGE_MAX           equ 0x20000     ; its most: up to UMEM_PHYS, the memory for programs
+IMAGE_MAX           equ 0x30000     ; its most: 192 KB; the memory for programs follows it
 
 ; The kernel's segments start at fixed offsets of the image, so every
 ; descriptor's base is a constant. NASM stops the build if a segment
@@ -99,9 +99,12 @@ KSTACK_TOP          equ KSTACK_BOTTOM + KSTACK_SIZE
 GDT_PHYS            equ 0x0C800
 GDT_ENTRIES         equ 1024
 OBJ_FREE_PHYS       equ GDT_PHYS + GDT_ENTRIES * 8
-; Memory for programs' segments, given out as untyped (l4.md L3)
-UMEM_PHYS           equ 0x30000
-UMEM_SIZE           equ 0x70000     ; to the EGA's memory at A0000h
+; Memory for programs' segments, given out as untyped (l4.md L3): from the
+; image's end, on a kilobyte, to the EGA's memory (os-server.md P15;
+; umem_size)
+UMEM_ALIGN          equ 0x400
+UMEM_END            equ 0xA0000
+UMEM_LEAST          equ 0x60000     ; what is left with the image at its most
 SPACE_MAX           equ 128         ; spaces (space_list)
 THREAD_MAX          equ 192         ; threads (thread_list)
 
@@ -114,8 +117,8 @@ MODULE_TABLE_VOFF   equ MODULE_TABLE_PHYS - KDATA_BASE  ; the module table
 GDT_OFF             equ GDT_PHYS - KDATA_BASE           ; the GDT
 OBJ_FREE_OFF        equ OBJ_FREE_PHYS - KDATA_BASE      ; its pool's free descriptors
 
-%if KERNEL_PHYS + IMAGE_MAX > UMEM_PHYS
-  %error "layout.inc: the image's room overlaps the memory for programs"
+%if KERNEL_PHYS + IMAGE_MAX + UMEM_LEAST > UMEM_END
+  %error "layout.inc: the image's room leaves too little memory for programs"
 %endif
 %if DFSTACK_PHYS + DFSTACK_SIZE > ARENA_PHYS || ARENA_PHYS + ARENA_SIZE > KDATA_BASE
   %error "layout.inc: the double fault's stack, the arena and the kernel's data overlap"

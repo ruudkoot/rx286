@@ -61,7 +61,7 @@ job.
 | `true`, `false`, `help` | `help`: the commands and the keys |
 
 `echo`, `cat` and `ls` are in `/z` with the shell; the others in C's
-`/BIN` (D11, P12: the boot image holds 128 KB), so a machine without drive
+`/BIN` (D11, P12: the boot image held 128 KB then), so a machine without drive
 C has those three alone.
 
 | Program | What |

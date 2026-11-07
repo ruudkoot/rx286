@@ -36,11 +36,11 @@ boot_untyped:
         db CAP_UNTYPED, 0
         dw ARENA_PARA, ARENA_SIZE >> 4, 0, 0, 0
         times SHADOW_SIZE - 12 db 0
-; The memory for programs' segments, likewise: the root's data and stack
-; first.
+; The memory for programs' segments, likewise, from the image's end
+; (umem_size): the root's data and stack first.
 memory_untyped:
         db CAP_UNTYPED, 0
-        dw UMEM_PHYS >> 4, UMEM_SIZE >> 4, 0, 0, 0
+        dw 0, 0, 0, 0, 0
         times SHADOW_SIZE - 12 db 0
 ; Extended memory, if the CMOS says there is some (ext_detect): the root's
 ; slots 3 and 4, each under 1 MB (an untyped's size is 16 bits of
@@ -686,6 +686,7 @@ slot_put_descriptor:
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 boot_root:
+        call umem_size
         call ext_detect
         push ds
         pop es
@@ -827,6 +828,25 @@ boot_root:
         jmp .module
 .done:
         mov bx, [boot_thread]
+        ret
+
+; ----------------------------------------------------------------------------
+; umem_size - the memory for programs' segments: from the image's end - the
+; module table's length, which the loader checked against the file - on a
+; kilobyte, to the EGA's memory (os-server.md P15: the image may grow
+; without taking memory from programs until it does)
+;   In:       DS = SEL_KDATA
+;   Out:      memory_untyped's base and size
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+umem_size:
+        mov ax, [MODULE_TABLE_VOFF + MH_PARAGRAPHS]
+        add ax, KERNEL_SEG + (UMEM_ALIGN >> 4) - 1
+        and ax, ~((UMEM_ALIGN >> 4) - 1)
+        mov [memory_untyped + SH_OBJECT], ax
+        neg ax
+        add ax, UMEM_END >> 4
+        mov [memory_untyped + SH_SIZE], ax
         ret
 
 ; ----------------------------------------------------------------------------

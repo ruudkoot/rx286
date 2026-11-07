@@ -20,8 +20,8 @@ D7). This document explains each one.
 | 07E00h-083FFh | the loader: 3 sectors | `LOADER_PHYS`, `LOADER_SECTORS` | the boot sector loads it |
 | 08400h-097FFh | the loader's FAT buffer | `LOADER_FAT_BUF` | the loader |
 | 09800h-0FFFFh | the loader's root-directory buffer | `LOADER_ROOT_BUF`, `LOADER_BUF_END` | the loader |
-| 10000h-2FFFFh | the boot image, `KERNEL.BIN`: up to `IMAGE_MAX` bytes | `KERNEL_PHYS` | the loader loads, the kernel and the modules run |
-| 30000h-9FFFFh | memory for programs' segments, as untyped | `UMEM_PHYS`, `UMEM_SIZE` | the root, and what it gives |
+| 10000h on | the boot image, `KERNEL.BIN`: up to `IMAGE_MAX` bytes, 192 KB (to 3FFFFh at most) | `KERNEL_PHYS` | the loader loads, the kernel and the modules run |
+| from the image's end, on a KB, to 9FFFFh | memory for programs' segments, as untyped: at least `UMEM_LEAST`, 384 KB (roadmap os-server.md P15) | `UMEM_ALIGN`, `UMEM_END` | the root, and what it gives |
 | A0000h-AFFFFh | EGA graphics memory | | nobody |
 | B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the kernel's console |
 | B8000h-BFFFFh | colour text, `VIDEO_PAGES` pages of `VIDEO_PAGE` bytes (`VIDEO_PAGE_SHIFT`) | | the console driver (os-server.md P11) |
@@ -31,8 +31,8 @@ D7). This document explains each one.
 
 The kernel's stacks, its GDT and the arena lie in the boot code's memory,
 which is free once the loader has jumped to the kernel (roadmap l4.md L5):
-so the boot image may grow past 64 KB, up to the memory for programs, with
-nothing of the kernel's in its way.
+so the boot image may grow past 64 KB, up to `IMAGE_MAX`, with nothing of
+the kernel's in its way.
 
 The floppy's reserved sectors are the boot sector and the loader:
 `RESERVED_SECTORS` = 1 + `LOADER_SECTORS`. The boot sector reads the loader
@@ -59,7 +59,7 @@ instead of corrupting the next segment.
 | kernel code | `KTEXT_OFF` 0100h | `KTEXT_ROOM` 16 KB | `KTEXT_PHYS` 10100h | `SEL_KCODE`, limit = size |
 | kernel data | `KDATA_OFF` 4100h | `KDATA_ROOM` 6 KB | `KDATA_PHYS` 14100h | within `SEL_KDATA` |
 | the module table | `MODULE_TABLE_OFF` 5900h | `MODULE_TABLE_SIZE` 512 B | `MODULE_TABLE_PHYS` 15900h | within `SEL_KDATA`; the root's, read-only |
-| the modules | `MODULES_OFF` 5B00h | to `IMAGE_MAX` 128 KB | 15B00h on | each module's code its own segment |
+| the modules | `MODULES_OFF` 5B00h | to `IMAGE_MAX` 192 KB | 15B00h on | each module's code its own segment |
 
 The code room was 16 KB and the data room 8 KB while the old system calls
 and the new kernel lived side by side (roadmap l4.md, *Constraints*); with
@@ -146,8 +146,12 @@ watermark gives no memory twice until a revoke has deleted everything
 made of it. The arena, `ARENA_SIZE` bytes from `ARENA_PHYS`, is untyped
 memory like any other: the kernel made the root's space and thread from
 it at its start, and the rest is the root's. The memory for programs'
-segments is untyped too, from `UMEM_PHYS`, `UMEM_SIZE` bytes, all the
-root's but its own data and stack.
+segments is untyped too: from the image's end, on a kilobyte
+(`UMEM_ALIGN`), to the EGA's memory at `UMEM_END`, all the root's but its
+own data and stack. The kernel works out where it starts from the module
+table's length, which the loader checked against the file (`umem_size`;
+roadmap os-server.md P15): the image may grow to `IMAGE_MAX` without a
+fixed room taking memory from programs before it does.
 
 | Object | Bytes | What |
 |---|---|---|
