@@ -26,8 +26,8 @@ relies on, and NASM refuses segments that overlap.
 ## 3. Pure routines on the host
 
 Routines that take registers and memory and touch no hardware (the scancode
-table, number formatting, the shell's parser, FAT12 decoding, FAT names and
-time stamps, retype's placement and a selector's slot) are assembled
+table, number formatting, FAT12 decoding, FAT names and time stamps,
+retype's placement and a selector's slot) are assembled
 alone and run in Unicorn's 16-bit mode by pytest (`tests/unit/`, `make
 unit`). Unicorn is not a 286, so only pure code is tested this way. The C
 is tested there too (roadmap os-server.md P1, *docs/c.md*): the libc built
@@ -48,18 +48,21 @@ not bind any port"); the runner starts such a run again.
 A test file is a header, a line `---`, and the expected lines:
 
 ```
-program: shell
+program: sh
 keys: echo hello\n
 ---
-rx286 shell; type help
-rx286> echo hello
+rx286, test build
+/a$ echo hello
 hello
-rx286>
+/a$
 ```
 
-Header lines (`tools/run-test` documents them all): `program` (shell,
-attack, fuzz, storage, `none` for no program module, `sh` for the shell in
-C), `keys` (what to type), `define` (a NASM define for
+Header lines (`tools/run-test` documents them all): `program` (`sh` or
+`shell`, the shell in C on the terminals; `none`, no program module, the
+processes having the keys; else a test program the root builds:
+`idle`, the default, `attack`, `fuzz`, `caps`, `ipc`, `revoke`, `rings`,
+`keys`, `additions`, `fputhreads`, `services`), `keys` (what to type),
+`define` (a NASM and C define for
 the test image), `image` (a fragmented, missing, truncated or oversized
 `KERNEL.BIN`, one past 64 KB, one whose first module is not the root or
 whose table places a module outside it, a disk without a loader),
@@ -72,8 +75,7 @@ of COM2, in an image built with COM2 the modem and the log on COM3: it
 echoes, and answers `AT` and `ATI`; Bochs then runs on real time, so its
 answers come in the ticks they would),
 `lpt1` and `lpt2` (what each printer must
-have printed, line by line), `sector` (what a sector of a drive's image must
-hold after the run, read on the host: a text, then each byte its offset),
+have printed, line by line),
 `fsck` (a drive whose volume `fsck.fat` must find sound after the run),
 `file` (a file of a drive's volume and the text it must hold, by mtools) and
 `install` (a file the build made, put on a drive before the run). In expected lines, `{name}` is
@@ -86,16 +88,18 @@ in the boot image and what it and its data sum to; `{image_sum}`,
 
 Every run gets its own copies of drives B, C and D (`make disks`,
 *docs/storage.md*), and its printers print into files of its directory, so
-tests that write to them run side by side. A `sector` line checks where a
-write landed, which a write and a read back through the same kernel cannot:
-a wrong turn from sector number to cylinder, head and sector would read back
-what it wrote.
+tests that write to them run side by side. A `file` line checks on the
+host what a run wrote, which a write and a read back through the same
+system cannot: a wrong turn from sector number to cylinder, head and sector
+would read back what it wrote (`tests/posix/drives.test` writes a file on
+each drive).
 
 How a test types: `test.asm` in the kernel's test build reads a byte stream
 compiled from the key script (`tools/rxlib.py`), and types each key through
 the 8042's command D2h, which puts the byte where the keyboard would and
-raises IRQ1 (roadmap E7). A key is pressed only while the program waits in
-`read_key` with nothing buffered, so tests never race; its release is typed
+raises IRQ1 (roadmap E7). A key is pressed only while a reader waits for
+one with nothing buffered, which the OS server tells the kernel
+(`TEST_READER`), so tests never race; its release is typed
 at once. `{ctrl-break}` and `{ctrl-alt-del}` are typed whatever the program
 does, and so is any key as `{now K}` (`{now ctrl-c}` for a program that
 never reads; os-server.md P12). When the keys run out and the program waits again, the kernel prints
@@ -121,7 +125,7 @@ The suites:
 | `tests/revoke` | delete and revoke (roadmap l4.md L12): a revoked copy in DS null on the way back, memory given back and made again at the same base, an endpoint's queued caller failed with `KE_CAP`, a worker's space and thread gone with their untyped, E3's ABA case, a worker that deletes its own stack stopped after its way back fails (L13), and copies of untyped and of a saved reply refused |
 | `tests/root` | the root (roadmap l4.md L5): each module's code and data where the module table says, as the root reads them; a program's fault reported by the OS server with the module's name; the root's own fault, a panic (os-server.md D8); a boot image without a root, or with a module outside it, refused by the loader |
 | `tests/posix` | the processes (roadmap os-server.md P6, P7; *docs/processes.md*): init starts `tests/posix/proc.c` from `/z`, which forks, execs and spawns `tests/posix/child.c` with arguments, waits, takes a child's fault and a kill as their signals, uses the heap, and is refused a fork once the table is full; and `tests/posix/files.c`, which writes, reads, appends, makes, lists, renames and removes on B, reads `/`, `/dev` and `/z`, shares a description by `dup` and `fork`, and is refused what it may not do, after which `fsck.fat` finds B sound and mtools reads its files; and `tests/posix/exec.c` (P8), which runs programs installed on C, finds them along PATH, sees two copies share their code, is refused a program at every corruption of its header, and times an exec from C (Bochs and MAME); `tests/posix/pipe.c` (P9), bytes through pipes, past their 1 KB, a child's standard output, writes of `PIPE_BUF` never split, `SIGPIPE`; `tests/posix/keys.c`, in an image with no program module, keys read from `/dev/tty` and Ctrl+Break's `SIGINT`; `tests/posix/signal.c` (P10), handlers in a busy loop, a blocked read (`EINTR`, `SA_RESTART`), a sleep, nested, blocked and pending, for `sigsuspend`, `pause` and `alarm`, faults to their handlers, `SIG_IGN`, `SIGCHLD`, the default actions, a frame a handler spoilt (CS; IOPL and NT, with `tests/posix/sigasm.asm`); `tests/posix/sigfpu.c`, the 287's control word and stack kept around a handler that spoils them (Bochs and DOSBox-X: MAME has no 287); `tests/posix/tty.c` (P11), the line discipline: lines echoed, edited, killed, ended by EOF, read in parts; raw, `VMIN` 0, without echo, without `ISIG`; ^C for a reader; and `tests/posix/jobs.c`, job control's calls: sessions and groups, `kill` to a group, stops and continues as `waitpid` and `SIGCHLD` see them, a stop in a read, ^Z, `SIGTTIN`, `SIGTTOU`; `tests/posix/console.c`, ANSI's sequences on a page, Alt+F1 and Alt+F3 showing pages, which a `TEST_SCREEN` build's console driver puts on the log; `tests/posix/poll.c` (P12), a pipe's states as `poll` sees them, a timeout, a child's write waking a poll, `SIGALRM` breaking one off, `/dev`'s devices and `ioctl`'s refusals; `tests/posix/thread.c` (P13), eight threads on a counter under a mutex, joins, once and keys, a condition, each thread's `errno`, trylock, the most a process may have, a fork from a thread, a thread's fault ending its process; `tests/posix/drives.c` (P14), in place of the disk calls' test program, a file written, fsync'd and read back on each drive, A to D, found on the host's images afterwards, `KERNEL.BIN` read whole, no drive E, and with B write-protected (`protected.test`) its writes refused, `EROFS`, B as it was and the other drives working on; `tests/posix/devices.c`, in place of the device calls', the speaker's tones measured by the kernel's probe and those the driver refuses, a rest, the game port (DOSBox-X's centred stick), the mouse's reset through IRQ4, COM2 refused as the log, and three console writes of 2 KB, across which the ticks keep pace with the RTC's seconds (all three emulators). Each `TEST_POSIX_*` build's `/z` holds its own programs alone (`c.mk`'s `Z_FOR_*`), so that the image keeps under 128 KB |
-| `tests/sh` | the shell in C and its commands (roadmap os-server.md P9; *docs/processes.md*): a pipeline into a file, quoting, variables, `$?`, lists, redirections, `cd` and `pwd`, aliases, a command not found, a line recalled; the line editor (on all three emulators); `exit`, and the shell started again; making, copying, moving, listing, counting and removing on B, and the refusals, after which `fsck.fat` finds B sound; what the drives hold and refuse (`tests/drives` did it for the shell in assembly until P12): `cd` in all its forms, `ls -l` on every drive, `cat` through a fragmented file and a file of four clusters, every path DOS reaches, a damaged FAT, a drive without a diskette or a partition, no drive D at all (`absent.test`); `more`'s pages; Ctrl+Break ending a command and not the shell; job control: ^Z, `jobs`, `fg`, a job stopped in the background, ^C for a job and at the prompt; the eight terminals, a shell started on each with Enter, their own jobs, their pages (`TEST_SCREEN`); `lp` on both printers, byte for byte (Bochs); the commands of P12, from C's `/BIN`: `help`, `uptime`, `date` and its formats, `clear`, `ps` and its states, `kill` and its signals, `sleep`, `env` (and an exec of its own file), `head`, `keys` and the escapes of the keys without ASCII, `mem`, `fpu` (Bochs), every kind of `crash`, the 287's error a fault #MF, and `spin` beside the shell, ended by ^C; the daemons, which init starts in a `TEST_DAEMONS` build, their status on the log, the clock started again by its name, and `nice`; DOS's names as aliases; the OS server's stacks after the deepest calls (`stacks.test`, `TEST_OS_STACKS`). The shell in assembly went in P12, and with it `tests/shell` and `tests/drives`, whose counterparts these are |
+| `tests/sh` | the shell in C and its commands (roadmap os-server.md P9; *docs/shell.md*): a pipeline into a file, quoting, variables, `$?`, lists, redirections, `cd` and `pwd`, aliases, a command not found, a line recalled; the line editor (on all three emulators); `exit`, and the shell started again; making, copying, moving, listing, counting and removing on B, and the refusals, after which `fsck.fat` finds B sound; what the drives hold and refuse (`tests/drives` did it for the shell in assembly until P12): `cd` in all its forms, `ls -l` on every drive, `cat` through a fragmented file and a file of four clusters, every path DOS reaches, a damaged FAT, a drive without a diskette or a partition, no drive D at all (`absent.test`); `more`'s pages; Ctrl+Break ending a command and not the shell; job control: ^Z, `jobs`, `fg`, a job stopped in the background, ^C for a job and at the prompt; the eight terminals, a shell started on each with Enter, their own jobs, their pages (`TEST_SCREEN`); `lp` on both printers, byte for byte (Bochs); the commands of P12, from C's `/BIN`: `help`, `uptime`, `date` and its formats, `clear`, `ps` and its states, `kill` and its signals, `sleep`, `env` (and an exec of its own file), `head`, `keys` and the escapes of the keys without ASCII, `mem`, `fpu` (Bochs), every kind of `crash`, the 287's error a fault #MF, and `spin` beside the shell, ended by ^C; the daemons, which init starts in a `TEST_DAEMONS` build, their status on the log, the clock started again by its name, and `nice`; DOS's names as aliases; the OS server's stacks after the deepest calls (`stacks.test`, `TEST_OS_STACKS`). The shell in assembly went in P12, and with it `tests/shell` and `tests/drives`, whose counterparts these are |
 | `tests/services` | the root's services for processes (roadmap os-server.md P4; `tests/programs/services.c`, a C test program): a code loaded, sealed and found, a process spawned, forked, grown and given a thread, both ended, every refusal; a thousand spawns and exits, after which the memory gives the same segments of 64 KB; a thread at the drivers' priority missing no tick while the root forks 64 KB four times (Bochs and MAME) |
 | `tests/kernel` | the banner, the tables as the CPU sees them, typed keys under every modifier, Ctrl+Break and Ctrl+Alt+Del, through the keyboard driver and the OS server (`tests/programs/keys.asm`), the rule for unhandled IRQs (the printer port's and the RTC's interrupts provoked), the 287's IRQ13, the timer against the RTC, the longest stretch with interrupts off (`stretch.test`, and across a kill and a start, `stretch-kill.test`; roadmaps/realtime.md R0) |
 | `tests/panic` | a divide error, a #GP and an assertion in the kernel; a kernel stack overflow reaching the double-fault task; a panic while page 3 is shown, which shows page 0 again, the CRTC's start address read back (`TEST_PANIC_PAGE`) |

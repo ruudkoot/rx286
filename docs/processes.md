@@ -2,12 +2,14 @@
 
 A process (roadmap os-server.md P6, P8) is a program run from `/z`, the
 archive of programs in the boot image, or from a file of a drive (`/c/bin`),
-by `fork`, `execve` or `posix_spawn`, beside
-today's programs, which the root builds from the image's modules
-(*docs/root.md*). It is C, linked with `src/lib/posix/` instead of
-today's `src/lib/os/`. It ends: nothing restarts it. The OS server keeps
-the processes (`src/os/proc.c`, *docs/os-server.md*); the root makes their
-spaces, threads and memory (its services, *docs/root.md*).
+by `fork`, `execve` or `posix_spawn`. Every program is one, init and the
+shell among them, but the kernel's test programs, which the root builds
+from the image's modules (*docs/root.md*, *docs/syscalls.md*). It is C,
+linked with `src/lib/posix/` (*docs/posix.md*). It ends: nothing restarts
+it. The OS server keeps the processes (`src/os/proc.c`,
+*docs/os-server.md*); the root makes their spaces, threads and memory (its
+services, *docs/root.md*). *docs/terminals.md* has the terminals and job
+control, *docs/shell.md* the shell and its commands.
 
 ## A process
 
@@ -22,7 +24,7 @@ Its thread starts at the file's entry with SP at the stack's top, where
 the server put three words, `main`'s argc, argv and envp, which crt0 passes
 on (`src/lib/crt/crt0.asm`). Its faults come to the server on the same
 endpoint, badged `FAULT_BADGE`: the default action of the fault's signal
-ends it, with today's report and its pid ("rx286: proc[7] fault #UD at
+ends it, with the kernel's report and its pid ("rx286: proc[7] fault #UD at
 0007:091F"), in the log and on its terminal (P12; the first if it has
 none). The 287's error is its fault #MF too (*docs/interrupts.md*), whose
 signal is `SIGFPE`.
@@ -39,7 +41,6 @@ no transfer segment (*docs/syscalls.md*).
 | Call | Arguments | What the server does |
 |---|---|---|
 | `PX_EXIT` | BX the status | the process ends: a zombie with the status (bits 8-15), until its parent's `waitpid` |
-| `PX_WRITE` | BX the descriptor, SI the bytes, CX how many | 0 to 2 are the console, as a foreground program's write: the log and the main screen; any other is `EBADF` |
 | `PX_FORK` | BX the child's IP, CX its SP | the root copies the process (`ROOT_FORK`); the child starts at libc's return path with the parent's SP (`src/lib/posix/fork.asm`) and returns 0 |
 | `PX_EXECVE` | SI the path, DI `argv`, BX `envp` | the file is checked and its arguments taken first; then the old image goes and the new one takes its slots, the pid kept. Past that point a failure ends the process (`SIGKILL`) |
 | `PX_SPAWN` | SI the path, DI `argv`, BX `envp` | a new process of the file, without a copy (`posix_spawn` without file actions or attributes) |
@@ -51,8 +52,8 @@ no transfer segment (*docs/syscalls.md*).
 | `PX_NICE` | BX an increment | the nice value moved by it, kept within 0 to 2 `NZERO` - 1 (any process may lower it as well as raise it: there are no users); returns it - `NZERO`. The thread's priority follows it: 3 up to `NZERO` (20), 2 up to `NZERO` + 10, else 1, above the idle loop alone. The server stops the thread once the call is answered and starts it again at that priority (`sig_renice`); a fork's and a spawn's child keep the value, and an exec (P12) |
 | `PX_PS` | BX a table entry, DI room for `PI_BYTES` | the first process from that entry on, as `struct rx_ps` (`rx/ps.h`): its pid, its parent's, its group and session (words `PI_PID`, `PI_PPID`, `PI_PGID`, `PI_SID`), its state (byte `PI_STATE`: `R` running or ready, `S` waiting in a call, `T` stopped, `Z` a zombie), its session's terminal (byte `PI_TTY`: 0 to 7, or FFh), its file's name (`PI_COMMAND`, 12 bytes) and its nice value (byte `PI_NICE`); the entry after it, or `ESRCH` past the last. rx286's own, for `ps` (P12) |
 
-The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts
-them all. A path has `PX_PATH_MAX` (80) bytes at most, its zero too, so
+The files' calls, `read` and `write` among them (roadmap os-server.md P7),
+are below; *docs/posix.md* lists every call. `PX_CALLS` counts them all. A path has `PX_PATH_MAX` (80) bytes at most, its zero too, so
 that every path DOS reaches, its 64 characters, fits behind its drive's
 `/b`; `limits.h` calls it `PATH_MAX`. A program's
 names a file of `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and
@@ -66,7 +67,8 @@ time before 1970). The signals: `SIGHUP`,
 `SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB, #BP), `SIGABRT`,
 `SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGUSR1`, `SIGSEGV` (any other
 fault), `SIGUSR2`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGCHLD`, `SIGCONT`,
-`SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`, up to `SIG_MAX`. A wait status
+`SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`, up to `SIG_MAX`. The files,
+the terminals and the threads add more errors (*docs/posix.md* has them all). A wait status
 is the exit's code in bits 8-15, or the signal in bits 0-6; a stop is 7Fh
 and the signal in bits 8-15, a continue FFFFh (`sys/wait.h`).
 
@@ -78,7 +80,7 @@ A process's signals are the server's (roadmap os-server.md P10, D7 A;
 `SA_NODEFER`, `SA_RESETHAND`), and the process's mask and pending set.
 Every default action ends the process but `SIGCHLD`'s, which ignores the
 signal, `SIGCONT`'s, which continues it, and the stop signals' (`SIGSTOP`,
-`SIGTSTP`, `SIGTTIN`, `SIGTTOU`), which stop it (*Job control* below);
+`SIGTSTP`, `SIGTTIN`, `SIGTTOU`), which stop it (*docs/terminals.md*);
 `SIGKILL` and `SIGSTOP` are never caught, ignored or blocked. init takes
 no default action. A fork keeps the
 actions and the mask; an exec puts back the default action of each signal
@@ -197,7 +199,7 @@ its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 |---|---|---|
 | `PX_OPEN` | SI the path, BX the flags | a descriptor, the lowest free: `O_RDONLY`, `O_WRONLY` or `O_RDWR` (`O_ACCMODE`); `O_CREAT` makes a volume's file, `O_EXCL` refuses one there (`EEXIST`), `O_TRUNC` empties it, `O_APPEND` writes at its end, `O_DIRECTORY` refuses a file (`ENOTDIR`), `O_CLOEXEC` marks it |
 | `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written |
-| `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many | by the kind: a volume's file, through the cache; a terminal (*The terminals* below; a read 0 where the processes have no keys); `/dev/null`; a printer; a file of `/z`, read only |
+| `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many | by the kind: a volume's file, through the cache; a terminal (*docs/terminals.md*; a read 0 where the processes have no keys); `/dev/null`; a printer; a device (*The devices* below); a pipe; a file of `/z`, read only |
 | `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset, its high word in SI; `ESPIPE` for a device |
 | `PX_DUP`, `PX_DUP2` | BX the descriptor (CX the one it becomes) | another descriptor of the same description |
 | `PX_FCNTL` | BX, CX the command, SI its argument | `F_DUPFD`, `F_GETFD` and `F_SETFD` (`FD_CLOEXEC`), `F_GETFL` |
@@ -212,6 +214,22 @@ its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 | `PX_IOCTL` | BX the descriptor, CX a request (`RXIO_*`), SI its argument | a device's request (*The devices* below); `ENOTTY` for any other descriptor or request, `EFAULT` for an argument past the data (P12) |
 | `PX_POLL` | SI the `struct pollfd`s (`PF_FD`, `PF_EVENTS`, `PF_REVENTS`; `PF_BYTES` each), CX how many (`OPEN_MAX` at most), BX the timeout in ms (-1: none; 0: at once) | how many have news, each one's `PF_REVENTS` set: `POLLIN` (bytes, or a pipe's end), `POLLOUT` (room: `PIPE_BUF` bytes in a pipe), `POLLERR` (a pipe without a reader), `POLLHUP` (without a writer), `POLLNVAL` (not open; `POLLPRI` never). It waits in the server thread: the terminals it asks about wake it, as their reader; the rest it looks at each tick. A signal's handler ends it with `EINTR`, `SA_RESTART` or not (XSH poll); a stop makes it again (P12) |
 
+The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
+`EMFILE` (no descriptor left), `ENOSPC`, `ESPIPE`, `EROFS` (`/`, `/z`, a
+diskette protected), `EXDEV`, `EEXIST`, `EBUSY`, `EACCES` (a read-only
+file), `ERANGE`, `ENAMETOOLONG` (past 8.3, or past `PX_PATH_MAX`),
+`ENOTEMPTY`, `EPIPE`.
+
+The volumes are read and written through a cache of 32 sectors in a
+segment of the server's (`src/os/cache.c`, `src/os/vol.c`): the FAT, in
+every copy, and the directories are written at the end of each call that
+changed them; a file's data at its close, its `fsync`, or when its sector
+leaves the cache. A sector the driver refuses to write is dropped from
+the cache: the call that changed it gets the error, `EROFS` for a
+write-protected diskette, and the disk's copy counts again. The diskette
+driver still moves a sector at a time and has no change line:
+its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
+
 A pipe holds 1 KB, in a segment of the server's; eight may be open at
 once. A read of an empty pipe waits, in the reader's server thread, until a
 writer's thread signals it, and returns 0 once no writer is left; a write
@@ -223,7 +241,7 @@ whose default action ends it; caught, ignored or blocked, the write is
 The terminal's keys (P9): when no program the root builds has them (an
 image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
 signals a notification of the processes' (`OS_SLOT_KEYS`), and `/dev/tty`
-has them, through its line discipline (*The terminals* below).
+has them, through its line discipline (*docs/terminals.md*).
 
 ## The devices
 
@@ -243,92 +261,11 @@ A wait for one gives up the server's lock.
 The mouse driver and the serial driver do not signal their news: a read
 that waits for them, and a poll, ask again each tick (`proc_nap`).
 
-## The terminals
+## Terminals and job control
 
-There are eight terminals, `/dev/tty1` to `/dev/tty8` (four on an EGA of
-64 KB), each with a line discipline and `termios` (roadmap os-server.md
-P11; XBD 11; `src/os/tty.c`), and each on its page of the screen, where
-the console driver understands ANSI's cursor moves, erasing and
-attributes (*docs/drivers.md*). `/dev/tty` is the caller's session's
-terminal, or the first if it has none. Alt+F1 to F8 show a terminal
-(`DRV_CON_SHOW`). The server's tty thread (`TTY_N`, its slots 164 and 165
-from `ROOT_SERVE`) takes each key as the keyboard driver signals it, and
-puts it through the shown terminal's discipline. A key with no ASCII
-sends what an xterm sends: an arrow ESC [ A to D, Home and End ESC [ H
-and F, Insert, Delete, Page Up and Page Down ESC [ 2 ~, 3 ~, 5 ~ and 6 ~,
-F1 to F4 ESC O P to S, F5 to F10 ESC [ 15 ~ and 17 ~ to 21 ~. A queue holds `MAX_CANON` (255) bytes. A
-process's read waits in its server thread until there is enough, which
-the tty thread wakes it for; a signal's handler breaks the wait off
-(`EINTR`). The first terminal's output and echo go to the kernel's log
-too, the transcript the tests read; the others' to their pages alone.
-
-| `struct termios` | What rx286 does with it |
-|---|---|
-| `TC_IFLAG` (0) | `ICRNL` (Enter's CR read as LF), `INLCR`, `IGNCR` |
-| `TC_OFLAG` (2) | `OPOST`, `ONLCR`: kept; the console takes LF as a new line anyway |
-| `TC_CFLAG` (4) | `CS8`, `CREAD`: kept, and nothing more |
-| `TC_LFLAG` (6) | `ISIG`: the INTR (^C) and QUIT (^\) characters are `SIGINT` and `SIGQUIT`, echoed, the input dropped unless `NOFLSH`; `ICANON`: a line at a time, edited with ERASE (Backspace) and KILL (^U), ended by LF, EOL or EOF (^D), which is not read; `ECHO`, `ECHOE` (ERASE as BS SP BS), `ECHOK`, `ECHONL`; `TOSTOP`, `IEXTEN` kept |
-| `TC_CC` (8) | `NCCS` (12) bytes: `VEOF`, `VEOL`, `VERASE`, `VINTR`, `VKILL`, `VMIN`, `VQUIT`, `VSUSP`, `VTIME`; 0 disables one. Without `ICANON` a read waits for `VMIN` bytes (0: none); `VTIME` is not kept |
-
-`TC_SIZE` bytes in all. `PX_TCGETATTR` (BX the descriptor, DI the room)
-reads it, `PX_TCSETATTR` (BX, CX `TCSANOW`, `TCSADRAIN` or `TCSAFLUSH`,
-which drops the input; SI the termios) sets it: `tcgetattr`, `tcsetattr`
-and `isatty` (`termios.h`, `unistd.h`); `ENOTTY` for a descriptor not the
-terminal's. The defaults: `ICRNL`, `OPOST` and `ONLCR`, `ISIG`, `ICANON`,
-`ECHO`, `ECHOE`, `ECHOK` and `IEXTEN`, `VMIN` 1. What is echoed goes
-where the terminal's output goes. Ctrl+Break is INTR for the terminal
-shown.
-
-## Job control
-
-Every process is in a process group and a session (roadmap os-server.md
-P11; XBD 11.1, XCU 2.11), at first its parent's; init's are its own.
-
-| Call | Arguments | What the server does |
-|---|---|---|
-| `PX_SETPGID` | BX a pid (0: the caller), CX a group (0: that pid) | the caller or a child of its into a group of its session, or one of its own; `EPERM` for another session's, a session's leader or no such group |
-| `PX_GETPGRP` | | the caller's group |
-| `PX_SETSID` | | a session and a group of the caller's, its pid; `EPERM` if it leads a group |
-| `PX_GETSID` | BX a pid (0: the caller) | its session |
-| `PX_TCGETPGRP`, `PX_TCSETPGRP` | BX the terminal's descriptor (CX a group of the session) | the terminal's foreground group, read or set; `ENOTTY` if the terminal is not the caller's session's |
-
-A terminal becomes a session's when that session's leader, which has none,
-opens it and no session has it; its foreground group is then the
-leader's. INTR (^C, and Ctrl+Break), QUIT (^\) and SUSP (^Z) signal the
-shown terminal's foreground group, each echoed with `ECHO`. A process of the session in
-another group gets `SIGTTIN` as it reads, and `SIGTTOU` as it writes with
-`TOSTOP` set or sets termios or the foreground group; if it ignores or
-blocks the signal, its read is `EIO` and the rest goes on. When the
-leader ends, the terminal is hung up: `SIGHUP` and `SIGCONT` for its
-foreground group, and no session has it. `kill` takes a pid, 0 for the
-caller's group, -1 for every process (init aside), or a group as a
-negative number.
-
-A stop marks the process's thread to stop, as for a handler, and then
-holds it stopped. A call it waits in (a pipe, the terminal, `waitpid`)
-ends with `ERESTART`, so that libc makes it again once the process
-continues: a stop is never `EINTR`. `SIGCONT` continues it, as it is
-sent, whatever its action, and runs its handler first if it has one; a
-stop signal drops a `SIGCONT` pending, and `SIGCONT` the stop signals
-pending. The parent's `waitpid` sees a stop with `WUNTRACED`, a continue
-with `WCONTINUED`, and gets `SIGCHLD` for each unless its action has
-`SA_NOCLDSTOP`. Orphaned process groups are not yet told apart.
-
-The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
-`EMFILE` (no descriptor left), `ENOSPC`, `ESPIPE`, `EROFS` (`/`, `/z`, a
-diskette protected), `EXDEV`, `EEXIST`, `EBUSY`, `EACCES` (a read-only
-file), `ERANGE`, `ENAMETOOLONG` (past 8.3, or past `PX_PATH_MAX`),
-`ENOTEMPTY`, `EPIPE`.
-
-The volumes are read and written through a cache of 32 sectors in a
-segment of the server's (`src/os/cache.c`, `src/os/vol.c`): the FAT, in
-every copy, and the directories are written at the end of each call that
-changed them; a file's data at its close, its `fsync`, or when its sector
-leaves the cache. A sector the driver refuses to write is dropped from
-the cache: the call that changed it gets the error, `EROFS` for a
-write-protected diskette, and the disk's copy counts again. The diskette
-driver still moves a sector at a time and has no change line:
-its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
+The eight terminals, their line discipline and `termios`, sessions,
+process groups and job control are *docs/terminals.md*'s (roadmap
+os-server.md P11).
 
 ## Threads
 
@@ -375,20 +312,11 @@ root copies: they are at 3, the root at 6.
 
 ## The library
 
-`src/lib/posix/` is the binding: `unistd.h` (`_exit`, `fork`, `_Fork`,
-`execve`, `execv`, `getpid`, `getppid`, `write`, `read`, `close`, `lseek`,
-`dup`, `dup2`, `unlink`, `rmdir`, `chdir`, `getcwd`, `fsync`, `brk`,
-`sbrk`), `fcntl.h` (`open`, `fcntl`), `sys/stat.h` (`stat`, `fstat`,
-`mkdir`), `dirent.h`, `stdio.h`'s `rename`, `sys/wait.h`, `spawn.h`,
-`signal.h` (`kill`, `raise`, `signal`, `sigaction`, `sigprocmask`,
-`sigpending`, `sigsuspend` and the sets' calls, a set a dword), `unistd.h`'s
-`pause`, `alarm` and `sleep`, `time.h`'s `nanosleep` (to the tick, rounded
-up), `errno.h` and `limits.h`; `stdio.h`'s `printf`,
-`puts` and `putchar`, unbuffered, on descriptor 1, and `perror`;
-`string.h`'s `strerror`; `stdlib.h`'s `malloc` and `free` on `sbrk`,
-`exit`, `getenv` and `atoi`; `execvp` and `posix_spawnp` (P8). `environ` is the crt's (`src/lib/crt/start.c`).
-fork keeps C's registers on the stack, which the root copies; the 287's
-state is not kept yet.
+`src/lib/posix/` is the calls' binding and the rest of a process's libc;
+*docs/posix.md* lists it by header, with the limits and where it departs
+from POSIX. `environ` is the crt's (`src/lib/crt/start.c`). fork keeps C's
+registers on the stack, which the root copies (`fork.asm`); the 287's
+state is not kept across it.
 
 ## /z
 
@@ -427,13 +355,10 @@ init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
 process that ends become its own. In an image built with `PROGRAM=shell` (`sh` too) it
-starts the shell in C, `/z/sh`, on each terminal, as getty does: a child
-of its own leads a session, opens `/dev/ttyN`, which so becomes its
-session's, as descriptors 0 to 2, and runs the shell. On the first
-terminal it does at once; on the others it says "rx286 terminal N: press
-Enter for a shell" and waits for Enter, so that a shell's memory is taken
-only where one is wanted (128 KB in all without extended memory). init
-starts a terminal's shell again whenever it ends. Once the shells are
+starts the shell, `/z/sh`, on each terminal, as getty does
+(*docs/terminals.md*, *init's terminals*): on the first at once, on the
+others once Enter is pressed there, so that a shell's memory is taken only
+where one is wanted (128 KB in all without extended memory). Once the shells are
 started it starts the daemons, `/z/clock` and `/z/counter` (P12; not in a
 test build, unless it asks, `TEST_DAEMONS`, as they would change every
 test's pids and timing). Each makes itself a daemon (`rx_daemon`,
@@ -446,68 +371,5 @@ status line through `/dev/status`; killed, it is started again by its name
 
 ## The shell
 
-The shell (roadmap os-server.md P9, D14; `src/bin/sh/sh.c`) is a process
-in C, POSIX-like. It reads a line from `/dev/tty`, raw (`ICANON` and
-`ECHO` off while it edits, the terminal as it was while a command runs):
-it echoes what is typed, takes Backspace, and recalls its last 8 lines on
-Up and Down. Its
-prompt is the current directory and `$`. It starts in `HOME`, with the
-environment init gave it (`PATH=/z:/c/bin`, `HOME=/a`).
-
-| What | How |
-|---|---|
-| a line | pipelines joined by `;`, `&&`, `\|\|` and `&`, which runs the pipeline before it in the background ("[1] 5": its job's number and group); each expanded only when it runs, so `$?` is the status of the one before |
-| a pipeline | commands joined by `\|`, each a child, a pipe between each two; its status is the last's: its exit code, or 128 and the signal that ended it |
-| a command | words split at blanks; `'...'` quotes all, `"..."` all but `$`, `\` the next character; `$NAME`, `${NAME}` and `$?` are put in; redirections `<`, `>`, `>>` and `2>`; `NAME=value` words alone set a shell variable |
-| an alias | its text put in for a command's first word when the line is read, as POSIX has it: an alias made on a line is there from the next |
-| a built-in | `cd` (to `HOME` without an argument), `pwd`, `exit`, `export`, `unset`, `set` (the variables), `alias`, `unalias`, `true`, `false`, `jobs`, `fg` and `bg` (a job's number, `%1` or `1`; without, the job stopped or started in the background last), `help` (the commands and the keys); alone, it runs in the shell, its redirections undone after |
-| a program | found along `PATH` (`execvp`); one not found is status 127 ("sh: nosuch: no such file or directory"), one not executable 126 |
-
-Job control: on a terminal the shell leads a session whose terminal it
-is, and ignores `SIGTSTP`, `SIGTTIN`, `SIGTTOU` and `SIGQUIT`. Each
-pipeline is a job, a process group of its own, which the shell makes the
-terminal's foreground while it waits for it; its children take the
-signals' default actions back. ^C and Ctrl+Break end the job, not the
-shell (status 130); at the prompt ^C drops the line. ^Z stops the job
-("[1] Stopped  cat"; status 148), which `jobs` lists, `fg` brings back to
-the foreground and `bg` continues in the background. A background job
-that stops (reading the terminal: `SIGTTIN`) or ends is said before the
-next prompt.
-The commands are programs in C (`src/bin/`). `echo`, `cat` and `ls` are
-in `/z` with the shell; the others in C's `/BIN` (D11, P12: the boot image
-holds 128 KB, and `/z` had grown to 54 KB of it), so a machine without
-drive C has those three alone:
-
-| Command | What |
-|---|---|
-| `echo` | its arguments, a space between, then a new line |
-| `cat` | each file, or descriptor 0, to descriptor 1 |
-| `ls` | a directory's names, or a file's own, one a line; names that start with "." left out; a header before each directory when there are several; `-l` with each its kind and permissions and its bytes (`drwxr-xr-x        0 DOCS`); a damaged directory's names up to the damage, then its error |
-| `cp` | a file to a file, or into a directory |
-| `mv` | `rename`: within a drive (across drives: "across drives") |
-| `rm`, `mkdir`, `rmdir` | each path |
-| `wc` | lines, words and bytes, of each file or descriptor 0; `-l`, `-w`, `-c` for one |
-| `head` | the first 10 lines, or `-n N` (or `-N`), of each file or descriptor 0; of several files each under "==> NAME <==" |
-| `lp` | each file, or descriptor 0, to `/dev/lpt1`; `-d lpt2` to the other |
-| `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, without Enter, `q` to stop |
-| `beep`, `play` | a tone of 880 Hz for 10 ticks; a tune of 13 notes and a rest (`/dev/speaker`) |
-| `joy` | one reading of `/dev/joystick`: "buttons: none; axes: absent absent absent absent" |
-| `mouse` | where the mouse is, then again whenever it moves or a button changes ("x 320, y 100 (column 40, row 12), buttons: none"), until Esc or both buttons; it waits in `poll` for the terminal and the mouse |
-| `term` | a terminal on COM2: what comes is shown, what is typed is sent (Enter as CR), raw, until Esc alone; it waits in `poll`. Where COM2 is the log it says so |
-| `ps` | the processes of the caller's terminal, or `-e` all: pid, parent, group, session, terminal, state, nice value, name (`PX_PS`) |
-| `nice` | a command run with its nice value moved by `-n N`, or 10 |
-| `clock`, `counter` | the daemons, in `/z`: the time of day in a field of the status line, five looks a second; and, at the lowest nice value, a count of what the machine has to spare ("idle 741k/s"), each second |
-| `kill` | `SIGTERM`, or `-s NAME`, `-NAME`, `-NUMBER`, to each pid (below -1: a group); `-l` the signals' names, `-l STATUS` the one that ended a process |
-| `sleep` | a wait of so many seconds |
-| `env` | the environment; with a command, that command run in it, changed by the `NAME=VALUE` before it, emptied first with `-i` |
-| `date` | the date and time, the real-time clock's as UTC (`time`, `gmtime`); `+FORMAT` in `strftime`'s conversions; it cannot set the clock |
-| `uptime` | the time since the start, to the tick: "up 0:01:23.45" (`CLOCK_MONOTONIC`) |
-| `clear` | a form feed, which the console takes as a clear screen |
-| `keys` | each key's bytes from the terminal, raw, in hexadecimal and as they read ("1Bh 5Bh 41h: ESC [ A"), until ^D |
-| `mem` | its own segments: selector, base (`KCALL_SEGMENT`), limit (`LSL`), and its break |
-| `fpu` | the square root of 2 and pi to 18 digits, by the 287 (`FBSTP`) |
-| `crash` | what no process may do, one kind a time (`crash` lists them): jumps past its code, an instruction that does not exist, a divide by zero, a push past its stack, a port, `CLI`, `HLT`, `INT 32h`, the kernel's selectors, a write over its code, the 287's error, the trap flag, NT and `IRET`. Each ends it with its fault's signal, the shell going on |
-| `spin` | a loop for ever; ^C ends it, and the shell and the other processes run meanwhile |
-
-A command's error is the path and `strerror`'s text, on descriptor 2
-("c:/docs: is a directory"), and status 1; a read's error too.
+The shell (`src/bin/sh/sh.c`) and its commands (`src/bin/`) are processes
+like any other: *docs/shell.md* has them.

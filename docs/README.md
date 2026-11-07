@@ -11,12 +11,14 @@
 | [syscalls.md](syscalls.md) | the system calls, as a program makes them |
 | [kernel-calls.md](kernel-calls.md) | the kernel's calls: capabilities, IPC, interrupt lines, delete and revoke, the log |
 | [root.md](root.md) | the root: how it builds the system, its faults, its services for processes |
-| [os-server.md](os-server.md) | the OS server: its threads and slots, where each call goes, the files, the status line |
+| [os-server.md](os-server.md) | the OS server: its threads and slots, the calls of the programs the root builds, its interface and requests to the root |
 | [processes.md](processes.md) | the processes: their calls, fork, exec, wait and kill, their files and descriptors, `/z`, init |
+| [posix.md](posix.md) | the POSIX subset: every call and its milestone, the library, the limits, where rx286 departs |
+| [terminals.md](terminals.md) | the eight terminals: pages, keys, the line discipline, sessions and job control |
 | [drivers.md](drivers.md) | the drivers outside the kernel: printer, mouse, console, keyboard, disks, serial line, sound, RTC |
 | [storage.md](storage.md) | the drives, their drivers, the files, the printers, the sample disks |
 | [devices.md](devices.md) | the speaker, the game port, the serial mouse, the modem |
-| [shell.md](shell.md) | the shell: its commands, drives and paths; the clock and the counter beside it |
+| [shell.md](shell.md) | the shell: its line, job control, its commands, DOS's names; the clock and the counter beside it |
 | [security.md](security.md) | what no program can do, and how the tests show it |
 | [building.md](building.md) | the tools, the Makefile, the builds |
 | [testing.md](testing.md) | the layers of tests |

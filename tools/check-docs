@@ -23,7 +23,8 @@ import rxlib
 
 ROOT = rxlib.ROOT
 
-# include file -> the document that must name each of its constants
+# include file -> the document (or documents, one of which) that must name
+# each of its constants
 COVERED = {
     'ports.inc': 'docs/hardware.md',
     'layout.inc': 'docs/memory-map.md',
@@ -34,7 +35,7 @@ COVERED = {
     'drivers.inc': 'docs/drivers.md',
     'disks.inc': 'docs/storage.md',
     'exe.inc': 'docs/c.md',
-    'posix.inc': 'docs/processes.md',
+    'posix.inc': ('docs/processes.md', 'docs/terminals.md', 'docs/posix.md'),
     'archive.inc': 'docs/processes.md',
 }
 
@@ -46,15 +47,19 @@ def constants(name):
 
 def main():
     problems = []
-    for inc, doc in COVERED.items():
-        doc_path = os.path.join(ROOT, doc)
-        if not os.path.exists(doc_path):
-            problems.append('%s: missing (it documents %s)' % (doc, inc))
-            continue
-        text = open(doc_path, encoding='utf-8').read()
+    for inc, docs in COVERED.items():
+        docs = docs if isinstance(docs, tuple) else (docs,)
+        text = ''
+        for doc in docs:
+            doc_path = os.path.join(ROOT, doc)
+            if not os.path.exists(doc_path):
+                problems.append('%s: missing (it documents %s)' % (doc, inc))
+                continue
+            text += open(doc_path, encoding='utf-8').read()
         for name in constants(inc):
             if not re.search(r'\b%s\b' % re.escape(name), text):
-                problems.append('%s: does not name %s (src/include/%s)' % (doc, name, inc))
+                problems.append('%s: does not name %s (src/include/%s)'
+                                % (' or '.join(docs), name, inc))
 
     ports = rxlib.include_constants('ports.inc')
     disks = rxlib.include_constants('disks.inc')

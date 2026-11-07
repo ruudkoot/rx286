@@ -16,10 +16,22 @@ No program can make the kernel:
 - keep the CPU from the kernel: the timer and keyboard interrupts always
   arrive.
 
-Every way out is a reported fault, after which the program starts again
-(roadmap D11): reported by the OS server, which handles its programs'
-faults (roadmap l4.md L6, D18), by the root for the OS server's, or by the
-kernel for a thread without a handler.
+Every way out is a reported fault (roadmap D11): reported by the OS
+server, which handles its programs' faults (roadmap l4.md L6, D18), by the
+root for the OS server's, or by the kernel for a thread without a handler.
+A process then ends, with its fault's signal, unless it handles it; a
+program the root builds starts again. And since roadmap os-server.md:
+
+- no program can make code that runs anywhere but in ring 3, nor write
+  code once it is code;
+- no process can read or write another's memory: a fork's child has
+  copies, and pipes and files copy through the server;
+- no process can stop the system by using it up: past its limits a call
+  fails, `EAGAIN`, `ENOMEM` or `EMFILE`, and the server and the root go on.
+
+There are no users yet, so every process may signal, wait for and kill
+every other but init, as root may on Unix; the OS server's threads and the
+root's have no pid at all.
 
 ## What holds the program in
 
@@ -75,9 +87,11 @@ kernel for a thread without a handler.
   or above, and stopped by Ctrl+Break if it is the program the keys are
   for; it starves only threads below it (roadmap l4.md L2,
   `tests/threads/above.test`).
-- **Each program in its own LDT.** The program and the counter have LDTs
-  of their own; the same selectors name different memory in each, and no
-  selector of one reaches the other's (*docs/protected-mode.md*).
+- **Each program in its own LDT.** Every process and every program the
+  root builds has an LDT of its own; the same selectors name different
+  memory in each, and no selector of one reaches another's
+  (*docs/protected-mode.md*). A process's threads share its LDT, and so
+  everything.
 - **Capabilities** (*docs/kernel-calls.md*; roadmap l4.md L3). A thread can
   name only the slots of its own space; a GDT selector, a slot past the
   space, an empty slot or one of the wrong type is refused (`KE_CAP`). A
@@ -160,6 +174,18 @@ The suite runs on Bochs and on MAME's IBM PC/AT, a real 286 core
 checksum of its code, GDT, IDT and TSSs is what it was at the first start,
 and that the frame it restarts from sits at the kernel stack's top. A
 difference is a panic, which fails the test.
+
+### The processes (`tests/posix`, `tests/sh`, `tests/caps/seal.test`)
+
+| What | Held by | Shown by |
+|---|---|---|
+| code only from the image or sealed, only of ring 3 | retype makes no code; `KCALL_SEAL` makes DPL-3 readable code of a data segment no other capability names, and refuses the rest (os-server.md P2); `THREAD_CONFIGURE` refuses conforming code | `tests/caps/seal.test`; the attack suite's seals of its data, stack, code and a GDT selector |
+| a file run only if its header holds | every field checked before anything is loaded (*docs/processes.md*, *Programs from disk*) | `tests/posix/exec.test`: a magic, a version, a flag, no code, an entry past the code, a file cut short, a stack too small, data past a segment, a most below its data: each `ENOEXEC` |
+| a process's memory its own | an LDT a process; the root copies at a fork in its own ring, from its own capabilities; the server checks every buffer against the process's data segment, and again after every wait | `EFAULT` in `tests/posix/drives.test`, `poll.test`'s `ioctl`, the attack suite |
+| ids and descriptors unforgeable | pids, groups and descriptors are the server's tables' entries, checked on every call | `tests/posix/proc.test` (`kill` of no one, `ESRCH`; of init, `EPERM`), `files.test` (`EBADF`) |
+| a signal's frame cannot hurt the server | the server writes it through the process's own segment after a bounds check, and a frame the handler spoilt faults in ring 3 | `tests/posix/signal.test`: a spoilt frame, IOPL and NT asked for, its own `IRET` with NT: each `SIGSEGV` |
+| no exhaustion | the table (`PROCS`), the descriptors (`OPEN_MAX`), the pipes, the root's allocator: each refused past its end | `tests/posix/proc.test`: a fork bomb stops at 13 children, `EAGAIN`; `thread.test`: seven threads, then `EAGAIN` |
+| the server's own paths and devices | `/` and `/z` read-only; paths absolute and their `..` taken out before they are followed; 8.3 and `PX_PATH_MAX` enforced | `tests/posix/files.test` (`EROFS`, `EXDEV`, `ENAMETOOLONG`), `tests/sh/deep.test` |
 
 ### The console's long writes (`tests/posix/devices.test`)
 

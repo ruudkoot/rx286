@@ -65,9 +65,11 @@ The code room was 16 KB and the data room 8 KB while the old system calls
 and the new kernel lived side by side (roadmap l4.md, *Constraints*); with
 the devices and `INT 30h` gone (L10) they were 12 KB and 6 KB, and the arena
 below the image grew by what they gave up. Since the kernel's objects left
-its data segment (roadmap os-server.md P3) the code has 16 KB again. `make sizes` shows how full each
-is: the release kernel's code was 5,358 bytes before L1, 7,660 at L9 and
-6,898 at L10, its data 2,268, 2,685 and 2,438.
+its data segment (roadmap os-server.md P3) the code has 16 KB again. `make
+sizes` shows how full each is: the release kernel's code was 5,358 bytes
+before L1, 7,660 at L9, 6,898 at L10 and 11,477 at os-server.md P14 (the
+capabilities' children, the seal, threads' frames, extended memory), its
+data 2,268, 2,685, 2,438 and 3,229.
 
 **The kernel's data segment,** `SEL_KDATA`, starts at `KDATA_BASE`, below
 the image, and reaches 64 KB: the kernel's stack, the GDT and its free
@@ -105,12 +107,14 @@ an image whose end did not arrive, whose table does not give the file's
 length, whose first module is not the root, or whose table places a module
 outside it.
 
-**A module** is a program assembled on its own (the root, the OS server, the shell or a
-test program), with its code at `USER_TEXT_START` and its data
-at `USER_DATA_START` of its binary, in rooms of `UTEXT_ROOM` and
-`UDATA_ROOM`; it runs with a stack of `USTACK_SIZE`. A C module (the clock,
-the counter; roadmap os-server.md P1) is an rx286 executable, whose header
-gives its rooms (*docs/c.md*). `tools/mkimage` takes each module's code
+**A module** in assembly (a driver, or a test program) is assembled on its
+own, with its code at `USER_TEXT_START` and its data at `USER_DATA_START`
+of its binary, in rooms of `UTEXT_ROOM` and `UDATA_ROOM`; it runs with a
+stack of `USTACK_SIZE`. A C module (the root, the OS server, the counter
+of `TEST_COUNTER` builds, the root's services' test program; roadmap
+os-server.md P1) is an rx286 executable, whose header gives its rooms
+(*docs/c.md*). `/z`, the archive of the processes' programs, is a module
+of data alone (`MF_ARCHIVE`). `tools/mkimage` takes each module's code
 whole and its data without the zeros it ends with.
 
 **At its start** the kernel builds the root from the first module: its
@@ -121,6 +125,14 @@ from the module. The root does the same for every other module
 and stacks are made from the untyped memory the kernel gave it. Nobody
 resets a program's data when it restarts: the program's entry code
 initialises what it needs.
+
+**A process's memory** (roadmap os-server.md P4, P6) is the root's buddy
+allocator's (*docs/root.md*): its data segment, which holds its stack,
+data and heap, 64 KB at most, and grows by a larger one taking its place
+(`brk`); its code, read from its file into a load the root seals, shared
+by every process of the file; its space, thread and endpoint, a block of
+1 KB. *docs/root.md* says which memory the allocator has, with extended
+memory and without.
 
 ## The kernel's objects, the arena, and memory for programs
 

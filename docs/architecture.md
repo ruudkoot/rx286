@@ -8,19 +8,19 @@ L5):
 |---|---|---|---|
 | boot sector | `src/boot-sector/` | 0000:7C00h, real mode, with the BIOS | 512 bytes |
 | boot loader | `src/boot-loader/` | 0000:7E00h, real mode, with the BIOS | 3 sectors |
-| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 8.9 KB of code, 2.6 KB of data |
-| the root | `src/root/` | a C module of the image, ring 2; the processes' services | about 9 KB of code |
-| the OS server | `src/os/` | a C module of the image, ring 2, a thread for each program; the files, in DOS's way | about 8.7 KB of code; its threads' stacks, 15 KB, in its data |
-| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
-| the processes | `src/userland/init.c`, `src/bin/` | programs of `/z` (in the image) and of C's `/BIN`, ring 3, which the OS server runs (*docs/processes.md*): init, the shell in C on each terminal (*docs/shell.md*), its commands, the daemons (the clock, the counter) | the shell about 13 KB, a command 1 to 8 KB |
+| kernel | `src/kernel/` | 10000h, protected mode, ring 0, never the BIOS | about 11.2 KB of code, 3.2 KB of data |
+| the root | `src/root/` | a C module of the image, ring 2: builds the system; the processes' memory, spaces and threads | about 8.2 KB of code |
+| the OS server | `src/os/` | a C module of the image, ring 2, a thread for each process and each program the root builds: the processes, their files, pipes, signals, terminals and devices | about 33 KB of code; its threads' stacks, 32 KB, in its data |
+| the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 137 to 1,313 bytes of code each |
+| the processes | `src/userland/init.c`, `src/bin/` | programs of `/z` (in the image) and of C's `/BIN`, ring 3, which the OS server runs (*docs/processes.md*): init, the shell in C on each terminal (*docs/shell.md*), its commands, the daemons (the clock, the counter) | the shell about 11 KB of code, a command 1 to 5 KB |
 | a test program | `tests/programs/` | a module of the image in a test build, ring 3 (or 1, 2), which makes four of the OS server's calls (*docs/syscalls.md*); the counter (`src/userland/counter.c`), a C module, beside it when a test asks | |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
 descriptor macros and the build flavours. `src/lib/` holds pure routines
 more than one part assembles, each its own copy: `format.asm` (numbers as
-text) in the kernel and the program, `fat12.asm` in the loader and the OS
-server.
+text) in the kernel and the test programs, `fat12.asm` in the loader.
+*docs/posix.md* lists the processes' calls and library.
 
 ## From power-on to the shell
 
@@ -112,9 +112,9 @@ A restart asked for while the kernel itself was interrupted (Ctrl+Break or a
 ## Threads
 
 Each program runs in a thread of its own (`thread.asm`; roadmap l4.md L2):
-the drivers (priority 7), the root (6), the OS server's (5), the program
-in the foreground (the shell, or a test program), and the clock and the
-counter beside the shell. A thread is a kernel object, anywhere in
+the drivers (priority 7), the root (6), the OS server's (5), the processes
+and their threads (3, or 2 and 1 by their nice value), and in a test build
+the test program. A thread is a kernel object, anywhere in
 memory, named by its own descriptor's selector (*docs/memory-map.md*;
 roadmap os-server.md P3): a control block, at whose end it keeps its frame
 while it does not run. The kernel has one stack for all of them, at whose
@@ -135,9 +135,9 @@ untyped memory and a space can make more with the kernel's calls.
   gave way.
 - **The scheduler:** eight priorities (`PRIORITIES`), round robin within
   each on time slices of `SLICE_TICKS` ticks; a 256-byte table gives the
-  highest non-empty queue, since the 286 has no `BSF`. The program runs at
-  priority 3, the clock at 4 and the counter at 1, so the counter runs only when the
-  program waits. Preemption happens on the way back to ring 3 and at the
+  highest non-empty queue, since the 286 has no `BSF`. A process runs at
+  priority 3, or below by its nice value: the counter daemon at 1, so it
+  runs only when nothing else would. Preemption happens on the way back to ring 3 and at the
   kernel's interrupt windows (`kpreempt`), never in the middle of a handler:
   a call that gives way at a window keeps its progress in the thread's
   control block - the log's bytes written, a retype's paragraphs zeroed -
@@ -235,8 +235,9 @@ in assembly (`tests/programs/`) share `src/userland/`'s `uprint.asm`
 ## Builds
 
 One source makes three flavours: release, debug and test (*docs/building.md*).
-Test builds add `test.asm` and the hooks the tests use; test programs
-(`tests/programs/`) replace the shell in some of them.
+Test builds add `test.asm` and the hooks the tests use; each test's build
+runs the shell, a test program the root builds (`tests/programs/`), or a
+process of `tests/posix` that init starts.
 
 ## What holds it together
 
