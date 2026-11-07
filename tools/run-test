@@ -34,9 +34,6 @@
 #                               it echoes, and answers AT, ATI. The image is
 #                               built with MODEM_COM2 (COM2 the modem, the
 #                               log on COM3): Bochs and DOSBox-X only
-#   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
-#                               or D) must hold text, then each byte its own
-#                               offset (storage.asm's fill); may repeat
 #   fsck: B                     after the run, fsck.fat finds drive B's volume
 #                               (its partition's, on C or D) sound; may repeat
 #   file: B /MOVED.TXT text     after the run, that file of drive B's volume
@@ -122,7 +119,6 @@ class Test:
         self.media = []
         self.modem = None
         self.printed = {}                   # 'lpt1' -> the lines it must print
-        self.sectors = []                   # (drive, sector, text)
         self.fscks = []                     # drives whose volumes fsck.fat checks
         self.files = []                     # (drive, path, text)
         self.installs = []                  # (drive, path, a file the build made)
@@ -188,11 +184,6 @@ class Test:
                 if drive not in DRIVE_IMAGES or not path.startswith('/'):
                     raise ValueError('%s: bad file line %r' % (self.path, line))
                 self.files.append((drive, path, text.replace('\\n', '\n')))
-            elif key == 'sector':
-                drive, number, text = (value.split(None, 2) + [''])[:3]
-                if drive not in DRIVE_IMAGES or not number.isdigit() or not text:
-                    raise ValueError('%s: bad sector line %r' % (self.path, line))
-                self.sectors.append((drive, int(number), text))
             else:
                 raise ValueError('%s: unknown header %r' % (self.path, key))
         self.expected = body.rstrip('\n').split('\n') if body.strip() else []
@@ -522,22 +513,6 @@ def check_printers(test, printers):
     return None
 
 
-def check_sectors(test):
-    """Each sector: line against the drive's image after the run."""
-    for drive, number, text in test.sectors:
-        path = os.path.join(test.build_dir, DRIVE_IMAGES[drive])
-        with open(path, 'rb') as f:
-            f.seek(number * SECTOR_SIZE)
-            data = f.read(SECTOR_SIZE)
-        wanted = text.encode('latin-1')
-        wanted += bytes(n & 0xFF for n in range(len(wanted), SECTOR_SIZE))
-        if data != wanted:
-            first = next(i for i in range(SECTOR_SIZE) if i >= len(data) or data[i] != wanted[i])
-            return 'sector %d of drive %s differs from byte %d: %r, not %r' % (
-                number, drive, first, data[first:first + 16], wanted[first:first + 16])
-    return None
-
-
 def volume_image(test, drive):
     """A drive's volume as an image of its own: the floppies' whole, a fixed
     disk's first FAT12 partition copied out (mtools and fsck.fat want one)."""
@@ -658,7 +633,7 @@ def run(test):
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
         if os.path.exists(dbglog) else []
     error = compare(test, transcript, debugger_lines) or check_printers(test, printers) \
-        or check_sectors(test) or check_volumes(test)
+        or check_volumes(test)
     if status == 'timeout':
         error = 'timed out after %.0f s; %s' % (timeout, error or 'the transcript matched')
     return test, error, time.monotonic() - started

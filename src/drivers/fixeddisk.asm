@@ -11,9 +11,13 @@
 ; (Restore), as the BIOS does at start: a reset leaves the step rate at 7.5
 ; ms, and Restore sets the rate implied seeks use (IBM, Fixed Disk and
 ; Diskette Adapter, 7-8). A drive that is not there fails with E_TIMEOUT
-; then. The controller seeks (an implied seek) and retries by itself; the
-; driver tries a sector HD_TRIES times, a timeout ending it at once. A read
-; interrupts when the sector waits in the controller's buffer; a write
+; then. The drive is selected before the reset as well as after: the AT's
+; controller keeps one drive/head register, but an IDE drive (MAME's AT)
+; takes it only while not busy, and a reset with a drive not there
+; selected would leave the other's status hidden. The controller seeks (an
+; implied seek) and retries by itself; the driver tries a sector HD_TRIES
+; times, a timeout ending it at once. A read interrupts when the sector
+; waits in the controller's buffer; a write
 ; takes its sector first (data request, no interrupt) and interrupts when it
 ; is on the disk. Reading the status register clears the interrupt. The
 ; words go straight between the controller and the segment the OS server
@@ -257,6 +261,8 @@ hd_transfer:
 hd_setup:
         cmp word [hd_ready], 0          ; both drives' bytes
         jne .parameters
+        xor al, al                      ; this drive, before the reset too: an IDE
+        call hd_drive_head              ;    drive takes it only while not busy
         mov dx, HDC_CONTROL
         mov al, HDC_CONTROL_RESET
         out dx, al
@@ -269,6 +275,8 @@ hd_setup:
         mov al, HDC_CONTROL_RUN
         out dx, al
 .parameters:
+        xor al, al                      ; this drive first: the status is the drive's
+        call hd_drive_head              ;    selected (one not there: never busy)
         call hd_wait_idle
         jc .late
         mov al, [di + UNIT_HEADS]

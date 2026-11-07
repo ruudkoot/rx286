@@ -7,7 +7,7 @@
  * it goes. The file system's FAT and directory sectors are written at the
  * end of the call that changed them (cache_meta, cache_flush_meta), each
  * once however often the call changed it; a file's data at its close, its
- * fsync or its eviction.
+ * fsync or its eviction. A sector the driver refuses to write is dropped.
  * Every call is made with the lock held (proc.c's lock_take).
  * ============================================================================ */
 
@@ -44,14 +44,16 @@ int cache_ready(void)
     return ready;
 }
 
-/* put - a dirty sector written: 0 or the driver's error */
+/* put - a dirty sector written: 0 or the driver's error. One the driver
+ * refused is dropped: the call that changed it is told so, and the disk's
+ * copy counts again, rather than every later call failing on it (a
+ * diskette write-protected, or taken out) */
 static rx_u16 put(int k)
 {
     rx_u16 error = disk_call(DRV_DISK_WRITE, cache[k].drive, cache[k].sector, CACHE_SEG,
                              (rx_u16)(k * SECTOR_SIZE));
 
-    if (!error)
-        cache[k].state = C_CLEAN;
+    cache[k].state = error ? C_EMPTY : C_CLEAN;
     return error;
 }
 

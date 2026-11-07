@@ -1532,9 +1532,10 @@ void vfs_exe_close(struct exe_file *f)
 int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
 {
     int result = call_files(i, data, r, error, si_out);
+    rx_u16 e;
 
-    if (result >= 0 && cache_flush_meta()) {
-        *error = EIO;
+    if (result >= 0 && (e = cache_flush_meta()) != 0) {
+        *error = errno_of(e);           /* EROFS: a diskette write-protected */
         return -1;
     }
     return result;

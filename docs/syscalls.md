@@ -177,7 +177,7 @@ it alone. `src/include/os.inc` holds the interface:
   transfer segment's end: so the OS server refuses it with `E_FAULT` after
   its other checks, in the order the kernel always made them. A call made
   straight on the endpoint that names bytes past the transfer segment is
-  refused the same way (`tests/syscalls`).
+  refused the same way.
 - **`SYS_EXIT`:** the OS server restarts the program (the kernel's
   `THREAD_RESTART`, *docs/kernel-calls.md*), and its own thread for it with
   it, since that thread serves the program alone (`START_SESSION`). So does

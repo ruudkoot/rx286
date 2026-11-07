@@ -153,7 +153,6 @@ that faulted:
 | `find` with a path through a null DS, or into the code; `getcwd` across the data's limit; `file_next` into the code | refused, `E_FAULT`, before the drive is touched |
 | `find` on drive 80h; `file_next` with nothing found | refused, `E_INVAL` |
 | `chdir` with a path whose end is past the 128 bytes the stub passes | refused, `E_BAD_NAME` |
-| `serial_read` into the code, across the data's limit, through a null ES; `serial_write` from a null selector | refused, `E_FAULT` (in `tests/devices/modem.test`, whose image has the modem; test builds' COM2 is the log, and refuses with `E_BUSY`) |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 | the kernel's calls with a GDT selector, its own data, an empty slot or a selector past its LDT as the untyped; its code as a space to copy into; its data as a thread to start | refused, `KE_CAP` (1) |
 | a kernel call that does not exist | refused, `KE_NOSYS` (7) |
@@ -166,13 +165,14 @@ checksum of its code, GDT, IDT and TSSs is what it was at the first start,
 and that the frame it restarts from sits at the kernel stack's top. A
 difference is a panic, which fails the test.
 
-### The system calls (`tests/syscalls/calls.test`)
+### The console's long writes (`tests/posix/devices.test`)
 
-Every call with good and bad arguments, the registers a call keeps, and
-writes of 2,048 newlines, spaces and form feeds during which the timer's
-ticks keep pace with the RTC. That test fails if `write`'s interrupt window
-is removed, opened only after line feeds (as before M10's review), or
-written as `sti; cli`, which opens nothing.
+Writes of 2,048 newlines, spaces and form feeds to the console, during
+which the timer's ticks keep pace with the RTC. The console driver writes
+in ring 1 with interrupts on (when the kernel wrote the screen, M10's
+review found its window opened only after line feeds); the test fails if a
+write keeps them off, which the driver's IOPL would allow. The system
+calls' own refusals are in *docs/processes.md* and `tests/posix`.
 
 ### The fuzzer (`tests/fuzz/fuzz.test`)
 

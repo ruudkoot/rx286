@@ -181,7 +181,8 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     sigfpu=$(C_B)/tests/posix/sigfpu.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
     tty=$(C_B)/tests/posix/tty.$(OBJ) jobs=$(C_B)/tests/posix/jobs.$(OBJ) \
     console=$(C_B)/tests/posix/console.$(OBJ) poll=$(C_B)/tests/posix/poll.$(OBJ) \
-    thread=$(C_B)/tests/posix/thread.$(OBJ)
+    thread=$(C_B)/tests/posix/thread.$(OBJ) drives=$(C_B)/tests/posix/drives.$(OBJ) \
+    devices=$(C_B)/tests/posix/devices.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -199,6 +200,8 @@ Z_FOR_JOBS := jobs
 Z_FOR_CONSOLE := console
 Z_FOR_POLL := poll
 Z_FOR_THREAD := thread
+Z_FOR_DRIVES := drives
+Z_FOR_DEVICES := devices
 Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))

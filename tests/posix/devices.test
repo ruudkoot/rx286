@@ -1,0 +1,39 @@
+# The devices of /dev through their drivers (roadmap os-server.md P14):
+# init starts tests/posix/devices.c (TEST_POSIX_DEVICES). Three tones the
+# kernel's probe measures (TEST_SOUND), a rest, three tones refused; the
+# game port (DOSBox-X emulates a centred stick); the mouse's state after
+# its reset, answered through IRQ4; COM2 refused, the log in test builds;
+# and three console writes of 2,048 bytes, across which the ticks keep pace
+# with the RTC's seconds: the kernel lets the interrupts in between bytes.
+program: idle
+define: TEST_POSIX_DEVICES
+define: TEST_SOUND
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: prefix
+timeout: 60
+---
+rx286, test build
+probe: the speaker sounds at the frequency asked
+probe: silent
+devices: 440 Hz (0): 0, errno 0
+probe: the speaker sounds at the frequency asked
+probe: silent
+devices: 1000 Hz (0): 0, errno 0
+probe: the speaker sounds at the frequency asked
+probe: silent
+devices: 2000 Hz (0): 0, errno 0
+probe: silent
+devices: a rest of 5 ticks (0): 0; 5 ticks or more: yes
+devices: 18 Hz (-1, EINVAL 22): -1, errno 22
+devices: 20001 Hz (-1, EINVAL 22): -1, errno 22
+devices: 501 ticks (-1, EINVAL 22): -1, errno 22
+@bochs devices: joystick (10): 10, buttons 00, axes absent absent absent absent
+@dosbox-x devices: joystick (10): 10, buttons 00, axes present present absent absent
+@mame devices: joystick (10): 10, buttons 00, axes absent absent absent absent
+devices: mouse (0): 0, at 320, 100, buttons 0
+devices: COM2, the log (-1, EBUSY 16): -1, errno 16
+devices: a console write of 2048 bytes: ticks kept pace with the clock
+devices: a console write of 2048 bytes: ticks kept pace with the clock
+[form feed]
+devices: a console write of 2048 bytes: ticks kept pace with the clock
+devices: done

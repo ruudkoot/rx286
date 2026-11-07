@@ -1,6 +1,6 @@
 # joy (roadmap os-server.md P12): one reading of /dev/joystick, where no
 # joystick is: on Bochs and MAME. (DOSBox-X's centred stick reads 684 to
-# 687 us, as its polling falls; devices/calls.test checks it there.)
+# 687 us, as its polling falls; tests/posix/devices.test checks it there.)
 program: sh
 emulators: bochs mame
 install: C /BIN/JOY z-joy.rx

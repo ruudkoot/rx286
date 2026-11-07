@@ -1,0 +1,15 @@
+# No fixed disk D at all (roadmap os-server.md P14): the fixed disks'
+# driver finds none, /d is an error, never a hang, and C works on. On
+# MAME's AT the disks are IDE drives, D the second: the driver selects C
+# before the controller's reset, which D's failure brings, as well as after.
+program: sh
+media: D absent
+emulators: bochs mame
+keys: ls /d; ls c:/docs\n
+---
+rx286, test build
+/a$ ls /d; ls c:/docs
+/d: input/output error
+HELLO.TXT
+PRINTME.TXT
+/a$

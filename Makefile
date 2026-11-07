@@ -49,11 +49,8 @@ NASMFLAGS := -f bin -w+all -w+error -Isrc/include/ $(FLAVOUR_DEFINE) $(TEST_DEFI
 
 # The program the kernel carries (test builds may choose another).
 program_main_idle := tests/programs/idle.asm
-program_main_syscalls := tests/programs/syscalls.asm
 program_main_attack := tests/programs/attack.asm
 program_main_fuzz := tests/programs/fuzz.asm
-program_main_storage := tests/programs/storage.asm
-program_main_devices := tests/programs/devices.asm
 program_main_fputhreads := tests/programs/fputhreads.asm
 program_main_caps := tests/programs/caps.asm
 program_main_ipc := tests/programs/ipc.asm
@@ -98,7 +95,7 @@ MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=128 \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
     z=$(B)/z.arc:3:0:archive
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, idle, syscalls, attack, fuzz, storage, devices, fputhreads, caps, ipc, rings, keys, revoke, additions or services, not '$(PROGRAM)')
+$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions or services, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed

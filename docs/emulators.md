@@ -106,7 +106,9 @@ What MAME does not emulate:
 
 ## The drives and printers on each
 
-`tests/storage/` runs where the devices are (*docs/storage.md*):
+The drives' tests (`tests/posix/drives.test`, `protected.test`;
+`tests/sh/media.test`, `absent.test`, `lp.test`) run where the devices are
+(*docs/storage.md*):
 
 - **Bochs** has both diskette drives, both fixed disks and both printer
   ports, and lets a test take B's diskette out, write-protect it or leave
@@ -114,7 +116,10 @@ What MAME does not emulate:
   wrong data rate or gap, so it cannot show such a slip.
 - **MAME's AT** has IBM's BIOS, a 765 that does mind, and an IDE card at
   the AT's task file, which answers the AT controller's commands (Set
-  Parameters, Read and Write Sectors). The runner gives it drive B and both
+  Parameters, Read and Write Sectors), as an IDE drive: it takes the
+  drive/head register only while it is not busy, so the driver selects a
+  drive before the controller's reset as well as after. The runner gives
+  it drive B and both
   fixed disks, the fixed disks as raw `.hd` images (links to the run's
   copies). MAME writes a diskette back to its file only when it stops, so
   the runner asks it to stop (SIGTERM) before it kills it. The AT's four
