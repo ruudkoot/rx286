@@ -1,8 +1,8 @@
 # A long list of siblings (roadmap os-server.md P15, the kernel's review,
 # finding 13): an endpoint copied into every slot of twelve spaces of 256;
 # six of the spaces deleted - each slot's delete takes one copy out of the
-# endpoint's list of 3,072, at once by its back link - then the endpoint,
-# its other 1,536 copies adopted with an interrupt window every 16.
+# endpoint's ring of 3,072, at once - then the endpoint, its other 1,536
+# copies put in its place in its untyped's ring at once (P15).
 # Interrupts are off longest in a space's retype (call 09: its 8 KB zeroed
 # at once), never in a delete or a revoke, and never for half a tick
 # (before: a delete walked its older siblings, and an adoption all the

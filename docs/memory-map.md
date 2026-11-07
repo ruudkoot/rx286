@@ -156,7 +156,7 @@ fixed room taking memory from programs before it does.
 | Object | Bytes | What |
 |---|---|---|
 | a thread | 256 | its control block (220), whose bytes 184 to 217 keep its frame while it does not run; the running thread's is at the top of the kernel's one stack, where SP0 puts every interrupt's from rings 1-3 (roadmap os-server.md P3) |
-| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its parent, its first child and its next and previous siblings: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's of 256 8,208, the root's of 512 16,400 |
+| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its first child and to its next and previous in its parent's ring of children, the first's to the parent too: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's of 256 8,208, the root's of 512 16,400 |
 | an endpoint, a notification | 16 | |
 
 An object lies at a paragraph, zeroed: every retype is aligned to a

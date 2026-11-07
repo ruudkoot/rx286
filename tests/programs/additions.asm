@@ -34,6 +34,12 @@
 ;                     endpoint (the other 1,536 adopted at once);
 ;                     TEST_STRETCH measures: no stretch grows with the list
 ;                     (os-server.md P15)
+;   TEST_ADD_RINGS    the children's rings (os-server.md P15): copies of a
+;                     segment deleted and moved in every place of a ring -
+;                     first, among others, alone, with children - then
+;                     revoked: each revoke takes exactly what derives from
+;                     it; a segment that is not the first of its untyped's
+;                     ring sealed (its parent found back along the ring)
 ;   TEST_ADD_RESIZE   KCALL_RESIZE (os-server.md P15): a segment made longer
 ;                     in place over memory a revoke left written, its copy
 ;                     with it, its bytes kept and the new ones zeroed in
@@ -200,6 +206,8 @@ entry:
         jmp siblings_part
 %elifdef TEST_ADD_RESIZE
         jmp resize_part
+%elifdef TEST_ADD_RINGS
+        jmp rings_part
 %else
         jmp pools_part
 %endif
@@ -1736,6 +1744,121 @@ rz_first:
         kcall KCALL_SEGMENT
         mov [rz_base], ax
         mov [rz_base + 2], dx
+        ret
+
+; ============================================================================ the rings
+RG_SLOT             equ 0x14F           ; 41 on: the ring's segments, RG(0) to RG(9)
+%define RG(n) (RG_SLOT + (n) * 8)
+
+; rg_copy from, to - a copy of a slot's segment into another of ours
+%macro rg_copy 2
+        mov dx, MY_SPACE
+        mov si, %1
+        mov di, %2
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+%endmacro
+; rg_move from, to - a slot's segment moved to another of ours
+%macro rg_move 2
+        mov dx, MY_SPACE
+        mov si, %1
+        mov di, %2
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        must
+%endmacro
+; rg_delete slot, rg_revoke slot
+%macro rg_delete 1
+        mov dx, %1
+        kcall KCALL_DELETE
+        must
+%endmacro
+%macro rg_revoke 1
+        mov dx, %1
+        kcall KCALL_REVOKE
+        must
+%endmacro
+
+; ----------------------------------------------------------------------------
+; rings_part - the rings of children: deletes and moves in every place of a
+; ring, then revokes that must take what derives from each and no more; a
+; segment that is not the first of its ring sealed
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rings_part:
+        mov si, RG(0)                   ; D, and three copies: RG3 RG2 RG1
+        call data64
+        rg_copy RG(0), RG(1)
+        rg_copy RG(0), RG(2)
+        rg_copy RG(0), RG(3)
+        rg_copy RG(2), RG(4)            ; two of RG2: RG5 RG4
+        rg_copy RG(2), RG(5)
+        rg_delete RG(2)                 ; among others, with children: RG3 RG5 RG4 RG1
+        rg_copy RG(5), RG(6)            ; one of RG5
+        rg_move RG(3), RG(7)            ; the first, childless: RG7 RG5 RG4 RG1
+        rg_move RG(5), RG(8)            ; among others, with a child: RG7 RG8 RG4 RG1
+        rg_revoke RG(8)                 ; its child alone
+        mov ax, 1 << 6
+        call rg_live
+        report "a moved copy's child, revoked (0)"
+        mov ax, (1 << 0) | (1 << 1) | (1 << 4) | (1 << 7) | (1 << 8)
+        call rg_live
+        report "the others kept (5)"
+        rg_revoke RG(0)
+        mov ax, 0x3FE
+        call rg_live
+        report "the segment revoked: its copies, each moved or spliced (0)"
+        mov ax, 1
+        call rg_live
+        report "and it kept (1)"
+        rg_copy RG(0), RG(1)            ; a ring of two: RG2 RG1
+        rg_copy RG(0), RG(2)
+        rg_delete RG(2)                 ; its first: RG1 alone, the first
+        rg_move RG(1), RG(9)            ; alone: moved
+        rg_copy RG(9), RG(3)            ; a child of it
+        rg_revoke RG(0)
+        mov ax, 0x3FE
+        call rg_live
+        report "after a first deleted and one alone moved, revoked (0)"
+        mov dx, UT_MEMORY               ; two segments of the same untyped: RG5
+        mov al, CAP_SEGMENT             ;    is not the first of its ring
+        mov si, RG(5)
+        mov cx, 64
+        mov bl, 0xF2
+        kcall KCALL_RETYPE
+        must
+        mov si, RG(6)
+        call data64
+        mov dx, RG(5)
+        kcall KCALL_SEAL
+        status "seal a segment not the first of its untyped's ring (0)"
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rg_live - how many of the ring's slots hold a segment, among some
+;   In:       AX = a bit for each slot, RG(0) the lowest
+;   Out:      AX = how many of them hold one (LSL takes the selector)
+;   Destroys: BX, CX, DX
+; ----------------------------------------------------------------------------
+rg_live:
+        mov bx, ax
+        xor ax, ax
+        mov dx, RG(0)
+        mov cx, 10
+.slot:
+        shr bx, 1
+        jnc .next
+        push ax
+        lsl ax, dx
+        pop ax
+        jnz .next
+        inc ax
+.next:
+        add dx, 8
+        loop .slot
         ret
 
 ; ============================================================================ review tests

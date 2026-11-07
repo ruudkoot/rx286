@@ -120,10 +120,11 @@ are still as they were (`KE_STATE` if not).
   never copied (`KE_ARG`), and a message may not grant them (they are left
   out of it): two retypes of the same untyped would carve the same memory,
   and a reply is answered once (roadmap l4.md L13).
-- **A copy is a child of its source:** first in the source's list of
+- **A copy is a child of its source:** first in the source's ring of
   children, for revocation (roadmap l4.md L12; os-server.md D9). A move
-  takes the capability's place in its parent's list, and its children,
-  with it.
+  takes the capability's place in its parent's ring, and its children,
+  with it, at once: only its neighbours and its first child are told
+  (os-server.md P15).
 - **A segment moved away is gone at once** for the caller: a DS or ES still
   holding it is made null on the way back to ring 3 (*docs/interrupts.md*).
 
@@ -355,17 +356,20 @@ them.
 
 ### Delete and revoke
 
-The capabilities form a tree: each records its parent, the slot it was
-copied, minted or granted from, or the untyped it was retyped from, and
-each keeps a list of its children in its shadow entry, as seL4 keeps its
-derivation tree (`src/kernel/revoke.asm`; roadmap l4.md L12, D8;
-os-server.md D9). Every kernel object counts the capabilities to it.
-Nothing looks through every slot of every space any more: a delete's time
-does not grow with the number of spaces.
+The capabilities form a tree: each has a parent, the slot it was copied,
+minted or granted from, or the untyped it was retyped from, and each keeps
+its children in a ring, linked both ways through their shadow entries, as
+seL4 keeps its derivation tree (`src/kernel/revoke.asm`; roadmap l4.md
+L12, D8; os-server.md D9). Only the first of a ring names the parent; the
+others find it back along the ring (os-server.md P15). Every kernel object
+counts the capabilities to it. Nothing looks through every slot of every
+space any more, nor through a capability's children: a delete's time grows
+with neither.
 
-- **`KCALL_DELETE`** empties a slot of the caller's. It leaves its parent's
-  list, and its children become its parent's, first in the parent's list,
-  so the tree holds. A segment deleted while DS or ES holds it is gone at
+- **`KCALL_DELETE`** empties a slot of the caller's. Its children take its
+  place in its parent's ring, at once, so the tree holds: only the first
+  of them is told (a capability with no parent: its children have none
+  either, each told, with an interrupt window every 16). A segment deleted while DS or ES holds it is gone at
   once, as for a move: the way back makes the register null.
 - **The last capability to an object** (its count 0) takes the object with
   it:

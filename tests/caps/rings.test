@@ -1,0 +1,20 @@
+# The children's rings (roadmap os-server.md P15): a delete puts its
+# children in its place in its parent's ring, and a move names its new
+# slot, telling only the first child. Copies of a segment deleted and moved
+# in every place of a ring - the first, among others, alone, with children
+# - then revoked: each revoke takes exactly what derives from it. A segment
+# that is not the first of its untyped's ring is sealed: its parent found
+# back along the ring. tests/programs/additions.asm, TEST_ADD_RINGS.
+program: additions
+define: TEST_CAPS
+define: TEST_ADD_RINGS
+match: contains
+timeout: 60
+---
+additions: a moved copy's child, revoked (0): 0
+additions: the others kept (5): 5
+additions: the segment revoked: its copies, each moved or spliced (0): 0
+additions: and it kept (1): 1
+additions: after a first deleted and one alone moved, revoked (0): 0
+additions: seal a segment not the first of its untyped's ring (0): 0
+additions: done

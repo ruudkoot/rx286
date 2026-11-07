@@ -139,13 +139,13 @@ SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's ba
 SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
 SH_BADGE            equ 4       ; an endpoint's or notification's badge
 SH_WATERMARK        equ 6       ; untyped: paragraphs retyped so far
-SH_PREV             equ 12      ; the previous of its parent's children (0: the first),
-SH_PREV_SLOT        equ 14      ;    so that it leaves the list at once (P15)
-SH_PARENT           equ 8       ; the space it was copied from (0: made, not copied)
-SH_PARENT_SLOT      equ 10      ; and the slot there
+SH_PREV             equ 12      ; the previous in its parent's ring of children (the
+SH_PREV_SLOT        equ 14      ;    first's: the last; 0: it has no parent, P15)
+SH_PARENT           equ 8       ; its parent's space and slot, the first of the ring's
+SH_PARENT_SLOT      equ 10      ;    alone; the others' 0 (parent_find, P15)
 SH_CHILD            equ 16      ; its first child's space (0: none) and slot: its children
-SH_CHILD_SLOT       equ 18      ;    are a list, linked by SH_NEXT (os-server.md D9)
-SH_NEXT             equ 20      ; the next of its parent's children (0: the last)
+SH_CHILD_SLOT       equ 18      ;    are a ring, linked both ways (os-server.md D9, P15)
+SH_NEXT             equ 20      ; the next in its parent's ring (the last's: the first)
 SH_NEXT_SLOT        equ 22
 SHADOW_SIZE         equ 24
 SLOT_SIZE           equ 8 + SHADOW_SIZE ; a slot's bytes in its space: descriptor and shadow

@@ -80,9 +80,10 @@ kcall_table:
 kcall_table_end:
 msg_thread_made     db "thread", 0
 ; Temporaries of the calls: no kernel call waits, so none is ever two deep.
-zero_place          dw 0                ; zero_pieces': its window's place
+call_place          dw 0                ; a window's place: the frame's call
 resize_slot         dw 0                ; kc_resize's: the segment's slot
 resize_offset       dw 0                ;    its paragraphs from its untyped's start
+resize_untyped      dw 0                ;    its untyped's slot
 resize_space        dw 0                ;    the caller's space, where the walk ends
 resize_paras        dw 0                ;    its new size, in paragraphs
 resize_limit        dw 0                ;    and as a limit
@@ -479,16 +480,41 @@ zero_pieces:
         mov ax, [es:T_ZERO_DONE]
         cmp ax, [es:T_ZERO_PARAS]
         jae .zeroed
-        mov al, [bp + FRAME_AX + 1]     ; the call, for a stretch's place
-        mov ah, VEC_KCALL
-        mov [zero_place], ax
-        KWINDOW [zero_place]
+        call call_place_set
+        KWINDOW [call_place]
         jmp zero_pieces
 .zeroed:
         clc
         ret
 .cancelled:
         stc
+        ret
+
+; ----------------------------------------------------------------------------
+; call_place_set - call_place: the frame's call, as a window's place (the
+; stretches' measure names it)
+;   In:       BP = the frame
+;   Out:      call_place
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+call_place_set:
+        push ax
+        mov al, [bp + FRAME_AX + 1]
+        mov ah, VEC_KCALL
+        mov [call_place], ax
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; call_iwindow - an interrupt window in a walk inside a call, where no
+; thread gives way (IWINDOW), at the frame's call's place
+;   In:       BP = the frame; interrupts off
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+call_iwindow:
+        call call_place_set
+        IWINDOW [call_place]
         ret
 
 ; ----------------------------------------------------------------------------
@@ -1813,12 +1839,11 @@ kc_seal:
         jne kc_done.arg                 ; data of DPL 3, expand-up
         cmp word [es:si + SH_CHILD], 0
         jne kc_done.state               ; a copy of it lives
-        mov bx, [es:si + SH_PARENT]
+        call parent_find                ; BX, AX = its parent
         test bx, bx
         jz kc_done.state
         push es
         push di
-        mov ax, [es:si + SH_PARENT_SLOT]
         call slot_at
         cmp byte [es:si + SH_TYPE], CAP_UNTYPED
         pop di
@@ -1874,7 +1899,7 @@ kc_resize:
         mov bl, [es:si + SH_HIGH]
         add dx, ax
         adc bl, 0                       ; BL:DX = its old end
-        mov ax, [es:si + SH_PARENT_SLOT]
+        mov ax, [resize_untyped]
         mov es, [cur_thread]
         mov [es:T_ZERO_BASE], dx
         mov [es:T_ZERO_HIGH], bl
@@ -1925,7 +1950,8 @@ resize_grow:
 
 ; ----------------------------------------------------------------------------
 ; resize_set - a segment's new size, in it and in each capability derived
-; from it: a walk down SH_CHILD, across SH_NEXT and back up SH_PARENT, with
+; from it: a walk down SH_CHILD, around each ring by SH_NEXT and back up to
+; the parent its first names, with
 ; an interrupt window every CHILDREN_WINDOW, where no thread gives way
 ; (IWINDOW), so that nothing changes the tree meanwhile
 ;   In:       BP = the frame (CX bytes); ES = the caller's space; CX = the
@@ -1957,15 +1983,13 @@ resize_set:
         cmp ax, [resize_slot]
         je kc_done.ok
 .sibling:
-        mov dx, [es:si + SH_NEXT]
-        test dx, dx
-        jz .up
+        mov bx, [es:si + SH_NEXT]
         mov ax, [es:si + SH_NEXT_SLOT]
-        mov bx, dx
-        jmp .visit
-.up:
-        mov ax, [es:si + SH_PARENT_SLOT]
-        mov bx, [es:si + SH_PARENT]
+        call shadow_at                  ; ES:SI = the next's
+        cmp word [es:si + SH_PARENT], 0
+        je .visit                       ; not the first again: a sibling
+        mov bx, [es:si + SH_PARENT]     ; the ring done: up to its parent, which
+        mov ax, [es:si + SH_PARENT_SLOT]    ; the first names
         call shadow_at
         jmp .across
 .visit:
@@ -2008,9 +2032,10 @@ resize_one:
 ; parent an untyped in the caller's own space, which it lies in
 ;   In:       BP = the frame (DX the segment)
 ;   Out:      CF clear: ES = the caller's space, SI = the segment's shadow
-;             entry, BX = its untyped's, resize_slot, resize_offset; CF set:
+;             entry, BX = its untyped's, resize_slot, resize_offset,
+;             resize_untyped; CF set:
 ;             AL = the status
-;   Destroys: AX, DI
+;   Destroys: AX, DX, DI
 ; ----------------------------------------------------------------------------
 resize_find:
         push cx
@@ -2026,12 +2051,12 @@ resize_find:
         cmp al, ACC_PRESENT | ACC_SEGMENT
         jne .refuse                     ; data, expand-up
         mov cl, KE_STATE
-        mov ax, es
-        cmp [es:si + SH_PARENT], ax
+        call parent_find                ; BX, AX = its parent
+        mov dx, es
+        cmp bx, dx
         jne .refuse                     ; its parent in another space, or none
+        mov [resize_untyped], ax
         push si
-        mov bx, ax
-        mov ax, [es:si + SH_PARENT_SLOT]
         call slot_at                    ; ES:SI = its parent's
         mov bx, si
         pop si

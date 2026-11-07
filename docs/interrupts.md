@@ -186,7 +186,7 @@ R0). On MAME's AT, which runs at an AT's speed: 4.5 ms at most in a test
 build, most of it a trace line on the log, written whole; 3.5 ms without
 the log's bytes, which a release build does not have. A kill was the
 longest work, 6.5 ms, while its revocation looked through every slot of
-every space for each child; it follows each capability's list of children
+every space for each child; it follows each capability's ring of children
 now (roadmap os-server.md D9), and stays under 3.6 ms, as does a 64 KB
 retype, zeroed 2 KB at a time, with 40 spaces more (`tests/caps/pools.test`).
 

@@ -4,15 +4,16 @@
 ; go, objects die with the last capability to them, and memory goes back to
 ; its untyped.
 ;
-; Every capability records its parent: the slot it was copied, minted or
-; granted from, or the untyped it was retyped from. Each parent keeps its
-; children in a list (SH_CHILD, then each child's SH_NEXT, and SH_PREV
-; back), so that nothing looks through every slot of every space
-; (os-server.md D9, as seL4 keeps its derivation tree), and a capability
-; leaves its list at once (P15). A delete gives its children to its parent,
-; first in the parent's list, so the tree holds; a move takes its children
-; with it. Both tell each child, with an interrupt window every
-; CHILDREN_WINDOW of them, so that no stretch grows with a list (P15).
+; Every capability has a parent: the slot it was copied, minted or granted
+; from, or the untyped it was retyped from. Each parent keeps its children
+; in a ring, linked both ways (SH_NEXT, SH_PREV), whose first its SH_CHILD
+; names, so that nothing looks through every slot of every space
+; (os-server.md D9, as seL4 keeps its derivation tree). Only the first
+; child names the parent (SH_PARENT); the others hold 0 there, and find it
+; back along the ring (parent_find), so that a delete puts its children in
+; its place in its parent's ring, and a move names its new slot, at once,
+; telling only the first child, however many there are (P15). A capability
+; with no parent is in no ring: its SH_PREV is 0.
 ; KCALL_REVOKE deletes the first child of a capability until it has none,
 ; and an untyped revoked has none of its memory used any more: its
 ; watermark goes back to 0, and the next retype reuses it, zeroed (l4.md
@@ -43,12 +44,15 @@ dead_spaces         times SPACE_MAX dw 0    ; spaces that died, their slots to e
 dead_count          dw 0
 list_bytes          dw 0
 unlink_type         db 0
-adopt_last          dw 0                ; children_adopt's: the last child walked (P15)
-adopt_last_slot     dw 0
                     db 0
 unlink_object       dw 0
-adopt_first         dw 0                ; children_adopt's: the first child
-adopt_first_slot    dw 0
+ring_next           dw 0, 0             ; ring_*'s: a capability's next, previous and
+ring_prev           dw 0, 0             ;    parent (space, slot; the parent 0 unless
+ring_parent         dw 0, 0             ;    it is the first), a ring's first and last,
+ring_first          dw 0, 0             ;    and a move's old slot (P15)
+ring_last           dw 0, 0
+ring_old            dw 0, 0
+ring_child          dw 0, 0             ; child_link's: the new child
 irq_refs            times IRQ_LINES dw 0    ; the capabilities to each interrupt line
 end_kdata
 
@@ -167,129 +171,14 @@ shadow_at:
         ret
 
 ; ----------------------------------------------------------------------------
-; child_link - a new capability made a child of another, first in its list;
-; its own list of children empty
-;   In:       BX, AX = the parent's space and slot (BX 0: it has none); DX,
-;             CX = the child's
+; child_link - a new capability made a child of another, first in its ring
+; of children (os-server.md P15); its own children none
+;   In:       BX, AX = the parent's space and slot (BX 0: it has none, and
+;             it is in no ring); DX, CX = the child's
 ;   Out:      nothing
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 child_link:
-        push si
-        push di
-        push es
-        push ax
-        push bx
-        mov bx, dx
-        mov ax, cx
-        call shadow_at                  ; ES:SI = the child's
-        pop bx
-        pop ax
-        push ax
-        push bx
-        mov [es:si + SH_PARENT], bx
-        mov [es:si + SH_PARENT_SLOT], ax
-        xor di, di
-        mov [es:si + SH_CHILD], di
-        mov [es:si + SH_CHILD_SLOT], di
-        mov [es:si + SH_NEXT], di
-        mov [es:si + SH_NEXT_SLOT], di
-        mov [es:si + SH_PREV], di       ; (first in the list, if in one)
-        mov [es:si + SH_PREV_SLOT], di
-        test bx, bx
-        jz .done
-        call shadow_at                  ; ES:SI = the parent's
-        push word [es:si + SH_CHILD_SLOT]
-        push word [es:si + SH_CHILD]
-        mov [es:si + SH_CHILD], dx
-        mov [es:si + SH_CHILD_SLOT], cx
-        mov bx, dx
-        mov ax, cx
-        call shadow_at                  ; the child's: next, the parent's old first
-        pop word [es:si + SH_NEXT]
-        pop word [es:si + SH_NEXT_SLOT]
-        mov bx, dx                      ; the old first's back link: the child (P15)
-        mov ax, cx
-        call next_back
-.done:
-        pop bx
-        pop ax
-        pop es
-        pop di
-        pop si
-        ret
-
-; ----------------------------------------------------------------------------
-; link_find - the link that names a capability in its parent's list: the
-; parent's SH_CHILD, or its previous sibling's SH_NEXT, by its back link at
-; once (os-server.md P15: no walk of the siblings)
-;   In:       ES:SI = the capability's shadow entry (or a copy of it, a move's)
-;   Out:      ES:DI = the link (the space's word, then the slot's)
-;   Destroys: nothing else
-; ----------------------------------------------------------------------------
-link_find:
-        push ax
-        push bx
-        push si
-        mov bx, [es:si + SH_PREV]
-        test bx, bx
-        jz .first
-        mov ax, [es:si + SH_PREV_SLOT]
-        call shadow_at                  ; ES:SI = the previous sibling's
-        lea di, [si + SH_NEXT]
-        jmp .found
-.first:
-        mov bx, [es:si + SH_PARENT]
-        mov ax, [es:si + SH_PARENT_SLOT]
-        call shadow_at
-        lea di, [si + SH_CHILD]
-.found:
-        pop si
-        pop bx
-        pop ax
-        ret
-
-; ----------------------------------------------------------------------------
-; next_back - a capability's next sibling's back link set (P15)
-;   In:       ES:SI = the capability's shadow entry; BX, AX = what its next's
-;             SH_PREV is to name (0: the next is now the first)
-;   Out:      nothing
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-next_back:
-        push si
-        push es
-        push bx
-        push ax
-        mov bx, [es:si + SH_NEXT]
-        mov ax, [es:si + SH_NEXT_SLOT]
-        test bx, bx
-        jz .none
-        call shadow_at                  ; ES:SI = the next's
-        pop ax
-        pop bx
-        mov [es:si + SH_PREV], bx
-        mov [es:si + SH_PREV_SLOT], ax
-        jmp .done
-.none:
-        pop ax
-        pop bx
-.done:
-        pop es
-        pop si
-        ret
-
-; ----------------------------------------------------------------------------
-; children_adopt - a capability's children given to its parent, first in
-; the parent's list; in no list, if it has no parent. Each child is told its
-; new parent, with an interrupt window every CHILDREN_WINDOW of them; the
-; list itself is spliced in at once (os-server.md P15)
-;   In:       ES:SI = the capability's shadow entry; DS = SEL_KDATA;
-;             interrupts off
-;   Out:      its list of children empty
-;   Destroys: nothing
-; ----------------------------------------------------------------------------
-children_adopt:
         push ax
         push bx
         push cx
@@ -297,70 +186,70 @@ children_adopt:
         push di
         push si
         push es
-        mov bx, [es:si + SH_CHILD]
-        test bx, bx
-        jz .none
-        mov ax, [es:si + SH_CHILD_SLOT]
-        mov [adopt_first], bx
-        mov [adopt_first_slot], ax
-        mov dx, [es:si + SH_PARENT]     ; DX, CX = the new parent
-        mov cx, [es:si + SH_PARENT_SLOT]
-        xor di, di                      ; DI = children walked
-.child:
-        mov [adopt_last], bx            ; (the last one walked)
-        mov [adopt_last_slot], ax
-        call shadow_at                  ; ES:SI = a child's
-        mov [es:si + SH_PARENT], dx
-        mov [es:si + SH_PARENT_SLOT], cx
-        mov bx, [es:si + SH_NEXT]
-        mov ax, [es:si + SH_NEXT_SLOT]
-        test dx, dx
-        jnz .linked
-        mov word [es:si + SH_NEXT], 0   ; no parent: no list
-        mov word [es:si + SH_NEXT_SLOT], 0
-        mov word [es:si + SH_PREV], 0
-        mov word [es:si + SH_PREV_SLOT], 0
-.linked:
-        inc di
-        test di, CHILDREN_WINDOW - 1
-        jnz .walked
-        IWINDOW (VEC_KCALL << 8) | KCALL_DELETE
-.walked:
-        test bx, bx
-        jnz .child
-        test dx, dx                     ; ES:SI = the last child's
-        jz .emptied
-        mov di, si
-        push es
+        mov [ring_parent], bx
+        mov [ring_parent + 2], ax
+        mov [ring_child], dx
+        mov [ring_child + 2], cx
         mov bx, dx
         mov ax, cx
-        call shadow_at                  ; ES:SI = the new parent's
-        mov bx, [es:si + SH_CHILD]      ; its old first: after the last
-        mov ax, [es:si + SH_CHILD_SLOT]
-        mov cx, [adopt_first]
-        mov [es:si + SH_CHILD], cx
-        mov cx, [adopt_first_slot]
-        mov [es:si + SH_CHILD_SLOT], cx
-        pop es
-        mov [es:di + SH_NEXT], bx
-        mov [es:di + SH_NEXT_SLOT], ax
-        test bx, bx
-        jz .emptied
-        call shadow_at                  ; ES:SI = the old first's: after the last
-        mov ax, [adopt_last]
-        mov [es:si + SH_PREV], ax
-        mov ax, [adopt_last_slot]
-        mov [es:si + SH_PREV_SLOT], ax
-.emptied:
+        call shadow_at                  ; ES:SI = the child's
+        call ring_out
+        xor ax, ax
+        mov [es:si + SH_CHILD], ax
+        mov [es:si + SH_CHILD_SLOT], ax
+        cmp word [ring_parent], 0
+        je .done                        ; no parent: in no ring
+        mov ax, [ring_parent]           ; it names the parent, alone in its ring
+        mov [es:si + SH_PARENT], ax     ;    so far
+        mov ax, [ring_parent + 2]
+        mov [es:si + SH_PARENT_SLOT], ax
+        mov [es:si + SH_NEXT], dx
+        mov [es:si + SH_NEXT_SLOT], cx
+        mov [es:si + SH_PREV], dx
+        mov [es:si + SH_PREV_SLOT], cx
+        mov bx, [ring_parent]
+        mov ax, [ring_parent + 2]
+        mov di, SH_CHILD
+        call link_get                   ; DX, CX = the parent's old first
+        mov [ring_first], dx
+        mov [ring_first + 2], cx
+        mov dx, [ring_child]
+        mov cx, [ring_child + 2]
+        call link_set                   ; the child its first
+        cmp word [ring_first], 0
+        je .done                        ; its only one
+        mov bx, [ring_first]
+        mov ax, [ring_first + 2]
+        mov di, SH_PREV
+        call link_get                   ; DX, CX = the last
+        mov [ring_last], dx
+        mov [ring_last + 2], cx
+        mov dx, [ring_child]            ; the old first: after the child, and
+        mov cx, [ring_child + 2]        ;    first no longer
+        call link_set
+        xor dx, dx
+        xor cx, cx
+        mov di, SH_PARENT
+        call link_set
+        mov bx, [ring_last]             ; the last: before the child
+        mov ax, [ring_last + 2]
+        mov dx, [ring_child]
+        mov cx, [ring_child + 2]
+        mov di, SH_NEXT
+        call link_set
+        mov bx, dx
+        mov ax, cx
+        mov dx, [ring_last]
+        mov cx, [ring_last + 2]
+        mov di, SH_PREV
+        call link_set
+        mov dx, [ring_first]
+        mov cx, [ring_first + 2]
+        mov di, SH_NEXT
+        call link_set
+.done:
         pop es
         pop si
-        mov word [es:si + SH_CHILD], 0
-        mov word [es:si + SH_CHILD_SLOT], 0
-        jmp .out
-.none:
-        pop es
-        pop si
-.out:
         pop di
         pop dx
         pop cx
@@ -369,9 +258,322 @@ children_adopt:
         ret
 
 ; ----------------------------------------------------------------------------
+; link_get - one of a capability's links, a space and a slot
+;   In:       BX, AX = the capability; DI = the link's offset in its shadow
+;             entry (SH_PARENT, SH_PREV, SH_NEXT, SH_CHILD)
+;   Out:      DX, CX = what it names (0: nothing)
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+link_get:
+        push si
+        push es
+        call shadow_at
+        add si, di
+        mov dx, [es:si]
+        mov cx, [es:si + 2]
+        pop es
+        pop si
+        ret
+
+; ----------------------------------------------------------------------------
+; link_set - one of a capability's links set
+;   In:       BX, AX = the capability; DI = the link's offset in its shadow
+;             entry; DX, CX = what it is to name (0: nothing)
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+link_set:
+        push si
+        push es
+        call shadow_at
+        add si, di
+        mov [es:si], dx
+        mov [es:si + 2], cx
+        pop es
+        pop si
+        ret
+
+; ----------------------------------------------------------------------------
+; ring_out - a capability's links to its parent and its siblings cleared:
+; in no ring
+;   In:       ES:SI = its shadow entry
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ring_out:
+        push ax
+        xor ax, ax
+        mov [es:si + SH_PARENT], ax
+        mov [es:si + SH_PARENT_SLOT], ax
+        mov [es:si + SH_PREV], ax
+        mov [es:si + SH_PREV_SLOT], ax
+        mov [es:si + SH_NEXT], ax
+        mov [es:si + SH_NEXT_SLOT], ax
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; ring_read - a capability's next, previous and parent into ring_next,
+; ring_prev and ring_parent (the parent 0 unless it is the first)
+;   In:       ES:SI = its shadow entry
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ring_read:
+        push ax
+        mov ax, [es:si + SH_NEXT]
+        mov [ring_next], ax
+        mov ax, [es:si + SH_NEXT_SLOT]
+        mov [ring_next + 2], ax
+        mov ax, [es:si + SH_PREV]
+        mov [ring_prev], ax
+        mov ax, [es:si + SH_PREV_SLOT]
+        mov [ring_prev + 2], ax
+        mov ax, [es:si + SH_PARENT]
+        mov [ring_parent], ax
+        mov ax, [es:si + SH_PARENT_SLOT]
+        mov [ring_parent + 2], ax
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; ring_leave - a capability out of its parent's ring: its previous and its
+; next each other's; if it was the first, its next is, naming the parent
+;   In:       BX, AX = the capability, in a ring
+;   Out:      it in no ring
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ring_leave:
+        push ax
+        push bx
+        push cx
+        push dx
+        push di
+        push si
+        push es
+        call shadow_at
+        call ring_read
+        call ring_out
+        cmp [ring_next], bx
+        jne .others
+        cmp [ring_next + 2], ax
+        jne .others
+        mov bx, [ring_parent]           ; alone: the first, its parent's only child
+        mov ax, [ring_parent + 2]
+        xor dx, dx
+        xor cx, cx
+        mov di, SH_CHILD
+        call link_set
+        jmp .done
+.others:
+        mov bx, [ring_prev]             ; its previous and its next: each other's
+        mov ax, [ring_prev + 2]
+        mov dx, [ring_next]
+        mov cx, [ring_next + 2]
+        mov di, SH_NEXT
+        call link_set
+        mov dx, bx
+        mov cx, ax
+        mov bx, [ring_next]
+        mov ax, [ring_next + 2]
+        mov di, SH_PREV
+        call link_set
+        cmp word [ring_parent], 0
+        je .done
+        mov dx, [ring_parent]           ; it was the first: the next is
+        mov cx, [ring_parent + 2]
+        mov di, SH_PARENT
+        call link_set
+        mov dx, bx
+        mov cx, ax
+        mov bx, [ring_parent]
+        mov ax, [ring_parent + 2]
+        mov di, SH_CHILD
+        call link_set
+.done:
+        pop es
+        pop si
+        pop di
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; ring_replace - a capability's ring of children in its place in its
+; parent's ring, at once, however many they are (os-server.md P15): only
+; its first child is told, which names the parent if the capability was the
+; first, else nothing; the capability in no ring, with no children
+;   In:       BX, AX = the capability, in a ring, with children
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+ring_replace:
+        push ax
+        push bx
+        push cx
+        push dx
+        push di
+        push si
+        push es
+        push bx
+        push ax
+        call shadow_at
+        call ring_read
+        call ring_out
+        mov dx, [es:si + SH_CHILD]      ; its first child, and its last
+        mov cx, [es:si + SH_CHILD_SLOT]
+        mov word [es:si + SH_CHILD], 0
+        mov word [es:si + SH_CHILD_SLOT], 0
+        mov [ring_first], dx
+        mov [ring_first + 2], cx
+        mov bx, dx
+        mov ax, cx
+        mov di, SH_PREV
+        call link_get
+        mov [ring_last], dx
+        mov [ring_last + 2], cx
+        pop ax
+        pop bx
+        cmp [ring_next], bx
+        jne .others
+        cmp [ring_next + 2], ax
+        je .parent                      ; alone: the children are the whole ring
+.others:
+        mov bx, [ring_prev]             ; previous, first ... last, next
+        mov ax, [ring_prev + 2]
+        mov dx, [ring_first]
+        mov cx, [ring_first + 2]
+        mov di, SH_NEXT
+        call link_set
+        mov bx, dx
+        mov ax, cx
+        mov dx, [ring_prev]
+        mov cx, [ring_prev + 2]
+        mov di, SH_PREV
+        call link_set
+        mov bx, [ring_last]
+        mov ax, [ring_last + 2]
+        mov dx, [ring_next]
+        mov cx, [ring_next + 2]
+        mov di, SH_NEXT
+        call link_set
+        mov bx, dx
+        mov ax, cx
+        mov dx, [ring_last]
+        mov cx, [ring_last + 2]
+        mov di, SH_PREV
+        call link_set
+.parent:
+        mov bx, [ring_first]            ; the first child: names the parent if
+        mov ax, [ring_first + 2]        ;    it is the first now, else nothing
+        mov dx, [ring_parent]
+        mov cx, [ring_parent + 2]
+        mov di, SH_PARENT
+        call link_set
+        test dx, dx
+        jz .done
+        mov dx, bx                      ; the parent's first: it
+        mov cx, ax
+        mov bx, [ring_parent]
+        mov ax, [ring_parent + 2]
+        mov di, SH_CHILD
+        call link_set
+.done:
+        pop es
+        pop si
+        pop di
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; children_free - the children of a capability in no ring (one with no
+; parent) each in no ring, with no parent, as it is: a walk of them, with an
+; interrupt window every CHILDREN_WINDOW, where no thread gives way (P15)
+;   In:       ES:SI = the capability's shadow entry (with children); DS =
+;             SEL_KDATA; interrupts off
+;   Out:      its children none
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+children_free:
+        push ax
+        push bx
+        push di
+        push si
+        push es
+        mov bx, [es:si + SH_CHILD]
+        mov ax, [es:si + SH_CHILD_SLOT]
+        mov word [es:si + SH_CHILD], 0
+        mov word [es:si + SH_CHILD_SLOT], 0
+        mov [ring_first], bx
+        mov [ring_first + 2], ax
+        xor di, di                      ; DI = children walked
+.child:
+        call shadow_at                  ; ES:SI = a child's
+        mov bx, [es:si + SH_NEXT]
+        mov ax, [es:si + SH_NEXT_SLOT]
+        call ring_out
+        inc di
+        test di, CHILDREN_WINDOW - 1
+        jnz .walked
+        IWINDOW (VEC_KCALL << 8) | KCALL_DELETE
+.walked:
+        cmp bx, [ring_first]
+        jne .child
+        cmp ax, [ring_first + 2]
+        jne .child
+        pop es
+        pop si
+        pop di
+        pop bx
+        pop ax
+        ret
+
+; ----------------------------------------------------------------------------
+; parent_find - a capability's parent: the first of its ring names it, the
+; others nothing (a delete or a move tells the first alone, P15), so it is
+; found back along SH_PREV, with an interrupt window every CHILDREN_WINDOW,
+; where no thread gives way
+;   In:       ES:SI = its shadow entry; BP = the frame (its AH the call)
+;   Out:      BX, AX = the parent's space and slot (BX 0: it has none)
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+parent_find:
+        push cx
+        push si
+        push es
+        xor cx, cx
+.look:
+        mov bx, [es:si + SH_PARENT]
+        test bx, bx
+        jnz .found
+        mov bx, [es:si + SH_PREV]
+        test bx, bx
+        jz .done                        ; in no ring: none
+        mov ax, [es:si + SH_PREV_SLOT]
+        call shadow_at
+        inc cx
+        test cx, CHILDREN_WINDOW - 1
+        jnz .look
+        call call_iwindow
+        jmp .look
+.found:
+        mov ax, [es:si + SH_PARENT_SLOT]
+.done:
+        pop es
+        pop si
+        pop cx
+        ret
+
+; ----------------------------------------------------------------------------
 ; cap_moved - a capability moved to another slot (KCALL_COPY's move): its
-; parent's link and its children's parent name the new slot, and so does
-; the back link of a saved reply's caller
+; previous and next in its ring, its parent if it is the first, its first
+; child, and the back link of a saved reply's caller name the new slot; at
+; once, however many children it has (P15)
 ;   In:       BX, AX = the old space and slot; DX, CX = the new
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -379,38 +581,49 @@ children_adopt:
 cap_moved:
         push ax
         push bx
+        push cx
+        push dx
         push si
         push di
         push es
-        push bx
-        push ax
+        mov [ring_old], bx
+        mov [ring_old + 2], ax
         mov bx, dx
         mov ax, cx
         call shadow_at                  ; ES:SI = the new one's
-        pop ax
-        pop bx
-        cmp word [es:si + SH_PARENT], 0
+        cmp word [es:si + SH_PREV], 0
+        je .reply                       ; in no ring
+        call ring_read
+        mov ax, [ring_old]
+        cmp [ring_next], ax
+        jne .others
+        mov ax, [ring_old + 2]
+        cmp [ring_next + 2], ax
+        jne .others
+        mov [es:si + SH_NEXT], dx       ; alone: itself, in the new slot
+        mov [es:si + SH_NEXT_SLOT], cx
+        mov [es:si + SH_PREV], dx
+        mov [es:si + SH_PREV_SLOT], cx
+        jmp .first
+.others:
+        mov bx, [ring_prev]
+        mov ax, [ring_prev + 2]
+        mov di, SH_NEXT
+        call link_set
+        mov bx, [ring_next]
+        mov ax, [ring_next + 2]
+        mov di, SH_PREV
+        call link_set
+.first:
+        cmp word [ring_parent], 0
         je .reply
-        push dx
-        push cx
-        push es
-        push si
-        call link_find                  ; ES:DI = the link that named the old
-        pop si
-        pop cx                          ; (the new one's space)
-        pop cx
-        pop dx
-        mov [es:di], dx
-        mov [es:di + 2], cx
-        push bx
-        push ax
-        mov bx, dx
-        mov ax, cx
-        call shadow_at                  ; ES:SI = the new one's again
-        call next_back                  ; its next's back link: the new slot (P15)
-        pop ax
-        pop bx
+        mov bx, [ring_parent]           ; the first: its parent's first
+        mov ax, [ring_parent + 2]
+        mov di, SH_CHILD
+        call link_set
 .reply:
+        mov bx, [ring_old]
+        mov ax, [ring_old + 2]
         cmp byte [es:si + SH_TYPE], CAP_REPLY
         jne .children
         mov di, [es:si + SH_OBJECT]     ; the caller it is owed to
@@ -427,35 +640,28 @@ cap_moved:
 .not_saved:
         pop es
 .children:
-        mov bx, [es:si + SH_CHILD]
+        mov bx, [es:si + SH_CHILD]      ; its first child names it
         mov ax, [es:si + SH_CHILD_SLOT]
-        xor di, di                      ; DI = children walked
-.child:
         test bx, bx
         jz .done
-        call shadow_at
-        mov [es:si + SH_PARENT], dx
-        mov [es:si + SH_PARENT_SLOT], cx
-        mov bx, [es:si + SH_NEXT]
-        mov ax, [es:si + SH_NEXT_SLOT]
-        inc di
-        test di, CHILDREN_WINDOW - 1
-        jnz .child
-        IWINDOW (VEC_KCALL << 8) | KCALL_COPY   ; (a long list: no long stretch, P15)
-        jmp .child
+        mov di, SH_PARENT
+        call link_set
 .done:
         pop es
         pop di
         pop si
+        pop dx
+        pop cx
         pop bx
         pop ax
         ret
 
 ; ----------------------------------------------------------------------------
-; cap_delete_at - a capability deleted: out of its parent's list, its
-; children given to its parent, its slot emptied, and its object dead if it
-; was the last capability to it. Nothing looks through the slots: a delete's
-; time does not grow with the number of spaces (os-server.md D9)
+; cap_delete_at - a capability deleted: its children in its place in its
+; parent's ring (in no ring, if it has none), its slot emptied, and its
+; object dead if it was the last capability to it. Nothing looks through
+; the slots, nor through its children: a delete's time grows with neither
+; (os-server.md D9, P15)
 ;   In:       BX = the space; AX = the slot (not empty); DS = SEL_KDATA;
 ;             interrupts off
 ;   Out:      nothing (dead spaces wait in dead_spaces: dead_flush)
@@ -472,22 +678,20 @@ cap_delete_at:
         mov dx, bx
         mov cx, ax
         call shadow_at                  ; ES:SI = its shadow entry
-        cmp word [es:si + SH_PARENT], 0
-        je .adopt
-        mov ax, [es:si + SH_NEXT]
-        mov bx, [es:si + SH_NEXT_SLOT]
-        push es
-        push si
-        call link_find                  ; ES:DI = the link that names it
-        mov [es:di], ax                 ; out of its parent's list
-        mov [es:di + 2], bx
-        pop si
-        pop es
-        mov bx, [es:si + SH_PREV]       ; its next's back link: its own (P15)
-        mov ax, [es:si + SH_PREV_SLOT]
-        call next_back
-.adopt:
-        call children_adopt
+        cmp word [es:si + SH_CHILD], 0
+        je .childless
+        cmp word [es:si + SH_PREV], 0
+        je .free
+        call ring_replace               ; its children in its place
+        jmp .unlinked
+.free:
+        call children_free              ; no parent: theirs none either
+        jmp .unlinked
+.childless:
+        cmp word [es:si + SH_PREV], 0
+        je .unlinked
+        call ring_leave
+.unlinked:
         mov al, [es:si + SH_TYPE]
         mov [unlink_type], al
         mov ax, [es:si + SH_OBJECT]
