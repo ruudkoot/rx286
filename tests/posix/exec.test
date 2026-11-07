@@ -32,4 +32,8 @@ exec: data past a segment (-1, ENOEXEC 8): -1, 8
 exec: a most below its data (-1, ENOEXEC 8): -1, 8
 exec: a directory (-1, EACCES 13): -1, 13
 exec: five from C, each within a second: yes
+exec: a file's name and a slash (-1, ENOTDIR 20): -1, 20
+exec: an empty name along PATH (-1, ENOENT 2): -1, 2
+exec: a file open for writing (-1, ETXTBSY 26): -1, 26
+exec: a PATH directory too long, never its tail (-1, ENOENT 2): -1, 2
 exec: done

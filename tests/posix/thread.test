@@ -26,4 +26,5 @@ thread: the most beside the main one (7): 7, then EAGAIN
 thread: a fork from a thread, its child's status (5): 5
 rx286: thread[
 thread: a thread's fault ends its process (SIGILL 4): 4
+thread: a read into the heap a lower break left (100): 100
 thread: done

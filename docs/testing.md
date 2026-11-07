@@ -69,8 +69,9 @@ whose table places a module outside it, a disk without a loader),
 `timeout`, `match` (full, prefix, contains), `break` and `debugger` (a
 debugger session at a kernel symbol), `media` (B without a diskette or
 write-protected, no fixed disk D, which the emulator is told; B's FAT
-damaged, D without a partition, B with paths of 64 characters, which the
-runner makes in the run's copy), `modem` (a Hayes-like peer at the far end
+damaged, a directory's chain that loops, a directory's entry with cluster
+0, two files with long names, D without a partition, B with paths of 64
+characters, which the runner makes in the run's copy), `modem` (a Hayes-like peer at the far end
 of COM2, in an image built with COM2 the modem and the log on COM3: it
 echoes, and answers `AT` and `ATI`; Bochs then runs on real time, so its
 answers come in the ticks they would),
@@ -160,6 +161,11 @@ real bug that Bochs cannot show (a single-step trap carried into the kernel).
 
 ## What `make check` costs
 
-About a minute and a quarter on this machine, most of it MAME's IBM BIOS
-running its power-on test once per test: Bochs' suites take about 10 s, the
-host tests 3 s, DOSBox-X's 15 s, MAME's 45 s (the tests run in parallel).
+About thirteen minutes on this machine, 16 threads (790 s from a fresh
+clone at os-server.md P15), most of it MAME's: its 90 tests take nine or
+ten minutes, each running the IBM BIOS's power-on test and waiting for an
+AT's diskette in an AT's time. Bochs' 101 take about a minute and a half,
+DOSBox-X's 37 under a minute, the host tests 10 s, and the static checks
+(`check-286`, `check-image`, `check-repro`, `lint`, `check-docs`) the
+rest. Each emulator's tests run in parallel. `make check-ia16` takes a
+minute and a half more.

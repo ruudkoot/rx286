@@ -14,7 +14,8 @@
  * its entry's place, first cluster and size, which its close or fsync
  * writes back with the data. Descriptors 0 to 2 of init are /dev/tty, the
  * console, as every process's are after it. A file's data is the cache's
- * until then (cache.c); FAT and directory sectors are written at once.
+ * until then (cache.c); FAT and directory sectors are written at the end
+ * of the call that changed them (vfs_call; P15).
  * What FAT12 cannot say (W2): an inode is the entry's place, links are 1,
  * the modes come from the attributes, times are DOS's.
  *
@@ -54,9 +55,14 @@ enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_
  * to read or write (-1: none) */
 struct pipe {
     rx_u8 used, readers, writers;
-    signed char reader, writer;
+    rx_u16 reading, writing;            /* the entries waiting at each end, a bit each:
+                                           all woken (P15) */
     rx_u16 head, count;
 };
+
+#if PROCS > 16
+#error "a pipe's waiters are bits of a word"
+#endif
 
 /* An open file description */
 struct ofd {
@@ -136,7 +142,8 @@ int in_segment(rx_u16 data, rx_u16 at, rx_u16 n)
     r.ax = KCALL_SEGMENT << 8;
     r.dx = data;
     r.bp = 0;
-    rx_kcall(&r);
+    if (rx_kcall(&r) != 0)
+        return 0;                       /* no segment there (P15) */
     return (rx_u32)at + n - 1 <= r.cx;
 }
 
@@ -194,6 +201,7 @@ static int path_make(const char *cwd, const char *in, struct path *p)
     char *s, *e;
     unsigned n, over = 0;               /* names past PARTS, for a ".." to take (P15) */
 
+    p->parts = 0;
     if (in[0] == 0)
         return ENOENT;
     if (lower(in[0]) >= 'a' && lower(in[0]) < 'a' + DRIVES && in[1] == ':') {
@@ -432,9 +440,10 @@ static int lookup(struct path *p, struct node *n)
         name_text(n->entry, p->part[k]);        /* as FAT keeps it: never longer */
         n->kind = n->entry[DIR_ATTRIBUTES] & DIR_ATTR_DIRECTORY ? K_DIR : K_FILE;
         n->first = w16(n->entry + DIR_FIRST_CLUSTER);
-        if (n->first != 0 && (n->first < FAT12_FIRST_CLUSTER       /* a damaged entry's: */
-                || n->first >= vols[n->drive].clusters + FAT12_FIRST_CLUSTER))
-            return EIO;                 /*    never followed (P15) */
+        if ((n->first == 0 && n->kind == K_DIR)                    /* a damaged entry's: */
+                || (n->first != 0 && (n->first < FAT12_FIRST_CLUSTER       /*   never */
+                    || n->first >= vols[n->drive].clusters + FAT12_FIRST_CLUSTER)))
+            return EIO;                 /*    followed (P15; a directory's 0 the root's) */
     }
     return 0;
 }
@@ -454,6 +463,14 @@ static int resolve(int i, rx_u16 data, rx_u16 at, struct path *p, struct node *n
                                              || n->kind == K_ZDIR || n->kind == K_DIR))
         error = ENOTDIR;                /* "name/" names a directory or nothing (XBD 4.13) */
     return error;
+}
+
+/* in_server - does a path name a name in the server's own directories, /,
+ * /dev or /z, where nothing can be made (EROFS)? (P15) */
+static int in_server(const struct path *p)
+{
+    return p->parts == 1 || (p->parts == 2 && (same(p->part[0], "z")
+                                               || same(p->part[0], "dev")));
 }
 
 /* cwd_of - a live process's current directory that is a directory of this
@@ -515,9 +532,13 @@ static rx_u16 entry_back(struct ofd *o)
     rx_u16 error, date, time;
     int end;
 
-    if (o->kind == K_FILE && o->changed) {
+    if (o->kind != K_FILE)
+        return 0;
+    if (o->changed) {
         if ((error = vol_dir_entry(v, o->parent, o->index, &o->where, entry, &end)) != 0)
             return error;
+        if (end)
+            return E_BROKEN;            /* (past its directory: P15) */
         put16(entry + DIR_FIRST_CLUSTER, o->first);
         put16(entry + DIR_FILE_SIZE, (rx_u16)o->size);
         put16(entry + DIR_FILE_SIZE + 2, (rx_u16)(o->size >> 16));
@@ -526,9 +547,11 @@ static rx_u16 entry_back(struct ofd *o)
         put16(entry + DIR_TIME, time);
         if ((error = vol_entry_put(v, &o->where, entry)) != 0)
             return error;
-        o->changed = 0;
     }
-    return o->kind == K_FILE ? cache_flush(o->drive) : 0;
+    if ((error = cache_flush(o->drive)) != 0)
+        return error;                   /* (changed still: written again next time) */
+    o->changed = 0;
+    return 0;
 }
 
 static int fd_new(int i, int k, int from);
@@ -546,17 +569,26 @@ static void wake(int i)
     rx_kcall(&r);
 }
 
+/* wake_all - the server threads of the entries waiting at a pipe's end */
+static void wake_all(rx_u16 who)
+{
+    int i;
+
+    for (i = 0; who; i++, who >>= 1)
+        if (who & 1)
+            wake(i);
+}
+
 /* pipe_wait - process i's thread waits, the lock given up, until another
  * signals it: 1; 0 if the process ended meanwhile; -1 if a signal is ready
  * for it (P10) */
-static int pipe_wait(int i, signed char *who)
+static int pipe_wait(int i, rx_u16 *who)
 {
-    *who = (signed char)i;
+    *who |= (rx_u16)(1u << i);
     lock_give();
     proc_sleep(i);
     lock_take(PROC_NOTIFY(i));
-    if (*who == i)
-        *who = -1;
+    *who &= (rx_u16)~(1u << i);
     if (!proc_still(i))
         return 0;
     return sig_ready(i) ? -1 : 1;
@@ -573,10 +605,10 @@ static rx_u16 ofd_drop(int k)
         error = entry_back(&ofds[k]);
         if (ofds[k].kind == K_PIPE_R) {
             p->readers--;
-            wake(p->writer);
+            wake_all(p->writing);
         } else if (ofds[k].kind == K_PIPE_W) {
             p->writers--;
-            wake(p->reader);
+            wake_all(p->reading);
         }
         if ((ofds[k].kind == K_PIPE_R || ofds[k].kind == K_PIPE_W) && !p->readers
                 && !p->writers)
@@ -634,7 +666,7 @@ static int px_pipe(int i, int *error, rx_u16 *write_fd)
     memset(&pipes[p], 0, sizeof pipes[p]);
     pipes[p].used = 1;
     pipes[p].readers = pipes[p].writers = 1;
-    pipes[p].reader = pipes[p].writer = -1;
+    pipes[p].reading = pipes[p].writing = 0;
     ofds[r].unit = ofds[w].unit = (rx_u16)p;
     ofds[r].flags = O_RDONLY;
     ofds[w].flags = O_WRONLY;
@@ -655,7 +687,7 @@ static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
     while (p->count == 0) {
         if (p->writers == 0)
             return 0;
-        if ((w = pipe_wait(i, &p->reader)) == 0)
+        if ((w = pipe_wait(i, &p->reading)) == 0)
             return VFS_GONE;
         if (w < 0 && p->count == 0)
             return VFS_INTR;
@@ -666,7 +698,7 @@ static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
         to[k] = buf[(p->head + k) % PIPE_SIZE];
     p->head = (rx_u16)((p->head + n) % PIPE_SIZE);
     p->count = (rx_u16)(p->count - n);
-    wake(p->writer);
+    wake_all(p->writing);
     return n;
 }
 
@@ -685,8 +717,8 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
             return done ? (int)done : VFS_SIGPIPE;
         room = (rx_u16)(PIPE_SIZE - p->count);
         if (room < (n <= PIPE_BUF && done == 0 ? n : 1)) {
-            wake(p->reader);
-            if ((w = pipe_wait(i, &p->writer)) == 0)
+            wake_all(p->reading);
+            if ((w = pipe_wait(i, &p->writing)) == 0)
                 return VFS_GONE;
             if (w < 0)
                 return done ? (int)done : VFS_INTR;
@@ -697,7 +729,7 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
             buf[(p->head + p->count + k) % PIPE_SIZE] = from[done + k];
         p->count = (rx_u16)(p->count + take);
         done = (rx_u16)(done + take);
-        wake(p->reader);
+        wake_all(p->reading);
     }
     return done;
 }
@@ -948,7 +980,7 @@ static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, i
 {
     struct vol *v = &vols[o->drive];
     rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, done = 0, hole, start, size;
-    rx_u16 e = 0;
+    rx_u16 e = 0, f;
 
     if (!write) {
         e = file_move(o, data, at, n, IO_READ, &done);
@@ -969,16 +1001,16 @@ static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, i
         }
         if (e == 0)
             e = file_move(o, data, at, n, IO_WRITE, &done);
-        if (e == 0 && (e = cache_flush_meta()) != 0)
-            done = 0;                   /* its clusters not on the disk: not written */
+        if ((f = cache_flush_meta()) != 0) {
+            e = f;                      /* its clusters not on the disk, even part way: */
+            done = 0;                   /*    not written (P15) */
+        }
         if (e && done == 0) {           /* nothing written: as it was */
             o->size = size;
             o->offset = start;
-            if (size == 0)
-                o->first = 0;
         }
         if (e)
-            file_trim(o);
+            file_trim(o);               /* past the size given back; at 0 all, `first` 0 */
         file_share(o);                  /* (its first cluster, its size) */
     }
     if (e && done == 0) {
@@ -1066,11 +1098,11 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
         *error = EFAULT;
         return -1;
     }
-    switch (o->kind) {
+    switch (o->kind) {                  /* (none asked: none, no wait; XSH read, P15) */
     case K_TTY:
-        return tty_read(i, o->unit, data, at, n);
+        return n ? tty_read(i, o->unit, data, at, n) : 0;
     case K_PIPE_R:
-        return pipe_read(i, o, data, at, n);
+        return n ? pipe_read(i, o, data, at, n) : 0;
     case K_NULL:
         return 0;
     case K_FILE:
@@ -1117,8 +1149,15 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     rx_u32 size;
     int k, j, fd, access = flags & O_ACCMODE, dir;
 
-    if ((*error = resolve(i, data, at, &p, &n)) != 0)
+    if (access == O_ACCMODE) {
+        *error = EINVAL;                /* (XSH open: one of the three; P15) */
         return -1;
+    }
+    if ((*error = resolve(i, data, at, &p, &n)) != 0) {
+        if (*error == ENOENT && (flags & O_CREAT) && in_server(&p))
+            *error = EROFS;             /* (P15) */
+        return -1;
+    }
     dir = n.kind == K_TOP || n.kind == K_DEVDIR || n.kind == K_ZDIR || n.kind == K_DIR;
     if (!n.exists) {
         if (!(flags & O_CREAT) || p.slash) {
@@ -1272,7 +1311,7 @@ static rx_u32 ino_of(int kind, const struct place *where, rx_u16 unit)
 static rx_u16 dev_of(int kind, rx_u16 drive)
 {
 #if ST_DEV_SERVER < DRIVES
-#error the server's device is a drive's
+#error "the server's device is a drive's"
 #endif
     return kind == K_FILE || kind == K_DIR ? drive : ST_DEV_SERVER;
 }
@@ -1325,6 +1364,7 @@ static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error
     struct place where;
     struct ofd *o;
     rx_u32 size = 0;
+    rx_u16 e;
     int k, end;
 
     if (!in_segment(data, r->di, ST_BYTES)) {
@@ -1337,8 +1377,12 @@ static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error
             return -1;
         }
         end = 1;                        /* a file's entry: its time, its read-only bit */
-        if (o->kind == K_FILE)
-            vol_dir_entry(&vols[o->drive], o->parent, o->index, &where, entry, &end);
+        if (o->kind == K_FILE
+                && (e = vol_dir_entry(&vols[o->drive], o->parent, o->index, &where, entry,
+                                      &end)) != 0) {
+            *error = errno_of(e);       /* (not a guess at them: P15) */
+            return -1;
+        }
         stat_put(data, r->di, o->kind, end ? 0 : entry, ino_of(o->kind, &o->where, o->unit),
                  o->kind == K_ZFILE ? zfile_size(o->unit) : o->size, dev_of(o->kind, o->drive));
         return 0;
@@ -1364,15 +1408,45 @@ static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error
     return 0;
 }
 
-/* entry_gone - a volume's entry deleted, and its clusters freed */
+static rx_u16 lfn_gone(struct vol *v, rx_u16 dir, rx_u16 index, const rx_u8 *entry);
+
+/* entry_gone - a volume's entry deleted, its long name's with it, and its
+ * clusters freed */
 static rx_u16 entry_gone(struct node *n, int free_chain)
 {
     rx_u16 error = 0;
 
     if (free_chain)
         error = vol_free_chain(&vols[n->drive], n->first);
+    if (!error)
+        error = lfn_gone(&vols[n->drive], n->parent, n->index, n->entry);
     n->entry[DIR_NAME] = DIR_DELETED;
     return error ? error : vol_entry_put(&vols[n->drive], &n->where, n->entry);
+}
+
+/* lfn_gone - a long name's entries just before an entry, whose checksum is
+ * its 8.3 name's, deleted with it, as DOS's tools do: a disk written
+ * elsewhere (P15) */
+static rx_u16 lfn_gone(struct vol *v, rx_u16 dir, rx_u16 index, const rx_u8 *entry)
+{
+    rx_u8 e[DIR_ENTRY_SIZE], sum = 0;
+    struct place where;
+    rx_u16 error;
+    int k, end;
+
+    for (k = 0; k < DIR_NAME_LENGTH; k++)
+        sum = (rx_u8)(((sum & 1) << 7) + (sum >> 1) + entry[k]);
+    while (index-- > 0) {
+        if ((error = vol_dir_entry(v, dir, index, &where, e, &end)) != 0)
+            return error;
+        if (end || e[DIR_ATTRIBUTES] != DIR_ATTR_LONG_NAME || e[DIR_NAME] == DIR_DELETED
+                || e[LFN_CHECKSUM] != sum)
+            return 0;
+        e[DIR_NAME] = DIR_DELETED;
+        if ((error = vol_entry_put(v, &where, e)) != 0)
+            return error;
+    }
+    return 0;
 }
 
 /* px_remove - PX_UNLINK (a file) or PX_RMDIR (an empty directory) */
@@ -1438,8 +1512,11 @@ static int px_mkdir(int i, rx_u16 data, rx_u16 at, int *error)
     rx_u16 e, cluster, date, time;
     int k;
 
-    if ((*error = resolve(i, data, at, &p, &n)) != 0)
+    if ((*error = resolve(i, data, at, &p, &n)) != 0) {
+        if (*error == ENOENT && in_server(&p))
+            *error = EROFS;             /* (P15) */
         return -1;
+    }
     if (n.exists) {
         *error = EEXIST;
         return -1;
@@ -1485,13 +1562,34 @@ static void cwds_moved(const char *old, struct path *q, struct node *b)
 
     name_text(b->entry, q->part[q->parts - 1]);     /* (never longer) */
     path_text(q);
-    while ((j = cwd_of(old, 1)) >= 0) {
-        if (strlen(q->text) + strlen(files_of[j].cwd + n) >= PX_PATH_MAX)
-            return;
-        strcpy(moved, q->text);
-        strcat(moved, files_of[j].cwd + n);
-        strcpy(files_of[j].cwd, moved);
-    }
+    for (j = 0; j < PROCS; j++)         /* (each fits: cwds_fit) */
+        if (proc_alive(j) && proc_leader(j) == j && strncmp(files_of[j].cwd, old, n) == 0
+                && (files_of[j].cwd[n] == 0 || files_of[j].cwd[n] == '/')) {
+            strcpy(moved, q->text);
+            strcat(moved, files_of[j].cwd + n);
+            strcpy(files_of[j].cwd, moved);
+        }
+}
+
+/* cwds_fit - would every current directory in a directory renamed from
+ * `old` to q fit the limits of a path, its bytes and its names? 0, or
+ * ENAMETOOLONG, before anything is done (P15) */
+static int cwds_fit(const char *old, const struct path *q)
+{
+    size_t n = strlen(old), m = strlen(q->text);
+    const char *c;
+    unsigned names;
+    int j;
+
+    for (j = 0; j < PROCS; j++)
+        if (proc_alive(j) && proc_leader(j) == j && strncmp(files_of[j].cwd, old, n) == 0
+                && (files_of[j].cwd[n] == 0 || files_of[j].cwd[n] == '/')) {
+            for (names = q->parts, c = files_of[j].cwd + n; *c; c++)
+                names += *c == '/';
+            if (m + strlen(files_of[j].cwd + n) >= PX_PATH_MAX || names > PARTS)
+                return ENAMETOOLONG;
+        }
+    return 0;
 }
 
 /* inside - is directory `cluster` inside directory `dir`, or `dir` itself?
@@ -1527,7 +1625,7 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
     struct vol *v;
     rx_u8 dots[DIR_ENTRY_SIZE];
     struct place where, old;
-    rx_u16 e;
+    rx_u16 e, e_dots = 0;
     int end, k, empty;
 
     if ((*error = resolve(i, data, from, &p, &a)) != 0
@@ -1539,6 +1637,10 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
     }
     if (p.dots || q.dots) {
         *error = EINVAL;                /* "." or ".." (XSH rename) */
+        return -1;
+    }
+    if (q.slash && a.kind != K_DIR) {
+        *error = ENOTDIR;               /* a file to "name/" (XBD 4.13; P15) */
         return -1;
     }
     path_text(&p);                      /* (as a cwd keeps it) */
@@ -1560,6 +1662,8 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
         *error = k > 0 ? EINVAL : errno_of((rx_u16)-k);
         return -1;
     }
+    if (a.kind == K_DIR && (*error = cwds_fit(p.text, &q)) != 0)
+        return -1;
     if (b.exists) {
         if (b.where.sector == a.where.sector && b.where.at == a.where.at)
             return 0;
@@ -1581,34 +1685,70 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
         }
     }
     old = a.where;
-    memcpy(b.entry, a.entry, DIR_ENTRY_SIZE);
-    memcpy(b.entry, b.name, DIR_NAME_LENGTH);
-    if ((e = vol_dir_add(v, b.parent, b.entry, &where)) != 0) {
+    if (a.parent == b.parent) {         /* in its directory: the name changed in its */
+        e = lfn_gone(v, a.parent, a.index, a.entry);    /*    place (P15) */
+        memcpy(a.entry, b.name, DIR_NAME_LENGTH);
+        if (e == 0)
+            e = vol_entry_put(v, &a.where, a.entry);
+        memcpy(b.entry, a.entry, DIR_ENTRY_SIZE);
+    } else {
+        memcpy(b.entry, a.entry, DIR_ENTRY_SIZE);
+        memcpy(b.entry, b.name, DIR_NAME_LENGTH);
+        if ((e = vol_dir_add(v, b.parent, b.entry, &where)) == 0) {
+            a.where = old;
+            e = entry_gone(&a, 0);
+        }
+        if (e == 0 && a.kind == K_DIR) {    /* its ".." */
+            where.sector = vol_cluster_sector(v, a.first);
+            where.at = DIR_ENTRY_SIZE;
+            if ((e_dots = vol_dir_entry(v, a.first, 1, &where, dots, &end)) == 0) {
+                put16(dots + DIR_FIRST_CLUSTER, b.parent);
+                e_dots = vol_entry_put(v, &where, dots);
+            }
+        }
+    }
+    if (e == 0)
+        e = cache_flush_meta();         /* on the disk before anything follows it (P15) */
+    if (e) {
         *error = errno_of(e);
         return -1;
     }
-    a.where = old;
-    if ((e = entry_gone(&a, 0)) != 0) {
-        *error = errno_of(e);
-        return -1;
-    }
-    if (a.kind == K_DIR && a.parent != b.parent) {  /* its ".." */
-        where.sector = vol_cluster_sector(v, a.first);
-        where.at = DIR_ENTRY_SIZE;
-        if ((e = vol_dir_entry(v, a.first, 1, &where, dots, &end)) == 0) {
-            put16(dots + DIR_FIRST_CLUSTER, b.parent);
-            e = vol_entry_put(v, &where, dots);
-        }
-    }
-    for (k = 0; k < OFDS; k++)          /* its open descriptions follow it */
-        if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == a.drive
-                && ofds[k].where.sector == old.sector && ofds[k].where.at == old.at) {
-            vol_dir_find(v, b.parent, b.name, &ofds[k].where, dots, &ofds[k].index);
-            ofds[k].parent = b.parent;
-        }
+    if (a.parent != b.parent)
+        for (k = 0; k < OFDS; k++)      /* its open descriptions follow it */
+            if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == a.drive
+                    && ofds[k].where.sector == old.sector && ofds[k].where.at == old.at) {
+                vol_dir_find(v, b.parent, b.name, &ofds[k].where, dots, &ofds[k].index);
+                ofds[k].parent = b.parent;
+            }
     if (a.kind == K_DIR)
         cwds_moved(p.text, &q, &b);     /* and the current directories in it (P15) */
-    return e ? (*error = errno_of(e), -1) : 0;
+    return e_dots ? (*error = errno_of(e_dots), -1) : 0;
+}
+
+/* dir_ino - the inode of the directory whose first cluster this is: 1 for
+ * a volume's root, else its entry's place in its parent, found through its
+ * own ".." (getdents' "..", P15); 0 if it cannot be found */
+static rx_u32 dir_ino(struct vol *v, rx_u16 cluster)
+{
+    rx_u8 e[DIR_ENTRY_SIZE];
+    struct place where;
+    rx_u16 up, k;
+    int end;
+
+    if (cluster == 0)
+        return 1;
+    if (vol_dir_entry(v, cluster, 1, &where, e, &end) != 0 || end)
+        return 0;
+    up = w16(e + DIR_FIRST_CLUSTER);
+    for (k = 0; k < 0xFFFF; k++) {
+        if (vol_dir_entry(v, up, k, &where, e, &end) != 0 || end || e[DIR_NAME] == DIR_END)
+            return 0;
+        if (e[DIR_NAME] != DIR_DELETED && e[DIR_NAME] != '.'
+                && (e[DIR_ATTRIBUTES] & DIR_ATTR_DIRECTORY)
+                && w16(e + DIR_FIRST_CLUSTER) == cluster)
+            return place_ino(&where);
+    }
+    return 0;
 }
 
 /* px_getdents - PX_GETDENTS: whole records, as many as fit */
@@ -1619,6 +1759,7 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
     struct place where;
     const rx_u8 RX_FAR *a;
     rx_u16 done = 0, e, count, k;
+    rx_u32 ino;
     int end;
 
     if (n > COUNT_MAX)
@@ -1628,12 +1769,14 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
         *error = o ? ENOTDIR : EBADF;
         return -1;
     }
-    if (!in_segment(data, at, n)) {
-        *error = EFAULT;
+    if (!in_segment(data, at, n) || n < DE_SIZE) {
+        *error = n < DE_SIZE ? EINVAL : EFAULT;     /* (no room for one: P15) */
         return -1;
     }
     while (done + DE_SIZE <= n) {
         memset(record, 0, sizeof record);
+        if (o->kind != K_DIR && o->offset >= 0xFFFF)
+            break;                      /* (an offset past the server's names: P15) */
         k = (rx_u16)o->offset;
         if (o->kind == K_TOP || o->kind == K_DEVDIR) {
             count = o->kind == K_TOP ? 6 : DEV_NAMES + (tty_keys() ? tty_terminals() : 0);
@@ -1665,8 +1808,13 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
             if (entry[DIR_NAME] == DIR_DELETED || (entry[DIR_ATTRIBUTES] & DIR_ATTR_VOLUME))
                 continue;
             name_text(entry, (char *)record + DE_NAME);
-            put16(record + DE_INO, (rx_u16)place_ino(&where));
-            put16(record + DE_INO + 2, (rx_u16)(place_ino(&where) >> 16));
+            ino = place_ino(&where);    /* "." and "..": the directories' own (P15) */
+            if (entry[DIR_NAME] == '.' && entry[DIR_NAME + 1] == ' ')
+                ino = ino_of(K_DIR, &o->where, 0);
+            else if (entry[DIR_NAME] == '.' && entry[DIR_NAME + 1] == '.')
+                ino = dir_ino(&vols[o->drive], w16(entry + DIR_FIRST_CLUSTER));
+            put16(record + DE_INO, (rx_u16)ino);
+            put16(record + DE_INO + 2, (rx_u16)(ino >> 16));
             far_bytes(data, (rx_u16)(at + done), record, DE_SIZE);
             done = (rx_u16)(done + DE_SIZE);
             continue;
@@ -1699,6 +1847,10 @@ static int px_lseek(int i, struct rx_kregs *r, int *error, rx_u16 *high)
     }
     base = r->di == SEEK_SET ? 0 : r->di == SEEK_CUR ? (rx_i32)o->offset
         : r->di == SEEK_END ? (rx_i32)(o->kind == K_ZFILE ? zfile_size(o->unit) : o->size) : -1;
+    if (r->di <= SEEK_END && offset > 0 && base > 0x7FFFFFFFL - offset) {
+        *error = EOVERFLOW;             /* past an off_t (XSH lseek; P15) */
+        return -1;
+    }
     if (r->di > SEEK_END || base + offset < 0) {
         *error = EINVAL;
         return -1;
@@ -1779,6 +1931,13 @@ int vfs_exe_open(int i, const char *path, struct exe_file *f)
         return ENOENT;
     if (n.kind != K_FILE && n.kind != K_ZFILE)
         return EACCES;
+    if (p.slash)
+        return ENOTDIR;                 /* "file/" (XBD 4.13; P15) */
+    for (k = 0; k < OFDS; k++)          /* open for writing: its bytes not yet whole */
+        if (ofds[k].kind == K_FILE && ofds[k].drive == n.drive
+                && ofds[k].where.sector == n.where.sector && ofds[k].where.at == n.where.at
+                && (ofds[k].flags & O_ACCMODE) != O_RDONLY)
+            return ETXTBSY;             /*    (XSH exec; P15) */
     if ((k = ofd_new(n.kind)) < 0)
         return ENFILE;
     ofds[k].exe = 1;
@@ -1816,16 +1975,15 @@ int vfs_exe_open(int i, const char *path, struct exe_file *f)
 int vfs_exe_read(struct exe_file *f, rx_u32 at, rx_u16 segment, rx_u16 to, rx_u16 n)
 {
     struct ofd *o = &ofds[f->ofd];
-    int error = 0, got;
+    rx_u32 done = 0;
+    rx_u16 e;
 
     o->offset = at;
     if (o->kind == K_ZFILE)
-        got = zfile_io(o, segment, to, n);
-    else
-        got = file_io(o, segment, to, n, 0, &error);
-    if (got < 0)
-        return error;
-    return (rx_u16)got == n ? 0 : ENOEXEC;
+        return zfile_io(o, segment, to, n) == n ? 0 : ENOEXEC;
+    if ((e = file_move(o, segment, to, n, IO_READ, &done)) != 0)
+        return errno_of(e);             /* (a read stopped part way: never taken as */
+    return done == n ? 0 : ENOEXEC;     /*    whole, past 32 KB too: P15) */
 }
 
 /* vfs_exe_close - its description given back */
@@ -2016,6 +2174,7 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
     static char in[PX_PATH_MAX];      /* (the lock is held: static) */
     struct ofd *o;
     unsigned len;
+    rx_u16 e;
     int fd;
 
     *si_out = 0;
@@ -2031,8 +2190,8 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = EBADF;
             return -1;
         }
-        if (fd_close(i, r->bx)) {
-            *error = EIO;
+        if ((e = fd_close(i, r->bx)) != 0) {
+            *error = errno_of(e);       /* (EROFS for a diskette protected: P15) */
             return -1;
         }
         return 0;
@@ -2087,8 +2246,8 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         return 0;
     case PX_GETCWD:
         len = strlen(FILES(i).cwd) + 1;
-        if (len > r->cx || !in_segment(data, r->di, (rx_u16)len)) {
-            *error = len > r->cx ? ERANGE : EFAULT;
+        if (r->cx == 0 || len > r->cx || !in_segment(data, r->di, (rx_u16)len)) {
+            *error = r->cx == 0 ? EINVAL : len > r->cx ? ERANGE : EFAULT;  /* (XSH; P15) */
             return -1;
         }
         far_bytes(data, r->di, (const rx_u8 *)FILES(i).cwd, (rx_u16)len);
@@ -2149,8 +2308,13 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = EBADF;
             return -1;
         }
-        if (entry_back(o)) {
-            *error = EIO;
+        if (o->kind == K_PIPE_R || o->kind == K_PIPE_W || o->kind == K_TTY || o->kind == K_NULL
+                || o->kind == K_LPT || o->kind == K_DEV) {
+            *error = EINVAL;            /* nothing to put on a disk (XSH fsync; P15) */
+            return -1;
+        }
+        if ((e = entry_back(o)) != 0) {
+            *error = errno_of(e);
             return -1;
         }
         return 0;

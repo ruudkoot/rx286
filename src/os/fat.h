@@ -27,6 +27,8 @@
 #define DIR_FILE_SIZE 0x1C
 #define DIR_ATTR_VOLUME 0x08
 #define DIR_ATTR_DIRECTORY 0x10
+#define DIR_ATTR_LONG_NAME 0x0F         /* a long name's entry (VFAT): its */
+#define LFN_CHECKSUM 13                 /*    8.3 entry's name's checksum (P15) */
 #define DIR_END 0x00
 #define DIR_DELETED 0xE5
 #define FAT12_FIRST_CLUSTER 2

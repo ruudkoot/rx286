@@ -8,10 +8,11 @@
 # entries of two directories side by side inode numbers of their own, and
 # takes 13 names a ".." shortens to 12. After the run fsck.fat
 # finds B sound, and mtools reads the files as the program left them.
-# MAME's diskette takes the AT's time: a minute of waiting for it.
+# MAME's diskette takes the AT's time: a minute and a half of waiting for it.
 program: idle
 define: TEST_POSIX_FILES
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 300
 emulators: bochs mame
@@ -80,4 +81,14 @@ files: two files' inodes differ (1): 1
 files: readdir's d_ino is stat's (1): 1
 files: 13 names, then 12 ..: /b (0): 0
 files: 13 names (-1, ENAMETOOLONG 36): -1, errno 36
+files: a file renamed to a name and a slash (-1, ENOTDIR 20): -1, errno 20
+files: getdents with room for less than a record (-1, EINVAL 22): -1, errno 22
+files: getdents of /dev past 64 K names (0): 0
+files: readdir's . and .. are their directories' inodes (2): 2
+files: a file made in /z (-1, EROFS 30): -1, errno 30
+files: a directory made in / (-1, EROFS 30): -1, errno 30
+files: lseek past 2 GB (-1, EOVERFLOW 75): -1, 75
+files: open with access mode 3 (-1, EINVAL 22): -1, errno 22
+files: getcwd with no room (NULL, EINVAL 22): NULL, 22
+files: a rename that would take my directory past 80 bytes (-1, ENAMETOOLONG 36): -1, errno 36
 files: done

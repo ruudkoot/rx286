@@ -27,7 +27,9 @@
 #   media: B ejected            change a drive: B ejected, B protected, D absent,
 #                               B damaged (MANY's chain leaves the volume),
 #                               D blank (no partition), B deep (paths of 64
-#                               characters: rxlib.DEEP_PATH); may repeat
+#                               characters: rxlib.DEEP_PATH), B loop (MANY's
+#                               chain to itself), B zerodir (MANY's cluster
+#                               0), B longnames (two VFAT names); may repeat
 #   lpt1: text                  a line LPT1 must have printed; may repeat (the
 #                               whole of what it printed, in order); lpt2 too
 #   modem: hayes                a modem at the far end of COM2 (HayesPeer):

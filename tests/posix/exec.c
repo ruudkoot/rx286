@@ -124,6 +124,31 @@ int main(void)
         spawned("codes", codes_exit, 1);
     printf("exec: five from C, each within a second: %s\n",
            rx_ticks() - t0 < 5 * TICKS_HZ ? "yes" : "no");
+
+    n2 = spawned("/z/child/", bad, 0);  /* P15's second review */
+    printf("exec: a file's name and a slash (-1, ENOTDIR 20): %d, %d\n", n2, errno);
+    n2 = spawned("", bad, 1);
+    printf("exec: an empty name along PATH (-1, ENOENT 2): %d, %d\n", n2, errno);
+    fd = open(bad[0], O_WRONLY);
+    n2 = spawned(bad[0], bad, 0);
+    printf("exec: a file open for writing (-1, ETXTBSY 26): %d, %d\n", n2, errno);
+    close(fd);
+    {
+        static char long_path[96] = "PATH=/c/";
+        char *env[2], **saved = environ;
+
+        for (k = 0; k < 75; k++)
+            strcat(long_path, "a");
+        strcat(long_path, "z");         /* its tail "z", from /: /z, which has child */
+        env[0] = long_path;
+        env[1] = 0;
+        chdir("/");
+        environ = env;
+        n2 = spawned("child", bad, 1);
+        environ = saved;
+        printf("exec: a PATH directory too long, never its tail (-1, ENOENT 2): %d, %d\n", n2,
+               errno);
+    }
     printf("exec: done\n");
     return 0;
 }

@@ -1,0 +1,19 @@
+# Long names written elsewhere (roadmap os-server.md P15, the second
+# review; tests/posix/edges.c, EDGES_LONGNAMES): mtools gave two files of
+# B long names, VFAT's entries before their 8.3 ones. An unlink and two
+# renames take those entries with them, and fsck.fat finds no orphaned
+# long name after (before, they stayed).
+program: idle
+define: TEST_POSIX_EDGES
+define: EDGES_LONGNAMES
+media: B longnames
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+fsck: B
+timeout: 120
+emulators: bochs
+---
+edges: unlink of a file with a long name (0): 0
+edges: rename of another, in its directory (0): 0
+edges: and into another (0): 0
+edges: done

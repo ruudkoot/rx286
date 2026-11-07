@@ -35,7 +35,12 @@ static const char *found(const char *list, const char *name, char *room)
 
     while (*list && *list != ':' && n < PX_PATH_MAX - 2)
         room[n++] = *list++;
-    if (n && room[n - 1] != '/')
+    if (*list && *list != ':') {        /* a directory too long: skipped whole, never its */
+        while (*list && *list != ':')   /*    tail as a directory of its own (P15) */
+            list++;
+        n = PX_PATH_MAX;
+    }
+    if (n && n < PX_PATH_MAX && room[n - 1] != '/')
         room[n++] = '/';
     if (n + strlen(name) >= PX_PATH_MAX)
         room[0] = 0;
@@ -60,6 +65,10 @@ int execvp(const char *name, char *const argv[])
     const char *list = getenv("PATH");
     int error = ENOENT;
 
+    if (!*name) {
+        errno = ENOENT;                 /* an empty name (XSH exec; P15) */
+        return -1;
+    }
     if (!list)
         list = DEFAULT_PATH;
     if (strchr(name, '/'))
@@ -84,6 +93,8 @@ int posix_spawnp(pid_t *pid, const char *name, const posix_spawn_file_actions_t 
     const char *list = getenv("PATH");
     int error = ENOENT, e;
 
+    if (!*name)
+        return ENOENT;                  /* an empty name (P15) */
     if (!list)
         list = DEFAULT_PATH;
     if (strchr(name, '/'))

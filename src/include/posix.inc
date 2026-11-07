@@ -135,6 +135,7 @@ ENOSYS              equ 38
 ENOTEMPTY           equ 39
 EPIPE               equ 32
 ENOTTY              equ 25
+ETXTBSY             equ 26      ; an exec of a file open for writing (P15)
 EOVERFLOW           equ 75      ; a time before 1970 for gmtime (P12)
 ERESTART            equ 85      ; never a program's: a call a signal's handler broke off,
                                 ;    which libc makes again (SA_RESTART)

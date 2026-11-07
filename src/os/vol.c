@@ -18,6 +18,13 @@
 #define FAT12_LAST 0xFFF                /* the end of a chain, as written */
 #define ENTRIES (SECTOR_SIZE / DIR_ENTRY_SIZE)
 
+/* The last directory walked (vol_dir_entry): its drive and first cluster,
+ * and the cluster its walk reached, that step along its chain (P15) */
+static struct {
+    rx_u8 valid, drive;
+    rx_u16 first, step, cluster;
+} walk;
+
 /* w16 - a little-endian word of a segment */
 static rx_u16 w16(const rx_u8 RX_FAR *p)
 {
@@ -48,6 +55,7 @@ rx_u16 vol_mount(struct vol *v, unsigned drive)
     rx_u32 fats;
     int slot, i;
 
+    walk.valid = 0;                     /* (another disk, perhaps) */
     v->drive = (rx_u8)drive;
     v->start = 0;
     if (drive >= DRIVE_C) {
@@ -145,6 +153,7 @@ rx_u16 vol_fat_set(struct vol *v, rx_u16 cluster, rx_u16 value)
     rx_u16 at = (rx_u16)(cluster + cluster / 2), error;
     unsigned copy;
 
+    walk.valid = 0;                     /* (a chain may change) */
     if (cluster < FAT12_FIRST_CLUSTER || cluster >= v->clusters + FAT12_FIRST_CLUSTER)
         return E_BROKEN;
     for (copy = 0; copy < v->fats; copy++) {
@@ -232,11 +241,14 @@ rx_u16 vol_chain_cut(struct vol *v, rx_u16 c)
 }
 
 /* vol_dir_entry - a directory's entry by its index (dir 0: the root's):
- * its copy and its place; *end past the directory's last sector */
+ * its copy and its place; *end past the directory's last sector. A walk
+ * goes on from the cluster the last one reached, in the same directory,
+ * so that a scan of its entries follows its chain once; a chain longer
+ * than the volume's clusters loops: E_BROKEN (P15) */
 rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *where,
                      rx_u8 *entry, int *end)
 {
-    rx_u16 sector, step, error, per = (rx_u16)(v->cluster_sectors * ENTRIES), n;
+    rx_u16 sector, step, target, c, error, per = (rx_u16)(v->cluster_sectors * ENTRIES);
     int slot;
 
     *end = 0;
@@ -247,18 +259,30 @@ rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *wher
         }
         sector = (rx_u16)(v->start + v->root + index / ENTRIES);
     } else {
-        for (step = index / per, n = 0; step; step--, n++) {
-            if ((error = vol_fat_get(v, dir, &dir)) != 0)
+        target = index / per;
+        step = 0;
+        c = dir;
+        if (walk.valid && walk.drive == v->drive && walk.first == dir && walk.step <= target) {
+            step = walk.step;
+            c = walk.cluster;
+        }
+        for (; step < target; step++) {
+            if ((error = vol_fat_get(v, c, &c)) != 0)
                 return error;
-            if (dir >= FAT12_END) {
+            if (c >= FAT12_END) {
                 *end = 1;
                 return 0;
             }
-            if (dir < FAT12_FIRST_CLUSTER || dir >= v->clusters + FAT12_FIRST_CLUSTER
-                    || n > v->clusters)
+            if (c < FAT12_FIRST_CLUSTER || c >= v->clusters + FAT12_FIRST_CLUSTER
+                    || step + 1u >= v->clusters)
                 return E_BROKEN;
         }
-        sector = (rx_u16)(vol_cluster_sector(v, dir) + (index % per) / ENTRIES);
+        walk.valid = 1;
+        walk.drive = (rx_u8)v->drive;
+        walk.first = dir;
+        walk.step = target;
+        walk.cluster = c;
+        sector = (rx_u16)(vol_cluster_sector(v, c) + (index % per) / ENTRIES);
     }
     if ((error = cache_get(v->drive, sector, 1, &slot)) != 0)
         return error;

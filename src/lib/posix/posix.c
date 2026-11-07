@@ -104,7 +104,7 @@ void _exit(int status)
         px(PX_EXIT, (rx_u16)status, 0, 0, 0, &r);
 }
 
-/* write - PX_WRITE: so far descriptors 0 to 2 alone, the console */
+/* write - PX_WRITE: bytes to a descriptor */
 ssize_t write(int fd, const void *bytes, size_t n)
 {
     struct rx_kregs r;

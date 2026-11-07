@@ -116,7 +116,7 @@ int main(void)
     || defined(TEST_POSIX_SIGFPU) || defined(TEST_POSIX_TTY) || defined(TEST_POSIX_JOBS) \
     || defined(TEST_POSIX_CONSOLE) || defined(TEST_POSIX_POLL) || defined(TEST_POSIX_THREAD) \
     || defined(TEST_POSIX_DRIVES) || defined(TEST_POSIX_DEVICES) || defined(TEST_POSIX_FSRAND) \
-    || defined(TEST_POSIX_PXRAND)
+    || defined(TEST_POSIX_PXRAND) || defined(TEST_POSIX_EDGES)
 #if defined(TEST_POSIX_PROC)
     static char *const argv[] = { "/z/proc", 0 };
 #elif defined(TEST_POSIX_FILES)
@@ -147,6 +147,8 @@ int main(void)
     static char *const argv[] = { "/z/fsrand", 0 };
 #elif defined(TEST_POSIX_PXRAND)
     static char *const argv[] = { "/z/pxrand", 0 };
+#elif defined(TEST_POSIX_EDGES)
+    static char *const argv[] = { "/z/edges", 0 };
 #else
     static char *const argv[] = { "/z/pipes", 0 };
 #endif

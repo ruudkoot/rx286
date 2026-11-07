@@ -90,13 +90,12 @@ void vfs_exit(int i);
 #define VFS_EIO (-6)                    /*    EIO (a background read, SIGTTIN not taken) */
 #define VFS_EINTR (-7)                  /*    as VFS_INTR, but never made again: poll's (P12) */
 
+/* pipes_init - the pipes' segment, from the root (at boot) */
 int pipes_init(void);
-/* (the terminal's reader is tty.c's: P11)
- * -1 */
 
 /* vfs_call - a file call (PX_WRITE, PX_READ, PX_OPEN to PX_FSYNC): its
- * result, or -1 and the error; SI out in *si_out. `give_up` is 1 if the call
- * may give the lock up while it waits for the console */
+ * result, or -1 and the error; SI out in *si_out. The FAT and directory
+ * sectors it changed are written before it answers (P15) */
 int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out);
 /* vfs_tty_open - has any process a terminal open? (P11) */
 int vfs_tty_open(int unit);

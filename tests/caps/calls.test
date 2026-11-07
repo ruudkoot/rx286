@@ -9,11 +9,11 @@ rx286, test build
 caps: retype a segment: 0
 caps: the segment, zeroed, reads back (4660): 4660
 @bochs caps: its base, high byte: 18
-@bochs caps: its base, low word: 23648
+@bochs caps: its base, low word: 23680
 @mame caps: its base, high byte: 18
-@mame caps: its base, low word: 23648
+@mame caps: its base, low word: 23680
 @dosbox-x caps: its base, high byte: 5
-@dosbox-x caps: its base, low word: 29104
+@dosbox-x caps: its base, low word: 29136
 caps: its limit (255): 255
 caps: retype a space: 0
 caps: retype a thread: 0

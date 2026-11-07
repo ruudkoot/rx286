@@ -42,6 +42,7 @@ char *strerror(int e)
     case ENOTEMPTY: return "directory not empty";
     case EINTR: return "interrupted";
     case ENOTTY: return "not a terminal";
+    case ETXTBSY: return "file busy";
     case EOVERFLOW: return "too large";
     case ENXIO: return "no such device";
     case EDEADLK: return "would deadlock";

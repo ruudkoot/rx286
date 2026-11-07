@@ -1,0 +1,18 @@
+# A directory's entry whose first cluster is 0 (roadmap os-server.md P15,
+# the second review; tests/posix/edges.c, EDGES_ZERODIR): only ".." may
+# say the root so; B:\MANY's entry does, and is EIO (before, it was the
+# root, and a rename of it wrote its ".." into the root's second entry,
+# README.TXT's first cluster).
+program: idle
+define: TEST_POSIX_EDGES
+define: EDGES_ZERODIR
+media: B zerodir
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+emulators: bochs
+---
+edges: a name in a directory whose entry says cluster 0 (-1, EIO 5): -1, errno 5
+edges: its listing (none, EIO 5): none, 5
+edges: its rename (-1, EIO 5): -1, errno 5
+edges: done

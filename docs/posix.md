@@ -125,6 +125,12 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
   a file a new one; a volume's root is 1; `/`, `/dev`, `/z` and the pipes
   are `ST_DEV_SERVER`'s, numbered in `getdents`' order), and times to
   DOS's two seconds.
+- **No unlinked open files:** FAT12 keeps no file without its entry, so
+  `unlink` of an open file, and `rename` over one, are `EBUSY`; a file
+  open for writing is `ETXTBSY` to `exec`.
+- **Paths at their limits:** a directory renamed deeper may leave files
+  in it past `PATH_MAX` or 12 names, which nothing reaches until it is
+  moved back (a current directory in it is refused, `ENAMETOOLONG`).
 - **Below the least limits:** `PATH_MAX`, `CHILD_MAX` and
   `PTHREAD_THREADS_MAX` (the table above): the server's data segment, which
   holds every thread's stack, is the bound (roadmap os-server.md, D4).
@@ -152,12 +158,12 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 
 | No. | Name | | No. | Name |
 |---|---|---|---|---|
-| 1 | `EPERM` | | 20 | `ENOTDIR` |
-| 2 | `ENOENT` | | 21 | `EISDIR` |
-| 3 | `ESRCH` | | 22 | `EINVAL` |
-| 4 | `EINTR` | | 23 | `ENFILE` |
-| 5 | `EIO` | | 24 | `EMFILE` |
-| 6 | `ENXIO` | | 25 | `ENOTTY` |
+| 1 | `EPERM` | | 21 | `EISDIR` |
+| 2 | `ENOENT` | | 22 | `EINVAL` |
+| 3 | `ESRCH` | | 23 | `ENFILE` |
+| 4 | `EINTR` | | 24 | `EMFILE` |
+| 5 | `EIO` | | 25 | `ENOTTY` |
+| 6 | `ENXIO` | | 26 | `ETXTBSY` |
 | 7 | `E2BIG` | | 27 | `EFBIG` |
 | 8 | `ENOEXEC` | | 28 | `ENOSPC` |
 | 9 | `EBADF` | | 29 | `ESPIPE` |
@@ -169,6 +175,7 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 | 16 | `EBUSY` | | 38 | `ENOSYS` |
 | 17 | `EEXIST` | | 39 | `ENOTEMPTY` |
 | 18 | `EXDEV` | | 75 | `EOVERFLOW` |
+| 20 | `ENOTDIR` | | | |
 
 `ERESTART` (85) is never a program's: libc makes the call again
 (*docs/processes.md*, *Signals*). `strerror` and `perror` have a text for

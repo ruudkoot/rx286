@@ -163,7 +163,8 @@ DISKS = os.path.join(ROOT, 'build', 'disks')
 # What a test may change of the drives (tools/run-test's `media:`): the
 # first three in the emulator, the others in the run's copies of the images
 # (damage_disks).
-MEDIA = ('B ejected', 'B protected', 'D absent', 'B damaged', 'D blank', 'B deep')
+MEDIA = ('B ejected', 'B protected', 'D absent', 'B damaged', 'D blank', 'B deep', 'B loop',
+         'B zerodir', 'B longnames')
 # 'B deep': directories whose paths reach DOS's 64 characters (PATH_MAX).
 DEEP_PATH = '/'.join(c * 8 for c in 'ABCDEF')      # 54 characters as \AAAAAAAA...
 DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
@@ -218,12 +219,16 @@ DISPLAY_HEADLESS = 'rfb, options="timeout=0"'
 
 DISK_IMAGES = ('fdb.img', 'hd0.img', 'hd1.img')     # drives B, C, D (tools/mkdisks)
 FAT12_BAD_LINK = 0xFF0          # a reserved value: no cluster of any volume
+LONG_NAMES = ('A long name.txt', 'Another long one.txt')   # 'B longnames' (P15)
 
 
 def damage_disks(directory, media):
     """The changes of MEDIA made to a run's copies of the images: 'D blank'
     zeroes fixed disk D (no partition at all); 'B damaged' points the FAT
-    entry of B:\\MANY's first cluster outside the volume, in both FATs;
+    entry of B:\\MANY's first cluster outside the volume, in both FATs, and
+    'B loop' to itself, its 32 entries all used (os-server.md P15);
+    'B zerodir' zeroes the first cluster of MANY's entry; 'B longnames'
+    adds two files with long names (VFAT's entries before their 8.3 ones);
     'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG."""
     if 'B deep' in media:
         path = os.path.join(directory, 'fdb.img')
@@ -241,7 +246,31 @@ def damage_disks(directory, media):
         with open(path, 'r+b') as f:
             f.truncate(0)
             f.truncate(size)
-    if 'B damaged' in media:
+    if 'B zerodir' in media:
+        path = os.path.join(directory, 'fdb.img')
+        with open(path, 'r+b') as f:
+            boot = f.read(512)
+            reserved = int.from_bytes(boot[0x0E:0x10], 'little')
+            fats, per_fat = boot[0x10], int.from_bytes(boot[0x16:0x18], 'little')
+            roots = int.from_bytes(boot[0x11:0x13], 'little')
+            at = (reserved + fats * per_fat) * 512
+            f.seek(at)
+            root = f.read(roots * 32)
+            for k in range(roots):
+                if root[k * 32:k * 32 + 11] == b'MANY       ':
+                    f.seek(at + k * 32 + 0x1A)
+                    f.write(b'\0\0')
+    if 'B longnames' in media:
+        path = os.path.join(directory, 'fdb.img')
+        env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
+        source = os.path.join(directory, 'longname.txt')
+        with open(source, 'w') as f:
+            f.write('A file with a long name.\n')
+        for name in LONG_NAMES:
+            subprocess.run(['mcopy', '-i', path, source, '::' + name], env=env, check=True,
+                           capture_output=True, stdin=subprocess.DEVNULL)
+        os.remove(source)
+    if 'B damaged' in media or 'B loop' in media:
         path = os.path.join(directory, 'fdb.img')
         env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
         chain = subprocess.run(['mshowfat', '-i', path, '::MANY'], capture_output=True,
@@ -255,10 +284,11 @@ def damage_disks(directory, media):
                 at = (reserved + n * per_fat) * 512 + cluster * 3 // 2
                 f.seek(at)
                 pair = int.from_bytes(f.read(2), 'little')
+                link = cluster if 'B loop' in media else FAT12_BAD_LINK
                 if cluster & 1:
-                    pair = (pair & 0x000F) | (FAT12_BAD_LINK << 4)
+                    pair = (pair & 0x000F) | (link << 4)
                 else:
-                    pair = (pair & 0xF000) | FAT12_BAD_LINK
+                    pair = (pair & 0xF000) | link
                 f.seek(at)
                 f.write(pair.to_bytes(2, 'little'))
 

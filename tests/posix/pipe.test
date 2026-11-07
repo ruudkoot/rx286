@@ -17,4 +17,7 @@ pipe: 5000 bytes from a child, then the end (0): 5000, 0 wrong
 pipe: a child's standard output through it: 3 lines, exited 3
 pipe: four writes of PIPE_BUF from two children: 2048 bytes, none split: yes
 pipe: a write with no reader (SIGPIPE 13): 13
+pipe: a read of none, none there (0): 0
+pipe: its fsync (-1, EINVAL 22): -1, 22
+pipe: two readers, 10 bytes and the end (10 and 0): 10 and 0
 pipe: done

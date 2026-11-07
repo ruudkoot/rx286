@@ -41,7 +41,7 @@
 #include "limits.h"
 
 #if CHILD_MAX != PROCS
-#error limits.h's CHILD_MAX is not the server's PROCS
+#error "limits.h's CHILD_MAX is not the server's PROCS"
 #endif
 
 #define LOAD_SLOT SLOT(148)             /* a load, while code is read into it */
@@ -846,12 +846,18 @@ static int px_kill(int i, pid_t pid, int sig, int *error)
  * held: the process waits in this call meanwhile) */
 static int px_brk(int i, rx_u16 end, int *error)
 {
+    rx_u32 size = (rx_u32)proc_data_limit(i) + 1;
+
     if (end == 0)
         return 0;                       /* (the break: SI, handle's) */
     if (end < procs[i].brk_min) {
         *error = EINVAL;
         return -1;
     }
+    if (end <= size && (end > procs[i].brk || proc_next_thread(i, -1) >= 0)) {
+        procs[i].brk = end;             /* within the segment: kept. A thread's call */
+        return 0;                       /*    may hold a buffer above a lower break, */
+    }                                   /*    which a smaller segment would cut (P15) */
     if (end > procs[i].brk_max
             || root(ROOT_BRK, procs[i].root, end, 0, P_SLOT(i, PK_DATA), 0)) {
         *error = ENOMEM;

@@ -27,7 +27,10 @@ static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
 static pthread_once_t once = PTHREAD_ONCE_INIT, inner = PTHREAD_ONCE_INIT;
 static pthread_key_t key;
 static volatile unsigned counter;
-static volatile int item, have, sum, onces, inners, destroyed, got;
+static volatile int item, have, sum, onces, inners, destroyed, got, piped;
+static char *high;                      /* a buffer past a break lowered meanwhile */
+static char hundred[100] = "a hundred bytes";
+static int pfd[2];
 
 /* add - ROUNDS increments of the counter under the lock, each a while
  * inside it so that the others find it taken */
@@ -148,6 +151,14 @@ static void *faulter(void *arg)
     return 0;
 }
 
+/* high_reader - a read from a pipe into `high`, which waits (P15) */
+static void *high_reader(void *arg)
+{
+    (void)arg;
+    piped = (int)read(pfd[0], high, 100);
+    return 0;
+}
+
 /* main - the tests, in order */
 int main(void)
 {
@@ -238,6 +249,19 @@ int main(void)
     waitpid(pid, &status, 0);
     printf("thread: a thread's fault ends its process (SIGILL 4): %d\n",
            WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+
+    result = sbrk(0);                   /* P15's second review: a buffer the break */
+    sbrk(8192);                         /*    leaves while a thread's read waits */
+    high = (char *)result + 8000;
+    pipe(pfd);
+    pthread_create(&t[0], 0, high_reader, 0);
+    nap.tv_sec = 0;
+    nap.tv_nsec = 200000000L;
+    nanosleep(&nap, 0);
+    brk(result);
+    write(pfd[1], hundred, sizeof hundred);
+    pthread_join(t[0], 0);
+    printf("thread: a read into the heap a lower break left (100): %d\n", piped);
     printf("thread: done\n");
     return 0;
 }

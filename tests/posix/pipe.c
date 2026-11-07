@@ -119,6 +119,30 @@ int main(void)
     close(fds[0]);
     close(fds[1]);
     printf("pipe: a write with no reader (SIGPIPE 13): %d\n", status_of(pid) - 100);
+
+    pipe(fds);                          /* P15's second review */
+    n = (int)read(fds[0], buf, 0);
+    printf("pipe: a read of none, none there (0): %d\n", n);
+    n = fsync(fds[0]);
+    printf("pipe: its fsync (-1, EINVAL 22): %d, %d\n", n, errno);
+    for (k = 0; k < 2; k++)             /* two readers waiting at once: both woken */
+        if ((pid = fork()) == 0) {
+            close(fds[1]);
+            alarm(5);
+            _exit((int)read(fds[0], buf, 64));
+        } else if (k == 0) {
+            a = pid;
+        } else {
+            b = pid;
+        }
+    sleep(1);
+    write(fds[1], "0123456789", 10);
+    close(fds[0]);
+    close(fds[1]);
+    n = status_of(a);
+    k = status_of(b);
+    printf("pipe: two readers, 10 bytes and the end (10 and 0): %d and %d\n", n > k ? n : k,
+           n > k ? k : n);
     printf("pipe: done\n");
     return 0;
 }

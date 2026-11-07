@@ -23,6 +23,8 @@
 
 static char buf[BIG];
 
+int rx_getdents(int fd, void *room, unsigned n);
+
 /* check - a call's result and errno, said */
 static void check(const char *what, int result)
 {
@@ -236,6 +238,56 @@ int main(void)
     check("13 names, then 12 ..: /b (0)",
           stat("/b/q/q/q/q/q/q/q/q/q/q/q/q/../../../../../../../../../../../..", &st));
     check("13 names (-1, ENAMETOOLONG 36)", stat("/b/q/q/q/q/q/q/q/q/q/q/q/q", &st));
+
+    check("a file renamed to a name and a slash (-1, ENOTDIR 20)",   /* the second review */
+          rename("/b/pad.txt", "/b/pad2/"));
+    fd = open("/b", O_RDONLY);
+    check("getdents with room for less than a record (-1, EINVAL 22)", rx_getdents(fd, buf, 10));
+    close(fd);
+    fd = open("/dev", O_RDONLY);
+    lseek(fd, 65536L, SEEK_SET);
+    check("getdents of /dev past 64 K names (0)", rx_getdents(fd, buf, 64));
+    close(fd);
+    mkdir("/b/dd", 0755);
+    mkdir("/b/dd/ee", 0755);
+    stat("/b/dd", &st);
+    ino = (unsigned long)st.st_ino;
+    stat("/b/dd/ee", &st);
+    same = 0;
+    if ((dp = opendir("/b/dd/ee")) != 0) {
+        while ((e = readdir(dp)) != 0)
+            if (strcmp(e->d_name, ".") == 0)
+                same += (unsigned long)e->d_ino == (unsigned long)st.st_ino;
+            else if (strcmp(e->d_name, "..") == 0)
+                same += (unsigned long)e->d_ino == ino;
+        closedir(dp);
+    }
+    printf("files: readdir's . and .. are their directories' inodes (2): %d\n", same);
+    check("a file made in /z (-1, EROFS 30)", open("/z/new", O_WRONLY | O_CREAT));
+    check("a directory made in / (-1, EROFS 30)", mkdir("/x", 0755));
+    fd = open("/b/pad.txt", O_RDONLY);
+    lseek(fd, 0x7FFFFFFFL, SEEK_SET);
+    l1 = lseek(fd, 0x7FFFFFFFL, SEEK_CUR);
+    printf("files: lseek past 2 GB (-1, EOVERFLOW 75): %ld, %d\n", l1, errno);
+    close(fd);
+    check("open with access mode 3 (-1, EINVAL 22)", open("/b/pad.txt", 3));
+    errno = 0;
+    printf("files: getcwd with no room (NULL, EINVAL 22): %s, ",
+           getcwd(cwd, 0) ? "a text" : "NULL");
+    printf("%d\n", errno);
+    mkdir("/b/AAAAAAAA", 0755);         /* a rename that would take a current */
+    mkdir("/b/AAAAAAAA/BBBBBBBB", 0755);    /*    directory past 80 bytes */
+    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC", 0755);
+    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD", 0755);
+    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE", 0755);
+    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF", 0755);
+    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/GGGGGGGG", 0755);
+    mkdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/GGGGGGGG/HHHHHHHH", 0755);
+    mkdir("/b/XXXXXXXX", 0755);         /* (74 bytes, 87 once renamed) */
+    chdir("/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/GGGGGGGG/HHHHHHHH");
+    check("a rename that would take my directory past 80 bytes (-1, ENAMETOOLONG 36)",
+          rename("/b/AAAAAAAA", "/b/XXXXXXXX/AAAAAAAA.ABC"));
+    chdir("/");
     printf("files: done\n");
     return 0;
 }
