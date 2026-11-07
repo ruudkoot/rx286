@@ -266,7 +266,8 @@ def damage_disks(directory, media):
 def install_file(image, fixed, path, source):
     """A file put on a drive's image at a path, its directories made: a
     fixed disk's in its first FAT12 partition (mtools at its offset). An
-    error's text, or None."""
+    error's text, or None. Never a question on the terminal: mtools asks
+    one of a name already there, which a captured stderr would hide."""
     if fixed:
         data = open(image, 'rb').read(512)
         starts = [struct.unpack_from('<I', data, 0x1BE + 16 * k + 8)[0] for k in range(4)
@@ -276,11 +277,11 @@ def install_file(image, fixed, path, source):
         image += '@@%d' % (starts[0] * 512)
     env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
     parts = path.strip('/').split('/')
-    for k in range(1, len(parts)):
-        subprocess.run(['mmd', '-i', image, '::/' + '/'.join(parts[:k])], capture_output=True,
-                       env=env)                     # (there already: fine)
+    for k in range(1, len(parts)):              # (-D s: there already, skipped)
+        subprocess.run(['mmd', '-D', 's', '-i', image, '::/' + '/'.join(parts[:k])],
+                       stdin=subprocess.DEVNULL, capture_output=True, env=env)
     done = subprocess.run(['mcopy', '-o', '-i', image, source, '::' + path],
-                          capture_output=True, text=True, env=env)
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env)
     return done.stderr.strip() or 'mcopy failed' if done.returncode else None
 
 
