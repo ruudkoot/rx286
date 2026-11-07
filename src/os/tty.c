@@ -521,6 +521,8 @@ int tty_access(int i, int unit, int what)
         return 0;
     if (!sig_takes(i, sig))
         return what == TTY_READ ? VFS_EIO : 0;
+    if (proc_orphaned(i))
+        return VFS_EIO;                 /* an orphaned group's: EIO, no stop (P15) */
     proc_group(proc_pgid(i), sig);
     if (!sig_caught(i, sig))
         return VFS_RESTART;

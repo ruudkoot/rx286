@@ -49,7 +49,8 @@ T_LDT               equ 8       ; its LDT's selector
 T_ZERO_PARAS        equ 10      ; KCALL_RETYPE: a segment's paragraphs, while it is zeroed
 T_USTACK_TOP        equ 12      ; its program's SP at a start
 T_RESTART           equ 14      ; byte: restart_pending, kept while another runs
-T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state
+T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state (FPU_GIVEN: given
+                                ;    by THREAD_FPU, kept at its first start, P15)
 T_NAME              equ 16      ; its name (kdata)
 T_SLICE             equ 18      ; byte: ticks left of its time slice
 T_FLAGS             equ 19      ; byte: TF_*
@@ -88,6 +89,7 @@ T_FRAME             equ 184     ;    revokes (P15); its frame while it does not 
 T_REVOKE_OBJECT     equ T_FRAME + FRAME_SIZE_USER
 TCB_SIZE            equ T_REVOKE_OBJECT + 2
 ZERO_CANCELLED      equ 0xFFFF  ; T_ZERO_SLOT: its untyped's memory given back (P15)
+FPU_GIVEN           equ 2       ; T_FPU_VALID: THREAD_FPU's, for its first start (P15)
 %if T_FPU + 94 > T_FAULT_BADGE
   %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
 %endif

@@ -149,6 +149,14 @@ static void halt(int i)
     proc_wake(i);
 }
 
+/* stop_discarded - a stop signal of the terminal's (SIGTSTP, SIGTTIN,
+ * SIGTTOU), its default action, for a process of an orphaned group: never
+ * a stop, discarded (XSH 2.4.3; P15) */
+static int stop_discarded(int i, int sig)
+{
+    return sig != SIGSTOP && proc_orphaned(i);
+}
+
 /* stop - process i stopped by a signal: its threads to stop and be held so
  * (P13), its waits ended, its parent told (lock held) */
 static void stop(int i, int sig)
@@ -323,8 +331,10 @@ void sig_send(int t, int sig)
                                        && !(sig == SIGCONT && (s->blocked & b))))
         return;                         /* (SIGCONT blocked: pending, XSH 2.4.1; P15) */
     if (a->handler == PX_SIG_DFL && !(s->blocked & b)) {
-        if (stops(sig))                 /* the default action, at once */
+        if (stops(sig) && !stop_discarded(t, sig))  /* the default action, at once */
             stop(t, sig);
+        else if (stops(sig))
+            return;
         else
             proc_end(t, sig);
         return;
@@ -497,10 +507,12 @@ void sig_step(int i)
             return;
         if (s->act[sig].handler <= PX_SIG_IGN) {
             s->pending &= ~bit(sig);
-            if (s->act[sig].handler == PX_SIG_DFL && stops(sig))
-                stop(i, sig);
-            else if (s->act[sig].handler == PX_SIG_DFL && !ignores(sig))
+            if (s->act[sig].handler == PX_SIG_DFL && stops(sig)) {
+                if (!stop_discarded(i, sig))
+                    stop(i, sig);
+            } else if (s->act[sig].handler == PX_SIG_DFL && !ignores(sig)) {
                 proc_end(i, sig);
+            }
             continue;
         }
         if (thread_call(i, THREAD_SUSPEND, 0, PROC_NOTIFY(i), 0, &r) == 0)
@@ -605,7 +617,10 @@ int sig_call(int i, struct rx_kregs *r, int *error)
             }
             if (sig && s->act[sig].handler == PX_SIG_DFL && stops(sig)) {
                 s->pending &= ~bit(sig);
-                stop(i, sig);
+                if (!stop_discarded(i, sig))
+                    stop(i, sig);
+                else
+                    continue;
             }
             if (s->stopped) {
                 s->blocked = s->restore;

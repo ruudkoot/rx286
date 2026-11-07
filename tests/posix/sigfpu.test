@@ -3,6 +3,8 @@
 # the 287 (mkexe --287, RXF_287), whose handler spoils the 287's control
 # word and stack; the trampoline's FSAVE and FRSTOR keep them. (MAME has
 # no 287.)
+# A fork's child starts with its parent's 287 (THREAD_FPU, P15): on Bochs;
+# DOSBox-X lets threads share the 287 without the trap that switches it.
 program: idle
 define: TEST_POSIX_SIGFPU
 keys: {wait 250}
@@ -12,4 +14,5 @@ emulators: bochs dosbox-x
 ---
 sigfpu: spoilt by a call (0): 0
 sigfpu: around a handler, the control word and pi kept (3): 3
+sigfpu: a fork's child, its parent's control word and pi (3): 3
 sigfpu: done

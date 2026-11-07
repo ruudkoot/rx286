@@ -151,8 +151,8 @@ static void *faulter(void *arg)
     return 0;
 }
 
-/* closed_reader - a read from a pipe whose ends another thread closes
- * meanwhile, and whose place a new pipe takes (P15) */
+/* closed_reader - a read from a pipe whose read end another thread closes
+ * meanwhile (P15) */
 static void *closed_reader(void *arg)
 {
     char c[8];
@@ -287,18 +287,17 @@ int main(void)
     pthread_join(t[0], 0);
     printf("thread: a read into the heap a lower break left (100): %d\n", piped);
 
-    pipe(pfd);                          /* a pipe closed under a thread's read */
-    pthread_create(&t[0], 0, closed_reader, 0);
+    pipe(pfd);                          /* a pipe's read end closed under a */
+    signal(SIGPIPE, SIG_IGN);           /*    thread's read: still held by it, so a */
+    pthread_create(&t[0], 0, closed_reader, 0);     /* write finds a reader (P15) */
     nanosleep(&nap, 0);
     close(pfd[0]);
-    close(pfd[1]);
-    pipe(pfd);                          /* (the pipe's place, were it free) */
-    write(pfd[1], "new", 3);
+    n = (int)write(pfd[1], "x", 1);
     pthread_join(t[0], 0);
-    printf("thread: a read whose pipe was closed under it, not the next pipe's (0): %d\n",
-           piped);
-    close(pfd[0]);
+    printf("thread: a write while a read waits on an end closed under it (1, then 0): %d, %d\n",
+           n, piped);
     close(pfd[1]);
+    signal(SIGPIPE, SIG_DFL);
     if ((pid = fork()) == 0) {          /* the main thread's pthread_exit: the others */
         pthread_create(&t[0], 0, late, 0);  /*    first */
         pthread_exit(0);

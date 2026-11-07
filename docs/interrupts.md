@@ -174,7 +174,13 @@ of a tick, so no tick is lost.
 **How long.** Test builds made with `TEST_STRETCH` measure every stretch
 with interrupts off, with timer channel 0's latched count, from the
 kernel's entry or a window's end to the next window or `IRET`, and say at
-the end of a test how long the longest was and where
+the end of a test how long the longest was and where. In these builds
+channel 0 is a rate generator (mode 2, at the same 50 Hz), whose count
+falls by one a clock and wraps once a period, and a tick pending in the
+master PIC's IRR says a whole period passed: a stretch is measured to two
+periods, 40 ms, and longer ones as at least that (os-server.md P15; mode
+3's count, falling by two and wrapping twice a period, hid every stretch
+past 10 ms)
 (`tests/kernel/stretch.test`, `stretch-kill.test`; roadmaps/realtime.md
 R0). On MAME's AT, which runs at an AT's speed: 4.5 ms at most in a test
 build, most of it a trace line on the log, written whole; 3.5 ms without

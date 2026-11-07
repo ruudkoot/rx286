@@ -47,6 +47,7 @@ PIC2_ICW3_ID        equ 0x02        ; ICW3 slave: cascade identity 2
 PIC_ICW4_8086       equ 0x01        ; 8086 mode, normal EOI
 PIC_EOI             equ 0x20        ; OCW2: non-specific end of interrupt
 PIC_READ_ISR        equ 0x0B        ; OCW3: the next read of the command port gives ISR
+PIC_READ_IRR        equ 0x0A        ;    and IRR (TEST_STRETCH builds, P15)
 PIC_CASCADE_IRQ     equ 2
 
 ; ---------------------------------------------------------------- 8254 timer
@@ -55,6 +56,7 @@ PIT_CH1             equ 0x041       ; DRAM refresh: never touched
 PIT_CH2             equ 0x042       ; the speaker
 PIT_MODE            equ 0x043
 PIT_CH0_LOHI_MODE3  equ 0x36        ; channel 0, low then high byte, square wave, binary
+PIT_CH0_LOHI_MODE2  equ 0x34        ;    as a rate generator (TEST_STRETCH builds, P15)
 PIT_CH2_LOHI_MODE3  equ 0xB6        ; channel 2, the same
 PIT_LATCH_CH0       equ 0x00        ; latch channel 0's count: the next two reads give it
 PIT_INPUT_HZ        equ 1193182

@@ -1462,6 +1462,8 @@ kc_thread:
         je .suspend
         cmp al, THREAD_FRAME
         je .frame
+        cmp al, THREAD_FPU
+        je .fpu
         cmp byte [es:T_STATE], TS_STOPPED
         je .stopped
         cmp byte [es:T_STATE], TS_FREE
@@ -1471,6 +1473,24 @@ kc_thread:
         cmp al, THREAD_START
         je .start
         jmp kc_done.arg
+.fpu:
+        ; another thread's 287 state into this one, not running (P15)
+        cmp byte [es:T_STATE], TS_FREE
+        je .fpu_target
+        cmp byte [es:T_STATE], TS_STOPPED
+        jne kc_done.state
+.fpu_target:
+        mov ax, [bp + FRAME_SI]
+        mov cl, CAP_THREAD
+        push bx
+        call cap_get                    ; ES:SI = the source's shadow entry
+        pop bx
+        jc kc_done.cap
+        mov dx, [es:si + SH_OBJECT]
+        call fpu_copy                   ; (BX the target, DX the source)
+        push ds
+        pop es
+        jmp kc_done.ok
 .bind:
         mov ax, [bp + FRAME_SI]         ; its notification, bound both ways
         mov cl, CAP_NOTIFY

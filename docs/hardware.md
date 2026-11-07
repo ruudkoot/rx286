@@ -66,9 +66,11 @@ numbers below are the Technical Reference's.
   the slave to IR2 (`PIC_CASCADE_IRQ`); `PIC_ICW4_8086` is ICW4; `PIC_EOI` is
   the non-specific end of interrupt; `PIC_READ_ISR` makes the next read of the
   command port return the in-service register, which tells a spurious IRQ7 or
-  IRQ15 from a real one.
+  IRQ15 from a real one; `PIC_READ_IRR` the request register, where a
+  tick waits while interrupts are off (`TEST_STRETCH` builds, P15).
 - **8254** (`PIT_*`): `PIT_CH0_LOHI_MODE3` programs channel 0 as a square wave,
-  low byte then high byte. `PIT_INPUT_HZ` is the input clock, `PIT_HZ` the
+  low byte then high byte; `PIT_CH0_LOHI_MODE2` as a rate generator, in
+  `TEST_STRETCH` builds, whose count falls by one a clock (P15). `PIT_INPUT_HZ` is the input clock, `PIT_HZ` the
   rate rx286 wants and `PIT_DIVISOR` the divisor that gives it (23864).
   `PIT_LATCH_CH0` latches channel 0's count for the game port's timing;
   `PIT_CH2_LOHI_MODE3` makes channel 2 the speaker's square wave. Channel 1

@@ -658,15 +658,27 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
     return procs[i].pid;
 }
 
+static int group_orphaned(pid_t pgid, pid_t sid);
+static int group_stopped(pid_t pgid);
+
 /* end - process i ends with a wait status: everything of it revoked (unless
  * it is already), a zombie; its children init's; its parent woken if it
  * waits, and sent SIGCHLD (lock held) */
 static void end(int i, int status, int revoke)
 {
     struct proc *p = &procs[i];
-    int k, init = entry_of(INIT_PID, P_ALIVE), parent;
+    int k, init = entry_of(INIT_PID, P_ALIVE), parent, groups = 0;
+    pid_t pgids[PROCS + 1], sids[PROCS + 1];
+    rx_u8 was[PROCS + 1];
     char line[48];
 
+    for (k = 0; k < PROCS; k++)         /* its group, its children's: orphaned */
+        if (k == i || (procs[k].state == P_ALIVE && procs[k].ppid == p->pid)) {
+            pgids[groups] = procs[k].pgid;  /*    before it ends? (P15) */
+            sids[groups] = procs[k].sid;
+            was[groups] = (rx_u8)group_orphaned(procs[k].pgid, procs[k].sid);
+            groups++;
+        }
     dev_tone_stop(i);                   /* (a tone it waits for: ended, P15) */
     if (revoke)
         root(ROOT_EXIT, p->root, 0, 0, 0, 0);
@@ -690,8 +702,46 @@ static void end(int i, int status, int revoke)
         waiters_wake(parent);
     if (parent >= 0)
         sig_send(parent, SIGCHLD);
+    for (k = 0; k < groups; k++)        /* a group orphaned now, a member of it */
+        if (!was[k] && group_orphaned(pgids[k], sids[k]) && group_stopped(pgids[k])) {
+            proc_group(pgids[k], SIGHUP);   /*    stopped: SIGHUP, then SIGCONT */
+            proc_group(pgids[k], SIGCONT);  /*    (XSH _exit; P15) */
+        }
     if (p->pid == INIT_PID)             /* D8: nothing would wait for the orphans */
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: init ended\n"));
+}
+
+/* group_orphaned - is a process group orphaned: no live member whose
+ * parent is in another group of its session (XBD 3.252; P15)? */
+static int group_orphaned(pid_t pgid, pid_t sid)
+{
+    int c, q;
+
+    for (c = 0; c < PROCS; c++) {
+        if (procs[c].state != P_ALIVE || procs[c].pgid != pgid)
+            continue;
+        q = entry_of(procs[c].ppid, P_ALIVE);
+        if (q >= 0 && procs[q].pgid != pgid && procs[q].sid == sid)
+            return 0;
+    }
+    return 1;
+}
+
+/* group_stopped - has a group a stopped member? */
+static int group_stopped(pid_t pgid)
+{
+    int c;
+
+    for (c = 0; c < PROCS; c++)
+        if (procs[c].state == P_ALIVE && procs[c].pgid == pgid && sig_stopped(c))
+            return 1;
+    return 0;
+}
+
+/* proc_orphaned - is process i's group orphaned? (server.h; P15) */
+int proc_orphaned(int i)
+{
+    return group_orphaned(proc_pgid(i), proc_sid(i));
 }
 
 /* proc_end - process i ends by a signal's default action, its server thread
@@ -732,9 +782,10 @@ static unsigned fault(int i, struct rx_kregs *r, char *line, unsigned size)
     return n;
 }
 
-/* px_fork - PX_FORK: a child, the root's copy, its thread at the IP and SP
- * libc gave (lock held) */
-static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
+/* px_fork - PX_FORK for process i from its entry t: a child, the root's
+ * copy, its thread at the IP and SP libc gave, with t's 287 state (lock
+ * held) */
+static int px_fork(int i, int t, rx_u16 ip, rx_u16 sp, int *error)
 {
     int c = entry_new();
     rx_u16 n;
@@ -752,7 +803,8 @@ static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
         *error = ENOMEM;
         return -1;
     }
-    procs[c].root = n;
+    thread_op(P_SLOT(c, PK_THREAD), THREAD_FPU, P_SLOT(t, PK_THREAD), 0, 0);
+    procs[c].root = n;                  /* (the forking thread's 287 too: XSH fork, P15) */
     procs[c].code = procs[i].code;
     vfs_forked(c, i);
     sig_start(c, i, SIG_FROM_FORK);
@@ -1298,7 +1350,7 @@ static int handle(int i, struct rx_kregs *r)
         result = vfs_call(i, data, r, &error, &status);
         break;
     case PX_FORK:
-        result = px_fork(p, r->bx, r->cx, &error);
+        result = px_fork(p, i, r->bx, r->cx, &error);
         break;
     case PX_EXECVE:
         result = path_in(i, r->si, path, &error);

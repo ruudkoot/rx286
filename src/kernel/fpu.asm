@@ -88,7 +88,7 @@ fpu_nm:
 
 ; ----------------------------------------------------------------------------
 ; fpu_reset_thread - the running thread's program starts again: its 287
-; starts clean
+; starts clean; at a first start, a state THREAD_FPU gave it is kept (P15)
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -98,6 +98,13 @@ fpu_reset_thread:
         push es
         mov bx, [cur_thread]
         mov es, bx
+        cmp byte [es:T_FPU_VALID], FPU_GIVEN
+        jne .reset
+        mov byte [es:T_FPU_VALID], 1    ; given: kept, once
+        pop es
+        pop bx
+        ret
+.reset:
         mov byte [es:T_FPU_VALID], 0
         pop es
         cmp bx, [fpu_owner]
@@ -106,6 +113,52 @@ fpu_reset_thread:
         fninit
 .done:
         pop bx
+        ret
+
+; ----------------------------------------------------------------------------
+; fpu_copy - a thread's 287 state as another's (THREAD_FPU, a fork's child:
+; XSH fork's copy of the floating-point environment; os-server.md P15): the
+; source's saved state, or, if the source owns the 287, its state saved and
+; put straight back, so that it owns it still
+;   In:       BX = the target (not running); DX = the source; DS = SEL_KDATA;
+;             interrupts off
+;   Out:      nothing
+;   Destroys: AX, CX, SI, DI, ES
+; ----------------------------------------------------------------------------
+fpu_copy:
+        cmp bx, [fpu_owner]
+        jne .source
+        mov word [fpu_owner], 0         ; (its old state goes: the copy replaces it)
+.source:
+        cmp dx, [fpu_owner]
+        jne .saved
+        clts                            ; (TS is set: the caller does not own it)
+        xor al, al                      ; BUSY released first, as fpu_nm does
+        out FPU_CLEAR_BUSY, al
+        mov es, dx
+        fnsave [es:T_FPU]
+        frstor [es:T_FPU]
+        mov byte [es:T_FPU_VALID], 1
+        smsw ax                         ; TS again: the caller still does not
+        or al, 8                        ;    own it
+        lmsw ax
+.saved:
+        mov es, dx
+        mov al, [es:T_FPU_VALID]
+        push ds
+        mov ds, dx
+        mov si, T_FPU
+        mov es, bx
+        mov di, T_FPU
+        mov cx, 94 / 2                  ; (FNSAVE's 94 bytes)
+        cld
+        rep movsw
+        pop ds
+        test al, al
+        jz .valid
+        mov al, FPU_GIVEN               ; (its first start keeps it: fpu_reset_thread)
+.valid:
+        mov [es:T_FPU_VALID], al
         ret
 
 ; ----------------------------------------------------------------------------

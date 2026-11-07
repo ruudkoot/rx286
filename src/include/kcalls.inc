@@ -126,6 +126,8 @@ THREAD_SUSPEND      equ 7   ;    SI a notification, or 0: it stops, its register
                             ;    THREAD_START resumes it where it was (os-server.md P2)
 THREAD_FRAME        equ 8   ;    of a suspended thread: BL FRAME_READ or FRAME_WRITE, SI a
                             ;    segment of the caller's, DI an offset: TFR_SIZE bytes
+THREAD_FPU          equ 9   ;    SI a thread: its 287's state copied into this one, which has
+                            ;    not started or is stopped (a fork's child: os-server.md P15)
 FRAME_READ          equ 0   ; THREAD_FRAME's BL: the thread's frame into the caller's bytes
 FRAME_WRITE         equ 1   ;    the caller's bytes into the frame (not TFR_VECTOR, TFR_ERROR;
                             ;    FLAGS: IF set, NT clear, IOPL the thread's)

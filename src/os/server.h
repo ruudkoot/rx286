@@ -201,7 +201,8 @@ rx_u16 proc_data_limit(int i);
 /* Job control (proc.c; P11; lock held): proc_is_init - is entry i init?
  * proc_stopped, proc_continued - its stop or continue, for its parent's
  * waitpid and SIGCHLD; proc_pgid, proc_sid - its group, its session;
- * proc_leads_session - is it its session's leader? proc_group - a signal
+ * proc_leads_session - is it its session's leader? proc_orphaned - is its
+ * group orphaned (XBD 3.252, P15)? proc_group - a signal
  * for every process of a group: how many there are; proc_group_in - is
  * there a group of that id in a session? */
 int proc_is_init(int i);
@@ -210,6 +211,7 @@ void proc_continued(int i);
 pid_t proc_pgid(int i);
 pid_t proc_sid(int i);
 int proc_leads_session(int i);
+int proc_orphaned(int i);
 int proc_group(pid_t pgid, int sig);
 int proc_group_in(pid_t pgid, pid_t sid);
 

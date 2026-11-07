@@ -105,7 +105,13 @@ one (blocked, it stays pending too, and its default action then drops it);
 a stop signal drops a `SIGCONT` pending, and `SIGCONT` the stop signals
 pending. The parent's `waitpid` sees a stop with `WUNTRACED`, a continue
 with `WCONTINUED`, and gets `SIGCHLD` for each unless its action has
-`SA_NOCLDSTOP`. Orphaned process groups are not yet told apart.
+`SA_NOCLDSTOP`. A process group is orphaned when no member has a parent in
+another group of its session (XBD 3.252); its members take no stop from
+`SIGTSTP`, `SIGTTIN` or `SIGTTOU` (discarded), their background reads, and
+their writes with `TOSTOP`, are `EIO`, and an exit that orphans a group
+with a stopped member sends the group `SIGHUP`, then `SIGCONT` (XSH 2.4.3,
+`_exit`; os-server.md P15). A shell's own group is one: its children's
+groups are not, the shell their parent.
 
 The shell is the terminals' job control's user (*docs/shell.md*): each
 pipeline a group, made the foreground while it runs; a job stopped keeps

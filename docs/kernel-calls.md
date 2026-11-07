@@ -192,6 +192,11 @@ E6, D7):
   stopped: `KE_STATE` (os-server.md P15).
 - **`THREAD_START`** resumes a suspended thread where it was, at the
   priority given.
+- **`THREAD_FPU`** gives a thread that has not started, or is stopped,
+  the 287 state of the thread SI names: its saved state, or the 287's own
+  if that thread owns it (saved and restored at once, so that it owns it
+  still). The thread's first start keeps it, where a start resets the 287
+  otherwise (os-server.md P15: a fork's child, XSH fork).
 
 | Offset | Constant | | Offset | Constant | |
 |---|---|---|---|---|---|

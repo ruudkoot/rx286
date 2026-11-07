@@ -165,6 +165,18 @@ int main(void)
         printf("exec: a PATH directory too long, never its tail (-1, ENOENT 2): %d, %d\n", n2,
                errno);
     }
+    {
+        char **list = malloc(16384u * sizeof(char *));  /* argv and environ of 16,383 */
+                                                        /*    each: E2BIG (P15) */
+        if (list) {
+            for (k = 0; k < 16383; k++)
+                list[k] = "";
+            list[16383] = 0;
+            n2 = posix_spawn(&pid, "/z/child", 0, 0, list, list);
+            free(list);
+            printf("exec: argv and environ of 16,383 each (E2BIG 7): %d\n", n2);
+        }
+    }
     fd = open("/b/junk", O_WRONLY | O_CREAT | O_TRUNC);
     for (k = 0; k < 10; k++)
         write(fd, junk, sizeof junk);   /* (20 KB: read, it takes the cache's 32 sectors) */

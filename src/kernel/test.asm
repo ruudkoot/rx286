@@ -1045,6 +1045,7 @@ begin_kdata
 stretch_start       dw 0                ; channel 0's count when interrupts went off
 stretch_place       dw 0                ; and where (STRETCH_BEGIN's place)
 stretch_open        db 0                ; 1 while a stretch is measured
+stretch_tick        db 0                ; a tick pending as it began (P15)
 stretch_max         dw 0                ; the longest, in the 8254's clocks
 stretch_max_place   dw 0
 stretch_logged      dw 0                ; clocks of the stretch the log took
@@ -1069,8 +1070,10 @@ end_kdata
 stretch_begin:
         mov [stretch_place], ax
         push ax
-        call pit_count
-        mov [stretch_start], ax
+        call pit_count                  ; the count first, then a tick pending: one
+        mov [stretch_start], ax         ;    that comes between is seen as pending
+        call tick_pending               ;    at the start, its wrap by the counts
+        mov [stretch_tick], al
         mov byte [stretch_open], 1
         mov word [stretch_logged], 0
         pop ax
@@ -1118,8 +1121,27 @@ stretch_end:
         mov byte [stretch_open], 0
         push ax
         push si
+        push dx
+        call tick_pending               ; a tick first, then the count: one that
+        mov dl, al                      ;    comes between shows as a wrap (P15)
+        call pit_count
+        mov dh, 0                       ; DH = the count wrapped
         mov si, [stretch_start]
-        call pit_elapsed                ; AX = the 8254's clocks
+        sub si, ax
+        jae .counted
+        add si, PIT_DIVISOR
+        inc dh
+.counted:
+        mov ax, si                      ; AX = the 8254's clocks
+        cmp byte [stretch_tick], 0      ; a tick came, none was pending at the
+        jne .measured                   ;    start, and the counts did not wrap: a
+        test dl, dl                     ;    whole period more
+        jz .measured
+        test dh, dh
+        jnz .measured
+        add ax, PIT_DIVISOR
+.measured:
+        pop dx
         cmp ax, [stretch_max]
         jbe .kept
         mov [stretch_max], ax
@@ -1248,10 +1270,11 @@ pit_count:
         ret
 
 ; ----------------------------------------------------------------------------
-; pit_elapsed - the 8254's clocks since a count of channel 0. In mode 3 the
-; count falls by two a clock from PIT_DIVISOR, twice a period; so for a span
-; under half a period (10 ms), the clocks are half the counts between, with
-; PIT_DIVISOR added if the count reloaded meanwhile
+; pit_elapsed - the 8254's clocks since a count of channel 0, a rate
+; generator in these builds (timer_init): the count falls by one a clock
+; from PIT_DIVISOR, once a period, so the clocks are the counts between,
+; with PIT_DIVISOR added if it reloaded meanwhile (P15: in mode 3 it fell
+; by two, twice a period, and a stretch past 10 ms could not be told)
 ;   In:       SI = the count then (pit_count)
 ;   Out:      AX = the clocks since
 ;   Destroys: nothing else
@@ -1261,12 +1284,25 @@ pit_elapsed:
         call pit_count
         mov dx, si
         sub dx, ax
-        jae .halve
+        jae .counted
         add dx, PIT_DIVISOR             ; it reloaded between
-.halve:
-        shr dx, 1
+.counted:
         mov ax, dx
         pop dx
+        ret
+
+; ----------------------------------------------------------------------------
+; tick_pending - is the timer's interrupt waiting in the master PIC's IRR?
+; With interrupts off a tick stays there: a whole period passed (P15)
+;   In:       interrupts off
+;   Out:      AL = 1 if so, else 0
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+tick_pending:
+        mov al, PIC_READ_IRR
+        out PIC1_CMD, al
+        in al, PIC1_CMD
+        and al, 1                       ; IRQ 0
         ret
 %endif
 

@@ -145,9 +145,9 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
   moves that many at most.
 - **stdio** is `printf`, `puts`, `putchar` and `perror`, unbuffered, a
   `printf` 128 bytes at most; there are no `FILE`s.
-- **fork** does not keep the 287's state: the child's starts as `FNINIT`
-  leaves it. A handler's frame keeps it, for a program whose executable
-  says it uses the 287 (`RXF_287`).
+- **The 287:** a fork's child starts with its parent's state, the
+  forking thread's (`THREAD_FPU`, P15); a handler's frame keeps it, for a
+  program whose executable says it uses the 287 (`RXF_287`).
 - **Not there:** `mmap`, shared memory, semaphores and message queues,
   `select`, sockets, file locks, `exec` of a script, the shell's scripts
   (`if`, `while`, `for`, functions: *Later* in the roadmap).

@@ -22,6 +22,7 @@
 
 static volatile sig_atomic_t chld, conts, usr1;
 static volatile int piped_errno;
+static int told;                        /* the pipe an orphan tells its parent by */
 
 /* on_chld, on_cont - handlers that count */
 static void on_chld(int sig)
@@ -81,6 +82,34 @@ static void *napper(void *arg)
     (void)arg;
     ticks(20);
     return 0;
+}
+
+/* on_hup - SIGHUP's handler: an orphan's group hung up, said (P15) */
+static void on_hup(int sig)
+{
+    (void)sig;
+    write(told, "h", 1);
+}
+
+/* orphan - a process whose group is orphaned once its parent, the group's
+ * leader, has ended: what it finds, said through the pipe (P15) */
+static void orphan(int stopped)
+{
+    char c;
+
+    signal(SIGHUP, on_hup);
+    if (stopped)
+        kill(getpid(), SIGSTOP);        /* its group orphaned while it is stopped */
+    while (getppid() != 1)
+        ticks(1);
+    if (!stopped) {
+        raise(SIGTSTP);                 /* discarded: it goes on */
+        write(told, "d", 1);
+        if (read(0, &c, 1) < 0 && errno == EIO)
+            write(told, "e", 1);        /* a background read: EIO, no SIGTTIN */
+    }
+    write(told, "c", 1);
+    _exit(0);
 }
 
 /* how - a waitpid status, as text */
@@ -295,8 +324,9 @@ int main(void)
     waitpid(b, &st, 0);
     pthread_join(th, 0);
 
-    if ((a = fork()) == 0) {            /* a stop pending, then a sigsuspend */
-        signal(SIGUSR1, on_usr1);
+    if ((a = fork()) == 0) {            /* a stop pending, then a sigsuspend (a */
+        setpgid(0, 0);                  /*    group of its own, which a parent of */
+        signal(SIGUSR1, on_usr1);       /*    the session's keeps from orphaned) */
         sigemptyset(&set);
         sigaddset(&set, SIGTSTP);
         sigprocmask(SIG_BLOCK, &set, 0);
@@ -307,6 +337,7 @@ int main(void)
         sigprocmask(SIG_BLOCK, 0, &now);
         _exit(n == -1 && e == EINTR && usr1 == 1 && sigismember(&now, SIGTSTP) ? 12 : 1);
     }
+    setpgid(a, a);
     waitpid(a, &st, WUNTRACED);
     printf("jobs: a stop pending for a sigsuspend: %s\n", how(st));
     kill(a, SIGCONT);
@@ -325,6 +356,28 @@ int main(void)
     setpgid(a, a);
     waitpid(a, &st, 0);
     printf("jobs: a thread's background read, SIGTTIN caught: EINTR: %s\n", how(st));
+    for (n = 0; n < 2; n++) {           /* orphaned process groups (P15) */
+        pipe(p);
+        told = p[1];
+        if ((a = fork()) == 0) {        /* a group of its own, and a child in it */
+            setpgid(0, 0);
+            if ((b = fork()) == 0)
+                orphan(n);
+            if (n)
+                waitpid(b, &st, WUNTRACED);
+            _exit(0);                   /* the group orphaned */
+        }
+        close(p[1]);
+        waitpid(a, &st, 0);
+        ready[0] = 0;
+        for (e = 0; e < 3 && read(p[0], (char *)ready + e, 1) == 1; e++)
+            ;
+        close(p[0]);
+        ((char *)ready)[e] = 0;
+        printf(n ? "jobs: an orphaned group's stopped member, SIGHUP and SIGCONT (hc): %s\n"
+               : "jobs: an orphaned group's SIGTSTP and background read (dec): %s\n",
+               (char *)ready);
+    }
     printf("jobs: done\n");
     read(0, &c, 1);                     /* (a reader again, no key left: the end) */
     return 0;

@@ -4,11 +4,11 @@
 # endpoint's list of 3,072, at once by its back link - then the endpoint,
 # its other 1,536 copies adopted with an interrupt window every 16.
 # Interrupts are off longest in a space's retype (call 09: its 8 KB zeroed
-# at once), never in a delete or a revoke (before: a delete walked its
-# older siblings, and an adoption all the children, in one stretch: the
-# longest, a revoke's, near half a tick, past which TEST_STRETCH's measure
-# cannot go). tests/programs/additions.asm, TEST_ADD_SIBLINGS; on Bochs,
-# whose timing the measure needs.
+# at once), never in a delete or a revoke, and never for half a tick
+# (before: a delete walked its older siblings, and an adoption all the
+# children, in one stretch: 21.7 ms, once the measure could tell, P15).
+# tests/programs/additions.asm, TEST_ADD_SIBLINGS; on Bochs, whose timing
+# the measure needs.
 program: additions
 define: TEST_CAPS
 define: TEST_ADD_SIBLINGS

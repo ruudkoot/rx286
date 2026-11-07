@@ -27,7 +27,7 @@ thread: a fork from a thread, its child's status (5): 5
 rx286: thread[
 thread: a thread's fault ends its process (SIGILL 4): 4
 thread: a read into the heap a lower break left (100): 100
-thread: a read whose pipe was closed under it, not the next pipe's (0): 0
+thread: a write while a read waits on an end closed under it (1, then 0): 1, 0
 thread: a thread after the main one's pthread_exit, then the end
 thread: the process's end after it (exit 0): 0
 thread: a new key in a deleted one's place, its value (none): none
