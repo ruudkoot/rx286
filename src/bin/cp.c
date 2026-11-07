@@ -13,16 +13,24 @@
 
 static char buf[512];
 
+/* last_name - a path's last name: after its last '/', or after DOS's
+ * drive ("c:readme.txt"; P15) */
+static const char *last_name(const char *path)
+{
+    const char *name = strrchr(path, '/');
+
+    return name ? name + 1 : path[0] && path[1] == ':' ? path + 2 : path;
+}
+
 /* target - where a file goes: a directory's path and the file's last name,
  * or the path itself */
 static const char *target(const char *from, const char *to, char *room)
 {
     struct stat st;
-    const char *name = strrchr(from, '/');
 
     if (stat(to, &st) < 0 || !S_ISDIR(st.st_mode))
         return to;
-    snprintf(room, PATH_MAX, "%s/%s", to, name ? name + 1 : from);
+    snprintf(room, PATH_MAX, "%s/%s", to, last_name(from));
     return room;
 }
 
@@ -30,6 +38,7 @@ static const char *target(const char *from, const char *to, char *room)
 int main(int argc, char **argv)
 {
     char room[PATH_MAX];
+    struct stat from, to;
     int in, out, n;
 
     if (argc != 3) {
@@ -41,6 +50,11 @@ int main(int argc, char **argv)
         return 1;
     }
     argv[2] = (char *)target(argv[1], argv[2], room);
+    if (fstat(in, &from) == 0 && stat(argv[2], &to) == 0 && from.st_dev == to.st_dev
+            && from.st_ino == to.st_ino) {  /* itself: O_TRUNC would empty it (P15) */
+        write(2, "cp: a file onto itself\n", 23);
+        return 1;
+    }
     if ((out = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
         perror(argv[2]);
         return 1;

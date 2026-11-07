@@ -54,7 +54,8 @@ int main(void)
 {
     struct stat st;
     char cwd[32];
-    int fd, fd2, i, n, status, same;
+    int fd, fd2, i, k, n, status, same;
+    long l1, l2, l3;
     pid_t pid;
 
     fd = open("/b/new.txt", O_WRONLY | O_CREAT | O_TRUNC);
@@ -174,6 +175,41 @@ int main(void)
     check("into itself (-1, EINVAL 22)", rename("/b/p", "/b/p/r"));
     rmdir("/b/p/q");
     rmdir("/b/p");
+
+    fd = open("/b/far.txt", O_RDWR | O_CREAT | O_TRUNC);    /* P15's review */
+    l1 = lseek(fd, 65531L, SEEK_SET);
+    l2 = lseek(fd, 65534L, SEEK_SET);
+    l3 = lseek(fd, 0L, SEEK_CUR);
+    printf("files: lseek near 64 KB (65531 65534 65534): %ld %ld %ld\n", l1, l2, l3);
+    lseek(fd, 0L, SEEK_SET);
+    write(fd, buf, 100);
+    stat("/b/far.txt", &st);
+    l1 = (long)st.st_size;
+    fstat(fd, &st);
+    printf("files: stat and fstat of it open, 100 written (100 100): %ld %ld\n", l1,
+           (long)st.st_size);
+    close(fd);
+    unlink("/b/far.txt");
+    for (k = 0; (fd = dup(1)) >= 0; k++)
+        ;
+    n = open("/b/emf.txt", O_WRONLY | O_CREAT);
+    printf("files: a create with no descriptor left (-1, EMFILE 24): %d, errno %d\n", n, errno);
+    for (fd = 3; fd < 20; fd++)
+        close(fd);
+    check("and no file made (-1, ENOENT 2)", stat("/b/emf.txt", &st));
+    check("a file's name and a slash (-1, ENOTDIR 20)", open("/b/pad.txt/", O_RDONLY));
+    check("a new name and a slash, made (-1, EISDIR 21)", open("/b/new2/", O_WRONLY | O_CREAT));
+    check("a new name made as a directory (-1, ENOTDIR 20)",
+          open("/b/h", O_RDONLY | O_CREAT | O_DIRECTORY));
+    check("and no file made (-1, ENOENT 2)", stat("/b/h", &st));
+    mkdir("/b/e", 0755);
+    chdir("/b/e");
+    check("rename my directory (0)", rename("/b/e", "/b/f"));
+    printf("files: getcwd after it (/b/F): %s\n", getcwd(cwd, sizeof cwd) ? cwd : "(error)");
+    check("rmdir my directory (-1, EBUSY 16)", rmdir("/b/f"));
+    check("rmdir . (-1, EINVAL 22)", rmdir("."));
+    chdir("/");
+    check("rmdir it once I left it (0)", rmdir("/b/f"));
     printf("files: done\n");
     return 0;
 }

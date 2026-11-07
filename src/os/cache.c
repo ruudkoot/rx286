@@ -7,7 +7,9 @@
  * it goes. The file system's FAT and directory sectors are written at the
  * end of the call that changed them (cache_meta, cache_flush_meta), each
  * once however often the call changed it; a file's data at its close, its
- * fsync or its eviction. A sector the driver refuses to write is dropped.
+ * fsync or its eviction. A sector the driver refuses to write is dropped;
+ * one an eviction could not write is said by its drive's next flush, a
+ * close's or an fsync's, not by the call that needed the room (P15).
  * Every call is made with the lock held (proc.c's lock_take).
  * ============================================================================ */
 
@@ -23,6 +25,8 @@ struct cached {
 };
 
 static struct cached cache[CACHE_SECTORS];
+static rx_u16 lost[DRIVES];             /* a dirty sector an eviction could not write: the
+                                           drive's next flush says so (P15) */
 static rx_u16 clock;
 static int ready;                       /* the segment is there */
 
@@ -79,8 +83,8 @@ rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
             oldest = k;
     }
     k = oldest;
-    if (cache[k].state >= C_DIRTY && (error = put(k)) != 0)
-        return error;
+    if (cache[k].state >= C_DIRTY && (error = put(k)) != 0 && !lost[cache[k].drive])
+        lost[cache[k].drive] = error;   /* (dropped: not this call's error, its owner's) */
     cache[k].state = C_EMPTY;
     if (fill && (error = disk_call(DRV_DISK_READ, drive, sector, CACHE_SEG,
                                    (rx_u16)(k * SECTOR_SIZE))) != 0)
@@ -140,5 +144,8 @@ rx_u16 cache_flush(unsigned drive)
         if (cache[k].state >= C_DIRTY && cache[k].drive == drive && (error = put(k)) != 0
                 && !first)
             first = error;
+    if (!first)
+        first = lost[drive];            /* an eviction's since the last flush */
+    lost[drive] = 0;
     return first;
 }

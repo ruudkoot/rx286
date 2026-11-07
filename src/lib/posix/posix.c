@@ -174,11 +174,18 @@ int brk(void *end)
 void *sbrk(int increment)
 {
     struct rx_kregs r;
-    int old = px(PX_BRK, 0, 0, 0, 0, &r);
+    rx_u16 old;
+    rx_i32 end;
 
-    if (old == -1)
+    if (px(PX_BRK, 0, 0, 0, 0, &r) < 0)
         return (void *)-1;
-    if (increment && px(PX_BRK, (rx_u16)(old + increment), 0, 0, 0, &r) == -1)
+    old = r.si;                         /* the break (P15: SI, never the result) */
+    end = (rx_i32)old + increment;
+    if (end < 0 || end > 0xFFFF) {      /* past the data segment's 64 KB, or below 0 */
+        errno = ENOMEM;
+        return (void *)-1;
+    }
+    if (increment && px(PX_BRK, (rx_u16)end, 0, 0, 0, &r) < 0)
         return (void *)-1;
     return (void *)(unsigned)old;
 }

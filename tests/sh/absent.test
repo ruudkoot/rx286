@@ -2,14 +2,18 @@
 # driver finds none, /d is an error, never a hang, and C works on. On
 # MAME's AT the disks are IDE drives, D the second: the driver selects C
 # before the controller's reset, which D's failure brings, as well as after.
+# A PATH through the missing drive finds nothing there, and says so (P15).
 program: sh
 media: D absent
 emulators: bochs mame
-keys: ls /d; ls c:/docs\n
+keys: ls /d; ls c:/docs\nexport PATH=/z:/d/bin; nosuch; echo [$?]\n
 ---
 rx286, test build
 /a$ ls /d; ls c:/docs
 /d: input/output error
 HELLO.TXT
 PRINTME.TXT
+/a$ export PATH=/z:/d/bin; nosuch; echo [$?]
+sh: nosuch: no such file or directory
+[127]
 /a$

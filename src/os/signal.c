@@ -198,15 +198,18 @@ int sig_stopped(int i)
 }
 
 /* sig_takes - would process i take a signal now, neither ignored nor
- * blocked? (server.h) */
+ * blocked? (server.h; a thread's entry: its process's, P15) */
 int sig_takes(int i, int sig)
 {
+    i = proc_leader(i);
     return !(sigs[i].blocked & bit(sig)) && sigs[i].act[sig].handler != PX_SIG_IGN;
 }
 
-/* sig_caught - has process i a handler for a signal? (server.h) */
+/* sig_caught - has process i a handler for a signal? (server.h; a
+ * thread's entry: its process's) */
 int sig_caught(int i, int sig)
 {
+    i = proc_leader(i);
     return sigs[i].act[sig].handler > PX_SIG_IGN;
 }
 
@@ -214,6 +217,7 @@ int sig_caught(int i, int sig)
  * (server.h) */
 int sig_nocldstop(int i)
 {
+    i = proc_leader(i);
     return (sigs[i].act[SIGCHLD].flags & SA_NOCLDSTOP) != 0;
 }
 
@@ -570,7 +574,20 @@ int sig_call(int i, struct rx_kregs *r, int *error)
         s->restore = s->blocked;
         s->restoring = 1;
         s->blocked = set & ~UNBLOCKABLE;
-        while (!sig_ready(i)) {
+        for (;;) {                      /* a stop's default, taken here: the mask */
+            sig = sig_ready(i);         /*    back, the call made again (P15) */
+            if (sig && s->act[sig].handler == PX_SIG_DFL && stops(sig)) {
+                s->pending &= ~bit(sig);
+                stop(i, sig);
+            }
+            if (s->stopped) {
+                s->blocked = s->restore;
+                s->restoring = 0;
+                *error = ERESTART;
+                return -1;
+            }
+            if (sig)
+                break;                  /* a handler's, or an end's (sig_step's) */
             lock_give();
             proc_sleep(i);
             lock_take(PROC_NOTIFY(i));

@@ -15,6 +15,7 @@ emulators: bochs mame
 thread: eight threads, 300 rounds each, under a mutex (2400): 2400
 thread: their results joined (280): 280
 thread: once (1): 1; a key's destructor, for each (7): 7
+thread: a once inside a once (1): 1
 thread: a consumer's sum of 20 items, by a condition (210): 210
 thread: errno, its own and the main thread's (9 2): 9 2
 thread: a mutex held, its waiter asleep (0, 2): 0, 2

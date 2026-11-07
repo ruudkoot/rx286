@@ -5,19 +5,22 @@
  * (TEST_POSIX_JOBS) from /z as "jobs". It makes a session whose terminal it
  * is, then groups: their refusals, kill to a group, stops and continues
  * and what waitpid and SIGCHLD say of them, a stop in a pipe's read, ^Z
- * for a reader in the foreground, SIGTTIN and SIGTTOU for the background.
+ * for a reader in the foreground, SIGTTIN and SIGTTOU for the background;
+ * then P15's review: a thread's background write, a group gone whose entry
+ * a thread took, a stop pending for a sigsuspend.
  * ============================================================================ */
 
 #include <stdio.h>
 #include "errno.h"
 #include "fcntl.h"
+#include "pthread.h"
 #include "signal.h"
 #include "termios.h"
 #include "time.h"
 #include "unistd.h"
 #include "sys/wait.h"
 
-static volatile sig_atomic_t chld, conts;
+static volatile sig_atomic_t chld, conts, usr1;
 
 /* on_chld, on_cont - handlers that count */
 static void on_chld(int sig)
@@ -33,6 +36,21 @@ static void on_cont(int sig)
     conts++;
 }
 
+/* on_usr1 - SIGUSR1's handler */
+static void on_usr1(int sig)
+{
+    (void)sig;
+    usr1++;
+}
+
+/* writer - a thread's write to the terminal */
+static void *writer(void *arg)
+{
+    (void)arg;
+    printf("jobs: a thread's background write, SIGTTOU ignored\n");
+    return 0;
+}
+
 /* ticks - a sleep of n ticks */
 static void ticks(long n)
 {
@@ -41,6 +59,14 @@ static void ticks(long n)
     t.tv_sec = 0;
     t.tv_nsec = n * 20000000L;
     nanosleep(&t, 0);
+}
+
+/* napper - a thread that waits a while */
+static void *napper(void *arg)
+{
+    (void)arg;
+    ticks(20);
+    return 0;
 }
 
 /* how - a waitpid status, as text */
@@ -71,6 +97,8 @@ int main(void)
 {
     struct sigaction act;
     struct termios t;
+    pthread_t th;
+    sigset_t set, now;
     pid_t me, a, b;
     int st = 0, n, e, p[2], ready[2];
     char c;
@@ -220,6 +248,58 @@ int main(void)
     printf("jobs: tcsetpgrp from the background: %s\n", how(st));
     kill(a, SIGKILL);
     waitpid(a, &st, 0);
+
+    t.c_lflag |= TOSTOP;                /* P15: a thread's, judged by its process */
+    tcsetattr(0, TCSANOW, &t);
+    if ((a = fork()) == 0) {
+        setpgid(0, 0);
+        signal(SIGTTOU, SIG_IGN);
+        pthread_create(&th, 0, writer, 0);
+        pthread_join(th, 0);
+        _exit(11);
+    }
+    setpgid(a, a);
+    waitpid(a, &st, 0);
+    printf("jobs: ... it went: %s\n", how(st));
+    t.c_lflag &= (tcflag_t)~TOSTOP;
+    tcsetattr(0, TCSANOW, &t);
+
+    if ((a = fork()) == 0) {            /* a group gone, its entry a thread's */
+        setpgid(0, 0);
+        _exit(0);
+    }
+    setpgid(a, a);
+    waitpid(a, &st, 0);
+    pthread_create(&th, 0, napper, 0);
+    if ((b = fork()) == 0) {
+        ticks(10);
+        _exit(0);
+    }
+    n = setpgid(b, a);
+    e = errno;
+    printf("jobs: setpgid into a group gone (-1, EPERM 1): %d, %d\n", n, e == EPERM);
+    waitpid(b, &st, 0);
+    pthread_join(th, 0);
+
+    if ((a = fork()) == 0) {            /* a stop pending, then a sigsuspend */
+        signal(SIGUSR1, on_usr1);
+        sigemptyset(&set);
+        sigaddset(&set, SIGTSTP);
+        sigprocmask(SIG_BLOCK, &set, 0);
+        raise(SIGTSTP);
+        sigemptyset(&set);
+        n = sigsuspend(&set);
+        e = errno;
+        sigprocmask(SIG_BLOCK, 0, &now);
+        _exit(n == -1 && e == EINTR && usr1 == 1 && sigismember(&now, SIGTSTP) ? 12 : 1);
+    }
+    waitpid(a, &st, WUNTRACED);
+    printf("jobs: a stop pending for a sigsuspend: %s\n", how(st));
+    kill(a, SIGCONT);
+    ticks(10);
+    kill(a, SIGUSR1);
+    waitpid(a, &st, 0);
+    printf("jobs: ... continued, it waited on for a handler, its mask back: %s\n", how(st));
     printf("jobs: done\n");
     read(0, &c, 1);                     /* (a reader again, no key left: the end) */
     return 0;

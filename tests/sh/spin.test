@@ -1,11 +1,12 @@
 # A program that spins holds neither the machine nor its terminal
 # (roadmap os-server.md P12): the shell runs another in the background,
 # and ^C, typed though nobody reads, ends it in the foreground. (It spins
-# at the shell's priority: fg gives it the terminal within a few slices.)
+# at the shell's priority: fg gives it the terminal within a few slices.
+# The wait after `spin &` lets it say so before the next line is echoed.)
 program: sh
 emulators: bochs mame
 install: C /BIN/SPIN z-spin.rx
-keys: spin &\necho beside it\nfg\n{wait 50}{now ctrl-c}echo $?\n
+keys: spin &\n{wait 50}echo beside it\nfg\n{wait 50}{now ctrl-c}echo $?\n
 match: contains
 ---
 /a$ spin &

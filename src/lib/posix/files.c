@@ -55,9 +55,9 @@ off_t lseek(int fd, off_t offset, int whence)
     int low = px(PX_LSEEK, (rx_u16)fd, (rx_u16)((rx_u32)offset >> 16), (rx_u16)offset,
                  (rx_u16)whence, &high);
 
-    if (low == -1 && errno && high == 0xFFFF)
+    if (low < 0)
         return -1;
-    return (off_t)((rx_u32)high << 16 | (rx_u16)low);
+    return (off_t)((rx_u32)high << 15 | (rx_u16)low);  /* (SI the offset's bits 15-30) */
 }
 
 /* dup, dup2 - PX_DUP, PX_DUP2 */

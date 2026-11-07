@@ -19,7 +19,7 @@ int main(int argc, char **argv)
         return 1;
     }
     for (d = argv[1]; *d; d++) {
-        if (*d < '0' || *d > '9' || seconds > 6553) {
+        if (*d < '0' || *d > '9' || seconds > 6553 || (seconds == 6553 && *d > '5')) {
             write(2, usage, sizeof usage - 1);
             return 1;
         }

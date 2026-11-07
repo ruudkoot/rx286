@@ -61,4 +61,17 @@ files: a write past what B holds (-1, EFBIG 27): -1, errno 27
 files: and the file as it was (3002): 3002
 files: rename a directory into its own (-1, EINVAL 22): -1, errno 22
 files: into itself (-1, EINVAL 22): -1, errno 22
+files: lseek near 64 KB (65531 65534 65534): 65531 65534 65534
+files: stat and fstat of it open, 100 written (100 100): 100 100
+files: a create with no descriptor left (-1, EMFILE 24): -1, errno 24
+files: and no file made (-1, ENOENT 2): -1, errno 2
+files: a file's name and a slash (-1, ENOTDIR 20): -1, errno 20
+files: a new name and a slash, made (-1, EISDIR 21): -1, errno 21
+files: a new name made as a directory (-1, ENOTDIR 20): -1, errno 20
+files: and no file made (-1, ENOENT 2): -1, errno 2
+files: rename my directory (0): 0
+files: getcwd after it (/b/F): /b/F
+files: rmdir my directory (-1, EBUSY 16): -1, errno 16
+files: rmdir . (-1, EINVAL 22): -1, errno 22
+files: rmdir it once I left it (0): 0
 files: done

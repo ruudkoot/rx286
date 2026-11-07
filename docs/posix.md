@@ -119,7 +119,9 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
   `nice` any other (os-server.md's follow-up roadmap adds them).
 - **FAT12.** Names are 8.3, in any case, kept upper case; there are no
   links (`st_nlink` 1), no device or inode numbers beyond a drive and an
-  entry's place, and times to DOS's two seconds.
+  entry's place (`st_ino` is its directory's cluster and its index there,
+  in 16 bits: two entries can share one in a large directory), and times
+  to DOS's two seconds.
 - **Below the least limits:** `PATH_MAX`, `CHILD_MAX` and
   `PTHREAD_THREADS_MAX` (the table above): the server's data segment, which
   holds every thread's stack, is the bound (roadmap os-server.md, D4).
@@ -130,6 +132,8 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 - **Time:** the real-time clock is taken as UTC; there are no time zones.
 - **Terminals:** `VTIME` is not kept; the control modes are kept and do
   nothing.
+- **A count past `SSIZE_MAX`** (32,767) for `read`, `write` or `getdents`
+  moves that many at most.
 - **stdio** is `printf`, `puts`, `putchar` and `perror`, unbuffered, a
   `printf` 128 bytes at most; there are no `FILE`s.
 - **fork** does not keep the 287's state: the child's starts as `FNINIT`

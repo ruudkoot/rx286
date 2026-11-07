@@ -4,7 +4,9 @@
 # group, SIGSTOP and SIGCONT as waitpid (WUNTRACED, WCONTINUED) and SIGCHLD
 # see them, SA_NOCLDSTOP, a stop in a pipe's read, ^Z for the foreground's
 # reader, SIGTTIN and EIO for a background reader, SIGTTOU for a
-# background writer with TOSTOP and for tcsetpgrp.
+# background writer with TOSTOP and for tcsetpgrp; then (P15) a thread's
+# background write while its process ignores SIGTTOU, setpgid into a group
+# gone whose entry a thread took, and a stop pending for a sigsuspend.
 program: none
 define: TEST_POSIX_JOBS
 keys: {ctrl-z}
@@ -32,4 +34,9 @@ jobs: a background write without TOSTOP
 jobs: ... it went: exit 10
 jobs: a background write with TOSTOP: stopped 22
 jobs: tcsetpgrp from the background: stopped 22
+jobs: a thread's background write, SIGTTOU ignored
+jobs: ... it went: exit 11
+jobs: setpgid into a group gone (-1, EPERM 1): -1, 1
+jobs: a stop pending for a sigsuspend: stopped 20
+jobs: ... continued, it waited on for a handler, its mask back: exit 12
 jobs: done

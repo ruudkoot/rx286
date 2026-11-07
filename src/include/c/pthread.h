@@ -33,7 +33,7 @@ typedef struct {
 } pthread_cond_t;
 
 typedef struct {
-    int done;
+    int state;                          /* 0 not yet, 1 its routine running, 2 done */
 } pthread_once_t;
 
 #define PTHREAD_CREATE_JOINABLE 0

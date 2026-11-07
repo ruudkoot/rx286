@@ -37,7 +37,7 @@ static void waited(const char *what, pid_t pid)
 /* main - each call, and how it refuses */
 int main(void)
 {
-    char pid_text[8], *argv[4], *heap;
+    char pid_text[8], *argv[4], *heap, *big;
     pid_t pid, children;
     int i, status;
 
@@ -100,7 +100,6 @@ int main(void)
     printf("proc: 3000 bytes of heap: %s; the break moved: %s\n", heap ? "yes" : "no",
            sbrk(0) > (void *)heap ? "yes" : "no");
     free(heap);
-
     for (children = 0; (pid = fork()) > 0; children++)
         ;
     if (pid == 0)
@@ -109,6 +108,20 @@ int main(void)
     for (i = 0; wait(&status) > 0; i++)
         ;
     printf("proc: all %d reaped; then ECHILD (10): %d\n", i, errno);
+
+    /* past 32 KB and 64 KB (P15); last, since a fork would copy all of it */
+    big = malloc(0x7000);
+    heap = malloc(0x1800);
+    printf("proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): %s %s %s\n",
+           big ? "yes" : "no", heap ? "yes" : "no", malloc(0x8000) ? "yes" : "no");
+    if (big && heap) {
+        memset(big, 1, 0x7000);
+        memset(heap, 2, 0x1800);
+    }
+    printf("proc: and they whole: %s\n", big && heap && big[0x6FFF] == 1 && heap[0x17FF] == 2
+           ? "yes" : "no");
+    free(heap);
+    free(big);
     printf("proc: done\n");
     return 0;
 }

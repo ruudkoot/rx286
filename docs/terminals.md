@@ -92,9 +92,12 @@ has it. `kill` takes a pid, 0 for the caller's group, -1 for every process
 (init aside), or a group as a negative number.
 
 A stop marks the process's threads to stop and holds them stopped. A call
-one waits in (a pipe, the terminal, `waitpid`, `poll`) ends with
+one waits in (the terminal, `waitpid`, `poll`, a device) ends with
 `ERESTART`, so that libc makes it again once the process continues: a stop
-is never `EINTR`. `SIGCONT` continues it, as it is sent, whatever its
+is never `EINTR`. A pipe's read or write waits on through the stop, and
+its thread, answered, stays stopped until the process continues. A
+`sigsuspend` takes a stop signal it unblocks there, gives the mask back
+and ends with `ERESTART`, so that it waits again once continued. `SIGCONT` continues it, as it is sent, whatever its
 action, and runs its handler first if it has one; a stop signal drops a
 `SIGCONT` pending, and `SIGCONT` the stop signals pending. The parent's
 `waitpid` sees a stop with `WUNTRACED`, a continue with `WCONTINUED`, and

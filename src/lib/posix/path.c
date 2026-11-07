@@ -44,8 +44,16 @@ static const char *found(const char *list, const char *name, char *room)
     return *list == ':' ? list + 1 : *list ? list : 0;
 }
 
+/* unsearchable - an error that says a PATH directory cannot be searched (a
+ * drive that is not there, a file named as a directory): not found there,
+ * the search goes on (P15) */
+static int unsearchable(int e)
+{
+    return e == ENOENT || e == ENOTDIR || e == EIO || e == ENXIO;
+}
+
 /* execvp - execv, a name without a slash looked for along PATH; back only
- * on an error: the last directory's, ENOENT if none had the file */
+ * on an error: a file's that was refused, ENOENT if none was found */
 int execvp(const char *name, char *const argv[])
 {
     char path[PX_PATH_MAX];
@@ -60,7 +68,7 @@ int execvp(const char *name, char *const argv[])
         list = found(list, name, path);
         if (path[0]) {
             execv(path, argv);
-            if (errno != ENOENT)
+            if (!unsearchable(errno))
                 error = errno;
         }
     }
@@ -84,8 +92,10 @@ int posix_spawnp(pid_t *pid, const char *name, const posix_spawn_file_actions_t 
         list = found(list, name, path);
         if (path[0]) {
             e = posix_spawn(pid, path, actions, attributes, argv, envp);
-            if (e != ENOENT)
-                return e;
+            if (e == 0)
+                return 0;
+            if (!unsearchable(e))
+                error = e;              /* (a file there, refused: said if none is found) */
         }
     }
     return error;

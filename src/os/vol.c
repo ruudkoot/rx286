@@ -104,12 +104,15 @@ static rx_u16 fat_at(struct vol *v, unsigned copy, rx_u16 at, int *slot, rx_u16 
                                         + at / SECTOR_SIZE), 1, slot);
 }
 
-/* vol_fat_get - a cluster's FAT entry */
+/* vol_fat_get - a cluster's FAT entry; E_BROKEN for a cluster outside the
+ * volume, whose "entry" would lie past the FAT (P15) */
 rx_u16 vol_fat_get(struct vol *v, rx_u16 cluster, rx_u16 *next)
 {
     rx_u16 at = (rx_u16)(cluster + cluster / 2), in, error, word;
     int slot;
 
+    if (cluster < FAT12_FIRST_CLUSTER || cluster >= v->clusters + FAT12_FIRST_CLUSTER)
+        return E_BROKEN;
     if ((error = fat_at(v, 0, at, &slot, &in)) != 0)
         return error;
     word = cache_bytes(slot)[in];
@@ -135,12 +138,15 @@ static rx_u16 fat_put(struct vol *v, unsigned copy, rx_u16 at, rx_u8 mask, rx_u8
     return 0;
 }
 
-/* vol_fat_set - a cluster's FAT entry, in every copy of the FAT */
+/* vol_fat_set - a cluster's FAT entry, in every copy of the FAT; E_BROKEN
+ * for a cluster outside the volume */
 rx_u16 vol_fat_set(struct vol *v, rx_u16 cluster, rx_u16 value)
 {
     rx_u16 at = (rx_u16)(cluster + cluster / 2), error;
     unsigned copy;
 
+    if (cluster < FAT12_FIRST_CLUSTER || cluster >= v->clusters + FAT12_FIRST_CLUSTER)
+        return E_BROKEN;
     for (copy = 0; copy < v->fats; copy++) {
         if (cluster & 1)                /* the upper 12 bits of the two bytes */
             error = fat_put(v, copy, at, 0xF0, (rx_u8)(value << 4))
@@ -175,10 +181,7 @@ rx_u16 vol_alloc(struct vol *v, rx_u16 prev, int zero, rx_u16 *cluster)
             return error;
         if (value != FAT12_FREE)
             continue;
-        if ((error = vol_fat_set(v, c, FAT12_LAST)) != 0
-                || (prev && (error = vol_fat_set(v, prev, c)) != 0))
-            return error;
-        for (k = 0; zero && k < v->cluster_sectors; k++) {
+        for (k = 0; zero && k < v->cluster_sectors; k++) {  /* zeroed before it is linked */
             if ((error = cache_get(v->drive, (rx_u16)(vol_cluster_sector(v, c) + k), 0,
                                    &slot)) != 0)
                 return error;
@@ -187,6 +190,9 @@ rx_u16 vol_alloc(struct vol *v, rx_u16 prev, int zero, rx_u16 *cluster)
                 p[i] = 0;
             cache_meta(slot);
         }
+        if ((error = vol_fat_set(v, c, FAT12_LAST)) != 0
+                || (prev && (error = vol_fat_set(v, prev, c)) != 0))
+            return error;
         v->next_free = (rx_u16)(c + 1);
         *cluster = c;
         return 0;
@@ -271,6 +277,8 @@ rx_u16 vol_dir_find(struct vol *v, rx_u16 dir, const rx_u8 *name, struct place *
     int end, k;
 
     for (i = 0;; i++) {
+        if (i == 0xFFFF)
+            return E_BROKEN;            /* (a chain that loops: P15) */
         if ((error = vol_dir_entry(v, dir, i, where, entry, &end)) != 0)
             return error;
         if (end || entry[DIR_NAME] == DIR_END)
@@ -309,6 +317,8 @@ rx_u16 vol_dir_add(struct vol *v, rx_u16 dir, const rx_u8 *entry, struct place *
     int end;
 
     for (i = 0;; i++) {
+        if (i == 0xFFFF)
+            return E_BROKEN;            /* (a chain that loops: P15) */
         if ((error = vol_dir_entry(v, dir, i, where, old, &end)) != 0)
             return error;
         if (end)
@@ -341,6 +351,8 @@ rx_u16 vol_dir_empty(struct vol *v, rx_u16 dir, int *empty)
 
     *empty = 1;
     for (i = 0;; i++) {
+        if (i == 0xFFFF)
+            return E_BROKEN;            /* (a chain that loops: P15) */
         if ((error = vol_dir_entry(v, dir, i, &where, entry, &end)) != 0)
             return error;
         if (end || entry[DIR_NAME] == DIR_END)

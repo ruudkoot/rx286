@@ -23,8 +23,9 @@ int main(int argc, char **argv)
     }
     to = argv[2];
     if (stat(to, &st) == 0 && S_ISDIR(st.st_mode)) {
-        name = strrchr(argv[1], '/');
-        snprintf(room, sizeof room, "%s/%s", to, name ? name + 1 : argv[1]);
+        name = strrchr(argv[1], '/');   /* its last name; after DOS's drive too (P15) */
+        snprintf(room, sizeof room, "%s/%s", to, name ? name + 1
+                 : argv[1][0] && argv[1][1] == ':' ? argv[1] + 2 : argv[1]);
         to = room;
     }
     if (rename(argv[1], to) < 0) {

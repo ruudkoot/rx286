@@ -39,8 +39,10 @@ static void *taken(size_t size)
             return b + 1;
         }
     }
-    b = (struct block *)sbrk((int)(units * UNIT));
-    if (b == (struct block *)-1)
+    b = (struct block *)sbrk(0);        /* the end in 32 bits: a request of 32 KB or */
+    if (b == (struct block *)-1         /*    more is no negative increment (P15) */
+            || (rx_u32)(unsigned)b + units * UNIT > 0xFFFF
+            || brk((char *)b + units * UNIT) < 0)
         return 0;
     b->units = units;
     return b + 1;

@@ -175,6 +175,26 @@ void tty_flush(int unit)
     t->head = t->count = t->lines = t->edit = 0;
 }
 
+/* recount - a queue's complete lines and the bytes after the last, counted
+ * again: none if not canonical (its modes set, P15) */
+static void recount(struct tty *t)
+{
+    rx_u16 k, v;
+
+    t->lines = t->edit = 0;
+    if (!(t->lflag & ICANON))
+        return;
+    for (k = 0; k < t->count; k++) {
+        v = t->q[(t->head + k) % QUEUE];
+        if (v == EOF_MARK || v == '\n' || is(t, (rx_u8)v, VEOL)) {
+            t->lines++;
+            t->edit = 0;
+        } else {
+            t->edit++;
+        }
+    }
+}
+
 /* erase - the line edited's last byte gone, echoed as BS SP BS */
 static void erase(struct tty *t)
 {
@@ -220,6 +240,8 @@ static void input(rx_u8 c)
             return;
         }
         if (is(t, c, VEOF)) {
+            if (t->count >= QUEUE)
+                return;                 /* (no room: P15) */
             push(t, EOF_MARK);
             t->lines++;
             t->edit = 0;
@@ -386,8 +408,9 @@ int tty_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n)
             break;                      /* the line still edited */
         t->head = (rx_u16)((t->head + 1) % QUEUE);
         t->count--;
-        if (v == EOF_MARK) {
-            t->lines--;                 /* EOF: the bytes before it, or 0 */
+        if (v == EOF_MARK) {            /* EOF: the bytes before it, or 0 */
+            if (t->lflag & ICANON)
+                t->lines--;             /* (raw, none counted: P15) */
             break;
         }
         to[k++] = (rx_u8)v;
@@ -437,7 +460,8 @@ void tty_getattr(int unit, rx_u16 data, rx_u16 at)
 }
 
 /* tty_setattr - a terminal's termios from a process's segment (server.h):
- * TCSAFLUSH drops the input; canonical no more, the line edited is input */
+ * TCSAFLUSH drops the input; canonical no more, the line edited is input;
+ * canonical again, the lines in the queue counted (P15) */
 void tty_setattr(int unit, rx_u16 data, rx_u16 at, int action)
 {
     struct tty *t = &ttys[unit];
@@ -454,8 +478,7 @@ void tty_setattr(int unit, rx_u16 data, rx_u16 at, int action)
     t->lflag = p[TC_LFLAG / 2];
     for (k = 0; k < NCCS; k++)
         t->cc[k] = cc[k];
-    if (!(t->lflag & ICANON))
-        t->lines = t->edit = 0;
+    recount(t);
 }
 
 /* tty_controlling - process i's session's terminal, or -1 if it has none
@@ -476,8 +499,7 @@ void tty_open(int i, int unit)
 {
     struct tty *t = &ttys[unit];
 
-    if (tty_keys() && !t->session && proc_sid(i) == proc_pgid(i)
-            && proc_group_in(proc_sid(i), proc_sid(i)) && tty_controlling(i) < 0) {
+    if (tty_keys() && !t->session && proc_leads_session(i) && tty_controlling(i) < 0) {
         t->session = proc_sid(i);
         t->pgrp = proc_pgid(i);
     }
@@ -485,8 +507,9 @@ void tty_open(int i, int unit)
 
 /* tty_access - may process i read, write or set a terminal (TTY_*)? 0;
  * else, for a background group of its session, SIGTTIN or SIGTTOU sent to
- * it and VFS_RESTART (a handler's: VFS_INTR); a read that ignores or blocks
- * SIGTTIN, VFS_EIO (server.h; lock held) */
+ * it and VFS_RESTART (a handler's: VFS_INTR, but a thread's VFS_RESTART,
+ * the handler the main thread's); a read that ignores or blocks SIGTTIN,
+ * VFS_EIO (server.h; lock held) */
 int tty_access(int i, int unit, int what)
 {
     const struct tty *t = &ttys[unit];
@@ -499,7 +522,7 @@ int tty_access(int i, int unit, int what)
     if (!sig_takes(i, sig))
         return what == TTY_READ ? VFS_EIO : 0;
     proc_group(proc_pgid(i), sig);
-    return sig_caught(i, sig) ? VFS_INTR : VFS_RESTART;
+    return sig_caught(i, sig) && proc_leader(i) == i ? VFS_INTR : VFS_RESTART;
 }
 
 /* tty_pgrp - a terminal's foreground group, or 0 if no session has it

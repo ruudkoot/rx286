@@ -204,7 +204,9 @@ static void threads_end(int p)
 
     for (k = proc_next_thread(p, -1); k >= 0; k = proc_next_thread(p, k)) {
         procs[k].state = P_FREE;
-        signal_entry((unsigned)k);
+        procs[k].futexing = 0;          /* (no stale waiter for futex_wake: P15) */
+        serving[k] = -1;                /* (its call dropped, though a new thread of */
+        signal_entry((unsigned)k);      /*    the same pid take the entry: P15) */
     }
 }
 
@@ -272,7 +274,13 @@ const char *proc_name(int i)
  * call is answered (sig_renice): the value - NZERO */
 static int px_nice(int i, int increment)
 {
-    int n = procs[i].nice + increment, k;
+    int n, k;
+
+    if (increment > 2 * NZERO)          /* (no overflow of an int: P15) */
+        increment = 2 * NZERO;
+    else if (increment < -2 * NZERO)
+        increment = -2 * NZERO;
+    n = procs[i].nice + increment;
 
     procs[i].nice = (rx_u8)(n < 0 ? 0 : n > 2 * NZERO - 1 ? 2 * NZERO - 1 : n);
     sig_renice(i);
@@ -516,6 +524,26 @@ static int entry_new(void)
     return -1;
 }
 
+/* new_pid - a pid no process, group or session has: the next, wrapping
+ * from 32,767 back to 2 (P15) */
+static pid_t new_pid(void)
+{
+    pid_t pid;
+    int c, used;
+
+    do {
+        pid = next_pid;
+        next_pid = next_pid >= 32767 ? INIT_PID + 1 : next_pid + 1;
+        used = 0;
+        for (c = 0; c < PROCS; c++)
+            if (procs[c].state != P_FREE && (procs[c].pid == pid
+                    || (procs[c].state != P_THREAD
+                        && (procs[c].pgid == pid || procs[c].sid == pid))))
+                used = 1;
+    } while (used);
+    return pid;
+}
+
 /* entry_start - entry i's process alive, of an image's or its parent's, in
  * its parent's group and session, its server thread woken and its thread
  * started */
@@ -528,9 +556,11 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
 
     p->state = P_ALIVE;
     p->waiting = p->asleep = 0;
+    p->futexing = 0;
     p->nice = parent >= 0 ? procs[parent].nice : NZERO;     /* a fork's, a spawn's */
     p->report = R_NONE;
-    p->pid = next_pid++;
+    p->pid = p->pgid = p->sid = 0;      /* (its old ones are no one's now) */
+    p->pid = new_pid();
     p->ppid = ppid;
     p->pgid = parent >= 0 ? procs[parent].pgid : p->pid;     /* init's own */
     p->sid = parent >= 0 ? procs[parent].sid : p->pid;
@@ -561,8 +591,10 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
         return -1;
     *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
     image_done(&img);
-    if (*error)
+    if (*error) {
+        root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);    /* (a code it sealed, unused: P15) */
         return -1;
+    }
     procs[i].root = n;
     procs[i].code = img.code;
     vfs_spawned(i, parent);
@@ -690,13 +722,16 @@ static int px_exec(int i, int t, const char *path, rx_u16 argv, rx_u16 envp, int
     same = img.code == procs[i].code;   /* its own file again: its code kept (P12) */
     root(ROOT_EXIT, procs[i].root, (rx_u16)same, 0, 0, 0);  /* its threads, in this call, too */
     threads_end(i);
-    if (t != i)
-        serving[i] = -1;                /* (proc_still: the main thread's call dropped) */
+    if (t != i) {
+        serving[i] = -1;                /* (proc_still: the main thread's call dropped, */
+        procs[i].futexing = 0;          /*    its server thread woken out of its wait, so */
+        procs[i].waiting = 0;           /*    that it serves the new image: P15) */
+        signal_entry((unsigned)i);
+    }
     *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
     image_done(&img);
     if (*error) {
-        if (same)
-            root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);
+        root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);    /* (the root keeps a code in use) */
         end(i, SIGKILL, 0);
         return NO_REPLY;
     }
@@ -807,7 +842,7 @@ static int px_kill(int i, pid_t pid, int sig, int *error)
 static int px_brk(int i, rx_u16 end, int *error)
 {
     if (end == 0)
-        return procs[i].brk;
+        return 0;                       /* (the break: SI, handle's) */
     if (end < procs[i].brk_min) {
         *error = EINVAL;
         return -1;
@@ -818,7 +853,7 @@ static int px_brk(int i, rx_u16 end, int *error)
         return -1;
     }
     procs[i].brk = end;
-    return end;
+    return 0;
 }
 
 /* proc_group - a signal for every process of a group: how many (server.h;
@@ -841,8 +876,9 @@ int proc_group_in(pid_t pgid, pid_t sid)
 {
     int c;
 
-    for (c = 0; c < PROCS; c++)
-        if (procs[c].state != P_FREE && procs[c].pgid == pgid && procs[c].sid == sid)
+    for (c = 0; c < PROCS; c++)         /* (a thread's entry: its process's, P15) */
+        if (procs[c].state != P_FREE && procs[c].state != P_THREAD && procs[c].pgid == pgid
+                && procs[c].sid == sid)
             return 1;
     return 0;
 }
@@ -857,6 +893,13 @@ pid_t proc_pgid(int i)
 pid_t proc_sid(int i)
 {
     return procs[LEADER(i)].sid;
+}
+
+/* proc_leads_session - is process i its session's leader, its pid the
+ * session's? (server.h; P15) */
+int proc_leads_session(int i)
+{
+    return procs[LEADER(i)].pid == procs[LEADER(i)].sid;
 }
 
 /* proc_is_init - is entry i init? (server.h) */
@@ -1095,8 +1138,10 @@ static int px_futex(int i, rx_u16 op, rx_u16 at, rx_u16 value, int *error)
     give();
     proc_sleep(i);
     take(P_SLOT(i, PK_NOTIFY));
-    if (!proc_still(i))
+    if (!proc_still(i)) {
+        procs[i].futexing = 0;          /* (the entry another's now: P15) */
         return NO_REPLY;
+    }
     if (!procs[i].futexing)
         return 0;                       /* woken */
     procs[i].futexing = 0;
@@ -1185,8 +1230,9 @@ static int handle(int i, struct rx_kregs *r)
     case PX_KILL:
         result = px_kill(p, (int)r->bx, (int)r->cx, &error);
         break;
-    case PX_BRK:
+    case PX_BRK:                        /* the break in SI: never a negative result (P15) */
         result = px_brk(p, r->bx, &error);
+        status = procs[p].brk;
         break;
     case PX_SETPGID:
         result = px_setpgid(p, (pid_t)r->bx, (pid_t)r->cx, &error);

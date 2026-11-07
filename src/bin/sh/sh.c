@@ -291,6 +291,10 @@ static int lex(const char *s, int first)
             say("sh: the line is too long\n");
             return -1;
         }
+        if (!tokens[n].quoted && tokens[n].text[0] == 0) {
+            pool_used--;                /* an unquoted expansion of nothing: no field */
+            continue;                   /*    (XCU 2.6.7; P15) */
+        }
         n++;
     }
 }
@@ -683,8 +687,9 @@ static int builtin(struct command *c)
 }
 
 /* aliased - a line with the aliases of its commands' first words put in
- * (once each, not again in what they put): into out */
-static void aliased(const char *s, char *out)
+ * (once each, not again in what they put): into out; 0, or -1 if it would
+ * grow past LINE_MAX */
+static int aliased(const char *s, char *out)
 {
     char word[LINE_MAX];
     const char *value;
@@ -708,12 +713,20 @@ static void aliased(const char *s, char *out)
         }
         if (*s == '|' || *s == ';' || *s == '&')
             start = 1;
-        if (*s == '\'' || *s == '"') {          /* a quote, whole */
+        if (*s == '\\' && s[1] && n < LINE_MAX - 2) {    /* an escaped character, whole */
+            out[n++] = *s++;
+            out[n++] = *s++;
+            continue;
+        }
+        if (*s == '\'' || *s == '"') {          /* a quote, whole, its \" too (P15) */
             char q = *s;
 
             out[n++] = *s++;
-            while (*s && *s != q && n < LINE_MAX - 1)
+            while (*s && *s != q && n < LINE_MAX - 1) {
+                if (q == '"' && *s == '\\' && s[1] && n < LINE_MAX - 2)
+                    out[n++] = *s++;
                 out[n++] = *s++;
+            }
             if (*s && n < LINE_MAX - 1)
                 out[n++] = *s++;
             continue;
@@ -721,6 +734,7 @@ static void aliased(const char *s, char *out)
         out[n++] = *s++;
     }
     out[n] = 0;
+    return *s ? -1 : 0;                 /* -1: too long once its aliases are in (P15) */
 }
 
 /* run - a command in a child: its program along PATH (or a built-in) */
@@ -833,7 +847,9 @@ static const char *next_part(const char *s, char *part, int *op)
     *op = T_END;
     for (; *s; s++) {
         if (quote) {
-            if (*s == quote)
+            if (quote == '"' && *s == '\\' && s[1])
+                part[n++] = *s++;       /* \" in a double quote: no end (P15) */
+            else if (*s == quote)
                 quote = 0;
         } else if (*s == '\'' || *s == '"') {
             quote = *s;
@@ -875,7 +891,11 @@ static void run_line(const char *line)
     const char *s = text;
     int kind = T_SEMI, op, n, next;
 
-    aliased(line, text);
+    if (aliased(line, text) < 0) {
+        say("sh: the line is too long\n");
+        status = 2;
+        return;
+    }
     while (*s || kind != T_END) {
         s = next_part(s, part, &op);
         if (kind == T_SEMI || (kind == T_AND && status == 0) || (kind == T_OR && status != 0)) {
@@ -907,26 +927,30 @@ static void erase(unsigned n)
  * end */
 static int line_read(char *line)
 {
-    char in[8], cwd[PATH_MAX];
+    char c, cwd[PATH_MAX];
     unsigned n = 0, at = (unsigned)history_count;
-    int got, k;
+    int got;
 
     if (!getcwd(cwd, sizeof cwd))
         strcpy(cwd, "?");
     printf("%s$ ", cwd);
     for (;;) {
-        got = read(0, in, sizeof in);
-        if (got < 0 && errno == EINTR) {
+        got = (int)read(0, &c, 1);      /* a byte at a time: what follows the line stays */
+        if (got < 0 && errno == EINTR) {    /*    in the terminal, for a command (P15) */
             write(1, "^C\n", 3);        /* ^C: the line dropped */
             line[0] = 0;
             return 0;
         }
         if (got <= 0)
             return -1;
-        if (got == 3 && in[0] == 0x1B && in[1] == '[' && (in[2] == 'A' || in[2] == 'B')) {
-            if (in[2] == 'A' && at > 0 && history_count - at < HISTORY)
+        if (c == 0x1B) {                /* a key's sequence, whole: Up and Down recall */
+            if (read(0, &c, 1) != 1 || c != '[')
+                continue;
+            while (read(0, &c, 1) == 1 && c >= '0' && c <= ';')
+                ;                       /* (ESC [ 3 ~ and its kin: passed over) */
+            if (c == 'A' && at > 0 && history_count - at < HISTORY)
                 at--;
-            else if (in[2] == 'B' && at < (unsigned)history_count)
+            else if (c == 'B' && at < (unsigned)history_count)
                 at++;
             else
                 continue;
@@ -939,21 +963,19 @@ static int line_read(char *line)
             write(1, line, n);
             continue;
         }
-        for (k = 0; k < got; k++) {
-            if (in[k] == '\r' || in[k] == '\n') {
-                write(1, "\n", 1);
-                line[n] = 0;
-                return (int)n;
+        if (c == '\r' || c == '\n') {
+            write(1, "\n", 1);
+            line[n] = 0;
+            return (int)n;
+        }
+        if (c == '\b' || c == 0x7F) {
+            if (n) {
+                n--;
+                erase(1);
             }
-            if (in[k] == '\b' || in[k] == 0x7F) {
-                if (n) {
-                    n--;
-                    erase(1);
-                }
-            } else if (in[k] >= ' ' && in[k] < 0x7F && n < LINE_MAX - 1) {
-                line[n++] = in[k];
-                write(1, &in[k], 1);
-            }
+        } else if (c >= ' ' && c < 0x7F && n < LINE_MAX - 1) {
+            line[n++] = c;
+            write(1, &c, 1);
         }
     }
 }

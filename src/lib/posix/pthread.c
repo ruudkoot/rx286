@@ -180,19 +180,29 @@ int pthread_equal(pthread_t a, pthread_t b)
     return a == b;
 }
 
-/* pthread_once - a routine run once, whichever thread comes first */
+#define ONCE_NOT 0
+#define ONCE_RUNNING 1
+#define ONCE_DONE 2
+
+/* pthread_once - a routine run once, whichever thread comes first: the
+ * control's own word claimed with XCHG, so that a routine may call
+ * pthread_once on another control (P15); the others wait on that word */
 int pthread_once(pthread_once_t *once, void (*routine)(void))
 {
-    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    int was;
 
-    if (once->done)
+    if (once->state == ONCE_DONE)
         return 0;
-    pthread_mutex_lock(&lock);
-    if (!once->done) {
+    was = rx_xchg(&once->state, ONCE_RUNNING);
+    if (was == ONCE_NOT) {
         routine();
-        once->done = 1;
+    } else if (was == ONCE_RUNNING) {
+        while (once->state == ONCE_RUNNING)
+            rx_futex(FUTEX_WAIT, &once->state, ONCE_RUNNING);
+        return 0;
     }
-    pthread_mutex_unlock(&lock);
+    once->state = ONCE_DONE;            /* (done, or done before the XCHG took it) */
+    rx_futex(FUTEX_WAKE, &once->state, PTHREAD_THREADS_MAX);
     return 0;
 }
 

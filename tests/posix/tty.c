@@ -87,6 +87,15 @@ int main(void)
     got("without echo", (int)read(0, buf, sizeof buf), buf);
     tcsetattr(0, TCSANOW, &cooked);
 
+    got("an EOF's line, its first", (int)read(0, buf, 1), buf);     /* P15 */
+    t = cooked;                         /* raw, the EOF read: no line counted */
+    t.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    t.c_cc[VMIN] = 1;
+    tcsetattr(0, TCSANOW, &t);
+    got("raw, its rest to the EOF", (int)read(0, buf, sizeof buf), buf);
+    tcsetattr(0, TCSANOW, &cooked);     /* canonical again: a read waits */
+    got("canonical again, a line", (int)read(0, buf, sizeof buf), buf);
+
     if ((pid = fork()) == 0) {          /* ^C: SIGINT for the reader's group */
         setpgid(0, 0);
         tcsetpgrp(0, getpid());

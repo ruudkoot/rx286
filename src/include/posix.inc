@@ -26,13 +26,15 @@ PX_GETPID           equ 7       ; -> the pid
 PX_GETPPID          equ 8       ; -> the parent's pid
 PX_KILL             equ 9       ; BX a pid (0: the caller's group; -1: all; below: a
                                 ;    group), CX a signal (0: only look)
-PX_BRK              equ 10      ; BX the break asked for (0: none) -> the break
+PX_BRK              equ 10      ; BX the break asked for (0: none) -> 0, the break in SI
+                                ;    (P15: never a negative result)
 ; The files (P7): a path is SI, its zero at the end; buffers are SI or DI
 PX_OPEN             equ 11      ; SI the path, BX O_* flags -> a descriptor
 PX_CLOSE            equ 12      ; BX a descriptor
 PX_READ             equ 13      ; BX a descriptor, DI the room, CX its bytes -> the bytes read
 PX_LSEEK            equ 14      ; BX a descriptor, CX:SI the offset (CX high), DI SEEK_* ->
-                                ;    the offset's low word, SI its high word
+                                ;    the offset's bits 0-14, SI its bits 15-30 (P15: the
+                                ;    result never negative)
 PX_DUP              equ 15      ; BX a descriptor -> the lowest free one, the same file
 PX_DUP2             equ 16      ; BX a descriptor, CX the one it becomes -> CX
 PX_FCNTL            equ 17      ; BX a descriptor, CX F_*, SI the argument -> the answer

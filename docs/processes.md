@@ -47,7 +47,7 @@ no transfer segment (*docs/syscalls.md*).
 | `PX_WAITPID` | BX a pid, -1 (any), 0 (the caller's group) or below -1 (a group), CX the options (`WNOHANG`, `WUNTRACED`, `WCONTINUED`) | a zombie child taken: its pid, and its status in SI; or a stop or continue not yet said, if asked (before the end, if it came first); else a sleep until a child ends; `ECHILD` with none. init waits even with none |
 | `PX_GETPID`, `PX_GETPPID` | | the pid, the parent's |
 | `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`) |
-| `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
+| `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is. The result is 0 and the break in SI, so that a break past 32 KB is no negative result |
 | `PX_TIME` | | the seconds since 1970-01-01 00:00:00 in SI:DI: the real-time clock's (the RTC driver's), taken as UTC; `EIO` if it does not answer (P12) |
 | `PX_NICE` | BX an increment | the nice value moved by it, kept within 0 to 2 `NZERO` - 1 (any process may lower it as well as raise it: there are no users); returns it - `NZERO`. The thread's priority follows it: 3 up to `NZERO` (20), 2 up to `NZERO` + 10, else 1, above the idle loop alone. The server stops the thread once the call is answered and starts it again at that priority (`sig_renice`); a fork's and a spawn's child keep the value, and an exec (P12) |
 | `PX_PS` | BX a table entry, DI room for `PI_BYTES` | the first process from that entry on, as `struct rx_ps` (`rx/ps.h`): its pid, its parent's, its group and session (words `PI_PID`, `PI_PPID`, `PI_PGID`, `PI_SID`), its state (byte `PI_STATE`: `R` running or ready, `S` waiting in a call, `T` stopped, `Z` a zombie), its session's terminal (byte `PI_TTY`: 0 to 7, or FFh), its file's name (`PI_COMMAND`, 12 bytes) and its nice value (byte `PI_NICE`); the entry after it, or `ESRCH` past the last. rx286's own, for `ps` (P12) |
@@ -190,6 +190,13 @@ which starts at its parent's (`/` for init), and its "." and ".." taken out
 before it is followed; within a volume a name is 8.3, matched in any case
 and kept upper case. The current directory keeps each name in its own
 case, as the server or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A
+path that ends with "/" names a directory: a file's is `ENOTDIR`, a new
+name's `O_CREAT` `EISDIR` (XBD 4.13). A create is refused before anything
+is made: with no descriptor (`EMFILE`) or description (`ENFILE`) left, or
+`O_DIRECTORY` asked for; and a call's FAT and directory sectors are
+written at its end whatever its result, an `open` and a growing `write`
+before they answer, which undo what they did if that fails. `stat` of an
+open file gives its size as its descriptions have it (P15). A
 process has `OPEN_MAX` (20) descriptors, each naming
 an open file description of the server's (32 in all): its kind, its flags,
 its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
@@ -201,14 +208,14 @@ is written at each one's last close (P15). init's descriptors 0 to 2 are `/dev/t
 |---|---|---|
 | `PX_OPEN` | SI the path, BX the flags | a descriptor, the lowest free: `O_RDONLY`, `O_WRONLY` or `O_RDWR` (`O_ACCMODE`); `O_CREAT` makes a volume's file, `O_EXCL` refuses one there (`EEXIST`), `O_TRUNC` empties it, `O_APPEND` writes at its end, `O_DIRECTORY` refuses a file (`ENOTDIR`), `O_CLOEXEC` marks it |
 | `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written |
-| `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many | by the kind: a volume's file, through the cache (a write past its end leaves a hole of zeros; one past what the volume could hold is `EFBIG`; one that fails leaves the file as it was); a terminal (*docs/terminals.md*; a read 0 where the processes have no keys); `/dev/null`; a printer; a device (*The devices* below); a pipe; a file of `/z`, read only |
-| `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset, its high word in SI; `ESPIPE` for a device |
+| `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many (32,767 at most, `SSIZE_MAX`: more moves that many) | by the kind: a volume's file, through the cache (a write past its end leaves a hole of zeros; one past what the volume could hold is `EFBIG`; one that fails leaves the file as it was); a terminal (*docs/terminals.md*; a read 0 where the processes have no keys); `/dev/null`; a printer; a device (*The devices* below); a pipe; a file of `/z`, read only |
+| `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset's bits 0-14, its bits 15-30 in SI (so that no result is negative); `ESPIPE` for a device |
 | `PX_DUP`, `PX_DUP2` | BX the descriptor (CX the one it becomes) | another descriptor of the same description |
 | `PX_FCNTL` | BX, CX the command, SI its argument | `F_DUPFD`, `F_GETFD` and `F_SETFD` (`FD_CLOEXEC`), `F_GETFL` |
 | `PX_STAT`, `PX_FSTAT` | SI the path or BX the descriptor, DI `ST_BYTES` of room | `ST_MODE` (`S_IFREG`, `S_IFDIR` or `S_IFCHR` within `S_IFMT`, and 0644, 0444 for a read-only file, 0755 for a directory), `ST_INO` (the entry's place: its directory's cluster and its index), `ST_NLINK` (1), `ST_SIZE`, `ST_MTIME` (DOS's time stamp, as seconds since 1970), `ST_DEV` (the drive) |
-| `PX_UNLINK`, `PX_RMDIR` | SI the path | a file's, or an empty directory's (`ENOTEMPTY`), entry and clusters gone; `EBUSY` while open |
+| `PX_UNLINK`, `PX_RMDIR` | SI the path | a file's, or an empty directory's (`ENOTEMPTY`), entry and clusters gone; `EBUSY` while open, or while it is a process's current directory; `rmdir` of "." or ".." is `EINVAL` |
 | `PX_MKDIR` | SI the path | a cluster with "." and "..", and its entry |
-| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): the entry made anew in the new directory, the old deleted, a file of the new name replaced, a directory's ".." its new parent; a directory into itself or one inside it is `EINVAL` |
+| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): the entry made anew in the new directory, the old deleted, a file of the new name replaced, a directory's ".." its new parent, and every current directory in it moved with it; a directory into itself or one inside it, or "." or "..", is `EINVAL`; over a current directory, `EBUSY` |
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short) |
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end. libc's `opendir` and `readdir` read through it (`dirent.h`) |
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk |
@@ -340,13 +347,17 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 The server has room for `PROCS` (15) processes and threads at once; a
 fork, a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
 (`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and
-the walks over the processes pass over it. Entry i has its slots of the server's, `PROC_SLOT0`
+the walks over the processes pass over it, and its signal state is its
+process's. A new process's pid is the next after the last given, from 2
+again after 32,767, passing over any a process, a zombie, a group or a
+session still has (P15). Entry i has its slots of the server's, `PROC_SLOT0`
 (166) + 6i on: the process's endpoint, thread, space and data segment (as the
 root gives them), the server's thread for it and that thread's
 notification. The thread, thread `PROC_N0` + i of the server's (`ROOT_SERVE`),
 serves process i alone and sleeps while the entry is empty. One lock guards
 the table, taken with XCHG (`rx_xchg`), and given up before a wait for a
-child and before the console. A wait that gives it up asks, once it has
+child and before the console (but for `/dev/status`'s short writes to the
+status line, and its last close, which keep it). A wait that gives it up asks, once it has
 it again, whether its process is still the one whose call it serves: the
 process may have ended and a new one taken its entry meanwhile
 (`proc_still`).

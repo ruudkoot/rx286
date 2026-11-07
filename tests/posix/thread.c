@@ -24,10 +24,10 @@
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
-static pthread_once_t once = PTHREAD_ONCE_INIT;
+static pthread_once_t once = PTHREAD_ONCE_INIT, inner = PTHREAD_ONCE_INIT;
 static pthread_key_t key;
 static volatile unsigned counter;
-static volatile int item, have, sum, onces, destroyed, got;
+static volatile int item, have, sum, onces, inners, destroyed, got;
 
 /* add - ROUNDS increments of the counter under the lock, each a while
  * inside it so that the others find it taken */
@@ -47,10 +47,17 @@ static void add(void)
     }
 }
 
-/* once_routine, destructor - pthread_once's and a key's */
+/* inner_routine, once_routine, destructor - pthread_once's, the second
+ * inside the first (P15), and a key's */
+static void inner_routine(void)
+{
+    inners++;
+}
+
 static void once_routine(void)
 {
     onces++;
+    pthread_once(&inner, inner_routine);
 }
 
 static void destructor(void *v)
@@ -164,6 +171,7 @@ int main(void)
            (unsigned)(8 * ROUNDS), counter);
     printf("thread: their results joined (280): %d\n", sum_results);
     printf("thread: once (1): %d; a key's destructor, for each (7): %d\n", onces, destroyed);
+    printf("thread: a once inside a once (1): %d\n", inners);
 
     pthread_create(&t[0], 0, consumer, 0);
     for (k = 1; k <= ITEMS; k++) {

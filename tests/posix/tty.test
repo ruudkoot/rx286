@@ -3,11 +3,12 @@
 # (TEST_POSIX_TTY), which reads canonical lines, echoed: one, one with a
 # Backspace, one killed with ^U and typed again, EOF alone and after bytes,
 # a line read in two parts; then raw, a key at a time and not echoed; VMIN
-# 0; ^C as a byte without ISIG; a line not echoed; and ^C, SIGINT for a
-# reader.
+# 0; ^C as a byte without ISIG; a line not echoed; an EOF's line read in
+# part, its rest raw, then a canonical read that waits (P15); and ^C,
+# SIGINT for a reader.
 program: none
 define: TEST_POSIX_TTY
-keys: hello\nabX\b\nxyz{ctrl-u}ok\n{ctrl-d}ab{ctrl-d}abcd\nx{ctrl-c}secret\n{ctrl-c}
+keys: hello\nabX\b\nxyz{ctrl-u}ok\n{ctrl-d}ab{ctrl-d}abcd\nx{ctrl-c}secret\npq{ctrl-d}ok\n{ctrl-c}
 match: contains
 ---
 tty: isatty(0) (1): 1
@@ -26,6 +27,9 @@ tty: raw, a key: 1 [x]
 tty: raw, VMIN 0, nothing typed: 0 []
 tty: without ISIG, ^C: 1 [^C]
 tty: without echo: 7 [secret\n]
+tty: an EOF's line, its first: 1 [p]
+tty: raw, its rest to the EOF: 1 [q]
+tty: canonical again, a line: 3 [ok\n]
 ^C
 tty: a reader at ^C (SIGINT 2): 2
 tty: done

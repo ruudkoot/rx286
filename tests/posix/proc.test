@@ -2,7 +2,10 @@
 # tests/posix/proc.c from /z (TEST_POSIX_PROC), which forks, execs, spawns
 # and waits, takes a child's fault and a kill as their signals, uses the
 # heap, and is refused a fork once the table is full. The idle program
-# waits for a key meanwhile; the test ends when the wait is over.
+# waits for a key meanwhile; the test ends when the wait is over. A data
+# segment grows by a copy into a new one (ROOT_BRK), so its 6 KB more past
+# 33 KB need a second 64 KB block, which DOSBox-X's 1 MB does not have
+# free: there the root refuses it, ENOMEM.
 program: idle
 define: TEST_POSIX_PROC
 keys: {wait 250}{wait 250}
@@ -31,4 +34,9 @@ proc: kill no one (-1, ESRCH 3): -1, 3
 proc: 3000 bytes of heap: yes; the break moved: yes
 proc: a fork bomb: 13 children, then EAGAIN (11): 11
 proc: all 13 reaped; then ECHILD (10): 10
+@bochs proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no
+@bochs proc: and they whole: yes
+@mame proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no
+@mame proc: and they whole: yes
+@dosbox-x proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes no no
 proc: done
