@@ -35,7 +35,11 @@ int main(int argc, char **argv)
     const char *device = "/dev/lpt1";
     int k = 1, fd, printer, status = 0;
 
-    if (argc > 2 && strcmp(argv[1], "-d") == 0) {
+    if (argc > 1 && strcmp(argv[1], "-d") == 0) {
+        if (argc < 3 || (strcmp(argv[2], "lpt1") != 0 && strcmp(argv[2], "lpt2") != 0)) {
+            write(2, "usage: lp [-d lpt1|lpt2] [FILE]...\n", 35);
+            return 1;                   /* (no printer, or no such one: P15) */
+        }
         device = strcmp(argv[2], "lpt2") == 0 ? "/dev/lpt2" : "/dev/lpt1";
         k = 3;
     }

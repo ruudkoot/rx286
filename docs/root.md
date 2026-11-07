@@ -89,14 +89,15 @@ address. It has no fault endpoint, and nothing could build it again.
 
 ## Its services for processes
 
-On the same endpoint, badged `ROOT_BADGE_OS` (os.inc; roadmap
-os-server.md P4), `ROOT_LOAD` to `ROOT_UNTHREAD` and `ROOT_SERVE` make and
-end the processes the OS server runs; any other request is `E_INVAL`.
-(Until P14 requests 1 to 3, `ROOT_INFO`, `ROOT_KILL` and `ROOT_START`,
-answered `ps`, `kill` and `start` of the programs the root built, a
-background program built of untyped of its own so that `kill` freed it all
-by a revoke: l4.md L11, L12.) Each answers in BX (0, `E_INVAL`, `E_NOMEM` or `E_IO`) and CX (a
-number), and copies what the server gets into its space, at the slots DI
+On the same endpoint, badged `ROOT_BADGE_OS` (os.inc; roadmap os-server.md
+P4), `ROOT_LOAD` to `ROOT_UNTHREAD` and `ROOT_SERVE` make and end the
+processes the OS server runs; any other request is `E_INVAL`. (Until P14
+requests 1 to 3, `ROOT_INFO`, `ROOT_KILL` and `ROOT_START`, answered `ps`,
+`kill` and `start` of the programs the root built, a background program
+built of untyped of its own so that `kill` freed it all by a revoke: l4.md
+L11, L12.) Each answers in BX (0, `E_INVAL`, `E_NOMEM` or `E_IO`;
+`ROOT_FIND` `E_NOT_FOUND` too; a segment of no bytes is `E_INVAL`) and CX
+(a number), and copies what the server gets into its space, at the slots DI
 names:
 
 - **`ROOT_LOAD`:** a segment of DPL 3 of BX bytes, for the server to read

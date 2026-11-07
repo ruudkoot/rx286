@@ -41,6 +41,7 @@ proc: SIGCHLD ignored: no zombie, ECHILD (-1, 10): -1, 10
 proc: poll of a terminal without keys, a read's 0 at once (1 POLLIN): 1 1
 proc: SIGCONT blocked: pending, then none (1 0): 1 0
 proc: a sleep past 2^32 ticks, then an alarm (-1, EINTR 4, 1): -1, 4, 1
+proc: malloc past 60 KB (none, ENOMEM 12): none, 12
 @bochs proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no
 @bochs proc: and they whole: yes
 @mame proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no

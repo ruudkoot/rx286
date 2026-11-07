@@ -68,7 +68,7 @@ C has those three alone.
 |---|---|
 | `echo` | its arguments, a space between, then a new line |
 | `cat` | each file, or descriptor 0, to descriptor 1 |
-| `ls [-l]` | a directory's names, or a file's own, one a line; names that start with "." left out; a header before each directory when there are several; `-l` with each its kind and permissions and its bytes (`drwxr-xr-x        0 DOCS`); a damaged directory's names up to the damage, then its error |
+| `ls [-l]` | a directory's names in its own order (DOS's, unsorted), or a file's own, one a line; names that start with "." left out; a header before each directory when there are several; `-l` with each its kind and permissions and its bytes (`drwxr-xr-x        0 DOCS`); a damaged directory's names up to the damage, then its error |
 | `cp`, `mv` | a file to a file, or into a directory; `mv` is `rename`, within a drive ("across drives" otherwise) |
 | `rm`, `mkdir`, `rmdir` | each path |
 | `wc` | lines, words and bytes, of each file or descriptor 0; `-l`, `-w`, `-c` for one |
@@ -76,7 +76,7 @@ C has those three alone.
 | `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, without Enter, `q` to stop |
 | `lp [-d lpt2]` | each file, or descriptor 0, to `/dev/lpt1`, or the other |
 | `ps [-e]` | the processes of the caller's terminal, or all: pid, parent, group, session, terminal, state, nice value, name (`PX_PS`) |
-| `kill` | `SIGTERM`, or `-s NAME`, `-NAME`, `-NUMBER`, to each pid (below -1: a group); `-l` the signals' names, `-l STATUS` the one that ended a process |
+| `kill` | `SIGTERM`, or `-s NAME`, `-NAME`, `-NUMBER` (a name in any case), to each pid (below -1: a group, after `--`, as `kill -- -5`); `-l` the signals' names, `-l STATUS` the one that ended a process |
 | `nice [-n N] CMD` | a command run with its nice value moved by N, or 10 |
 | `sleep` | a wait of so many seconds |
 | `env` | the environment; with a command, that command run in it, changed by the `NAME=VALUE` before it, emptied first with `-i` |
@@ -88,7 +88,7 @@ C has those three alone.
 | `fpu` | the square root of 2 and pi to 18 digits, by the 287 (`FBSTP`) |
 | `crash KIND` | what no process may do, one kind a time (`crash` lists them): jumps past its code, an instruction that does not exist, a divide by zero, a push past its stack, a port, `CLI`, `HLT`, `INT 32h`, the kernel's selectors, a write over its code, the 287's error, the trap flag, NT and `IRET`. Each ends it with its fault's signal, the shell going on |
 | `spin` | a loop for ever; ^C ends it, and the shell and the other processes run meanwhile |
-| `beep`, `play` | a tone of 880 Hz for 10 ticks; a tune of 13 notes and a rest (`/dev/speaker`) |
+| `beep`, `play` | a tone of 880 Hz for 10 ticks; a tune of 12 notes and a rest (`/dev/speaker`) |
 | `joy` | one reading of `/dev/joystick`: "buttons: none; axes: absent absent absent absent" |
 | `mouse` | where the mouse is, then again whenever it moves or a button changes ("x 320, y 100 (column 40, row 12), buttons: none"), until Esc or both buttons; it waits in `poll` for the terminal and the mouse |
 | `term` | a terminal on COM2: what comes is shown, what is typed is sent (Enter as CR), raw, until Esc alone; it waits in `poll`. Where COM2 is the log it says so |

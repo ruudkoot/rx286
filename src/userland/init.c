@@ -17,6 +17,7 @@
  * every test's pids and timing.
  * ============================================================================ */
 
+#include <string.h>
 #include "fcntl.h"
 #include "spawn.h"
 #include "unistd.h"
@@ -46,6 +47,7 @@ static pid_t shell(int n)
     static char wait[] = "rx286 terminal 1: press Enter for a shell\n";
     char line[8];
     pid_t pid;
+    int got;
 
     name[8] = (char)('1' + n);
     if ((pid = fork()) == 0) {
@@ -60,8 +62,9 @@ static pid_t shell(int n)
         if (n > 0) {
             wait[15] = (char)('1' + n);
             write(1, wait, sizeof wait - 1);
-            while (read(0, line, sizeof line) == (int)sizeof line)
-                ;                       /* (the line, to its end) */
+            while ((got = (int)read(0, line, sizeof line)) > 0
+                    && !memchr(line, '\n', (size_t)got))
+                ;                       /* (the line, to its new line: P15) */
         }
         execve("/z/sh", argv, environ);
         _exit(127);
@@ -99,7 +102,8 @@ int main(void)
         for (k = 0; k < n; k++)
             if (shells[k] < 0)
                 shells[k] = shell(k);
-        if (!daemons++) {
+        if (!daemons) {
+            daemons = 1;                /* (once: no count to wrap, P15) */
 #ifdef WITH_DAEMONS
             daemon_start("/z/clock");
             daemon_start("/z/counter");

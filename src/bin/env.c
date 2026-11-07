@@ -56,8 +56,10 @@ int main(int argc, char **argv)
     vars[n] = 0;
     environ = vars;
     if (k == argc) {
-        for (at = 0; at < n; at++)
-            printf("%s\n", vars[at]);
+        for (at = 0; at < n; at++) {    /* (whole: printf cuts at 127 bytes, P15) */
+            write(1, vars[at], strlen(vars[at]));
+            write(1, "\n", 1);
+        }
         return 0;
     }
     execvp(argv[k], argv + k);

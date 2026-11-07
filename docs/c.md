@@ -91,7 +91,7 @@ restarted program keeps its data, as every rx286 program does.
 | `src/include/rx/compiler.h` | every difference between the compilers |
 | `src/include/c/` | the standard headers, rx286's own: ISO C's (`stddef.h`, `stdint.h`, `stdarg.h`, `string.h`, `stdio.h`, `stdlib.h`, `setjmp.h`) and POSIX's (*docs/posix.md* lists each and what it has) |
 | `src/lib/crt/` | crt0; `start.c`; the compilers' helpers (32-bit multiply and divide); `memcpy`, `memmove`, `memset`, `memcmp`; `setjmp`, `longjmp` |
-| `src/lib/c/` | ISO C: the string functions, `snprintf` and `vsnprintf` |
+| `src/lib/c/` | ISO C: the string functions, `snprintf` and `vsnprintf`, `atoi` |
 | `src/lib/rx286/` | the kernel's calls (`src/include/rx/rx286.h`): `rx_kcall`, `rx_ticks`, `rx_log`; `rx_ud2`, a fault on purpose for the tests; `rx_verr`, `rx_lsl`, `rx_cs`, `rx_ds`, `rx_ss`, `rx_xchg` |
 | `src/lib/os/` | the calls of a program in C that the root builds (`src/include/rx/oscall.h`; os-server.md P14): `os_px`, `os_write`, `os_key`, `_exit` (*docs/syscalls.md*); the counter module and `tests/programs/services.c` |
 | `src/lib/posix/` | a process's libc (*docs/posix.md*, *docs/processes.md*): the POSIX calls (`unistd.h`, `fcntl.h`, `dirent.h`, `signal.h`, `termios.h`, `sys/wait.h`, `spawn.h`, `poll.h`; `sys/ioctl.h`'s `ioctl` and rx286's devices' structures, P12; `pthread.h`, each thread with its own `errno`, `rx/tls.h`, P13); `stdio.h`'s output, unbuffered; `malloc`; `time.h`: `nanosleep`, `time`, `clock_gettime`, `gmtime`, `localtime` (as `gmtime`: no time zones) and `strftime` (P12); `rx/ps.h`'s `rx_ps`, the processes for `ps`; `nice`; `rx/daemon.h`'s `rx_daemon` |

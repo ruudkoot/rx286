@@ -52,6 +52,10 @@ int main(int argc, char **argv)
         const char *o;
 
         for (o = argv[k] + 1; *o; o++) {
+            if (*o != 'l' && *o != 'w' && *o != 'c') {
+                write(2, "usage: wc [-lwc] [FILE]...\n", 27);
+                return 1;               /* (an option it does not know: P15) */
+            }
             want_l |= *o == 'l';
             want_w |= *o == 'w';
             want_c |= *o == 'c';

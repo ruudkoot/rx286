@@ -133,14 +133,14 @@ static struct process *proc_of(rx_u16 n)
 /* load - ROOT_LOAD: a segment for code, the server's copy at `to` */
 static int load(rx_u16 bytes, rx_u16 to, rx_u16 *n)
 {
-    int i;
+    int i, status;
 
     for (i = 0; i < CODES_MAX && codes[i].state != NONE; i++)
         ;
     if (i == CODES_MAX)
         return E_NOMEM;
-    if (block_segment(bytes, &codes[i].block, &codes[i].segment))
-        return E_NOMEM;
+    if ((status = block_segment(bytes, &codes[i].block, &codes[i].segment)) != 0)
+        return status;                  /* (0 bytes: E_INVAL, P15) */
     if (give(codes[i].segment, to)) {
         block_free(codes[i].block, codes[i].segment, 0);
         return E_INVAL;
@@ -289,8 +289,8 @@ static int proc_make(int code, rx_u16 bytes, rx_u16 badge, rx_u16 to, rx_u16 *ou
     p = &procs[i];
     for (status = 0; status <= PROC_THREADS; status++)
         p->threads[status].objects = -1;
-    if (block_segment(bytes, &p->data, &p->segment))
-        return E_NOMEM;
+    if ((status = block_segment(bytes, &p->data, &p->segment)) != 0)
+        return status;                  /* (0 bytes: E_INVAL, P15) */
     status = thread_make(p, 0, badge, 1);
     if (status) {
         block_free(p->data, p->segment, 0);
@@ -369,12 +369,12 @@ static int brk(rx_u16 n, rx_u16 bytes, rx_u16 to)
 {
     struct process *p = proc_of(n);
     rx_u16 segment, old;
-    int block;
+    int block, status;
 
     if (!p)
         return E_INVAL;
-    if (block_segment(bytes, &block, &segment))
-        return E_NOMEM;
+    if ((status = block_segment(bytes, &block, &segment)) != 0)
+        return status;
     old = segment_bytes(p->segment);
     far_copy(segment, p->segment, bytes < old ? bytes : old);
     block_free(p->data, p->segment, 0); /* every copy of the old, the server's too */

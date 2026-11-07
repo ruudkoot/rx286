@@ -73,7 +73,8 @@ static const char *const dos_names[] = {    /* DOS's, its aliases from the start
     "B:=cd /b", "C:=cd /c", "D:=cd /d"
 };
 static char history[HISTORY][LINE_MAX];
-static int history_count, status;
+static unsigned history_count;          /* (unsigned: it wraps within HISTORY, P15) */
+static int status;
 static struct token tokens[WORDS + 1];
 static char pool[POOL];
 static unsigned pool_used;
@@ -84,6 +85,8 @@ static struct command cmds[PIPELINE];
  * terminal's modes it stopped with, which fg gives it back (XCU 2.11) */
 struct job {
     int state, said, moded;
+    unsigned seq;                       /* when it last started or stopped: the current
+                                           job is the latest (job_current, P15) */
     pid_t pgid, pids[PIPELINE];
     int n, left, code;
     char text[40];
@@ -92,6 +95,7 @@ struct job {
 
 static struct job jobs[JOBS + 1];       /* (the last: a foreground job without room) */
 static struct job *last_job;            /* fg's and bg's when none is named */
+static unsigned job_seq;
 static pid_t shell_pgid;
 static int job_control;                 /* the terminal's ours: jobs are groups */
 
@@ -99,6 +103,15 @@ static int job_control;                 /* the terminal's ours: jobs are groups 
 static void say(const char *s)
 {
     write(2, s, strlen(s));
+}
+
+/* say_line - a line of a word and a text on a descriptor, whole: printf
+ * cuts at 127 bytes (P15) */
+static void say_line(int fd, const char *word, const char *text)
+{
+    write(fd, word, strlen(word));
+    write(fd, text, strlen(text));
+    write(fd, "\n", 1);
 }
 
 /* complain - "sh: what: why" */
@@ -187,8 +200,8 @@ static const char *name_end(const char *s)
     return s;
 }
 
-/* expand - $NAME, ${NAME} or $? at s (s at the $): the pool given its
- * value; past it */
+/* expand - $NAME, ${NAME}, $DIGIT or $? at s (s at the $): the pool given
+ * its value; past it, or NULL for a ${ not closed (P15) */
 static const char *expand(const char *s)
 {
     const char *start, *end, *value;
@@ -202,7 +215,9 @@ static const char *expand(const char *s)
         return s + 1;
     }
     start = *s == '{' ? s + 1 : s;
-    end = name_end(start);
+    end = *start >= '0' && *start <= '9' ? start + 1 : name_end(start);    /* ($1: one */
+    if (*s == '{' && *end != '}')                                       /*    digit) */
+        return 0;
     if (end == start) {
         keep('$');
         return s;
@@ -264,14 +279,16 @@ static int lex(const char *s, int first)
             if (*s == '\'' || *s == '"') {
                 quote = *s++;
                 tokens[n].quoted = 1;
-                while (*s && *s != quote) {
+                while (s && *s && *s != quote) {
                     if (quote == '"' && *s == '$')
                         s = expand(s);
-                    else if (quote == '"' && *s == '\\' && s[1])
-                        keep(*++s), s++;
+                    else if (quote == '"' && *s == '\\' && s[1] && strchr("$`\"\\", s[1]))
+                        keep(*++s), s++;        /* (only these: XCU 2.2.3, P15) */
                     else
                         keep(*s++);
                 }
+                if (!s)
+                    break;
                 if (*s != quote) {
                     say("sh: a quote is not closed\n");
                     return -1;
@@ -282,10 +299,15 @@ static int lex(const char *s, int first)
                 keep(s[1]);
                 s += 2;
             } else if (*s == '$') {
-                s = expand(s);
+                if (!(s = expand(s)))
+                    break;
             } else {
                 keep(*s++);
             }
+        }
+        if (!s) {
+            say("sh: a ${ is not closed\n");
+            return -1;
         }
         if (keep(0) < 0) {
             say("sh: the line is too long\n");
@@ -406,6 +428,7 @@ static struct job *job_new(pid_t pgid, const pid_t *pids, int n, const char *tex
         }
     memset(j, 0, sizeof *j);
     j->state = J_RUNNING;
+    j->seq = ++job_seq;
     j->pgid = pgid;
     j->n = n;
     for (k = 0; k < n; k++)
@@ -438,6 +461,7 @@ static void job_update(pid_t pid, int st)
                 j->said = 0;
             }
             j->code = 128 + WSTOPSIG(st);
+            j->seq = ++job_seq;
             if (j != &jobs[JOBS])
                 last_job = j;
         } else if (WIFCONTINUED(st)) {
@@ -453,6 +477,36 @@ static void job_update(pid_t pid, int st)
         }
         return;
     }
+}
+
+/* job_current - the job fg and bg take when none is named, once the last
+ * is gone: the latest stopped, else the latest started (XCU 2.11; P15) */
+static struct job *job_current(void)
+{
+    struct job *best = 0;
+    int k, stopped = 0;
+
+    for (k = 0; k < JOBS; k++) {
+        if (jobs[k].state != J_RUNNING && jobs[k].state != J_STOPPED)
+            continue;
+        if ((jobs[k].state == J_STOPPED && !stopped) || !best
+                || ((jobs[k].state == J_STOPPED) == stopped && jobs[k].seq > best->seq)) {
+            best = &jobs[k];
+            stopped = jobs[k].state == J_STOPPED;
+        }
+    }
+    return best;
+}
+
+/* job_free - is there room in the table for a job? (P15) */
+static int job_free(void)
+{
+    int k;
+
+    for (k = 0; k < JOBS; k++)
+        if (jobs[k].state == J_FREE)
+            return 1;
+    return 0;
 }
 
 /* job_say - a job, as jobs says it */
@@ -471,8 +525,8 @@ static void job_reap(int say)
     pid_t pid;
     int st, k;
 
-    while ((pid = waitpid(-1, &st, WNOHANG | WUNTRACED)) > 0)
-        job_update(pid, st);
+    while ((pid = waitpid(-1, &st, WNOHANG | WUNTRACED | WCONTINUED)) > 0)
+        job_update(pid, st);            /* (a continue from elsewhere too: P15) */
     for (k = 0; k < JOBS; k++) {
         if (jobs[k].state == J_FREE)
             continue;
@@ -481,7 +535,7 @@ static void job_reap(int say)
         if (jobs[k].state == J_DONE && jobs[k].said) {
             jobs[k].state = J_FREE;
             if (last_job == &jobs[k])
-                last_job = 0;
+                last_job = job_current();
         }
     }
 }
@@ -495,8 +549,8 @@ static int job_wait(struct job *j)
 
     if (job_control)
         tcsetpgrp(0, j->pgid);
-    while (j->state == J_RUNNING) {
-        pid = waitpid(-1, &st, WUNTRACED);
+    while (j->state == J_RUNNING && j->left > 0) {  /* (none left: done, P15) */
+        pid = waitpid(-1, &st, WUNTRACED | WCONTINUED);
         if (pid < 0) {
             if (errno == EINTR)
                 continue;
@@ -517,7 +571,7 @@ static int job_wait(struct job *j)
     } else {
         j->state = J_FREE;
         if (last_job == j)
-            last_job = 0;
+            last_job = job_current();
     }
     return code;
 }
@@ -527,8 +581,11 @@ static struct job *job_pick(const char *name)
 {
     int n;
 
-    if (!name)
+    if (!name) {                        /* (one that ended is not taken: the */
+        if (!last_job || (last_job->state != J_RUNNING && last_job->state != J_STOPPED))
+            last_job = job_current();   /*    current one now, XCU 2.11; P15) */
         return last_job;
+    }
     n = atoi(name[0] == '%' ? name + 1 : name);
     if (n < 1 || n > JOBS || jobs[n - 1].state == J_FREE || jobs[n - 1].state == J_DONE)
         return 0;
@@ -590,6 +647,7 @@ static int builtin(struct command *c)
         else
             printf("[%d] %s &\n", (int)(j - jobs) + 1, j->text);
         j->state = J_RUNNING;
+        j->seq = ++job_seq;
         if (name[0] == 'f' && job_control) {
             if (j->moded)               /* its modes, while the terminal is ours */
                 tcsetattr(0, TCSADRAIN, &j->modes);
@@ -628,14 +686,14 @@ static int builtin(struct command *c)
     if (strcmp(name, "set") == 0) {
         for (k = 0; k < VARS; k++)
             if (vars[k])
-                printf("%s\n", vars[k]);
+                say_line(1, "", vars[k]);
         return 0;
     }
     if (strcmp(name, "alias") == 0) {
         if (c->argc == 1)
             for (k = 0; k < ALIASES; k++)
                 if (aliases[k])
-                    printf("alias %s\n", aliases[k]);
+                    say_line(1, "alias ", aliases[k]);
         for (k = 1; k < c->argc; k++) {
             int a;
             size_t n = strchr(c->argv[k], '=') ? (size_t)(strchr(c->argv[k], '=') - c->argv[k])
@@ -686,55 +744,64 @@ static int builtin(struct command *c)
     return -1;
 }
 
+/* put - a byte into aliased()'s line: 0, or -1 if it is full (P15) */
+static int put(char *out, unsigned *n, char c)
+{
+    if (*n >= LINE_MAX - 1)
+        return -1;
+    out[(*n)++] = c;
+    return 0;
+}
+
 /* aliased - a line with the aliases of its commands' first words put in
- * (once each, not again in what they put): into out; 0, or -1 if it would
- * grow past LINE_MAX */
+ * (once each, not again in what they put; a word with quotes or a $ in it
+ * none, XCU 2.3.1): into out; 0, or -1 if it would grow past LINE_MAX */
 static int aliased(const char *s, char *out)
 {
     char word[LINE_MAX];
     const char *value;
-    int start = 1;
+    int start = 1, full = 0;
     unsigned n = 0, k;
 
-    while (*s && n < LINE_MAX - 1) {
+    while (*s) {
         if (start) {
-            while ((*s == ' ' || *s == '\t') && n < LINE_MAX - 1)
-                out[n++] = *s++;
+            while (*s == ' ' || *s == '\t')
+                full |= put(out, &n, *s++);
             for (k = 0; s[k] && !strchr(" \t|;&<>'\"\\$", s[k]) && k < LINE_MAX - 1; k++)
                 word[k] = s[k];
             word[k] = 0;
             start = 0;
-            if (k && (value = alias_of(word)) != 0) {
-                while (*value && n < LINE_MAX - 1)
-                    out[n++] = *value++;
+            if (k && (!s[k] || strchr(" \t|;&<>", s[k])) && (value = alias_of(word)) != 0) {
+                while (*value)          /* (all of it, or the line is too long: P15) */
+                    full |= put(out, &n, *value++);
                 s += k;
                 continue;
             }
         }
         if (*s == '|' || *s == ';' || *s == '&')
             start = 1;
-        if (*s == '\\' && s[1] && n < LINE_MAX - 2) {    /* an escaped character, whole */
-            out[n++] = *s++;
-            out[n++] = *s++;
+        if (*s == '\\' && s[1]) {       /* an escaped character, whole */
+            full |= put(out, &n, *s++);
+            full |= put(out, &n, *s++);
             continue;
         }
-        if (*s == '\'' || *s == '"') {          /* a quote, whole, its \" too (P15) */
+        if (*s == '\'' || *s == '"') {  /* a quote, whole, its \" too (P15) */
             char q = *s;
 
-            out[n++] = *s++;
-            while (*s && *s != q && n < LINE_MAX - 1) {
-                if (q == '"' && *s == '\\' && s[1] && n < LINE_MAX - 2)
-                    out[n++] = *s++;
-                out[n++] = *s++;
+            full |= put(out, &n, *s++);
+            while (*s && *s != q) {
+                if (q == '"' && *s == '\\' && s[1])
+                    full |= put(out, &n, *s++);
+                full |= put(out, &n, *s++);
             }
-            if (*s && n < LINE_MAX - 1)
-                out[n++] = *s++;
+            if (*s)
+                full |= put(out, &n, *s++);
             continue;
         }
-        out[n++] = *s++;
+        full |= put(out, &n, *s++);
     }
     out[n] = 0;
-    return *s ? -1 : 0;                 /* -1: too long once its aliases are in (P15) */
+    return full ? -1 : 0;               /* -1: too long once its aliases are in (P15) */
 }
 
 /* run - a command in a child: its program along PATH (or a built-in) */
@@ -773,6 +840,10 @@ static int pipeline(int n, int background, const char *text)
     struct job *j;
     int fds[2], in = -1, k, code = 0, saved[3];
 
+    if (background && !job_free()) {
+        say("sh: too many jobs\n");     /* (none started, untracked: P15) */
+        return 1;
+    }
     if (n == 1 && cmds[0].argc && !background) {
         for (k = 0; k < 3; k++)
             saved[k] = dup(k);
@@ -826,8 +897,10 @@ static int pipeline(int n, int background, const char *text)
     if (in >= 0)
         close(in);
     if (!pgid)
-        return status;                  /* none started */
+        return 126;                     /* none started: not run (P15) */
     j = job_new(pgid, pids, k, text);
+    if (k < n || pids[k - 1] <= 0)
+        j->code = 126;                  /* its last not started (P15) */
     if (background) {
         if (j != &jobs[JOBS])
             last_job = j;               /* the current job, as one stopped is */
@@ -883,8 +956,35 @@ static int assignments(struct command *c)
     return 1;
 }
 
+/* redirected - a command of redirections and assignments alone: its
+ * files opened (made, emptied) in the shell and closed again, as XCU 2.9.1
+ * asks: 0, or 1 if one could not be (P15) */
+static int redirected(struct command *c)
+{
+    int saved[3], k, code;
+
+    for (k = 0; k < 3; k++)
+        saved[k] = dup(k);
+    code = redirect(c) < 0 ? 1 : 0;
+    for (k = 0; k < 3; k++) {
+        dup2(saved[k], k);
+        close(saved[k]);
+    }
+    return code;
+}
+
+/* blank - is a part of a list nothing but blanks? */
+static int blank(const char *s)
+{
+    while (*s == ' ' || *s == '\t')
+        s++;
+    return *s == 0;
+}
+
 /* run_line - a line's list: its aliases put in when it is read, each
- * pipeline then expanded as it comes, run as ;, && and || say */
+ * pipeline then expanded as it comes, run as ;, && and || say. A part
+ * that is missing (before a ;, &&, || or &, or at the end after && or ||)
+ * is a syntax error, found before anything runs (XCU 2.9.3; P15) */
 static void run_line(const char *line)
 {
     char text[LINE_MAX], part[LINE_MAX];
@@ -896,6 +996,19 @@ static void run_line(const char *line)
         status = 2;
         return;
     }
+    for (;;) {
+        s = next_part(s, part, &op);
+        if (blank(part) && (op != T_END || kind != T_SEMI)) {
+            say("sh: a command is missing\n");
+            status = 2;
+            return;
+        }
+        kind = op == T_BG ? T_SEMI : op;
+        if (op == T_END)
+            break;
+    }
+    s = text;
+    kind = T_SEMI;
     while (*s || kind != T_END) {
         s = next_part(s, part, &op);
         if (kind == T_SEMI || (kind == T_AND && status == 0) || (kind == T_OR && status != 0)) {
@@ -904,11 +1017,12 @@ static void run_line(const char *line)
                 status = 2;
                 return;
             }
-            if (n == 1 && cmds[0].argc && !cmds[0].in && !cmds[0].out && !cmds[0].err
-                    && assignments(&cmds[0]))
-                status = 0;
+            if (n == 1 && cmds[0].argc && assignments(&cmds[0]))
+                status = redirected(&cmds[0]);      /* (NAME=value > f: both, P15) */
             else if (n)
                 status = pipeline(n, op == T_BG, part);
+            else if (!blank(part))
+                status = redirected(&cmds[0]);      /* (> f alone, or $EMPTY: 0) */
         }
         kind = op == T_BG ? T_SEMI : op;
         if (op == T_END)
@@ -923,65 +1037,102 @@ static void erase(unsigned n)
         write(1, "\b \b", 3);
 }
 
-/* line_read - a line from the terminal, edited: its length, or -1 at its
- * end */
+static int terminal;                    /* descriptor 0 is one */
+
+/* recall - a line of the history in place of the one edited, Up (-1) or
+ * Down (1) from *at: 0, or -1 if there is none that way */
+static int recall(char *line, unsigned *n, unsigned *at, int way)
+{
+    if (way < 0 && *at > 0 && history_count - *at < HISTORY)
+        (*at)--;
+    else if (way > 0 && *at < history_count)
+        (*at)++;
+    else
+        return -1;
+    erase(*n);
+    if (*at < history_count)
+        strcpy(line, history[*at % HISTORY]);
+    else
+        line[0] = 0;
+    *n = strlen(line);
+    write(1, line, *n);
+    return 0;
+}
+
+/* line_read - a line, from the terminal edited (its prompt on descriptor
+ * 2, its echo the shell's), or from a file as it is: its length, or -1 at
+ * the end (^D on an empty line at a terminal). A last line without its
+ * new line is a line; one that is too long is said and dropped, status 2
+ * (P15) */
 static int line_read(char *line)
 {
+    static int ended;                   /* the end came after a last line */
     char c, cwd[PATH_MAX];
-    unsigned n = 0, at = (unsigned)history_count;
-    int got;
+    unsigned n = 0, at = history_count;
+    int got, too_long = 0;
 
-    if (!getcwd(cwd, sizeof cwd))
-        strcpy(cwd, "?");
-    printf("%s$ ", cwd);
+    if (ended)
+        return -1;
+    if (terminal) {
+        if (!getcwd(cwd, sizeof cwd))
+            strcpy(cwd, "?");
+        say(cwd);
+        say("$ ");
+    }
     for (;;) {
         got = (int)read(0, &c, 1);      /* a byte at a time: what follows the line stays */
-        if (got < 0 && errno == EINTR) {    /*    in the terminal, for a command (P15) */
+        if (got > 0 && c == 0x1B && terminal) {     /*    for a command (P15) */
+            if ((got = (int)read(0, &c, 1)) > 0 && c == '[') {
+                while ((got = (int)read(0, &c, 1)) == 1 && c >= '0' && c <= ';')
+                    ;                   /* (ESC [ 3 ~ and its kin: passed over) */
+                if (got > 0) {          /* Up and Down recall; the rest nothing */
+                    if (c == 'A' || c == 'B')
+                        recall(line, &n, &at, c == 'A' ? -1 : 1);
+                    continue;
+                }
+            }                           /* (a lone Esc: the key after it is a key) */
+        }
+        if (got < 0 && errno == EINTR) {
             write(1, "^C\n", 3);        /* ^C: the line dropped */
             line[0] = 0;
             return 0;
         }
-        if (got <= 0)
-            return -1;
-        if (c == 0x1B) {                /* a key's sequence, whole: Up and Down recall */
-            if (read(0, &c, 1) != 1 || c != '[')
-                continue;
-            while (read(0, &c, 1) == 1 && c >= '0' && c <= ';')
-                ;                       /* (ESC [ 3 ~ and its kin: passed over) */
-            if (c == 'A' && at > 0 && history_count - at < HISTORY)
-                at--;
-            else if (c == 'B' && at < (unsigned)history_count)
-                at++;
-            else
-                continue;
-            erase(n);
-            if (at < (unsigned)history_count)
-                strcpy(line, history[at % HISTORY]);
-            else
-                line[0] = 0;
-            n = strlen(line);
-            write(1, line, n);
-            continue;
+        if (got <= 0 || (terminal && c == 0x04 && n == 0)) {
+            if (got > 0)
+                write(1, "\n", 1);     /* (^D: the prompt's line ended) */
+            if (got > 0 || n == 0)
+                return -1;
+            ended = 1;                  /* a last line first */
+            c = '\n';
         }
         if (c == '\r' || c == '\n') {
-            write(1, "\n", 1);
+            if (terminal)
+                write(1, "\n", 1);
             line[n] = 0;
+            if (too_long) {
+                say("sh: the line is too long\n");
+                status = 2;
+                return 0;
+            }
             return (int)n;
         }
-        if (c == '\b' || c == 0x7F) {
-            if (n) {
+        if (terminal) {
+            if ((c == '\b' || c == 0x7F) && n) {
                 n--;
                 erase(1);
+            } else if (c >= ' ' && c < 0x7F && n < LINE_MAX - 1) {
+                line[n++] = c;
+                write(1, &c, 1);
             }
-        } else if (c >= ' ' && c < 0x7F && n < LINE_MAX - 1) {
-            line[n++] = c;
-            write(1, &c, 1);
+        } else if (n < LINE_MAX - 1) {
+            line[n++] = c;              /* from a file: as it is */
+        } else {
+            too_long = 1;
         }
     }
 }
 
 static struct termios cooked, raw;     /* the terminal's, and the editor's */
-static int terminal;                    /* descriptor 0 is one */
 
 /* editing - the terminal raw while a line is edited (1), as it was while
  * a command runs (0) */

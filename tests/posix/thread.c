@@ -306,6 +306,16 @@ int main(void)
     waitpid(pid, &status, 0);
     printf("thread: the process's end after it (exit 0): %d\n",
            WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+    {
+        pthread_key_t k1, k2;           /* (the second review: a key's place reused) */
+
+        pthread_key_create(&k1, 0);
+        pthread_setspecific(k1, (void *)&counter);
+        pthread_key_delete(k1);
+        pthread_key_create(&k2, 0);
+        printf("thread: a new key in a deleted one's place, its value (none): %s\n",
+               pthread_getspecific(k2) ? "the old one's" : "none");
+    }
     printf("thread: done\n");
     return 0;
 }

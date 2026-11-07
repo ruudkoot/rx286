@@ -106,20 +106,20 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
     pthread_mutex_lock(&list_lock);
     t->next = threads;
     threads = t;
-    pthread_mutex_unlock(&list_lock);
+    made++;                             /* (before it runs: it may end before this */
+    pthread_mutex_unlock(&list_lock);   /*    returns, P15) */
     n = rx_px(PX_THREAD, (rx_u16)(unsigned)rx_thread_entry, (rx_u16)((unsigned)t + RX_STACK),
               (rx_u16)(unsigned)&t->ep, 0, &r);
     errno = e;
     if (n < 0) {
         pthread_mutex_lock(&list_lock);
         drop(t);
+        made--;
         pthread_mutex_unlock(&list_lock);
+        rx_futex(FUTEX_WAKE, (void *)&ended, 0x7FFF);   /* (a main thread waiting on it) */
         free(raw);
         return EAGAIN;
     }
-    pthread_mutex_lock(&list_lock);
-    made++;
-    pthread_mutex_unlock(&list_lock);
     *thread = t;
     return 0;
 }
@@ -219,6 +219,7 @@ int pthread_once(pthread_once_t *once, void (*routine)(void))
 /* pthread_key_create - a key of every thread's data */
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 {
+    struct rx_tls *t;
     int k;
 
     pthread_mutex_lock(&list_lock);
@@ -227,6 +228,9 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
     if (k < RX_KEYS) {
         keys_used[k] = 1;
         destructors[k] = destructor;
+        rx_main_tls.keys[k] = 0;        /* a new key's value: none in every thread, */
+        for (t = threads; t; t = t->next)   /*    not a deleted one's (XSH; P15) */
+            t->keys[k] = 0;
     }
     pthread_mutex_unlock(&list_lock);
     if (k == RX_KEYS)

@@ -30,4 +30,5 @@ thread: a read into the heap a lower break left (100): 100
 thread: a read whose pipe was closed under it, not the next pipe's (0): 0
 thread: a thread after the main one's pthread_exit, then the end
 thread: the process's end after it (exit 0): 0
+thread: a new key in a deleted one's place, its value (none): none
 thread: done

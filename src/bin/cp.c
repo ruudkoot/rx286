@@ -50,6 +50,12 @@ int main(int argc, char **argv)
         return 1;
     }
     argv[2] = (char *)target(argv[1], argv[2], room);
+    if (fstat(in, &from) == 0 && S_ISDIR(from.st_mode)) {
+        write(2, "cp: ", 4);            /* (before the target is made or emptied: P15) */
+        write(2, argv[1], strlen(argv[1]));
+        write(2, ": is a directory\n", 17);
+        return 1;
+    }
     if (fstat(in, &from) == 0 && stat(argv[2], &to) == 0 && from.st_dev == to.st_dev
             && from.st_ino == to.st_ino) {  /* itself: O_TRUNC would empty it (P15) */
         write(2, "cp: a file onto itself\n", 23);

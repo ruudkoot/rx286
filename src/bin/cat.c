@@ -17,8 +17,10 @@ static int copy(int fd, const char *name)
     int n;
 
     while ((n = read(fd, buf, sizeof buf)) > 0)
-        if (write(1, buf, (size_t)n) != n)
+        if (write(1, buf, (size_t)n) != n) {
+            perror("cat: the output");  /* (a full or protected disk: said, P15) */
             return 1;
+        }
     if (n < 0) {
         perror(name);
         return 1;

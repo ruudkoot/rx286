@@ -172,6 +172,11 @@ int main(void)
                status, i, (int)rang);
     }
 
+    errno = 0;                          /* (the second review: malloc's errno) */
+    heap = malloc(0xF001);
+    i = errno;
+    printf("proc: malloc past 60 KB (none, ENOMEM 12): %s, %d\n", heap ? "a block" : "none", i);
+
     /* past 32 KB and 64 KB (P15); last, since a fork would copy all of it */
     big = malloc(0x7000);
     heap = malloc(0x1800);

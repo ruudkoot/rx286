@@ -1,0 +1,49 @@
+# What P15's second, uncapped review of the shell and its commands found
+# (roadmap os-server.md P15), first part: an alias at a line's end that
+# does not fit is "too long", not cut; fg takes the job that is current
+# once the last has ended; a backslash in double quotes stays but before
+# $ ` " and \; kill takes pids to 32,767, -9 alone is its usage, names in
+# any case; a command of redirections alone opens its files; a lone Esc
+# eats no key. tests/sh/review3.test has the rest.
+program: sh
+emulators: bochs mame
+install: C /BIN/SLEEP z-sleep.rx
+install: C /BIN/KILL z-kill.rx
+install: C /BIN/CP z-cp.rx
+install: C /BIN/MKDIR z-mkdir.rx
+install: C /BIN/WC z-wc.rx
+install: C /BIN/RM z-rm.rx
+keys: echo 01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678;c:\n
+keys: sleep 5 &\nsleep 1 &\n{wait 150}fg; echo [$?]\n
+keys: echo "a\\b" "c:\\dos"\n
+keys: kill -0 32100; echo [$?]\nkill -9; echo [$?]\nkill -s term 99; echo [$?]\n
+keys: > /b/new.txt; ls /b/new.txt\n
+keys: {esc}xecho hi\n
+---
+rx286, test build
+/a$ echo 01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678;c:
+sh: the line is too long
+/a$ sleep 5 &
+[1] 10
+/a$ sleep 1 &
+[2] 11
+/a$ fg; echo [$?]
+sleep 5
+[0]
+[2] Done  sleep 1
+/a$ echo "a\b" "c:\dos"
+a\b c:\dos
+/a$ kill -0 32100; echo [$?]
+kill: 32100: no such process
+[1]
+/a$ kill -9; echo [$?]
+usage: kill [-s NAME | -NAME | -NUMBER] [--] PID...; kill -l [STATUS]
+[1]
+/a$ kill -s term 99; echo [$?]
+kill: 99: no such process
+[1]
+/a$ > /b/new.txt; ls /b/new.txt
+/b/new.txt
+/a$ xecho hi
+sh: xecho: no such file or directory
+/a$

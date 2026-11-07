@@ -6,6 +6,7 @@
  * A lock keeps the list whole between threads (rx_lock; P13, XSH 2.9.1).
  * ============================================================================ */
 
+#include "errno.h"
 #include "stdlib.h"
 #include "unistd.h"
 #include "rx/tls.h"
@@ -42,8 +43,10 @@ static void *taken(size_t size)
     b = (struct block *)sbrk(0);        /* the end in 32 bits: a request of 32 KB or */
     if (b == (struct block *)-1         /*    more is no negative increment (P15) */
             || (rx_u32)(unsigned)b + units * UNIT > 0xFFFF
-            || brk((char *)b + units * UNIT) < 0)
+            || brk((char *)b + units * UNIT) < 0) {
+        errno = ENOMEM;                 /* (XSH malloc: each NULL, P15) */
         return 0;
+    }
     b->units = units;
     return b + 1;
 }
@@ -53,8 +56,11 @@ void *malloc(size_t size)
 {
     void *p;
 
-    if (size == 0 || size > 0xF000)
+    if (size == 0 || size > 0xF000) {
+        if (size)
+            errno = ENOMEM;
         return 0;
+    }
     rx_lock(&heap_lock);
     p = taken(size);
     rx_unlock(&heap_lock);

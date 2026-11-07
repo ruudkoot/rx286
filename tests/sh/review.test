@@ -3,7 +3,8 @@
 # double quote ends nothing, for the lists' split too; cp of a file onto
 # itself is refused, not emptied; cp takes a DOS path's last name after
 # its drive; sleep refuses what would wrap; sh reads a file of commands a
-# byte at a time, no line's start lost.
+# byte at a time, no line's start lost, and without a prompt or an echo
+# (P15's second review).
 program: sh
 emulators: bochs mame
 install: C /BIN/CP z-cp.rx
@@ -28,10 +29,7 @@ hello
 usage: sleep SECONDS
 [1]
 /b$ echo echo first > /b/s; echo echo second >> /b/s; echo echo third >> /b/s; sh < /b/s
-/a$ echo first
 first
-/a$ echo second
 second
-/a$ echo third
 third
-/a$ /b$
+/b$

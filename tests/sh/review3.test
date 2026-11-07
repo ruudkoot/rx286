@@ -1,0 +1,57 @@
+# What P15's second, uncapped review of the shell and its commands found
+# (roadmap os-server.md P15), second part: an empty expansion's status is
+# 0; a missing command is a syntax error, found before anything runs;
+# NAME=value with a redirection does both; ${ unclosed is an error, $1abc
+# is $1 and abc; no alias for a word with a $ in it; a file's last line
+# without its new line runs, without a prompt or an echo; cp refuses a
+# directory before it makes the target; wc and rm say their usage; ^D at
+# an empty prompt ends the shell, and init starts another.
+program: sh
+emulators: bochs mame
+install: C /BIN/SLEEP z-sleep.rx
+install: C /BIN/KILL z-kill.rx
+install: C /BIN/CP z-cp.rx
+install: C /BIN/MKDIR z-mkdir.rx
+install: C /BIN/WC z-wc.rx
+install: C /BIN/RM z-rm.rx
+keys: false; $EMPTY; echo [$?]\necho a;;echo b\necho [$?]\n
+keys: X=1 > /b/f; echo $X; ls /b/f\necho $\{HOME\necho $1abc\nalias e=echo; e$EMPTY hi\n
+keys: cat > /b/t\necho first\necho last{ctrl-d}{ctrl-d}sh < /b/t > /b/out; cat /b/out\n
+keys: mkdir /b/dd; cp /b/dd /b/x; echo [$?]; ls /b/x\n
+keys: echo hi | wc -q; echo [$?]; rm; echo [$?]\n
+keys: {ctrl-d}echo again\n
+---
+rx286, test build
+/a$ false; $EMPTY; echo [$?]
+[0]
+/a$ echo a;;echo b
+sh: a command is missing
+/a$ echo [$?]
+[2]
+/a$ X=1 > /b/f; echo $X; ls /b/f
+1
+/b/f
+/a$ echo ${HOME
+sh: a ${ is not closed
+/a$ echo $1abc
+abc
+/a$ alias e=echo; e$EMPTY hi
+sh: e: no such file or directory
+/a$ cat > /b/t
+echo first
+echo last/a$ sh < /b/t > /b/out; cat /b/out
+first
+last
+/a$ mkdir /b/dd; cp /b/dd /b/x; echo [$?]; ls /b/x
+cp: /b/dd: is a directory
+[1]
+/b/x: no such file or directory
+/a$ echo hi | wc -q; echo [$?]; rm; echo [$?]
+usage: wc [-lwc] [FILE]...
+[1]
+usage: rm FILE...
+[1]
+/a$
+/a$ echo again
+again
+/a$

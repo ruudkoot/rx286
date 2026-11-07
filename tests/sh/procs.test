@@ -55,7 +55,7 @@ HUP INT QUIT ILL TRAP ABRT FPE KILL USR1 SEGV USR2 PIPE ALRM TERM CHLD CONT STOP
 INT
 kill: 999: no such process
 kill: no such signal
-usage: kill [-s NAME | -NAME | -NUMBER] PID...; kill -l [STATUS]
+usage: kill [-s NAME | -NAME | -NUMBER] [--] PID...; kill -l [STATUS]
 /a$ env -i A=1 B=2; env -i A=1 env; env -i A=1 A=2; env nothing; echo $?
 A=1
 B=2

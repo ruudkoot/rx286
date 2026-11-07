@@ -175,8 +175,11 @@ int buddy_alloc(rx_u16 paragraphs)
         return -1;
     while (k > order) {                 /* the smallest free block: halved down */
         b = free_list[k];
-        if (split(b) != 0)
+        if (split(b) != 0) {
+            unlink(b);                  /* (whole, its buddies split above it merged */
+            buddy_free(b);              /*    back with it: P15) */
             return -1;
+        }
         k--;
     }
     b = free_list[order];

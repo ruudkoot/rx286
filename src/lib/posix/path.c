@@ -12,6 +12,7 @@
 #include "posix.h"
 #include "spawn.h"
 #include "unistd.h"
+#include "sys/stat.h"
 
 #define DEFAULT_PATH "/z:/c/bin"
 
@@ -51,10 +52,15 @@ static const char *found(const char *list, const char *name, char *room)
 
 /* unsearchable - an error that says a PATH directory cannot be searched (a
  * drive that is not there, a file named as a directory): not found there,
- * the search goes on (P15) */
-static int unsearchable(int e)
+ * the search goes on. EIO and ENXIO only if the file itself cannot be
+ * found: a program there that cannot be read is said (P15) */
+static int unsearchable(int e, const char *path)
 {
-    return e == ENOENT || e == ENOTDIR || e == EIO || e == ENXIO;
+    struct stat st;
+
+    if (e == EIO || e == ENXIO)
+        return stat(path, &st) != 0;
+    return e == ENOENT || e == ENOTDIR;
 }
 
 /* execvp - execv, a name without a slash looked for along PATH; back only
@@ -63,7 +69,7 @@ int execvp(const char *name, char *const argv[])
 {
     char path[PX_PATH_MAX];
     const char *list = getenv("PATH");
-    int error = ENOENT;
+    int error = ENOENT, e;
 
     if (!*name) {
         errno = ENOENT;                 /* an empty name (XSH exec; P15) */
@@ -77,8 +83,9 @@ int execvp(const char *name, char *const argv[])
         list = found(list, name, path);
         if (path[0]) {
             execv(path, argv);
-            if (!unsearchable(errno))
-                error = errno;
+            e = errno;                  /* (before unsearchable's stat) */
+            if (!unsearchable(e, path))
+                error = e;
         }
     }
     errno = error;
@@ -105,7 +112,7 @@ int posix_spawnp(pid_t *pid, const char *name, const posix_spawn_file_actions_t 
             e = posix_spawn(pid, path, actions, attributes, argv, envp);
             if (e == 0)
                 return 0;
-            if (!unsearchable(e))
+            if (!unsearchable(e, path))
                 error = e;              /* (a file there, refused: said if none is found) */
         }
     }

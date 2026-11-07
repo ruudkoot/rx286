@@ -19,7 +19,8 @@ static const char *const names[] = {
 };
 #define NAMES ((int)(sizeof names / sizeof names[0]))
 
-static const char usage[] = "usage: kill [-s NAME | -NAME | -NUMBER] PID...; kill -l [STATUS]\n";
+static const char usage[] = "usage: kill [-s NAME | -NAME | -NUMBER] [--] PID...; "
+                            "kill -l [STATUS]\n";
 
 /* say - text on the standard error */
 static void say(const char *text)
@@ -38,11 +39,29 @@ static int number(const char *s, int *ok)
     if (!*s)
         *ok = 0;
     for (; *s; s++) {
-        if (*s < '0' || *s > '9' || n > 3200)
-            *ok = 0;
+        if (*s < '0' || *s > '9' || n > 3276 || (n == 3276 && *s > '7')) {
+            *ok = 0;                    /* (32,767 the most: P15) */
+            break;
+        }
         n = n * 10 + (*s - '0');
     }
     return *ok ? (minus ? -n : n) : 0;
+}
+
+/* upper - a letter in upper case */
+static int upper(int c)
+{
+    return c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c;
+}
+
+/* same - two names alike in any case (XCU kill; P15) */
+static int same(const char *a, const char *b)
+{
+    while (*a && upper(*a) == upper(*b)) {
+        a++;
+        b++;
+    }
+    return upper(*a) == upper(*b);
 }
 
 /* signal_of - a signal's name, with or without SIG, or its number: the
@@ -51,10 +70,10 @@ static int signal_of(const char *s)
 {
     int k, ok;
 
-    if (strncmp(s, "SIG", 3) == 0)
+    if (upper(s[0]) == 'S' && upper(s[1]) == 'I' && upper(s[2]) == 'G')
         s += 3;
     for (k = 0; k < NAMES; k++)
-        if (names[k] && strcmp(names[k], s) == 0)
+        if (names[k] && same(names[k], s))
             return k;
     k = number(s, &ok);
     return ok && k >= 0 && k < NAMES && names[k] ? k : -1;
@@ -94,10 +113,9 @@ int main(int argc, char **argv)
     if (k + 1 < argc && strcmp(argv[k], "-s") == 0) {
         sig = signal_of(argv[k + 1]);
         k += 2;
-    } else if (k < argc && argv[k][0] == '-' && strcmp(argv[k], "--") != 0
-               && (argv[k][1] < '0' || argv[k][1] > '9' || k + 1 < argc)) {
-        sig = signal_of(argv[k++] + 1);
-    }
+    } else if (k < argc && argv[k][0] == '-' && strcmp(argv[k], "--") != 0) {
+        sig = signal_of(argv[k++] + 1); /* (-9 alone: the signal, its pid missing; a */
+    }                                   /*    group after --: XCU kill, P15) */
     if (k < argc && strcmp(argv[k], "--") == 0)
         k++;
     if (sig < 0 || k == argc) {
