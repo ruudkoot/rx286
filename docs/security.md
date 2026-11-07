@@ -1,7 +1,8 @@
 # Security
 
-The program in ring 3 is treated as arbitrary code. The shell is trusted no
-more than that.
+Every program in ring 3 is treated as arbitrary code: the processes, the
+shell among them, and the programs the root builds. The shell is trusted
+no more than that.
 
 ## The promise
 

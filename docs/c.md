@@ -113,10 +113,10 @@ is fixed by its slot.
 `tools/mkexe` writes one from the linker's output (`--287` first sets
 `RXF_287`: the Makefile's `Z_287` names the programs of `/z` that use the
 287, whose state then survives a signal's handler, *docs/processes.md*),
-and a map in NASM's form beside it, so that `tools/run-test` (`{l:rx_ud2}`), `tools/map2sym` and
+and a map in NASM's form beside it, so that `tools/run-test` (`{c:rx_ud2}`), `tools/map2sym` and
 `tools/sizes` read a C module as they read an assembled one; its symbols
 are C's names. `tools/mkimage` takes an executable as a module of the boot
-image (`clock=build/test/clock.rx:3:4`).
+image (`counter=build/test/counter.rx:3:1`).
 
 ## The tests of C
 
@@ -126,8 +126,8 @@ image (`clock=build/test/clock.rx:3:4`).
   program; `tests/unit/test_helpers.py` runs the 32-bit helpers in Unicorn
   against Python's arithmetic.
 - **On rx286:** the root (`src/root/root.c`, roadmap os-server.md P4), the
-  OS server (`src/os/`, P5), the clock and the counter are C
-  (`src/userland/clock.c`, `counter.c`), and so is the services' test
+  OS server (`src/os/`, P5), the counter module (`src/userland/counter.c`),
+  the processes (`src/userland/init.c`, `src/bin/`) are C, and so is the services' test
   program (`tests/programs/services.c`), so every suite tests the crt and
   the libraries in every `make check`. The OS server starts each of its
   threads with its own start (`src/os/start.asm`), not crt0: a part of the

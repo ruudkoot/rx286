@@ -1,14 +1,18 @@
 # A fault of a program goes to its fault endpoint (roadmap l4.md L5, L6,
 # D18), the OS server's, which the root gave it: the counter faults once
 # (TEST_COUNTER_FAULT) while the shell waits for a key; the OS server
-# reports it with the module's name, and restarts it; the shell goes on.
+# reports it with the module's name, and restarts it; the shell, in C, a
+# process (os-server.md P12), goes on. DOSBox-X's shell starts in /.
 program: shell
 define: TEST_COUNTER_FAULT
 keys: {wait 20}echo hi\n
 ---
 rx286, test build
-rx286 shell: type help for the commands
-A:\>rx286: counter fault #UD at 0007:{c:rx_ud2}
-echo hi
+rx286: counter fault #UD at 0007:{c:rx_ud2}
+@bochs /a$ echo hi
+@mame /a$ echo hi
+@dosbox-x /$ echo hi
 hi
-A:\>
+@bochs /a$
+@mame /a$
+@dosbox-x /$

@@ -1,54 +1,32 @@
-# The demonstration (roadmap l4.md L11, D19), as `make run` shows it: the
-# clock writes the time on the status line every second and the counter
-# says how fast it counts, which is how much of the CPU nothing else wants,
-# while the shell runs commands. In TEST_DEMO builds the OS server puts
-# their status lines on the log too, where the runner sets them apart
-# ("status, NAME: TEXT", after the line each fell in: the clock's report of
-# its fault ends the first), and the clock faults once, after three
-# seconds: the OS server reports it and starts it again while the shell
-# works on.
-# ps lists every module the root built; kill stops the clock, which shows
-# no more: everything made for it is revoked and its memory given back
-# (roadmap l4.md L12); start builds it again from that memory, its data
-# afresh from the module, so it faults once more; neither touches anything
-# but a background program. The clock, above the shell, ticks on while the shell
-# spins, until Ctrl+Break; the counter, below it, does not count then.
+# The demonstration (roadmap l4.md L11, D19; os-server.md P12), as `make
+# run` shows it: init starts the clock and the counter, daemons, which put
+# the time and how fast the counter counts - how much of the CPU nothing
+# else wants - on the status line, while the shell runs commands. In a
+# TEST_DEMO build init starts them as it does outside the tests, and the OS
+# server puts their status on the log too, where the runner sets it apart
+# ("status, NAME: TEXT", after the line each fell in). ps lists them, init's
+# orphans; the clock, at the shell's priority, ticks on while a command
+# spins, until ^C; the counter, below every process, does not count then.
+# (MAME's AT counts some 22,000 a second: its first report, after 65,536
+# counts, takes three seconds.)
 program: shell
 define: TEST_DEMO
-keys: {wait 250}ps\nkill clock\n{wait 100}ps\nstart clock\n{wait 250}kill program\nkill nothing\nstart counter\nkill\nspin\n{wait 150}{ctrl-break}\n
+emulators: bochs mame
+install: C /BIN/PS z-ps.rx
+install: C /BIN/SPIN z-spin.rx
+keys: {wait 250}{wait 100}ps -e\nspin\n{wait 150}{now ctrl-c}echo done\n
 timeout: 120
 match: contains
 ---
-rx286 shell: type help for the commands
-rx286: clock fault #UD at 0007:{l:rx_ud2}
+/a$ ps -e
 status, clock:
 status, counter: idle
+   11     1    11    11 -
+   13     1    13    13 -    R 39 counter
+/a$ spin
+Spinning; ^C ends it.
+^C
 status, clock:
-  # name     kind       priority state, runs
-  0 root     root       6        running,
-  1 os       OS server  5        awaiting a notification,
-  2 printer  driver     7        receiving,
-  6 fd       driver     7        receiving,
-  9 sound    driver     7        receiving,
- 10 rtc      driver     7        receiving,
- 11 program  foreground 3        awaiting its reply,
- 12 clock    background 4
- 13 counter  background 1
-A:\>kill clock
-A:\>ps
- 12 clock    background 4        stopped,
-A:\>start clock
-rx286: clock fault #UD at 0007:{l:rx_ud2}
 status, clock:
-kill program
-Not a background program
-A:\>kill nothing
-No such program
-A:\>start counter
-It is running already
-A:\>kill
-Required parameter missing
-A:\>spin
-rx286: Ctrl+Break: the program starts again
-status, clock:
-rx286 shell, started again
+/a$ echo done
+done

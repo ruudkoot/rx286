@@ -1,0 +1,17 @@
+# The OS server's stacks (roadmap os-server.md P5, P12): each of its threads
+# has 1 KB of its data segment, filled at its first start; after the
+# deepest calls the processes make - a directory of two clusters, a file
+# through the FAT, a cd, ps, a fault reported - the deepest of them has a
+# quarter of its part or more to spare, as the server says at each exit
+# (TEST_OS_STACKS).
+program: sh
+define: TEST_OS_STACKS
+install: C /BIN/PS z-ps.rx
+install: C /BIN/CRASH z-crash.rx
+keys: ls -l b:/many\ncat c:/docs/hello.txt\ncd c:/docs\nps -e\ncrash gp\nexit\n
+match: contains
+timeout: 120
+emulators: bochs mame
+---
+/c/DOCS$ exit
+os: a thread's stack: a quarter of it or more to spare: yes

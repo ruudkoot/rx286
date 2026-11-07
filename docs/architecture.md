@@ -12,9 +12,8 @@ L5):
 | the root | `src/root/` | a C module of the image, ring 2; the processes' services | about 9 KB of code |
 | the OS server | `src/os/` | a C module of the image, ring 2, a thread for each program; the files, in DOS's way | about 8.7 KB of code; its threads' stacks, 15 KB, in its data |
 | the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
-| the program (the shell) | `src/userland/` | a module of the image, ring 3 | about 4 KB of code, 4 KB of data |
-| the clock | `src/userland/clock.c` | a C module of the image (*docs/c.md*), ring 3, beside the shell, above it | about 900 bytes |
-| the counter | `src/userland/counter.c` | a C module of the image, ring 3, beside the shell, below everything | about 2 KB |
+| the processes | `src/userland/init.c`, `src/bin/` | programs of `/z` (in the image) and of C's `/BIN`, ring 3, which the OS server runs (*docs/processes.md*): init, the shell in C on each terminal (*docs/shell.md*), its commands, the daemons (the clock, the counter) | the shell about 13 KB, a command 1 to 8 KB |
+| a test program | `tests/programs/` | a module of the image in a test build, ring 3 (or 1, 2), on today's system calls; the counter (`src/userland/counter.c`), a C module, beside it when a test asks | |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
@@ -213,26 +212,28 @@ thread for its timer and its interrupt, and its interrupt line
 (*docs/drivers.md*). The OS server calls it for the system calls of its
 device.
 
-## The program
+## The programs
 
-The program sees three segments (code, data, stack: selectors 07h, 0Fh,
-17h), its endpoint to the OS server and its transfer segment (47h, 4Fh),
-and through them the system calls (*docs/syscalls.md*): the console, the
-keyboard, the clocks, the four drives a sector at a time or as files, and
-the two printers (*docs/storage.md*). It starts with its registers zero, IF on and
-IOPL 0; when it faults or exits, the OS server restarts it at its entry
-with a fresh stack, and so it does when it is broken off with Ctrl+Break,
-which the keyboard driver signals to it. Its data survives, so the shell keeps its last line and knows it was
-restarted.
+A process (*docs/processes.md*) sees its code, its data segment with its
+stack at the bottom, and its endpoint to the OS server, through which it
+makes POSIX's calls: it ends, and nothing restarts it. A program the root
+builds from a module, a test program today, sees three segments (code,
+data, stack: selectors 07h, 0Fh, 17h), its endpoint to the OS server and
+its transfer segment (47h, 4Fh), and through them today's system calls
+(*docs/syscalls.md*): the console, the keyboard, the clocks, the four
+drives a sector at a time or as files, and the two printers
+(*docs/storage.md*). It starts with its registers zero, IF on and IOPL 0;
+when it faults or exits, the OS server restarts it at its entry with a
+fresh stack, and so it does when it is broken off with Ctrl+Break, which
+the keyboard driver signals to it. Its data survives.
 
-The shell (`src/userland/`, *docs/shell.md*) is `shell.asm` (the start, the
-line editor, the command table), `commands.asm`, `drives.asm` (the prompt,
-the drive letters, `dir`, `cd`, `type`, `print`, on the OS server's file
-calls), `crash.asm`, `parse.asm` (pure, tested on the host), `uprint.asm`
-(output through `SYS_WRITE`) and `program.inc` (the sections and the
-`PRINT` macro every program uses). From `src/lib/` it takes `format.asm`,
-`fat12.asm` (a directory entry's fields) and `fatname.asm` (FAT names and
-time stamps as text), each pure and tested on the host.
+The shell is a process in C (`src/bin/sh/sh.c`, *docs/shell.md*; roadmap
+os-server.md P9, P12), and so are its commands (`src/bin/`). The shell in
+assembly, a module the root built, went in P12. The programs of today's
+system calls in assembly (`tests/programs/`) share `src/userland/`'s
+`uprint.asm` (output through `SYS_WRITE`), `stub.asm` and `program.inc`
+(the sections and the `PRINT` macro), and `src/lib/`'s `format.asm`,
+`fat12.asm` and `fatname.asm`, each pure and tested on the host.
 
 ## Builds
 

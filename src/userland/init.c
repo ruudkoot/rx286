@@ -13,8 +13,8 @@
  * where one is wanted (a machine without extended memory has 128 KB). Once
  * the shells are started it starts the daemons, the clock and the counter
  * (P12), which leave it at once and run on as its orphans: not in a test
- * build, unless it asks (TEST_DAEMONS), since they would change every
- * test's pids and timing.
+ * build, unless it asks (TEST_DAEMONS, TEST_DEMO), since they would change
+ * every test's pids and timing.
  * ============================================================================ */
 
 #include "fcntl.h"
@@ -69,7 +69,7 @@ static pid_t shell(int n)
     return pid;
 }
 
-#if !defined(TEST) || defined(TEST_DAEMONS)
+#if !defined(TEST) || defined(TEST_DAEMONS) || defined(TEST_DEMO)
 /* daemon_start - a daemon of /z started (it makes itself one: rx_daemon) */
 static void daemon_start(char *path)
 {

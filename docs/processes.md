@@ -380,7 +380,7 @@ process may have ended and a new one taken its entry meanwhile
 init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
-process that ends become its own. In an image built with `PROGRAM=sh` it
+process that ends become its own. In an image built with `PROGRAM=shell` (`sh` too) it
 starts the shell in C, `/z/sh`, on each terminal, as getty does: a child
 of its own leads a session, opens `/dev/ttyN`, which so becomes its
 session's, as descriptors 0 to 2, and runs the shell. On the first
@@ -395,9 +395,8 @@ test's pids and timing). Each makes itself a daemon (`rx_daemon`,
 session of its own without a terminal, in `/`, its descriptors 0 to 2
 `/dev/null`, and init has it as an orphan. Each writes to its field of the
 status line through `/dev/status`; killed, it is started again by its name
-(`clock`), from any shell. In the other images today's shell is still a
-program the root builds, beside it, until P12. In `TEST_POSIX_*` builds
-init starts a test of `tests/posix` instead (`tests/posix/proc.test`).
+(`clock`), from any shell. In `TEST_POSIX_*` builds init starts a test of
+`tests/posix` instead (`tests/posix/proc.test`).
 
 ## The shell
 

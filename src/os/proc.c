@@ -972,6 +972,9 @@ static int handle(int i, struct rx_kregs *r)
     }
     switch (r->ax & 0xFF) {
     case PX_EXIT:
+#ifdef TEST_OS_STACKS
+        os_stacks_report();
+#endif
         end(i, (r->bx & 0xFF) << 8, 1);
         result = NO_REPLY;
         break;

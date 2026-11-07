@@ -4,8 +4,9 @@ The AT's four drives and two printer ports, as rx286 drives them
 (`roadmaps/storage.md`). Drivers in ring 1 drive them (*docs/drivers.md*;
 roadmap l4.md L7, L9). The program sees them through system calls
 (*docs/syscalls.md*): the disks a sector at a time, or as files in DOS's
-way, which the OS server keeps (roadmap l4.md L9); the shell's drive
-letters, directories and files are those (*docs/shell.md*).
+way, which the OS server keeps (roadmap l4.md L9); a process sees the same
+files as `/a` to `/d` (*docs/processes.md*), and so does the shell
+(*docs/shell.md*).
 
 ## The drives
 
@@ -137,5 +138,6 @@ never stay busy.
 `make disks` builds drives B, C and D in `build/disks/` with `tools/mkdisks`,
 the same bytes each time; `disks/README.md` lists the files. C and D each
 have a master boot record and one FAT12 partition from sector 17 (cylinder
-0, head 1), as FDISK lays them out. `make run` uses these images, and the
-shell may write to them; the tests use copies.
+0, head 1), as FDISK lays them out. `make run` uses these images, puts the
+shell's commands in C's `/BIN`, and the shell may write to them; the tests
+use copies.

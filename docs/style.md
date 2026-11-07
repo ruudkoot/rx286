@@ -68,7 +68,7 @@ says so in Out.
 
   ```c
   /* ============================================================================
-   * rx286 - src/userland/clock.c
+   * rx286 - src/bin/clock.c
    * One line: what the file is.
    *
    * A paragraph: what it does, what it relies on, what it leaves to others.

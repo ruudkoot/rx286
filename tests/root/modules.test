@@ -2,8 +2,10 @@
 # capabilities the kernel gave it, the root finds each module's code where
 # the module table says, and its code and data as assembled (Fletcher sums
 # of what it reads, against the image's). The drivers' code, of ring 1, is
-# not the root's to read: "----".
-program: shell
+# not the root's to read: "----". Beside the drivers and the servers, a
+# program in assembly (idle) and one in C (the counter, TEST_COUNTER).
+program: idle
+define: TEST_COUNTER
 define: TEST_ROOT_REPORT
 ---
 rx286, test build
@@ -20,5 +22,3 @@ root: module rtc: code at {m:rtc.base}h, sum ----, data sum {m:rtc.datasum}
 root: module program: code at {m:program.base}h, sum {m:program.codesum}, data sum {m:program.datasum}
 root: module counter: code at {m:counter.base}h, sum {m:counter.codesum}, data sum {m:counter.datasum}
 root: module z: code at {m:z.base}h, sum {m:z.codesum}, data sum {m:z.datasum}
-rx286 shell: type help for the commands
-A:\>

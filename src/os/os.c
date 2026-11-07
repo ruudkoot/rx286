@@ -747,17 +747,25 @@ static void control(void)
 }
 
 #ifdef TEST_OS_STACKS
-/* stack_report - TEST_OS_STACKS builds: how deep the thread has gone, at
- * its program's exit (tests/shell/stacks.test) */
-static void stack_report(struct session *s)
+static rx_u8 started[TTY_N + 1];        /* the threads that have started (os_thread) */
+
+/* os_stacks_report - TEST_OS_STACKS builds: the deepest any of the server's
+ * threads that have started has gone, said at a program's or a process's
+ * exit (server.h; tests/sh/stacks.test) */
+void os_stacks_report(void)
 {
     char line[LINE_SIZE];
-    unsigned used = os_stack_used(s->n);
+    unsigned n, used, most = 0, deepest = 2;
 
-    rx_log(line, (unsigned)snprintf(line, sizeof line, "os: thread %u used %u of %u bytes of "
-                                    "its stack\n", s->n, used, OS_PART));
+    for (n = 2; n <= TTY_N; n++)
+        if (started[n] && (used = os_stack_used(n)) > most) {
+            most = used;
+            deepest = n;
+        }
+    rx_log(line, (unsigned)snprintf(line, sizeof line, "os: thread %u went deepest: %u of %u "
+                                    "bytes of its stack\n", deepest, most, OS_PART));
     rx_log(line, (unsigned)snprintf(line, sizeof line, "os: a thread's stack: a quarter of it "
-                                    "or more to spare: %s\n", used <= OS_PART / 4 * 3 ? "yes"
+                                    "or more to spare: %s\n", most <= OS_PART / 4 * 3 ? "yes"
                                     : "no"));
 }
 #endif
@@ -802,7 +810,7 @@ static void serve(struct session *s)
             r.ax = KCALL_REPLY_RECV << 8;
         } else if ((r.ax & 0xFF) == SYS_EXIT) {
 #ifdef TEST_OS_STACKS
-            stack_report(s);
+            os_stacks_report();
 #endif
             keys_dropped(s);
             r.ax = (KCALL_THREAD << 8) | THREAD_RESTART;    /* the program starts again, */
@@ -830,6 +838,9 @@ void os_thread(unsigned n)
 {
     struct session s;
 
+#ifdef TEST_OS_STACKS
+    started[n] = 1;
+#endif
     if (n == OS_CONTROL_N) {
 #ifndef TEST_CAPS
         proc_boot();

@@ -130,7 +130,7 @@ What it rests on:
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
-| P12 | The commands and the devices | in progress (steps 1-3 of 4, branch `os-server`) |
+| P12 | The commands and the devices | done (2026-11-07, branch `os-server`) |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
 | P15 | The documents, a review, the release | not started |
@@ -2554,6 +2554,21 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - **`start` goes** with the old shell: a daemon killed is started again by its name.
   - **The tests:** `tests/sh/daemons` (Bochs and MAME): both daemons as init's orphans, their
     status, the clock killed and started again, `nice`. `ps` shows the nice value.
+* **Step 4 done (2026-11-07): the old shell goes.**
+  - **`PROGRAM=shell` is the shell in C** (`sh` too): `make run` boots it, with the daemons, its
+    commands installed in C's `/BIN`. The shell in assembly is deleted (`src/userland/shell.asm`,
+    `commands.asm`, `drives.asm`, `programs.asm`, `devices.asm`, `crash.asm`, `parse.asm` and
+    its unit test), and so is the clock's module, which the daemon replaces. The counter's
+    module stays for the kernel's tests that ask for it (`TEST_COUNTER*`).
+  - **DOS's names** are the shell's aliases from its start (D14 C): `dir`, `type`, `print`,
+    `copy`, `del`, `ren`, `md`, `rd`, `cls`, and `A:` to `D:` for `cd`.
+  - **The tests:** `tests/shell` and `tests/drives` are gone, `tests/sh` having their
+    counterparts, `stacks` too (the deepest of the server's threads, at each exit).
+    `tests/threads`, `tests/root`'s fault test and `tests/kernel`'s stretch tests run the
+    shell in C; the modules test runs `idle` and the counter; the demonstration shows the
+    daemons; stretch-kill ends processes where it killed the clock's module.
+  - **Left to P14:** today's calls the old shell alone made (`SYS_PS`, `SYS_KILL`,
+    `SYS_START`) have no test now; P14 deletes them with the rest.
 
 ### P13. POSIX threads (M, about 1,200)
 

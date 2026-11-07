@@ -33,9 +33,9 @@ $(INC_H)/%.h: src/include/%.inc tools/inc2h
 	$(PYTHON) tools/inc2h $< $@
 
 # The flavour and the test's NASM defines, as the C compiler takes them;
-# INIT_SHELL where init runs the shell (PROGRAM=sh)
+# INIT_SHELL where init runs the shell (PROGRAM=shell or sh)
 C_DEFINES := $(patsubst -d%,-D%,$(FLAVOUR_DEFINE) $(TEST_DEFINES)) \
-    $(if $(filter sh,$(PROGRAM)),-DINIT_SHELL)
+    $(if $(filter shell sh,$(PROGRAM)),-DINIT_SHELL)
 NASM_C_FLAGS := -w+all -w+error -Isrc/include/ -Isrc/userland/ -Isrc/lib/ $(FLAVOUR_DEFINE) \
     $(TEST_DEFINES)
 
@@ -205,7 +205,7 @@ Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p
 Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls clock counter, \
     $(c)=$(C_B)/bin/$(c).$(OBJ))
 Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED)) \
-    $(if $(filter sh,$(PROGRAM)),$(Z_SHELL))
+    $(if $(filter shell sh,$(PROGRAM)),$(Z_SHELL))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
 # install: lines put them on a run's drive C, `make run` all of them in
 # /c/bin (tools/install-programs). The shell's commands but its first
@@ -215,7 +215,7 @@ BIN_COMMANDS := $(foreach c,cp mv rm mkdir rmdir wc lp more clear uptime date sl
     $(c)=$(C_B)/bin/$(c).$(OBJ)) crash=$(C_B)/bin/crash.$(OBJ)+$(C_B)/bin/crashes.$(OBJ) \
     fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ)
 DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ)) \
-    $(if $(filter sh,$(PROGRAM)),$(BIN_COMMANDS))
+    $(if $(filter shell sh,$(PROGRAM)),$(BIN_COMMANDS))
 DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p))).rx)
 image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
@@ -233,9 +233,6 @@ $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 # A test program in C (tests/programs/*.c), the program module of its build
 $(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe
 	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ))
-
-$(B)/clock.rx: $(C_LIB_OBJS) $(C_B)/userland/clock.$(OBJ) tools/mkexe
-	$(call c_link,clock,$(C_LIB_OBJS) $(C_B)/userland/clock.$(OBJ))
 
 $(B)/counter.rx: $(C_LIB_OBJS) $(C_B)/userland/counter.$(OBJ) \
     $(C_B)/userland/counter-fpu.$(OBJ) tools/mkexe

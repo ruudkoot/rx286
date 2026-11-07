@@ -2,12 +2,16 @@
 # kernel (TEST_STRETCH), from its entry or a window's end to the next window
 # or IRET, with timer channel 0's latched count; the longest, and where, said
 # at the end. The shell lists a directory, types a file, reads the game port,
-# sounds and faults, so the drivers and the OS server work meanwhile; the
+# sounds and faults (in C since os-server.md P12, its commands from C's
+# /BIN), so the drivers and the OS server work meanwhile; the
 # kernel never keeps interrupts off for half a tick. MAME's AT runs at an
 # AT's speed: its numbers are the ones realtime.md records.
 program: shell
 define: TEST_STRETCH
-keys: dir c:\ntype c:\\numbers.txt\njoy\nbeep\ncrash gp\n
+install: C /BIN/JOY z-joy.rx
+install: C /BIN/BEEP z-beep.rx
+install: C /BIN/CRASH z-crash.rx
+keys: ls c:/\ncat c:/numbers.txt\njoy\nbeep\ncrash gp\n
 timeout: 60
 emulators: bochs mame
 match: contains

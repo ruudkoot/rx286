@@ -25,7 +25,7 @@ wants SS = DS, and calls `os_thread(n)` (`src/os/os.c`). Each part's lowest
 word is a guard, which the thread checks after every message: a thread
 that overflowed its part says so on the log and serves no more. On a
 thread's first start its part is filled with the guard's word, so that
-`os_stack_used` can tell how deep it has gone (`tests/shell/stacks.test`).
+`os_stack_used` can tell how deep it has gone (`tests/sh/stacks.test`).
 The threads share no table: each works on its own program's segments.
 
 Each thread serves one program, so one program's wait for a key or a tick holds up no

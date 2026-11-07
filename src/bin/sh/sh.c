@@ -9,7 +9,9 @@
  * (in the background); a pipeline commands joined by |; a command words,
  * with <, >, >> and 2> redirections. Words are split at blanks; '...' quotes all, "..."
  * all but $, and \ the next character; $NAME, ${NAME} and $? are
- * replaced. The first word of a command may be an alias. The built-ins are
+ * replaced. The first word of a command may be an alias; DOS's names are
+ * aliases from the start (D14 C: dir, type, print, copy, del, ren, md, rd,
+ * cls, and A: to D: for cd). The built-ins are
  * cd, pwd, exit, export, unset, set, alias, unalias, true, false, jobs, fg,
  * bg and help (P12); any other command is a program, found along PATH
  * (execvp), run in a child. Paths may name a drive DOS's way: "c:/docs" is
@@ -39,7 +41,7 @@
 #define POOL 512                        /* their text, expanded */
 #define PIPELINE 6                      /* a pipeline's commands */
 #define VARS 24
-#define ALIASES 12
+#define ALIASES 24
 #define HISTORY 8
 #define JOBS 8
 
@@ -64,6 +66,11 @@ struct command {
 static char *vars[VARS];                /* "NAME=value" */
 static unsigned char exported[VARS];
 static char *aliases[ALIASES];          /* "name=value" */
+static const char *const dos_names[] = {    /* DOS's, its aliases from the start (D14 C) */
+    "dir=ls -l", "type=cat", "print=lp", "copy=cp", "del=rm", "ren=mv", "md=mkdir",
+    "rd=rmdir", "cls=clear", "a:=cd /a", "b:=cd /b", "c:=cd /c", "d:=cd /d", "A:=cd /a",
+    "B:=cd /b", "C:=cd /c", "D:=cd /d"
+};
 static char history[HISTORY][LINE_MAX];
 static int history_count, status;
 static struct token tokens[WORDS + 1];
@@ -527,6 +534,7 @@ static const char help_text[] =
     "Machine:   date [+FORMAT], uptime, clear, keys, mem, fpu, crash KIND, spin\n"
     "Devices:   beep, play, joy, mouse, term (COM2)\n"
     "Lines:     CMD | CMD, CMD; CMD, && ||, & (in the background), < > >> 2>\n"
+    "DOS's:     dir, type, print, copy, del, ren, md, rd, cls, A: to D: (alias)\n"
     "Keys:      Backspace, Up and Down (the last lines), ^C (stop), ^Z (stop a\n"
     "           job), ^D (the end), Alt+F1 to F8 (the terminals)\n";
 
@@ -985,6 +993,9 @@ int main(int argc, char **argv, char **envp)
 
     (void)argc;
     (void)argv;
+    for (n = 0; n < (int)(sizeof dos_names / sizeof dos_names[0]); n++)
+        if ((aliases[n] = malloc(strlen(dos_names[n]) + 1)) != 0)
+            strcpy(aliases[n], dos_names[n]);
     for (; envp && *envp; envp++)
         if (strchr(*envp, '='))
             var_set(*envp, 1);

@@ -1,0 +1,56 @@
+# DOS's names, the shell's aliases from its start (roadmap os-server.md
+# D14 C, P12): dir, type, copy, ren, del, md, rd, and a drive's letter for
+# cd, in either case; alias lists them, and unalias takes one away, from
+# the next line on (an alias is put in as its line is read: XCU 2.3.1).
+program: shell
+emulators: bochs mame
+install: C /BIN/CP z-cp.rx
+install: C /BIN/MV z-mv.rx
+install: C /BIN/RM z-rm.rx
+install: C /BIN/MKDIR z-mkdir.rx
+install: C /BIN/RMDIR z-rmdir.rx
+keys: dir c:/docs\ntype c:/docs/hello.txt\nb:\npwd\nmd d; copy frag.txt d/f.txt; ren d/f.txt d/g.txt\n
+keys: dir d\ndel d/g.txt; rd d; C:\npwd\nalias\nunalias dir; dir\ndir\n
+timeout: 60
+---
+rx286, test build
+/a$ dir c:/docs
+-rw-r--r--       21 HELLO.TXT
+-rw-r--r--      161 PRINTME.TXT
+/a$ type c:/docs/hello.txt
+Hello from C:\DOCS.
+/a$ b:
+/b$ pwd
+/b
+/b$ md d; copy frag.txt d/f.txt; ren d/f.txt d/g.txt
+/b$ dir d
+-rw-r--r--     3136 G.TXT
+/b$ del d/g.txt; rd d; C:
+/c$ pwd
+/c
+/c$ alias
+alias dir=ls -l
+alias type=cat
+alias print=lp
+alias copy=cp
+alias del=rm
+alias ren=mv
+alias md=mkdir
+alias rd=rmdir
+alias cls=clear
+alias a:=cd /a
+alias b:=cd /b
+alias c:=cd /c
+alias d:=cd /d
+alias A:=cd /a
+alias B:=cd /b
+alias C:=cd /c
+alias D:=cd /d
+/c$ unalias dir; dir
+-rw-r--r--      142 README.TXT
+drwxr-xr-x        0 DOCS
+-rw-r--r--    29000 NUMBERS.TXT
+drwxr-xr-x        0 BIN
+/c$ dir
+sh: dir: no such file or directory
+/c$

@@ -2,7 +2,8 @@
 # ============================================================================
 # rx286 - tools/sizes
 # Each segment of a build against its room in src/include/layout.inc, from
-# the NASM map files. Warns at 90% full.
+# the NASM map files, of the modules its image has (a map an older build
+# left is passed over). Warns at 90% full.
 #
 #   tools/sizes build/release
 # ============================================================================
@@ -26,8 +27,6 @@ ROOMS = [
     ('user', 'utext', 'program: code', L['UTEXT_ROOM']),
     ('user', 'udata', 'program: data', L['UDATA_ROOM']),
     # C modules (tools/mkexe's maps; roadmap os-server.md P1): a segment each, at most 64 KB
-    ('clock', 'rxtext', 'clock (C): code', 0x10000),
-    ('clock', 'rxdata', 'clock (C): data', 0x10000),
     ('counter', 'rxtext', 'counter (C): code', 0x10000),
     ('counter', 'rxdata', 'counter (C): data', 0x10000),
 ]
@@ -45,12 +44,19 @@ def section_lengths(path):
     return lengths, total
 
 
+# A module's binary, by its name in the image's module table
+MODULE_OF = {'user': 'program', 'counter': 'counter'}
+
+
 def main(build):
     print('%-26s %7s %7s %5s' % ('segment', 'used', 'room', 'full'))
     warn = False
+    image = os.path.join(build, 'image.bin')
+    modules = ({m['name'] for m in rxlib.image_modules(open(image, 'rb').read())}
+               if os.path.exists(image) else set())
     for binary, section, label, room in ROOMS:
         path = os.path.join(build, binary + '.map')
-        if not os.path.exists(path):
+        if not os.path.exists(path) or (binary in MODULE_OF and MODULE_OF[binary] not in modules):
             continue
         lengths, total = section_lengths(path)
         if section.endswith('_end'):        # a symbol: its offset is the size used

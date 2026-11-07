@@ -271,7 +271,7 @@ def build(test):
         for name in ('kernel.bin', 'user.bin', 'user.rx', 'root.rx', 'os.rx', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
-                     'rtc.bin', 'clock.rx', 'z.arc'):
+                     'rtc.bin', 'z.arc'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
         for name in glob.glob(os.path.join(b, 'z-*.rx')):     # /z's programs
@@ -382,8 +382,8 @@ def booted_image(test):
 
 def substitute(test, line):
     """{name} (the program's), {k:name} (the kernel's), {c:name} (the
-    counter's), {r:name} (the root's), {o:name} (the OS server's) and
-    {l:name} (the clock's) to four upper-case hex digits, and
+    counter's), {r:name} (the root's) and {o:name} (the OS server's) to
+    four upper-case hex digits, and
     {z:program.name} a program of /z's (roadmap os-server.md P6);
     {x:name} and {kx:name} to eight lower-case ones, as Bochs'
     debugger prints them; {m:module.base} to where a module's code is (five
@@ -418,14 +418,14 @@ def substitute(test, line):
             program, _, name = name.partition('.')
             mapfile = 'z-%s.map' % program
         else:
-            mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map', 'o': 'os.map',
-                       'l': 'clock.map'}.get(which[:1], 'user.map')
+            mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map',
+                       'o': 'os.map'}.get(which[:1], 'user.map')
         symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
     line = line.replace('{{', '\x00').replace('}}', '\x01')    # {{ and }}: braces themselves
-    line = re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    line = re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
     return line.replace('\x00', '{').replace('\x01', '}')
 
 

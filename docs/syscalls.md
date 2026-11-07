@@ -138,8 +138,8 @@ server asks it for a program's calls about them. `SYS_PS`'s record
 made the program of, so everything made for it dies - its space, thread,
 segments, endpoint, the OS server's thread for it - and its memory is free
 again (roadmap l4.md L12). `SYS_START` builds it again from that memory, as
-the root did at the start, its data afresh from its module. The shell, the
-OS server, a driver and the root are none of theirs. A background program's writes (`SYS_WRITE`) go to its own field of
+the root did at the start, its data afresh from its module. The program
+the keys are for, the OS server, a driver and the root are none of theirs. A background program's writes (`SYS_WRITE`) go to its own field of
 the status line, not to the log: the first background program's at the
 line's right end, the next's left of it (*docs/drivers.md*).
 

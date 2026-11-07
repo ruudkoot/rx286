@@ -246,5 +246,7 @@ void sig_timers(void);
  * is its guard there; the bytes it has used at most */
 int os_stack_ok(unsigned n);
 unsigned os_stack_used(unsigned n);
+/* os_stacks_report - TEST_OS_STACKS builds: the deepest thread's (os.c) */
+void os_stacks_report(void);
 
 #endif

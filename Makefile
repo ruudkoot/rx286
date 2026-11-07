@@ -48,7 +48,6 @@ endif
 NASMFLAGS := -f bin -w+all -w+error -Isrc/include/ $(FLAVOUR_DEFINE) $(TEST_DEFINES)
 
 # The program the kernel carries (test builds may choose another).
-program_main_shell := src/userland/shell.asm
 program_main_idle := tests/programs/idle.asm
 program_main_syscalls := tests/programs/syscalls.asm
 program_main_attack := tests/programs/attack.asm
@@ -64,23 +63,20 @@ program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
 program_main_services := tests/programs/services.c
 # PROGRAM=none: no program the root builds; the processes have the keys (P9);
-# PROGRAM=sh: no program the root builds either, and init runs the shell in C
+# PROGRAM=shell (sh too): no program the root builds either, and init runs
+# the shell in C on each terminal (os-server.md P9; the shell in assembly
+# went in P12)
 program_main_none := none
+program_main_shell := none
 program_main_sh := none
 PROGRAM_MAIN := $(program_main_$(PROGRAM))
 # The program's module: assembled, or a C program linked (c.mk)
 PROGRAM_BIN := $(if $(filter none,$(PROGRAM_MAIN)),,$(if $(filter %.c,$(PROGRAM_MAIN)),$(B)/user.rx,$(B)/user.bin))
-# The counter runs beside the shell; beside a test program only if the test
-# asks for it (TEST_COUNTER_*), so that the test programs' transcripts and
-# timings stay their own. Its priority is below the program's (3), or as a
-# test says.
-WITH_COUNTER := $(or $(filter shell,$(PROGRAM)),$(findstring TEST_COUNTER,$(TEST_DEFINES)))
-# The clock runs beside the shell too (roadmap l4.md L11, D19), above it, so
-# that it ticks while the shell computes (it sleeps but for a moment a
-# second); in a test build only if the test asks (TEST_DEMO), since it would
-# put the time in every transcript's timing.
-WITH_CLOCK := $(if $(filter test,$(FLAVOUR)),$(findstring TEST_DEMO,$(TEST_DEFINES)),$(filter \
-    shell,$(PROGRAM)))
+# The counter as a module the root builds, for the kernel's tests of it
+# (TEST_COUNTER*: tests/threads, tests/root): the shell has the counter of
+# /z, a daemon (os-server.md P12). Its priority is below the program's (3),
+# or as a test says.
+WITH_COUNTER := $(findstring TEST_COUNTER,$(TEST_DEFINES))
 COUNTER_PRIORITY := $(if $(findstring TEST_COUNTER_SAME,$(TEST_DEFINES)),3,$(if \
     $(findstring TEST_COUNTER_ABOVE,$(TEST_DEFINES)),4,1))
 # The program's ring: 3, or 1 or 2 for the tests of those rings, which ask
@@ -99,7 +95,6 @@ MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=128 \
     serial=$(B)/serial.bin:1:7:driver:irq=3:service=7 sound=$(B)/sound.bin:1:7:driver:service=8 \
     rtc=$(B)/rtc.bin:1:7:driver:service=9 \
     $(if $(PROGRAM_BIN),program=$(PROGRAM_BIN):$(PROGRAM_RING)) \
-    $(if $(WITH_CLOCK),clock=$(B)/clock.rx:3:4) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
     z=$(B)/z.arc:3:0:archive
 ifeq ($(PROGRAM_MAIN),)
@@ -117,7 +112,7 @@ IMAGE := $(B)/rx286.img
 BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.rx \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
     $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) \
-    $(B)/clock.rx $(B)/counter.rx $(B)/z.arc $(B)/kernel.bin $(B)/image.bin
+    $(B)/counter.rx $(B)/z.arc $(B)/kernel.bin $(B)/image.bin
 
 .PHONY: all release debug test-build image symbols run run-release debugger test test-286 check \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks \
@@ -176,7 +171,7 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
 $(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.rx $(B)/printer.bin $(B)/mouse.bin \
     $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
-    $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) $(B)/clock.rx $(B)/counter.rx $(B)/z.arc \
+    $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) $(B)/counter.rx $(B)/z.arc \
     tools/mkimage \
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)

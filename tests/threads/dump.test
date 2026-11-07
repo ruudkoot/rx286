@@ -1,22 +1,19 @@
 # The thread dump of debug and test builds (roadmap l4.md L2), on the AT's
 # Sys Req key: every thread, its state and priority, and how much of the
 # kernel's one stack has been used (roadmap os-server.md P3). The keyboard
-# driver asks for the dump (roadmap l4.md L8), and is running; the shell
-# waits for the reply of the OS server's thread, which sleeps until the
-# keyboard driver signals (roadmap os-server.md P5); the OS server's control
-# thread awaits Ctrl+Break; the mouse's
-# driver is still in the mouse's reset (roadmap l4.md L7), but on MAME,
-# where the drivers, at 7 above the root at 6 (roadmap os-server.md P4),
-# have run long enough to finish it.
+# driver asks for the dump (roadmap l4.md L8), and is running; each process
+# - init's, the shell in C on the first terminal - waits for the reply of
+# its thread of the OS server's, which awaits its notification (os-server.md
+# P6, P12); the counter, a module (TEST_COUNTER), is ready below them. The
+# mouse's driver may still be in the mouse's reset: its line is not
+# checked.
 program: shell
+define: TEST_COUNTER
 keys: {sysrq}
 match: contains
 ---
 rx286: thread root receiving priority 6
 rx286: thread printer receiving priority 7
-@bochs rx286: thread mouse awaiting a notification priority 7
-@mame rx286: thread mouse receiving priority 7
-@dosbox-x rx286: thread mouse awaiting a notification priority 7
 rx286: thread console receiving priority 7
 rx286: thread kbd running priority 7
 rx286: thread fd receiving priority 7
@@ -24,9 +21,7 @@ rx286: thread hd receiving priority 7
 rx286: thread serial receiving priority 7
 rx286: thread sound receiving priority 7
 rx286: thread rtc receiving priority 7
-rx286: thread program awaiting its reply priority 3
 rx286: thread counter ready priority 1
 rx286: thread os awaiting a notification priority 5
-rx286: thread os awaiting a notification priority 5
-rx286: thread os receiving priority 5
+rx286: thread thread awaiting its reply priority 3
 rx286: the kernel's stack used
