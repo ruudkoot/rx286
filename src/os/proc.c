@@ -7,7 +7,7 @@
  * A process is the root's (ROOT_SPAWN, ROOT_FORK): a space of PROC_SLOTS
  * with its code, its data segment (in slots 1 and 2) and its endpoint. The
  * server keeps a table of them, and for table entry i the server's copies
- * of its endpoint, thread, space and data in slots PROC_SLOT0 + 8i on, and
+ * of its endpoint, thread, space and data in slots PROC_SLOT0 + 6i on, and
  * a thread of its own (ROOT_SERVE), started as thread PROC_N0 + i, which
  * serves process i alone and sleeps on its notification while the entry is
  * empty. A call is a message (D5 B; posix.inc): its buffers lie in the
@@ -38,8 +38,7 @@
 #include "exe.h"
 #include "vectors.h"
 
-#define NEW_SLOT0 168                   /* exec's new image, before it takes the old's slots */
-#define LOAD_SLOT SLOT(172)             /* a load, while code is read into it */
+#define LOAD_SLOT SLOT(148)             /* a load, while code is read into it */
 #define ARCHIVE SLOT(OS_SLOT_ARCHIVE)
 #define INIT_PID 1
 #define NO_REPLY (-2)                   /* a call that ends its process: no answer */
@@ -1012,12 +1011,12 @@ void proc_timers(void)
     give();
 }
 
-/* proc_terminal - a signal for the terminal's foreground group, if it has
- * a session (server.h; lock held) */
+/* proc_terminal - a signal for the shown terminal's foreground group, if
+ * it has a session (server.h; lock held) */
 void proc_terminal(int sig)
 {
-    if (tty_pgrp())
-        proc_group(tty_pgrp(), sig);
+    if (tty_pgrp(tty_shown()))
+        proc_group(tty_pgrp(tty_shown()), sig);
 }
 
 /* proc_interrupt - Ctrl+Break (server.h): the INTR character's SIGINT, and
@@ -1027,7 +1026,7 @@ void proc_interrupt(void)
     take(OS_CONTROL);
     proc_terminal(SIGINT);
     if (tty_keys())
-        tty_flush();
+        tty_flush(tty_shown());
     give();
 }
 

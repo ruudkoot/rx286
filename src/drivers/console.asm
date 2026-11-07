@@ -62,6 +62,7 @@ page_pos            times VIDEO_PAGES dw CON_FIRST      ; each page's, kept
 page_attr           times VIDEO_PAGES db ATTR_NORMAL
 page_esc            times VIDEO_PAGES * 4 db 0          ; state, n, p0, p1
 status_page         dw 0
+show_quiet          db 0                ; DRV_CON_SHOW's BH (CON_QUIET)
 chunk_buf           times CHUNK db 0
 ansi_colours        db 0, 4, 2, 6, 1, 5, 3, 7      ; ANSI's black, red, green, yellow,
                                                     ; blue, magenta, cyan, white
@@ -867,12 +868,14 @@ scroll:
 
 ; ----------------------------------------------------------------------------
 ; show - DRV_CON_SHOW: a page shown, the CRTC's start address at it and the
-; hardware cursor at its cursor (TEST_SCREEN: the page on the log)
-;   In:       BL = the page; DS = its data
+; hardware cursor at its cursor (TEST_SCREEN: the page on the log, but with
+; CON_QUIET)
+;   In:       BL = the page; BH = CON_QUIET or 0; DS = its data
 ;   Out:      BX = the pages the EGA holds; CX = the page shown
 ;   Destroys: AX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 show:
+        mov [show_quiet], bh
         xor bh, bh
         cmp bx, [con_pages]
         jae .answer
@@ -900,6 +903,8 @@ show:
         call cursor_on                  ; (CX = the page's start, in words)
         pop bx
 %ifdef TEST_SCREEN
+        cmp byte [show_quiet], CON_QUIET
+        je .answer
         call dump
 %endif
 .answer:

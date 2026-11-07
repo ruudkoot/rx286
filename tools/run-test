@@ -428,20 +428,32 @@ def substitute(test, line):
     return line.replace('\x00', '{').replace('\x01', '}')
 
 
+# What the kernel or the console driver writes to the log as lines of
+# their own, which may fall into another line's middle
+INSERTED = re.compile(r'\[trace\] |screen \d(?: \d\d)?: ')
+
+
 def relevant(lines):
     """The lines a test compares: not the kernel's trace and register lines,
-    and not blank ones. A trace line the kernel wrote into another's middle
-    (a program's output before its newline, a prompt) is taken out, and the
-    line put together again."""
+    and not blank ones. A trace line, or a TEST_SCREEN build's line of a page,
+    that fell into another's middle (a program's output before its newline,
+    a prompt) is taken out, and that line put together again."""
     out, carry = [], ''
     for l in lines:
-        at = l.find('[trace] ')
-        if at > 0:
-            carry += l[:at]
+        m = INSERTED.search(l)
+        if m:
+            carry += l[:m.start()]
+            if not l.startswith('[trace] ', m.start()):
+                out.append(l[m.start():])       # a page's line
             continue
-        l = carry + l
+        if l == 'TEST END' and carry:
+            out.append(carry.rstrip())          # (the kernel's own line, never joined)
+        elif not l.startswith(IGNORED_PREFIXES):
+            l = carry + l
+        else:
+            continue
         carry = ''
-        if l and not l.startswith(IGNORED_PREFIXES):
+        if l:
             out.append(l)
     if carry:
         out.append(carry)

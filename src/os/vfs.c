@@ -45,7 +45,7 @@ enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_
 
 #define PIPES 8                         /* the pipes at once (P9) */
 #define PIPE_SIZE 1024                  /* each one's buffer, in the server's segment */
-#define PIPE_SEG SLOT(174)
+#define PIPE_SEG SLOT(150)
 
 /* A pipe: its ends' descriptions, its bytes, the entries whose threads wait
  * to read or write (-1: none) */
@@ -100,6 +100,8 @@ static struct files files_of[PROCS];
 static struct vol vols[DRIVES];
 static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
 static const char *const dev_names[] = { "null", "tty", "lpt1", "lpt2" };
+#define DEV_NAMES 4                     /* then "tty1" to the last terminal's (P11) */
+#define TTY_OWN 0xFF                    /* /dev/tty's unit: the opener's terminal */
 static const char punctuation[] = "!#$%&'()-@^_`{}~";
 
 /* errno_of - a volume's or a driver's error (E_*, syscalls.inc) as POSIX's */
@@ -324,6 +326,16 @@ static int archive_entry(const char *name)
     return -1;
 }
 
+/* tty_unit - a terminal's name, "tty1" to "tty8" in any case: its unit, or
+ * -1 if there is no such terminal */
+static int tty_unit(const char *name)
+{
+    if (!tty_keys() || lower(name[0]) != 't' || lower(name[1]) != 't' || lower(name[2]) != 'y'
+            || name[3] < '1' || name[3] > '0' + tty_terminals() || name[4])
+        return -1;
+    return name[3] - '1';
+}
+
 /* lookup - the node a path names; on a volume the node may be absent, its
  * directory there (exists 0): 0 or the error. Each name found is written in
  * its own case, as the root or FAT has it (path_text puts them together) */
@@ -344,13 +356,21 @@ static int lookup(struct path *p, struct node *n)
         n->kind = K_DEVDIR;
         if (p->parts == 1)
             return 0;
-        for (k = 0; k < 4; k++)
+        for (k = 0; k < DEV_NAMES; k++)
             if (p->parts == 2 && same(p->part[1], dev_names[k])) {
                 strcpy(p->part[1], dev_names[k]);
                 n->kind = k == 0 ? K_NULL : k == 1 ? K_TTY : K_LPT;
-                n->unit = (rx_u16)(k - 2);
+                n->unit = (rx_u16)(k == 1 ? TTY_OWN : k - 2);
                 return 0;
             }
+        if (p->parts == 2 && (e = tty_unit(p->part[1])) >= 0) {
+            p->part[1][0] = 't';        /* "tty1" to "tty8" (P11) */
+            p->part[1][1] = 't';
+            p->part[1][2] = 'y';
+            n->kind = K_TTY;
+            n->unit = (rx_u16)e;
+            return 0;
+        }
         return ENOENT;
     }
     if (same(p->part[0], "z")) {
@@ -535,6 +555,17 @@ int pipes_init(void)
     if (call(OS_ROOT, ROOT_LOAD, PIPES * PIPE_SIZE, 0, 0, PIPE_SEG, 0, &r) || r.bx)
         return E_NOMEM;
     pipes_ready = 1;
+    return 0;
+}
+
+/* vfs_tty_open - has any process a terminal open? (fs.h) */
+int vfs_tty_open(int unit)
+{
+    int k;
+
+    for (k = 0; k < OFDS; k++)
+        if (ofds[k].kind == K_TTY && ofds[k].unit == (rx_u16)unit)
+            return 1;
     return 0;
 }
 
@@ -817,20 +848,19 @@ static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, i
     return done;
 }
 
-/* tty_write - the console, as a foreground program's SYS_WRITE: the log and
- * the main screen, the lock given up meanwhile */
-static int tty_write(int i, rx_u16 data, rx_u16 at, rx_u16 n)
+/* tty_write - bytes to a terminal, through the log (the first terminal's)
+ * and the console driver, the lock given up while they write */
+static int tty_write(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n)
 {
     rx_u16 done = 0, chunk;
-    int written;
+    unsigned written;
 
     lock_give();
     while (done < n) {
         chunk = n - done > LOG_MAX ? LOG_MAX : (rx_u16)(n - done);
-        written = rx_log_far(data, (rx_u16)(at + done), chunk);
-        if (written <= 0)
+        written = tty_output(unit, data, (rx_u16)(at + done), chunk);
+        if (written == 0)
             break;
-        console(data, (rx_u16)(at + done), (unsigned)written, CON_MAIN, 0);
         done = (rx_u16)(done + written);
     }
     lock_take(PROC_NOTIFY(i));
@@ -854,9 +884,9 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
     }
     switch (o->kind) {
     case K_TTY:
-        if ((access = tty_access(i, TTY_WRITE)) != 0)
+        if ((access = tty_access(i, o->unit, TTY_WRITE)) != 0)
             return access;              /* the background's, with TOSTOP: SIGTTOU (P11) */
-        return tty_write(i, data, at, n);
+        return tty_write(i, o->unit, data, at, n);
     case K_NULL:
         return n;
     case K_LPT:
@@ -891,7 +921,7 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
     }
     switch (o->kind) {
     case K_TTY:
-        return tty_read(i, data, at, n);
+        return tty_read(i, o->unit, data, at, n);
     case K_PIPE_R:
         return pipe_read(i, o, data, at, n);
     case K_NULL:
@@ -982,6 +1012,8 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     o->flags = flags & (O_ACCMODE | O_APPEND);
     o->drive = n.drive;
     o->unit = n.unit;
+    if (n.kind == K_TTY && n.unit == TTY_OWN)       /* /dev/tty: the opener's own */
+        o->unit = (rx_u16)(tty_controlling(i) >= 0 ? tty_controlling(i) : 0);
     o->first = n.first;
     o->where = n.where;
     o->parent = n.parent;
@@ -998,7 +1030,7 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     if (flags & O_CLOEXEC)
         files_of[i].cloexec[fd] = 1;
     if (n.kind == K_TTY)
-        tty_open(i);                    /* a session's leader's: its terminal (P11) */
+        tty_open(i, o->unit);           /* a session's leader's: its terminal (P11) */
     return fd;
 }
 
@@ -1292,10 +1324,15 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
         memset(record, 0, sizeof record);
         k = (rx_u16)o->offset;
         if (o->kind == K_TOP || o->kind == K_DEVDIR) {
-            count = o->kind == K_TOP ? 6 : 4;
+            count = o->kind == K_TOP ? 6 : DEV_NAMES + (tty_keys() ? tty_terminals() : 0);
             if (k >= count)
                 break;
-            strcpy((char *)record + DE_NAME, o->kind == K_TOP ? top_names[k] : dev_names[k]);
+            if (o->kind == K_TOP || k < DEV_NAMES) {
+                strcpy((char *)record + DE_NAME, o->kind == K_TOP ? top_names[k] : dev_names[k]);
+            } else {
+                strcpy((char *)record + DE_NAME, "tty1");
+                record[DE_NAME + 3] = (rx_u8)('1' + k - DEV_NAMES);
+            }
         } else if (o->kind == K_ZDIR) {
             a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, 0);
             count = (rx_u16)(a[ARH_COUNT] | (a[ARH_COUNT + 1] << 8));
@@ -1594,7 +1631,7 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
                 *error = EFAULT;
                 return -1;
             }
-            tty_getattr(data, r->di);
+            tty_getattr(o->unit, data, r->di);
             return 0;
         }
         if (!in_segment(data, r->si, TC_SIZE)) {
@@ -1605,9 +1642,9 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = EINVAL;
             return -1;
         }
-        if ((fd = tty_access(i, TTY_SET)) != 0)
+        if ((fd = tty_access(i, o->unit, TTY_SET)) != 0)
             return fd;                  /* the background's: SIGTTOU first (P11) */
-        tty_setattr(data, r->si, r->cx);
+        tty_setattr(o->unit, data, r->si, r->cx);
         return 0;
     case PX_TCGETPGRP:
     case PX_TCSETPGRP:                  /* job control's (P11; tty.c) */
@@ -1620,8 +1657,8 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             return -1;
         }
         if ((r->ax & 0xFF) == PX_TCGETPGRP)
-            return tty_getpgrp(i, error);
-        return tty_setpgrp(i, (pid_t)r->cx, error);
+            return tty_getpgrp(i, o->unit, error);
+        return tty_setpgrp(i, o->unit, (pid_t)r->cx, error);
     case PX_FSYNC:
         if (!(o = ofd_of(i, r->bx))) {
             *error = EBADF;

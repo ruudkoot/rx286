@@ -24,7 +24,9 @@ INC_H := $(B)/inc
 INC_NAMES := build syscalls kcalls os layout disks drivers ports selectors descriptors posix archive \
     vectors exe
 INC_HEADERS := $(addprefix $(INC_H)/,$(addsuffix .h,$(INC_NAMES)))
-C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h) $(INC_HEADERS)
+# (and the servers' own: a change of one rebuilds every object, os-server.md P11)
+C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h src/os/*.h src/root/*.h) \
+    $(INC_HEADERS)
 
 $(INC_H)/%.h: src/include/%.inc tools/inc2h
 	@mkdir -p $(dir $@)

@@ -5,28 +5,86 @@
  * ever, for its children and for the orphans that become its own; the
  * server keeps it waiting even while it has none. The TEST_POSIX_* builds
  * start a test first (tests/posix); the builds with the shell in C
- * (INIT_SHELL, PROGRAM=sh) start it, and again whenever it ends.
+ * (INIT_SHELL, PROGRAM=sh) start a shell on each terminal, as getty does
+ * (os-server.md P11): a child of its own leads a session, opens the
+ * terminal, which so becomes its session's, as descriptors 0 to 2, and
+ * runs the shell; again whenever it ends. On the terminals but the first
+ * the child waits for Enter first, so that a shell's memory is taken only
+ * where one is wanted (a machine without extended memory has 128 KB).
  * ============================================================================ */
 
+#include "fcntl.h"
 #include "spawn.h"
 #include "unistd.h"
+#include "sys/stat.h"
 #include "sys/wait.h"
 
-/* main - wait, for ever; in a build with the shell in C, start it, and
- * start it again whenever it ends */
+#ifdef INIT_SHELL
+#define TERMINALS 8                     /* /dev/tty1 to /dev/tty8, if there */
+
+static pid_t shells[TERMINALS];
+static char name[] = "/dev/tty1";
+
+/* there - is terminal n there? (four on a 64 KB EGA) */
+static int there(int n)
+{
+    struct stat st;
+
+    name[8] = (char)('1' + n);
+    return stat(name, &st) == 0;
+}
+
+/* shell - a shell on terminal n, in a session of its own whose terminal
+ * it is, at once on the first, after Enter on the others: its pid, or -1 */
+static pid_t shell(int n)
+{
+    static char *const argv[] = { "sh", 0 };
+    static char wait[] = "rx286 terminal 1: press Enter for a shell\n";
+    char line[8];
+    pid_t pid;
+
+    name[8] = (char)('1' + n);
+    if ((pid = fork()) == 0) {
+        setsid();
+        close(0);
+        close(1);
+        close(2);
+        if (open(name, O_RDWR) != 0)    /* descriptor 0, and its session's */
+            _exit(1);
+        dup(0);
+        dup(0);
+        if (n > 0) {
+            wait[15] = (char)('1' + n);
+            write(1, wait, sizeof wait - 1);
+            while (read(0, line, sizeof line) == (int)sizeof line)
+                ;                       /* (the line, to its end) */
+        }
+        execve("/z/sh", argv, environ);
+        _exit(127);
+    }
+    return pid;
+}
+#endif
+
+/* main - wait, for ever; in a build with the shell in C, a shell on each
+ * terminal, started again whenever it ends */
 int main(void)
 {
     int status;
 #ifdef INIT_SHELL
-    static char *const shell[] = { "sh", 0 };
-    pid_t sh = -1, got;
+    pid_t got;
+    int n, k;
 
+    for (n = 0; n < TERMINALS && there(n); n++)
+        shells[n] = -1;
     for (;;) {
-        if (sh < 0)
-            posix_spawn(&sh, "/z/sh", 0, 0, shell, environ);
+        for (k = 0; k < n; k++)
+            if (shells[k] < 0)
+                shells[k] = shell(k);
         got = wait(&status);
-        if (got == sh || got < 0)
-            sh = -1;
+        for (k = 0; k < n; k++)
+            if (shells[k] == got || (got < 0 && shells[k] < 0))
+                shells[k] = -1;
     }
 #endif
 #if defined(TEST_POSIX_PROC) || defined(TEST_POSIX_FILES) || defined(TEST_POSIX_EXEC) \

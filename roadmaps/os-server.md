@@ -129,7 +129,7 @@ What it rests on:
 | P8 | Programs from disk | done (2026-11-06, branch `os-server`) |
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
-| P11 | Terminals, the eight virtual terminals, job control | steps 1 to 3 of 4 done (2026-11-06, branch `os-server`) |
+| P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
 | P12 | The commands and the devices | not started |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
@@ -2439,6 +2439,32 @@ The largest change to the kernel since l4.md, in three steps, each with every su
     process's memory. Each wait now asks whether its process is still the one whose call it
     serves (`proc_still`). `tests/posix/jobs` hit it, once the new console driver's timing
     changed.
+* **Step 4 done (2026-11-07): eight terminals.**
+  - **The terminals:** `/dev/tty1` to `/dev/tty8` (as many as the EGA holds pages), each with
+    its queue, `termios`, session and foreground group, on its page. `/dev/tty` is the
+    caller's own terminal. The keys go to the terminal shown. The first terminal's output
+    goes to the log, the transcript the tests read. The kernel types a key only while a
+    process waits to read the terminal shown, or nobody has it open.
+  - **Fifteen processes:** six of the server's slots each from 166 (the load, the cache and the
+    pipes moved to 148-150); threads 17-31, and the tty thread 32, the most the server's
+    stack allows (SP = 4n).
+  - **init:** a shell on each terminal, as getty does. On the first at once; on the others
+    after Enter ("rx286 terminal N: press Enter for a shell"), so that DOSBox-X's 128 KB
+    without extended memory still has room for commands: the buddy allocator's power-of-two
+    blocks gave eight shells all of it.
+  - **The shell:** `fg` now gives the terminal before SIGCONT, as bash does. A job continued
+    first could read in the background and stop again.
+  - **The tests:** `tests/sh/terminals` (Bochs, MAME): eight shells at once, a job on one
+    terminal while ^C works on another, each page. The fork bomb of `tests/posix/proc` now
+    makes 13 children.
+  - **Found on the way:** no C object depended on the servers' own headers (`src/os/*.h`,
+    `src/root/*.h`). A build directory kept an `os.obj` with the old `TTY_N`, whose tty
+    thread became process entry 15 and spun. That starved init, and looked like a race for
+    a while. `c.mk` now lists them.
+* **Done when:** eight shells run at once (`tests/sh/terminals`); ^C, ^Z, `fg` and `bg` behave
+  as XCU 2.11 says (`tests/sh/jobs`, `tests/posix/jobs`); a panic shows its screen while
+  another page is shown (`tests/panic/page`, the CRTC read back on all three emulators in
+  place of MAME's snapshot).
 
 ### P12. The commands and the devices (M, about 1,500)
 

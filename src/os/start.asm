@@ -23,8 +23,9 @@ bits 16
 
 OS_STACK_SHIFT      equ 2               ; the root's: SP = n * OS_STACK (4) at a start
 OS_FIRST_N          equ 2               ; module 1 is the server: programs from 2
-OS_LAST_N           equ 27              ; the processes' (PROC_N0 + PROCS - 1; P6), then
-                                        ;    the tty thread (TTY_N; P11)
+OS_LAST_N           equ 32              ; the processes' (PROC_N0 + PROCS - 1; P6), then
+                                        ;    the tty thread (TTY_N; P11): SP = 4n, at most
+                                        ;    the server's stack, 128
 OS_PART_SHIFT       equ 10
 OS_PART             equ 1 << OS_PART_SHIFT  ; each thread's part of the stacks
 OS_STACKS           equ (OS_LAST_N - OS_FIRST_N + 1) * OS_PART

@@ -14,8 +14,8 @@ way; and handles the programs' faults. The root builds it
 |---|---|---|
 | program n's | part n - 1 of the stacks in its data segment, n the program's module number | serves program n alone: its calls and its faults |
 | the control thread | part 15 (n = 16) | at boot, init (*docs/processes.md*); then Ctrl+Break: the keyboard driver signals the control notification; the thread ends a sound, drops the keys waiting and restarts the foreground program. The processes' timers ring on the same notification, badged `CONTROL_TIMER` (P10) |
-| process entry i's | part 16 + i (n = 17 + i, `PROC_N0` + i), from `ROOT_SERVE` | serves the process in entry i alone, and sleeps while there is none (roadmap os-server.md P6); its notification bound to it, it runs the process's signals' handlers (P10) |
-| the tty thread | part 25 (n = 27, `TTY_N`), from `ROOT_SERVE`, when the processes have the keys | each key through `/dev/tty`'s line discipline (P11; *docs/processes.md*) |
+| process entry i's | part 15 + i (n = 17 + i, `PROC_N0` + i), from `ROOT_SERVE` | serves the process in entry i alone, and sleeps while there is none (roadmap os-server.md P6); its notification bound to it, it runs the process's signals' handlers (P10) |
+| the tty thread | part 30 (n = 32, `TTY_N`: SP = 4n, the most the server's 128 bytes of stack allow), from `ROOT_SERVE`, when the processes have the keys | each key through the shown terminal's line discipline (P11; *docs/processes.md*) |
 
 The root starts each thread with SP = 4n in the server's small stack
 segment; that is how a thread knows its program. Its start
@@ -50,15 +50,15 @@ program's thread's notification whenever the keyboard sent it something
 | 15 | the foreground program's thread, which Ctrl+Break restarts |
 | 8n to 8n + 7 | program n's: the endpoint it calls on, its thread, its space, its code, data and stack, its transfer segment and its files segment (`OS_K_*`) |
 | 128 + n | a notification program n's thread sleeps on (`OS_SLOT_SLEEP`): the kernel's timer signals it with bit 1; the foreground program's, the keyboard driver too, whenever the keyboard sent something (`KEY_SIGNAL_BIT`) |
+| 148 | a load, while code is read into it |
+| 149 | the files' cache, 32 sectors (*docs/processes.md*, *Files*) |
+| 150 | the pipes' buffers, eight of 1 KB |
 | 160 | the root's fault endpoint, badged `ROOT_BADGE_OS` (`OS_SLOT_ROOT`) |
 | 161 | `/z`, the archive of programs, read-only (`OS_SLOT_ARCHIVE`; *docs/processes.md*) |
-| 168-172 | exec's new image, before it takes the old one's slots, and a load, while code is read into it |
 | 162 | the processes' keys' notification, when no program the root builds has the keys (`OS_SLOT_KEYS`) |
 | 163 | the control notification, badged `CONTROL_TIMER`: the processes' timers (`OS_SLOT_TIMER`) |
 | 164, 165 | the tty thread and its notification (`ROOT_SERVE`; P11) |
-| 173 | the files' cache, 32 sectors (*docs/processes.md*, *Files*) |
-| 174 | the pipes' buffers, eight of 1 KB |
-| 176 + 8i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it and that thread's notification (`PROC_SLOT0`) |
+| 166 + 6i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it and that thread's notification (`PROC_SLOT0`, `PROC_SLOTS_EACH`; fifteen) |
 
 Its space has 256 slots.
 

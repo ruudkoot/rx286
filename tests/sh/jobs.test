@@ -2,8 +2,13 @@
 # cat, jobs lists it, fg brings it back to read a line; cat & stops at its
 # read in the background (SIGTTIN), bg would only stop it again, fg finishes
 # it; ^C ends a job and not the shell, and drops a line at the prompt.
+# (Pids: init 1, its children for the eight terminals 2 to 9, then the
+# jobs and echo, a program. A cat in the background may stop before the
+# next prompt, which then says so too: the lines below in order, others
+# between them.)
 program: sh
 emulators: bochs mame
+match: contains
 keys: cat\n{ctrl-z}jobs\nfg\nhello\n{ctrl-d}echo $?\n
 keys: cat &\n{wait 20}jobs\nfg %1\nworld\n{ctrl-d}
 keys: cat\n{ctrl-c}echo $?\nabc{ctrl-c}echo still here\n
@@ -21,7 +26,7 @@ hello
 /a$ echo $?
 0
 /a$ cat &
-[1] 5
+[1] 12
 /a$ jobs
 [1] Stopped  cat
 /a$ fg %1

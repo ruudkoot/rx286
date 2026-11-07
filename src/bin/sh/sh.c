@@ -555,6 +555,8 @@ static int builtin(struct command *c)
         else
             printf("[%d] %s &\n", (int)(j - jobs) + 1, j->text);
         j->state = J_RUNNING;
+        if (name[0] == 'f' && job_control)
+            tcsetpgrp(0, j->pgid);      /* the terminal first, then SIGCONT */
         kill(-j->pgid, SIGCONT);
         return name[0] == 'f' ? job_wait(j) : 0;
     }

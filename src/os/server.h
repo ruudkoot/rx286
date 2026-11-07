@@ -30,8 +30,9 @@
 #define OS_SLOT_SLEEP 128               /* program n's thread's notification: + n */
 #define OS_CONTROL_N 16                 /* the control thread's number */
 #define OS_PART 1024                    /* each thread's part of the stacks (start.asm) */
-#define PROCS 10                        /* the processes at once (proc.c; P6) */
-#define PROC_SLOT0 176                  /* process entry i's slots: PROC_SLOT0 + 8i on */
+#define PROCS 15                        /* the processes at once (proc.c; P6, P11) */
+#define PROC_SLOT0 166                  /* process entry i's slots: PROC_SLOT0 + 6i on */
+#define PROC_SLOTS_EACH 6
 #define PROC_N0 17                      /* the server's thread for entry i: PROC_N0 + i */
 
 /* A program's slots of the server's: 8n + k */
@@ -105,39 +106,48 @@ int proc_alive(int i);
 void proc_interrupt(void);
 #define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */
 #define OS_TIMER SLOT(OS_SLOT_TIMER)    /* the control notification, CONTROL_TIMER (P10) */
-#define TTY_N 27                        /* the tty thread's number (P11) */
+#define TTY_N 32                        /* the tty thread's number (P11) */
+#define TTYS VIDEO_PAGES                /* the terminals: the EGA's pages, at most */
 #define TTY_THREAD SLOT(164)            /* its thread and notification (ROOT_SERVE) */
 #define TTY_NOTIFY SLOT(165)
 
-/* The terminal (tty.c; P11). tty_keys - do the processes have the keys?
- * tty_thread - the tty thread: each key through the line discipline;
- * tty_read - process i's read (lock held, given up while it waits): the
- * bytes, 0 at EOF, VFS_GONE or VFS_INTR; tty_getattr, tty_setattr - termios
- * to and from a process's segment (TCSA*); tty_flush - the input dropped
- * (lock held) */
+/* The terminals (tty.c; P11), a unit each, 0 to TTYS - 1. tty_keys - do the
+ * processes have the keys? tty_terminals - how many terminals there are;
+ * tty_shown - the one shown; tty_thread - the tty thread: each key through
+ * the shown one's discipline; tty_output - a terminal's bytes to its page,
+ * the first's to the log too (lock not held): the bytes taken; tty_read -
+ * process i's read (lock held, given up while it waits): the bytes, 0 at
+ * EOF, VFS_GONE, VFS_INTR, VFS_RESTART or VFS_EIO; tty_getattr, tty_setattr
+ * - termios to and from a process's segment (TCSA*); tty_flush - the input
+ * dropped (lock held) */
 int tty_keys(void);
+int tty_terminals(void);
+int tty_shown(void);
 void tty_thread(void);
-int tty_read(int i, rx_u16 data, rx_u16 at, rx_u16 n);
-void tty_getattr(rx_u16 data, rx_u16 at);
-void tty_setattr(rx_u16 data, rx_u16 at, int action);
-void tty_flush(void);
-/* Job control (tty.c; P11; lock held): tty_open - process i opens the
- * terminal, which a session's leader makes its session's; tty_access - may
- * it read, write or set it (TTY_*): 0, VFS_RESTART or VFS_INTR (SIGTTIN or
- * SIGTTOU sent), VFS_EIO; tty_pgrp - the foreground group (0: no session);
- * tty_getpgrp, tty_setpgrp - PX_TCGETPGRP, PX_TCSETPGRP; tty_hangup - a
- * session's leader ended */
+unsigned tty_output(int unit, rx_u16 segment, rx_u16 at, unsigned n);
+int tty_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n);
+void tty_getattr(int unit, rx_u16 data, rx_u16 at);
+void tty_setattr(int unit, rx_u16 data, rx_u16 at, int action);
+void tty_flush(int unit);
+/* Job control (tty.c; P11; lock held): tty_controlling - process i's
+ * session's terminal, or -1; tty_open - process i opens a terminal, which a
+ * session's leader with none makes its session's; tty_access - may it read,
+ * write or set it (TTY_*): 0, VFS_RESTART or VFS_INTR (SIGTTIN or SIGTTOU
+ * sent), VFS_EIO; tty_pgrp - a terminal's foreground group (0: no
+ * session); tty_getpgrp, tty_setpgrp - PX_TCGETPGRP, PX_TCSETPGRP;
+ * tty_hangup - a session's leader ended */
 #define TTY_READ 0
 #define TTY_WRITE 1
 #define TTY_SET 2
-void tty_open(int i);
-int tty_access(int i, int what);
-pid_t tty_pgrp(void);
-int tty_getpgrp(int i, int *error);
-int tty_setpgrp(int i, pid_t pgid, int *error);
+int tty_controlling(int i);
+void tty_open(int i, int unit);
+int tty_access(int i, int unit, int what);
+pid_t tty_pgrp(int unit);
+int tty_getpgrp(int i, int unit, int *error);
+int tty_setpgrp(int i, int unit, pid_t pgid, int *error);
 void tty_hangup(pid_t sid);
-/* proc_terminal - a signal for the terminal's processes: every process but
- * init and its children, until process groups (proc.c; lock held) */
+/* proc_terminal - a signal for the shown terminal's foreground group
+ * (proc.c; lock held) */
 void proc_terminal(int sig);
 /* proc_timers - the processes' timers, at the control thread's every wake:
  * SIGALRM, a sleep's end, the timer armed for the next (proc.c, signal.c) */
@@ -149,7 +159,7 @@ void lock_take(rx_u16 notify);
 void lock_give(void);
 
 /* Process entry i's slots of the server's (proc.c) */
-#define P_SLOT(i, k) SLOT(PROC_SLOT0 + 8 * (i) + (k))
+#define P_SLOT(i, k) SLOT(PROC_SLOT0 + PROC_SLOTS_EACH * (i) + (k))
 #define PK_EP 0                         /* the process's endpoint, */
 #define PK_THREAD 1                     /* thread, */
 #define PK_SPACE 2                      /* space, */

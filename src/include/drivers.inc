@@ -55,8 +55,10 @@ DRV_MOUSE_NEWS      equ 2       ; -> BX 1 if the mouse moved or a button changed
 ; The console driver
 DRV_CON_WRITE       equ 1       ; BL CON_*, BH a page (CON_MAIN), CX bytes, SI their offset
                                 ;    in the segment passed -> CX the bytes written
-DRV_CON_SHOW        equ 2       ; BL a page: shown (os-server.md P11) -> BX the pages the
-                                ;    EGA holds (VIDEO_PAGES or 4), CX the page shown
+DRV_CON_SHOW        equ 2       ; BL a page: shown (os-server.md P11), BH CON_QUIET or 0 ->
+                                ;    BX the pages the EGA holds (VIDEO_PAGES or 4), CX the
+                                ;    page shown
+CON_QUIET           equ 1       ; DRV_CON_SHOW's BH: TEST_SCREEN builds, the page not logged
 CON_MAIN            equ 0       ;    a page's main area, below the status line: the
                                 ;    foreground program's, a terminal's
 CON_STATUS          equ 1       ;    a background program's field of the status line, DI

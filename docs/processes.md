@@ -167,7 +167,8 @@ build made in C's `/BIN` (`tools/install-programs`), and run-test's
 
 The tree is one (D13 C, `src/os/vfs.c`): `/` is the server's own and
 read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
-programs and `/dev` the devices (`null`, `tty`, the console, and `lpt1`,
+programs and `/dev` the devices (`null`; `tty`, the caller's terminal;
+`tty1` to `tty8`, the terminals, as many as the EGA holds pages; `lpt1`,
 `lpt2`). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A
 path is made absolute against the process's current directory,
 which starts at its parent's (`/` for init), and its "." and ".." taken out
@@ -183,7 +184,7 @@ its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 |---|---|---|
 | `PX_OPEN` | SI the path, BX the flags | a descriptor, the lowest free: `O_RDONLY`, `O_WRONLY` or `O_RDWR` (`O_ACCMODE`); `O_CREAT` makes a volume's file, `O_EXCL` refuses one there (`EEXIST`), `O_TRUNC` empties it, `O_APPEND` writes at its end, `O_DIRECTORY` refuses a file (`ENOTDIR`), `O_CLOEXEC` marks it |
 | `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written |
-| `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many | by the kind: a volume's file, through the cache; `/dev/tty` the console (a read: 0, until the terminals give processes keys, P11); `/dev/null`; a printer; a file of `/z`, read only |
+| `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many | by the kind: a volume's file, through the cache; a terminal (*The terminals* below; a read 0 where the processes have no keys); `/dev/null`; a printer; a file of `/z`, read only |
 | `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset, its high word in SI; `ESPIPE` for a device |
 | `PX_DUP`, `PX_DUP2` | BX the descriptor (CX the one it becomes) | another descriptor of the same description |
 | `PX_FCNTL` | BX, CX the command, SI its argument | `F_DUPFD`, `F_GETFD` and `F_SETFD` (`FD_CLOEXEC`), `F_GETFL` |
@@ -207,19 +208,24 @@ whose default action ends it; caught, ignored or blocked, the write is
 The terminal's keys (P9): when no program the root builds has them (an
 image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
 signals a notification of the processes' (`OS_SLOT_KEYS`), and `/dev/tty`
-has them, through its line discipline (*The terminal* below).
+has them, through its line discipline (*The terminals* below).
 
-## The terminal
+## The terminals
 
-`/dev/tty` has a line discipline and `termios` (roadmap os-server.md P11;
-XBD 11; `src/os/tty.c`). The server's tty thread (`TTY_N`, its slots 164
-and 165 from `ROOT_SERVE`) takes each key as the keyboard driver signals
-it, and puts it through the discipline. An arrow, which has no ASCII, is
-ESC [ A to D. Alt+F1 to F8 show a page of the screen (`DRV_CON_SHOW`;
-*docs/drivers.md*); the terminal writes page 0, and understands ANSI's
-cursor moves, erasing and attributes through the console driver. The queue holds `MAX_CANON` (255) bytes. A process's read
-waits in its server thread until there is enough, which the tty thread
-wakes it for; a signal's handler breaks the wait off (`EINTR`).
+There are eight terminals, `/dev/tty1` to `/dev/tty8` (four on an EGA of
+64 KB), each with a line discipline and `termios` (roadmap os-server.md
+P11; XBD 11; `src/os/tty.c`), and each on its page of the screen, where
+the console driver understands ANSI's cursor moves, erasing and
+attributes (*docs/drivers.md*). `/dev/tty` is the caller's session's
+terminal, or the first if it has none. Alt+F1 to F8 show a terminal
+(`DRV_CON_SHOW`). The server's tty thread (`TTY_N`, its slots 164 and 165
+from `ROOT_SERVE`) takes each key as the keyboard driver signals it, and
+puts it through the shown terminal's discipline. An arrow, which has no
+ASCII, is ESC [ A to D. A queue holds `MAX_CANON` (255) bytes. A
+process's read waits in its server thread until there is enough, which
+the tty thread wakes it for; a signal's handler breaks the wait off
+(`EINTR`). The first terminal's output and echo go to the kernel's log
+too, the transcript the tests read; the others' to their pages alone.
 
 | `struct termios` | What rx286 does with it |
 |---|---|
@@ -234,8 +240,9 @@ reads it, `PX_TCSETATTR` (BX, CX `TCSANOW`, `TCSADRAIN` or `TCSAFLUSH`,
 which drops the input; SI the termios) sets it: `tcgetattr`, `tcsetattr`
 and `isatty` (`termios.h`, `unistd.h`); `ENOTTY` for a descriptor not the
 terminal's. The defaults: `ICRNL`, `OPOST` and `ONLCR`, `ISIG`, `ICANON`,
-`ECHO`, `ECHOE`, `ECHOK` and `IEXTEN`, `VMIN` 1. What is echoed goes to
-the screen and the log, as a process's writes do. Ctrl+Break is INTR.
+`ECHO`, `ECHOE`, `ECHOK` and `IEXTEN`, `VMIN` 1. What is echoed goes
+where the terminal's output goes. Ctrl+Break is INTR for the terminal
+shown.
 
 ## Job control
 
@@ -250,10 +257,10 @@ P11; XBD 11.1, XCU 2.11), at first its parent's; init's are its own.
 | `PX_GETSID` | BX a pid (0: the caller) | its session |
 | `PX_TCGETPGRP`, `PX_TCSETPGRP` | BX the terminal's descriptor (CX a group of the session) | the terminal's foreground group, read or set; `ENOTTY` if the terminal is not the caller's session's |
 
-The terminal becomes a session's when that session's leader opens
-`/dev/tty` and no session has it; its foreground group is then the
+A terminal becomes a session's when that session's leader, which has none,
+opens it and no session has it; its foreground group is then the
 leader's. INTR (^C, and Ctrl+Break), QUIT (^\) and SUSP (^Z) signal the
-foreground group, each echoed with `ECHO`. A process of the session in
+shown terminal's foreground group, each echoed with `ECHO`. A process of the session in
 another group gets `SIGTTIN` as it reads, and `SIGTTOU` as it writes with
 `TOSTOP` set or sets termios or the foreground group; if it ignores or
 blocks the signal, its read is `EIO` and the rest goes on. When the
@@ -321,14 +328,17 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 
 ## The table
 
-The server has room for `PROCS` (10) processes at once; a fork or a spawn
+The server has room for `PROCS` (15) processes at once; a fork or a spawn
 past that is `EAGAIN`. Entry i has its slots of the server's, `PROC_SLOT0`
-+ 8i on: the process's endpoint, thread, space and data segment (as the
+(166) + 6i on: the process's endpoint, thread, space and data segment (as the
 root gives them), the server's thread for it and that thread's
 notification. The thread, thread `PROC_N0` + i of the server's (`ROOT_SERVE`),
 serves process i alone and sleeps while the entry is empty. One lock guards
 the table, taken with XCHG (`rx_xchg`), and given up before a wait for a
-child and before the console.
+child and before the console. A wait that gives it up asks, once it has
+it again, whether its process is still the one whose call it serves: the
+process may have ended and a new one taken its entry meanwhile
+(`proc_still`).
 
 ## init
 
@@ -336,9 +346,14 @@ init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
 process that ends become its own. In an image built with `PROGRAM=sh` it
-starts the shell in C, `/z/sh`, and starts it again whenever it ends; in
-the others today's shell is still a program the root builds, beside it,
-until P9's last step. In `TEST_POSIX_*` builds init starts a test of
+starts the shell in C, `/z/sh`, on each terminal, as getty does: a child
+of its own leads a session, opens `/dev/ttyN`, which so becomes its
+session's, as descriptors 0 to 2, and runs the shell. On the first
+terminal it does at once; on the others it says "rx286 terminal N: press
+Enter for a shell" and waits for Enter, so that a shell's memory is taken
+only where one is wanted (128 KB in all without extended memory). init
+starts a terminal's shell again whenever it ends. In the other images
+today's shell is still a program the root builds, beside it, until P12. In `TEST_POSIX_*` builds init starts a test of
 `tests/posix` instead (`tests/posix/proc.test`).
 
 ## The shell

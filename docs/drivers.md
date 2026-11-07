@@ -112,7 +112,8 @@ other byte is shown as its glyph, and a full page scrolls its 24 lines.
 Each page keeps its cursor, attribute and escape. `DRV_CON_SHOW` (BL a
 page) shows a page: the CRTC's start address (`CRTC_START_HIGH`,
 `CRTC_START_LOW`) and the hardware cursor at its cursor; it answers with
-the pages there are. Page 0 starts where the kernel's cursor stopped,
+the pages there are (BH `CON_QUIET`: a `TEST_SCREEN` build does not log
+the page, as for the server's first call, which asks how many). Page 0 starts where the kernel's cursor stopped,
 below the banner. The OS server asks it with `DRV_CON_WRITE` for
 `SYS_WRITE` and the terminal's output, after the kernel's write has
 checked the buffer and written the log; the kernel's console writes the

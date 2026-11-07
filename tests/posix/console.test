@@ -4,11 +4,12 @@
 # writes at places (ESC [ H), moves back, up, down (D, A, B), erases a
 # line's end (K), and colours (m); the console driver of this TEST_SCREEN
 # build puts the page Alt+F1 shows on the log: each line, its attributes
-# as <XX>. Alt+F3 shows the third page, blank but its status line.
+# as <XX>. Alt+F3 shows the third page, blank but its status line; Alt+F1
+# the first again, where the test's process reads and the keys end.
 program: none
 define: TEST_POSIX_CONSOLE
 define: TEST_SCREEN
-keys: {alt-f1}{alt-f3}
+keys: {alt-f1}{alt-f3}{alt-f1}
 match: contains
 ---
 console: 8 pages
@@ -23,3 +24,4 @@ screen 0 10:          x
 screen 0 11:           z
 screen 0 12: done
 screen 2: shown
+screen 0: shown

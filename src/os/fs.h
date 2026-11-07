@@ -12,7 +12,7 @@
 #include "fat.h"
 #include "posix.h"
 
-#define CACHE_SEG SLOT(173)             /* the cache's segment (ROOT_LOAD at boot) */
+#define CACHE_SEG SLOT(149)             /* the cache's segment (ROOT_LOAD at boot) */
 #define CACHE_SECTORS 32
 
 int cache_init(void);
@@ -93,5 +93,7 @@ int pipes_init(void);
  * result, or -1 and the error; SI out in *si_out. `give_up` is 1 if the call
  * may give the lock up while it waits for the console */
 int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out);
+/* vfs_tty_open - has any process a terminal open? (P11) */
+int vfs_tty_open(int unit);
 
 #endif

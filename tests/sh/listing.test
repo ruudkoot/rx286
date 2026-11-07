@@ -73,6 +73,14 @@ null
 tty
 lpt1
 lpt2
+tty1
+tty2
+tty3
+tty4
+tty5
+tty6
+tty7
+tty8
 /z:
 init
 sh
