@@ -56,6 +56,9 @@ files: F_GETFD (0): 0
 files: F_GETFD after F_SETFD (1): 1
 files: a description shared by fork and dup: one offset
 files: two descriptions of one file, both written: one file
+files: a write past the end: 3002 bytes, the hole zeros: yes
+files: a write past what B holds (-1, EFBIG 27): -1, errno 27
+files: and the file as it was (3002): 3002
 files: rename a directory into its own (-1, EINVAL 22): -1, errno 22
 files: into itself (-1, EINVAL 22): -1, errno 22
 files: done

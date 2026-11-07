@@ -31,6 +31,7 @@ char *strerror(int e)
     case EISDIR: return "is a directory";
     case EINVAL: return "invalid argument";
     case ENFILE: case EMFILE: return "too many open files";
+    case EFBIG: return "file too large";
     case ENOSPC: return "no space left";
     case ESPIPE: return "not seekable";
     case EROFS: return "read-only";

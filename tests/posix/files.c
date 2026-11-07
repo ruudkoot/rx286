@@ -152,6 +152,22 @@ int main(void)
     same = n == 13 && memcmp(buf, "first\nsecond\n", 13) == 0;
     printf("files: two descriptions of one file, both written: %s\n",
            same ? "one file" : "two chains");
+    fd = open("/b/hole.txt", O_RDWR | O_CREAT | O_TRUNC);  /* a hole, and too far */
+    write(fd, "ab", 2);
+    lseek(fd, 3000, SEEK_SET);
+    write(fd, "cd", 2);
+    lseek(fd, 0, SEEK_SET);
+    n = read(fd, buf, sizeof buf);
+    for (i = 2, same = n == 3002; same && i < 3000; i++)
+        same = buf[i] == 0;
+    printf("files: a write past the end: %d bytes, the hole zeros: %s\n", n,
+           same ? "yes" : "no");
+    lseek(fd, 0x01000000L, SEEK_SET);
+    check("a write past what B holds (-1, EFBIG 27)", (int)write(fd, "x", 1));
+    fstat(fd, &st);
+    printf("files: and the file as it was (3002): %ld\n", (long)st.st_size);
+    close(fd);
+    unlink("/b/hole.txt");
     mkdir("/b/p", 0755);
     mkdir("/b/p/q", 0755);
     check("rename a directory into its own (-1, EINVAL 22)", rename("/b/p", "/b/p/q/r"));

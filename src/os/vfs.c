@@ -23,6 +23,7 @@
  * server thread's 1 KB of stack, are static.
  * ============================================================================ */
 
+#include <stdio.h>
 #include <string.h>
 #include "sys/types.h"
 #include "fs.h"
@@ -57,7 +58,7 @@ struct pipe {
 
 /* An open file description */
 struct ofd {
-    rx_u8 kind, refs, drive, changed;
+    rx_u8 kind, refs, drive, changed, exe;  /* exe: an exec's own, without a descriptor */
     rx_u16 flags;
     rx_u32 offset, size;                /* (a directory's offset: its next entry) */
     rx_u16 first;                       /* a file's first cluster, a directory's (0: none,
@@ -822,62 +823,126 @@ static rx_u16 file_cluster(struct ofd *o, rx_u16 index, int grow, rx_u16 *c)
     return 0;
 }
 
-/* file_io - a volume's file read into, or written from, a process's data
- * segment at the description's offset: the bytes moved, or -1 */
-static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, int *error)
+enum { IO_READ, IO_WRITE, IO_ZERO };
+
+/* file_move - bytes moved between a volume's file at the description's
+ * offset and a process's data segment (IO_READ, IO_WRITE), or zeros
+ * written into the file (IO_ZERO), a sector of the cache at a time: 0 or
+ * the error (E_*, or ENOSPC), the bytes moved in *done */
+static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how,
+                        rx_u32 *done)
 {
     struct vol *v = &vols[o->drive];
-    rx_u16 done = 0, chunk, in, cluster, e;
     rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, within;
-    int slot;
+    rx_u16 chunk, in, cluster, e, k;
+    int slot, write = how != IO_READ;
     rx_u8 RX_FAR *p;
     rx_u8 RX_FAR *q;
 
-    if (write && (o->flags & O_APPEND))
-        o->offset = o->size;
-    while (done < n && (write || o->offset < o->size)) {
+    *done = 0;
+    while (*done < n && (write || o->offset < o->size)) {
         within = o->offset % bytes;
-        e = file_cluster(o, (rx_u16)(o->offset / bytes), write, &cluster);
-        if (e || cluster == 0) {
-            if (write)
-                file_share(o);          /* (a first cluster taken before the error) */
-            *error = e ? errno_of(e) : EIO;
-            return done ? (int)done : -1;
-        }
+        if ((e = file_cluster(o, (rx_u16)(o->offset / bytes), write, &cluster)) != 0)
+            return e;
+        if (cluster == 0)
+            return E_BROKEN;            /* a chain shorter than its size */
         in = (rx_u16)(within % SECTOR_SIZE);
         chunk = (rx_u16)(SECTOR_SIZE - in);
-        if (chunk > n - done)
-            chunk = (rx_u16)(n - done);
+        if (chunk > n - *done)
+            chunk = (rx_u16)(n - *done);
         if (!write && chunk > o->size - o->offset)
             chunk = (rx_u16)(o->size - o->offset);
         e = cache_get(o->drive, (rx_u16)(vol_cluster_sector(v, cluster) + within / SECTOR_SIZE),
                       !(write && in == 0 && chunk == SECTOR_SIZE), &slot);
-        if (e) {
-            *error = errno_of(e);
-            return done ? (int)done : -1;
-        }
+        if (e)
+            return e;
         p = cache_bytes(slot) + in;
-        q = (rx_u8 RX_FAR *)RX_MK_FP(data, at + done);
+        q = (rx_u8 RX_FAR *)RX_MK_FP(data, (rx_u16)(at + *done));
+        for (k = 0; k < chunk; k++)
+            if (how == IO_READ)
+                q[k] = p[k];
+            else
+                p[k] = how == IO_WRITE ? q[k] : 0;
         if (write) {
-            for (e = 0; e < chunk; e++)
-                p[e] = q[e];
             cache_dirty(slot);
-        } else {
-            for (e = 0; e < chunk; e++)
-                q[e] = p[e];
+            o->changed = 1;
         }
-        done = (rx_u16)(done + chunk);
+        *done += chunk;
         o->offset += chunk;
         if (o->offset > o->size) {
             o->size = o->offset;
             o->changed = 1;
         }
-        if (write)
-            o->changed = 1;
     }
-    if (write && done)
+    return 0;
+}
+
+/* file_trim - a file's chain cut back to the clusters its size covers: a
+ * write's that took clusters and failed leaves none past the size (P15) */
+static void file_trim(struct ofd *o)
+{
+    struct vol *v = &vols[o->drive];
+    rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE;
+    rx_u16 keep = (rx_u16)((o->size + bytes - 1) / bytes), c = o->first, k;
+
+    o->cursor = 0;
+    if (c == 0)
+        return;
+    if (keep == 0) {
+        vol_free_chain(v, c);
+        o->first = 0;
+        o->changed = 1;
+        return;
+    }
+    for (k = 1; k < keep; k++)
+        if (vol_fat_get(v, c, &c) != 0 || c < FAT12_FIRST_CLUSTER || c >= FAT12_END)
+            return;                     /* (shorter than its size: nothing past it) */
+    vol_chain_cut(v, c);
+}
+
+/* file_io - a volume's file read into, or written from, a process's data
+ * segment at the description's offset: the bytes moved, or -1. A write
+ * past the end first fills the hole with zeros (XSH write, lseek); one
+ * past what the volume could ever hold is EFBIG; one that fails leaves
+ * the file as it was, its clusters given back (P15) */
+static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, int *error)
+{
+    struct vol *v = &vols[o->drive];
+    rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, done = 0, hole, start, size;
+    rx_u16 e = 0;
+
+    if (!write) {
+        e = file_move(o, data, at, n, IO_READ, &done);
+    } else if (n != 0) {
+        if (o->flags & O_APPEND)
+            o->offset = o->size;
+        if ((o->offset + n - 1) / bytes >= v->clusters) {
+            *error = EFBIG;
+            return -1;
+        }
+        start = o->offset;
+        size = o->size;
+        if (o->offset > o->size) {      /* a hole: zeros up to the offset */
+            hole = o->offset - o->size;
+            o->offset = o->size;
+            e = file_move(o, 0, 0, hole, IO_ZERO, &done);
+            done = 0;
+        }
+        if (e == 0)
+            e = file_move(o, data, at, n, IO_WRITE, &done);
+        if (e && done == 0) {           /* nothing written: as it was */
+            o->size = size;
+            o->offset = start;
+        }
+        if (e)
+            file_trim(o);
         file_share(o);                  /* (its first cluster, its size) */
-    return done;
+    }
+    if (e && done == 0) {
+        *error = errno_of(e);
+        return -1;
+    }
+    return (int)done;
 }
 
 /* tty_write - bytes to a terminal, through the log (the first terminal's)
@@ -1540,6 +1605,7 @@ int vfs_exe_open(int i, const char *path, struct exe_file *f)
         return EACCES;
     if ((k = ofd_new(n.kind)) < 0)
         return ENFILE;
+    ofds[k].exe = 1;
     ofds[k].drive = n.drive;
     ofds[k].unit = n.unit;
     ofds[k].first = n.first;
@@ -1592,13 +1658,61 @@ void vfs_exe_close(struct exe_file *f)
     ofds[f->ofd].kind = K_FREE;
 }
 
+#ifdef TEST
+/* vfs_check - test builds: the tables' counts, after every file call (P15):
+ * each description's references are the descriptors of the live processes
+ * that name it (an exec's own besides), a free one's none; each pipe's
+ * readers and writers are its descriptions. A count gone wrong is said as
+ * a panic is, which fails every test, and the counts are made right */
+static void vfs_check(void)
+{
+    static rx_u8 refs[OFDS], readers[PIPES], writers[PIPES];
+    char line[80];
+    int i, fd, k;
+
+    memset(refs, 0, sizeof refs);
+    memset(readers, 0, sizeof readers);
+    memset(writers, 0, sizeof writers);
+    for (i = 0; i < PROCS; i++)
+        if (proc_alive(i) && proc_leader(i) == i)
+            for (fd = 0; fd < OPEN_MAX; fd++)
+                if (files_of[i].fd[fd] != NO_FD)
+                    refs[files_of[i].fd[fd]]++;
+    for (k = 0; k < OFDS; k++) {
+        if (ofds[k].kind == K_FREE ? refs[k] != 0 : refs[k] + ofds[k].exe != ofds[k].refs) {
+            rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286 PANIC: os: description "
+                                            "%d: %u references, %u descriptors\n", k,
+                                            ofds[k].refs, refs[k]));
+            ofds[k].refs = (rx_u8)(refs[k] + ofds[k].exe);
+        }
+        if (ofds[k].kind == K_PIPE_R)
+            readers[ofds[k].unit % PIPES]++;
+        else if (ofds[k].kind == K_PIPE_W)
+            writers[ofds[k].unit % PIPES]++;
+    }
+    for (k = 0; k < PIPES; k++)
+        if (pipes[k].used && (pipes[k].readers != readers[k] || pipes[k].writers != writers[k])) {
+            rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286 PANIC: os: pipe %d: "
+                                            "%u readers, %u writers; %u and %u open\n", k,
+                                            pipes[k].readers, pipes[k].writers, readers[k],
+                                            writers[k]));
+            pipes[k].readers = readers[k];
+            pipes[k].writers = writers[k];
+        }
+}
+#endif
+
 /* vfs_call - the processes' file calls (fs.h), the FAT and directory
- * sectors they changed written at their end */
+ * sectors they changed written at their end; in test builds the tables'
+ * counts checked (vfs_check) */
 int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
 {
     int result = call_files(i, data, r, error, si_out);
     rx_u16 e;
 
+#ifdef TEST
+    vfs_check();
+#endif
     if (result >= 0 && (e = cache_flush_meta()) != 0) {
         *error = errno_of(e);           /* EROFS: a diskette write-protected */
         return -1;

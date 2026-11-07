@@ -118,6 +118,7 @@ ENOTDIR             equ 20
 EISDIR              equ 21
 ENFILE              equ 23
 EMFILE              equ 24
+EFBIG               equ 27      ; a write past what a volume can hold (P15)
 ENOSPC              equ 28
 ESPIPE              equ 29
 EROFS               equ 30

@@ -210,6 +210,21 @@ rx_u16 vol_free_chain(struct vol *v, rx_u16 c)
     return 0;
 }
 
+/* vol_chain_cut - a chain ended at a cluster, the clusters after it free
+ * (fs.h): a write's that took clusters and failed (P15) */
+rx_u16 vol_chain_cut(struct vol *v, rx_u16 c)
+{
+    rx_u16 next, error;
+
+    if ((error = vol_fat_get(v, c, &next)) != 0)
+        return error;
+    if (next < FAT12_FIRST_CLUSTER || next >= FAT12_END)
+        return 0;                       /* (its end already) */
+    if ((error = vol_fat_set(v, c, FAT12_LAST)) != 0)
+        return error;
+    return vol_free_chain(v, next);
+}
+
 /* vol_dir_entry - a directory's entry by its index (dir 0: the root's):
  * its copy and its place; *end past the directory's last sector */
 rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *where,

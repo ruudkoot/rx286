@@ -161,7 +161,7 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 | 14 | `EFAULT` | | 36 | `ENAMETOOLONG` |
 | 16 | `EBUSY` | | 38 | `ENOSYS` |
 | 17 | `EEXIST` | | 39 | `ENOTEMPTY` |
-| | | | 75 | `EOVERFLOW` |
+| 27 | `EFBIG` | | 75 | `EOVERFLOW` |
 
 `ERESTART` (85) is never a program's: libc makes the call again
 (*docs/processes.md*, *Signals*). `strerror` and `perror` have a text for

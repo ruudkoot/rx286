@@ -45,6 +45,8 @@ rx_u16 vol_fat_get(struct vol *v, rx_u16 cluster, rx_u16 *next);
 rx_u16 vol_fat_set(struct vol *v, rx_u16 cluster, rx_u16 value);
 rx_u16 vol_alloc(struct vol *v, rx_u16 prev, int zero, rx_u16 *cluster);
 rx_u16 vol_free_chain(struct vol *v, rx_u16 first);
+/* vol_chain_cut - a chain ended at a cluster, the clusters after it free */
+rx_u16 vol_chain_cut(struct vol *v, rx_u16 cluster);
 rx_u16 vol_cluster_sector(struct vol *v, rx_u16 cluster);
 rx_u16 vol_dir_find(struct vol *v, rx_u16 dir, const rx_u8 *name, struct place *where,
                     rx_u8 *entry, rx_u16 *index);
