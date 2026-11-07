@@ -65,7 +65,7 @@ milestone.
 | 1 | `KCALL_CALL` | DX an endpoint; AL the label; BX CX SI DI; BP a capability to pass, or 0 | AL the status; BX CX SI DI the reply |
 | 2 | `KCALL_REPLY_RECV` | BX CX SI DI the reply owed; then as `KCALL_RECV` | as `KCALL_RECV` |
 | 3 | `KCALL_RECV` | DX an endpoint or a notification; BP an empty slot of the caller's for a capability, or 0 | AL the label, DX the sender's badge, BX CX SI DI, BP the capability received, or 0; a notification: BX its bits |
-| 4 | `KCALL_SEND` | as `KCALL_CALL`; or DX a saved reply and BX CX SI DI the reply | AL the status |
+| 4 | `KCALL_SEND` | as `KCALL_CALL`; or DX a saved reply and BX CX SI DI the reply (`KCALL_CALL` on a saved reply is `KE_CAP`) | AL the status |
 | 5 | `KCALL_SIGNAL` | DX a notification | |
 | 6 | `KCALL_POLL` | as `KCALL_RECV` | as `KCALL_RECV`, or `KE_EMPTY` at once |
 | 7 | `KCALL_RETYPE` | DX untyped; AL the type; SI an empty slot of the caller's; a segment: CX bytes (1-65535) and BL its access byte; a space: CX slots; untyped: CX paragraphs | the object made, zeroed, its capability in the slot |
@@ -84,12 +84,10 @@ milestone.
 
 ### Retype
 
-Retype makes an object from untyped memory, at the untyped's next address
-aligned to the object's size (`retype_place`, `src/lib/caps.asm`), and
-zeroes it. A space is aligned to a paragraph only: it is 16 bytes and 32 a
-slot, no power of two. The room an alignment skips is the untyped's hole,
-kept in its shadow entry: a later object that fits goes there first
-(roadmap l4.md L10). A segment of more than 2 KB is zeroed 2 KB at a time
+Retype makes an object from untyped memory, at the untyped's next
+paragraph (`retype_place`, `src/lib/caps.asm`), and zeroes it. Every
+object is aligned to a paragraph alone, so no room is skipped, and an
+untyped keeps no hole (roadmap l4.md L10's; os-server.md P15). A segment of more than 2 KB is zeroed 2 KB at a time
 with an interrupt window between (about 0.8 ms each on an AT; roadmap
 os-server.md P2): a 64 KB retype no longer keeps interrupts off for 27 ms,
 and the call checks afterwards that its slot, its untyped and its space
@@ -187,8 +185,11 @@ E6, D7):
   `TFR_SIZE` bytes at SI:DI of the caller's, checked as `KCALL_LOG` checks
   its buffer (`KE_CAP`): ES, DS, `PUSHA`'s eight words, the vector and
   error code (not written), IP, CS, FLAGS, SP and SS (`TFR_*`). A write
-  keeps the thread's IOPL and IF, and clears NT; the way back checks every
-  selector, as for any frame. A thread not yet stopped: `KE_STATE`.
+  keeps the thread's IOPL and IF, clears NT, and makes the RPL of CS and
+  SS the thread's ring; the way back checks every selector, as for any
+  frame. A write to a thread stopped in a kernel call half done gives the
+  call up: the thread goes back with the frame written. A thread not yet
+  stopped: `KE_STATE` (os-server.md P15).
 - **`THREAD_START`** resumes a suspended thread where it was, at the
   priority given.
 
@@ -359,13 +360,20 @@ does not grow with the number of spaces.
   and keeps the slot's own: the slot's first child, whose own children
   become the slot's first, until it has none. Revoking untyped deletes
   everything made from it, so none of its memory is used any more: its
-  watermark and hole go back to 0, and the next retype uses it again,
+  watermark goes back to 0, and the next retype uses it again,
   zeroed. (The root's untyped in slots 3 and 4 begin past what the kernel
   made for the root itself, which is no child of theirs.) Interrupts are
   open after each capability it deletes, and other threads may run there.
   A thread that is to restart meanwhile gives the revoke up, partly done,
   and may call it again (roadmap l4.md L13); one suspended meanwhile stops
-  once the revoke has ended.
+  once the revoke has ended. If the slot is emptied, or holds another
+  capability, when the revoke comes back from a window, it ends with
+  `KE_STATE`. Before an untyped's memory is free again, every dead space
+  still to be emptied is emptied and released, and a retype still zeroing
+  in that memory is given up (`KE_STATE`): nothing of the memory is
+  written after it is given back (os-server.md P15). A thread whose last
+  capability, or whose space, went while it ran ends at its call's next
+  window rather than give way there.
 
 ## Errors
 

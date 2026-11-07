@@ -83,8 +83,11 @@ T_ZERO_BASE         equ 162     ;    its base, in paragraphs
 T_ZERO_SLOT         equ 164     ;    its untyped's slot
 T_FAULT_REGS        equ 166     ; 16 bytes: the registers its fault's message overwrote
 T_ZERO_HIGH         equ 182     ; byte: KCALL_RETYPE: T_ZERO_BASE's bits 16-19
-T_FRAME             equ 184     ; its frame while it does not run (FRAME_SIZE_USER bytes)
-TCB_SIZE            equ T_FRAME + FRAME_SIZE_USER
+T_REVOKE_TYPE       equ 183     ; byte: KCALL_REVOKE: the type and the object of what it
+T_FRAME             equ 184     ;    revokes (P15); its frame while it does not run
+T_REVOKE_OBJECT     equ T_FRAME + FRAME_SIZE_USER
+TCB_SIZE            equ T_REVOKE_OBJECT + 2
+ZERO_CANCELLED      equ 0xFFFF  ; T_ZERO_SLOT: its untyped's memory given back (P15)
 %if T_FPU + 94 > T_FAULT_BADGE
   %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
 %endif
@@ -134,8 +137,8 @@ SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's ba
 SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
 SH_BADGE            equ 4       ; an endpoint's or notification's badge
 SH_WATERMARK        equ 6       ; untyped: paragraphs retyped so far
-SH_HOLE             equ 12      ; untyped: the room an alignment skipped, kept for
-SH_HOLE_END         equ 14      ;    smaller objects (paragraphs, as the watermark)
+SH_PREV             equ 12      ; the previous of its parent's children (0: the first),
+SH_PREV_SLOT        equ 14      ;    so that it leaves the list at once (P15)
 SH_PARENT           equ 8       ; the space it was copied from (0: made, not copied)
 SH_PARENT_SLOT      equ 10      ; and the slot there
 SH_CHILD            equ 16      ; its first child's space (0: none) and slot: its children
@@ -207,7 +210,7 @@ FLAGS_IF            equ 0x0200
 FLAGS_NT            equ 0x4000
 FLAGS_USER_START    equ 0x0202  ; IF set, IOPL 0, everything else clear
 FLAGS_IOPL1         equ 0x1000  ; IOPL 1: a driver's (roadmap l4.md D11)
-FLAGS_USER_KEEP     equ 0x0FD5  ; the flags a program sets itself: CF PF AF ZF SF TF DF OF
+FLAGS_USER_KEEP     equ 0x0DD5  ; the flags a program sets itself: CF PF AF ZF SF TF DF OF
                                 ; (THREAD_FRAME writes these, never IF, IOPL or NT)
 FLAGS_DF_TASK       equ 0x0002  ; the double-fault task: interrupts off (bit 1 reads as 1)
 CPL_MASK            equ 3
@@ -263,6 +266,18 @@ VECTOR_NAME_CHARS   equ 3       ; "#GP", "NMI": the longest name of an exception
         STRETCH_BEGIN %1
         call kpreempt
 %endmacro
+
+; IWINDOW - an interrupt window alone, where the running thread never gives
+; way: inside a walk of a capability's children, which no interrupt handler
+; looks at, so that a long list keeps no stretch long (os-server.md P15)
+%macro IWINDOW 1
+        STRETCH_END
+        sti
+        nop
+        cli
+        STRETCH_BEGIN %1
+%endmacro
+CHILDREN_WINDOW     equ 16      ; children walked between two IWINDOWs
 
 
 ; ---------------------------------------------------------------- messages

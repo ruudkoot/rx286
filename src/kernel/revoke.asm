@@ -6,10 +6,13 @@
 ;
 ; Every capability records its parent: the slot it was copied, minted or
 ; granted from, or the untyped it was retyped from. Each parent keeps its
-; children in a list (SH_CHILD, then each child's SH_NEXT), so that nothing
-; looks through every slot of every space (os-server.md D9, as seL4 keeps
-; its derivation tree). A delete gives its children to its parent, first in
-; the parent's list, so the tree holds; a move takes its children with it.
+; children in a list (SH_CHILD, then each child's SH_NEXT, and SH_PREV
+; back), so that nothing looks through every slot of every space
+; (os-server.md D9, as seL4 keeps its derivation tree), and a capability
+; leaves its list at once (P15). A delete gives its children to its parent,
+; first in the parent's list, so the tree holds; a move takes its children
+; with it. Both tell each child, with an interrupt window every
+; CHILDREN_WINDOW of them, so that no stretch grows with a list (P15).
 ; KCALL_REVOKE deletes the first child of a capability until it has none,
 ; and an untyped revoked has none of its memory used any more: its
 ; watermark goes back to 0, and the next retype reuses it, zeroed (l4.md
@@ -34,10 +37,14 @@
 begin_kdata
 space_list          times SPACE_MAX dw 0    ; every space, in the order made
 space_bytes         dw 0                ; its length, in bytes
+revoke_object       dw 0                ; revoke_root's: what a revoke revokes (P15)
+revoke_type         db 0
 dead_spaces         times SPACE_MAX dw 0    ; spaces that died, their slots to empty
 dead_count          dw 0
 list_bytes          dw 0
 unlink_type         db 0
+adopt_last          dw 0                ; children_adopt's: the last child walked (P15)
+adopt_last_slot     dw 0
                     db 0
 unlink_object       dw 0
 adopt_first         dw 0                ; children_adopt's: the first child
@@ -187,6 +194,8 @@ child_link:
         mov [es:si + SH_CHILD_SLOT], di
         mov [es:si + SH_NEXT], di
         mov [es:si + SH_NEXT_SLOT], di
+        mov [es:si + SH_PREV], di       ; (first in the list, if in one)
+        mov [es:si + SH_PREV_SLOT], di
         test bx, bx
         jz .done
         call shadow_at                  ; ES:SI = the parent's
@@ -199,6 +208,9 @@ child_link:
         call shadow_at                  ; the child's: next, the parent's old first
         pop word [es:si + SH_NEXT]
         pop word [es:si + SH_NEXT_SLOT]
+        mov bx, dx                      ; the old first's back link: the child (P15)
+        mov ax, cx
+        call next_back
 .done:
         pop bx
         pop ax
@@ -209,9 +221,9 @@ child_link:
 
 ; ----------------------------------------------------------------------------
 ; link_find - the link that names a capability in its parent's list: the
-; parent's SH_CHILD, or a sibling's SH_NEXT
-;   In:       ES:SI = a shadow entry whose parent is the capability's; DX, CX
-;             = the capability's space and slot
+; parent's SH_CHILD, or its previous sibling's SH_NEXT, by its back link at
+; once (os-server.md P15: no walk of the siblings)
+;   In:       ES:SI = the capability's shadow entry (or a copy of it, a move's)
 ;   Out:      ES:DI = the link (the space's word, then the slot's)
 ;   Destroys: nothing else
 ; ----------------------------------------------------------------------------
@@ -219,23 +231,18 @@ link_find:
         push ax
         push bx
         push si
+        mov bx, [es:si + SH_PREV]
+        test bx, bx
+        jz .first
+        mov ax, [es:si + SH_PREV_SLOT]
+        call shadow_at                  ; ES:SI = the previous sibling's
+        lea di, [si + SH_NEXT]
+        jmp .found
+.first:
         mov bx, [es:si + SH_PARENT]
         mov ax, [es:si + SH_PARENT_SLOT]
         call shadow_at
         lea di, [si + SH_CHILD]
-.link:
-        mov bx, [es:di]
-        mov ax, [es:di + 2]
-        cmp bx, dx
-        jne .next
-        cmp ax, cx
-        je .found
-.next:
-        test bx, bx
-        ASSERT nz, "link_find: a capability not in its parent's list"
-        call shadow_at
-        lea di, [si + SH_NEXT]
-        jmp .link
 .found:
         pop si
         pop bx
@@ -243,9 +250,42 @@ link_find:
         ret
 
 ; ----------------------------------------------------------------------------
+; next_back - a capability's next sibling's back link set (P15)
+;   In:       ES:SI = the capability's shadow entry; BX, AX = what its next's
+;             SH_PREV is to name (0: the next is now the first)
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+next_back:
+        push si
+        push es
+        push bx
+        push ax
+        mov bx, [es:si + SH_NEXT]
+        mov ax, [es:si + SH_NEXT_SLOT]
+        test bx, bx
+        jz .none
+        call shadow_at                  ; ES:SI = the next's
+        pop ax
+        pop bx
+        mov [es:si + SH_PREV], bx
+        mov [es:si + SH_PREV_SLOT], ax
+        jmp .done
+.none:
+        pop ax
+        pop bx
+.done:
+        pop es
+        pop si
+        ret
+
+; ----------------------------------------------------------------------------
 ; children_adopt - a capability's children given to its parent, first in
-; the parent's list; in no list, if it has no parent
-;   In:       ES:SI = the capability's shadow entry
+; the parent's list; in no list, if it has no parent. Each child is told its
+; new parent, with an interrupt window every CHILDREN_WINDOW of them; the
+; list itself is spliced in at once (os-server.md P15)
+;   In:       ES:SI = the capability's shadow entry; DS = SEL_KDATA;
+;             interrupts off
 ;   Out:      its list of children empty
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
@@ -265,7 +305,10 @@ children_adopt:
         mov [adopt_first_slot], ax
         mov dx, [es:si + SH_PARENT]     ; DX, CX = the new parent
         mov cx, [es:si + SH_PARENT_SLOT]
+        xor di, di                      ; DI = children walked
 .child:
+        mov [adopt_last], bx            ; (the last one walked)
+        mov [adopt_last_slot], ax
         call shadow_at                  ; ES:SI = a child's
         mov [es:si + SH_PARENT], dx
         mov [es:si + SH_PARENT_SLOT], cx
@@ -275,7 +318,14 @@ children_adopt:
         jnz .linked
         mov word [es:si + SH_NEXT], 0   ; no parent: no list
         mov word [es:si + SH_NEXT_SLOT], 0
+        mov word [es:si + SH_PREV], 0
+        mov word [es:si + SH_PREV_SLOT], 0
 .linked:
+        inc di
+        test di, CHILDREN_WINDOW - 1
+        jnz .walked
+        IWINDOW (VEC_KCALL << 8) | KCALL_DELETE
+.walked:
         test bx, bx
         jnz .child
         test dx, dx                     ; ES:SI = the last child's
@@ -294,6 +344,13 @@ children_adopt:
         pop es
         mov [es:di + SH_NEXT], bx
         mov [es:di + SH_NEXT_SLOT], ax
+        test bx, bx
+        jz .emptied
+        call shadow_at                  ; ES:SI = the old first's: after the last
+        mov ax, [adopt_last]
+        mov [es:si + SH_PREV], ax
+        mov ax, [adopt_last_slot]
+        mov [es:si + SH_PREV_SLOT], ax
 .emptied:
         pop es
         pop si
@@ -338,8 +395,6 @@ cap_moved:
         push cx
         push es
         push si
-        mov dx, bx
-        mov cx, ax
         call link_find                  ; ES:DI = the link that named the old
         pop si
         pop cx                          ; (the new one's space)
@@ -352,6 +407,7 @@ cap_moved:
         mov bx, dx
         mov ax, cx
         call shadow_at                  ; ES:SI = the new one's again
+        call next_back                  ; its next's back link: the new slot (P15)
         pop ax
         pop bx
 .reply:
@@ -373,6 +429,7 @@ cap_moved:
 .children:
         mov bx, [es:si + SH_CHILD]
         mov ax, [es:si + SH_CHILD_SLOT]
+        xor di, di                      ; DI = children walked
 .child:
         test bx, bx
         jz .done
@@ -381,6 +438,10 @@ cap_moved:
         mov [es:si + SH_PARENT_SLOT], cx
         mov bx, [es:si + SH_NEXT]
         mov ax, [es:si + SH_NEXT_SLOT]
+        inc di
+        test di, CHILDREN_WINDOW - 1
+        jnz .child
+        IWINDOW (VEC_KCALL << 8) | KCALL_COPY   ; (a long list: no long stretch, P15)
         jmp .child
 .done:
         pop es
@@ -422,6 +483,9 @@ cap_delete_at:
         mov [es:di + 2], bx
         pop si
         pop es
+        mov bx, [es:si + SH_PREV]       ; its next's back link: its own (P15)
+        mov ax, [es:si + SH_PREV_SLOT]
+        call next_back
 .adopt:
         call children_adopt
         mov al, [es:si + SH_TYPE]
@@ -842,10 +906,7 @@ space_destroy:
         je .free
         call thread_stop
 .free:
-        mov es, bx
-        mov byte [es:T_STATE], TS_FREE  ; to be configured again, if at all
-        and byte [es:T_FLAGS], ~(TF_CONFIGURED | TF_SESSION) & 0xFF
-        mov word [es:T_SPACE], 0
+        call thread_unconfigure         ; to be configured again, if at all
         pop bx
 .next:
         inc di
@@ -855,6 +916,29 @@ space_destroy:
         shl di, 1
         mov [dead_spaces + di], bx
         inc word [dead_count]
+.done:
+        ret
+
+; ----------------------------------------------------------------------------
+; thread_unconfigure - a thread whose space died, free, to be configured
+; again: nothing of its last life kept but its capabilities - no flag (but
+; TF_DEAD), no suspender's notification, no call's progress, not the keys
+; (os-server.md P15)
+;   In:       BX = the thread; DS = SEL_KDATA
+;   Out:      ES = the thread
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+thread_unconfigure:
+        mov es, bx
+        mov byte [es:T_STATE], TS_FREE
+        and byte [es:T_FLAGS], TF_DEAD
+        mov word [es:T_SPACE], 0
+        mov word [es:T_SUSPEND_NOTIFY], 0
+        mov word [es:T_LOG_DONE], 0
+        mov word [es:T_ZERO_PARAS], 0
+        cmp [fg_thread], bx
+        jne .done
+        mov word [fg_thread], SEL_IDLE
 .done:
         ret
 
@@ -999,10 +1083,8 @@ thread_die:
 thread_orphan:
         mov bx, [cur_thread]
         mov es, bx
-        and byte [es:T_FLAGS], ~(TF_ORPHAN | TF_CONFIGURED | TF_SESSION) & 0xFF
-        mov byte [es:T_STATE], TS_FREE
         mov si, [es:T_SPACE]
-        mov word [es:T_SPACE], 0
+        call thread_unconfigure
         test si, si
         jz .gone
         push bx
@@ -1034,12 +1116,17 @@ kc_revoke:
         jc kc_done.cap
         cmp byte [es:si + SH_TYPE], CAP_EMPTY
         je kc_done.cap
+        mov cl, [es:si + SH_TYPE]
+        mov dx, [es:si + SH_OBJECT]
         mov es, [cur_thread]
         mov [es:T_REVOKE_SPACE], bx
         mov [es:T_REVOKE_SLOT], ax
+        mov [es:T_REVOKE_TYPE], cl      ; (what is there, checked again after each
+        mov [es:T_REVOKE_OBJECT], dx    ;    window: P15)
 .child:
         call revoke_root                ; BX, AX, ES:SI: the slot
-        jc kc_done.ok                   ; emptied meanwhile, or its space gone
+        jc kc_done.state                ; emptied or another there meanwhile, or its
+                                        ;    space gone (P15)
         mov bx, [es:si + SH_CHILD]
         test bx, bx
         jz .revoked
@@ -1052,10 +1139,16 @@ kc_revoke:
 .revoked:
         cmp byte [es:si + SH_TYPE], CAP_UNTYPED
         jne kc_done.ok
+        cmp word [dead_count], 0        ; a dead space still to empty: emptied and
+        je .give_back                   ;    released first, its memory perhaps this
+        call dead_flush                 ;    untyped's (P15)
+        call revoke_window
+        jc kc_done.ok
+        jmp .child
+.give_back:
+        call retypes_cancel             ; a retype zeroing in it: to go no further
         xor ax, ax                      ; nothing made from it is left
         mov [es:si + SH_WATERMARK], ax
-        mov [es:si + SH_HOLE], ax
-        mov [es:si + SH_HOLE_END], ax
         jmp kc_done.ok
 
 ; ----------------------------------------------------------------------------
@@ -1067,6 +1160,10 @@ kc_revoke:
 ; ----------------------------------------------------------------------------
 revoke_root:
         mov es, [cur_thread]
+        mov bx, [es:T_REVOKE_OBJECT]
+        mov [revoke_object], bx
+        mov bl, [es:T_REVOKE_TYPE]
+        mov [revoke_type], bl
         mov bx, [es:T_REVOKE_SPACE]
         mov ax, [es:T_REVOKE_SLOT]
         call space_alive
@@ -1074,10 +1171,66 @@ revoke_root:
         push ax
         call slot_at
         pop ax
-        cmp byte [es:si + SH_TYPE], CAP_EMPTY   ; (CF clear: nothing is below 0)
-        jne .done
+        mov di, [es:si + SH_OBJECT]     ; what was revoked, still there? (P15)
+        cmp di, [revoke_object]
+        jne .other
+        push ax
+        mov al, [es:si + SH_TYPE]
+        cmp al, [revoke_type]
+        pop ax
+        jne .other
+        clc
+        ret
+.other:
         stc
 .done:
+        ret
+
+; ----------------------------------------------------------------------------
+; retypes_cancel - every thread's segment retype still zeroing memory of an
+; untyped that a revoke gives back marked ZERO_CANCELLED, so that it writes
+; nothing more there, nor makes its segment (retype_zero; os-server.md P15)
+;   In:       ES:SI = the untyped's shadow entry; DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+retypes_cancel:
+        push ax
+        push bx
+        push cx
+        push dx
+        push di
+        mov ax, [es:si + SH_OBJECT]     ; DL:AX = its first paragraph, CX its size
+        mov dl, [es:si + SH_HIGH]
+        mov cx, [es:si + SH_SIZE]
+        xor di, di
+.thread:
+        cmp di, [thread_count]
+        jae .done
+        push es
+        mov bx, di
+        shl bx, 1
+        mov es, [thread_list + bx]
+        cmp word [es:T_ZERO_PARAS], 0
+        je .next
+        mov bx, [es:T_ZERO_BASE]        ; its retype's base, from the untyped's
+        mov dh, [es:T_ZERO_HIGH]
+        sub bx, ax
+        sbb dh, dl
+        jnz .next                       ; (below it, or 1 MB beyond)
+        cmp bx, cx
+        jae .next
+        mov word [es:T_ZERO_SLOT], ZERO_CANCELLED
+.next:
+        pop es
+        inc di
+        jmp .thread
+.done:
+        pop di
+        pop dx
+        pop cx
+        pop bx
+        pop ax
         ret
 
 ; ----------------------------------------------------------------------------

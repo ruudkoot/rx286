@@ -79,6 +79,10 @@ kc_log:
         call con_cursor
         mov al, KE_CAP
 .failed:
+        push es                         ; (its count of bytes written: none for the
+        mov es, [cur_thread]            ;    next call, P15)
+        mov word [es:T_LOG_DONE], 0
+        pop es
         call kc_done
         jmp call_leave
 

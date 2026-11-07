@@ -36,7 +36,8 @@ writes the GDT except for the TSS's busy bit.
 
 Every descriptor of the GDT has DPL 0 (roadmap l4.md L1): nothing in it can
 be loaded from ring 3. `RPL_KERNEL` and `RPL_USER` are the two privilege
-levels in use. The GDT has `GDT_ENTRIES` descriptors and its limit is
+levels in use; `RPL_MASK` is a selector's RPL bits, which `THREAD_FRAME`
+sets to the thread's ring (os-server.md P15). The GDT has `GDT_ENTRIES` descriptors and its limit is
 `GDT_LIMIT`, 1FFFh. The image holds its fixed part, which the entry
 loads with the limit `GDT_BOOT_LIMIT`; `gdt_init` builds the whole at `GDT_PHYS` and loads that. The kernel
 takes a descriptor of the pool for each object it makes, and for each

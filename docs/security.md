@@ -40,8 +40,9 @@ root's have no pid at all.
   LDT (*docs/protected-mode.md*). Every descriptor of the GDT has DPL 0, so
   the program cannot load any of them; the LDT's empty slots are all zeros,
   invisible to it. LDTR always holds the program's LDT, never Bochs' live
-  one at address 0 (roadmap X8). The GDT ends at 1CFh and a program's LDT
-  at 7Fh, so any selector past either faults.
+  one at address 0 (roadmap X8). The GDT ends at 1FFFh (`GDT_LIMIT`, 1,024
+  descriptors: roadmap os-server.md P3) and a program's LDT at 7Fh, so any
+  selector past either faults.
 - **Rings 1 and 2.** Only a thread of ring 1 gets IOPL, and only if its
   starter asks: the drivers (roadmap l4.md D11). A thread of ring 2 that
   asks gets 0, and its `IN`, `OUT` and `CLI` fault; ring 1's privileged
@@ -72,8 +73,8 @@ root's have no pid at all.
   switching tasks; the TSSs have DPL 0, so the program cannot jump to them.
 - **The kernel's stack** is switched to on every interrupt from ring 3
   (SS0:SP0 in the TSS), so a broken program stack cannot hurt the kernel.
-- **The kernel's own buffer.** `KCALL_LOG`, the one kernel call that reads
-  memory, checks its buffer with the 286's own instructions at the caller's
+- **The kernel's own buffer.** `KCALL_LOG` and `THREAD_FRAME`, the kernel
+  calls that read or write a caller's memory, check its buffer with the 286's own instructions at the caller's
   privilege: `ARPL` against the caller's CS, `VERR`, `LAR` (no expand-down
   segment), `LSL` and bounds; and checks it again after
   every window, since the segment may have gone meanwhile (roadmap l4.md

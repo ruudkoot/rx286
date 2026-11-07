@@ -1,0 +1,14 @@
+# The kernel's review (roadmap os-server.md P15), finding 1: a segment's retype, resumed after another thread's revoke
+# gave its untyped's memory back and retyped it, ends KE_STATE, writing
+# nothing more (before: KE_OK, a segment over the new space). tests/programs/
+# additions.asm, TEST_RV_RETYPE; Bochs, whose timing the races need.
+program: additions
+define: TEST_CAPS
+define: TEST_RV_RETYPE
+emulators: bochs
+match: contains
+timeout: 60
+---
+additions: B found D inside its retype: 1
+additions: D: its 64 KB segment's retype, resumed (KE_STATE expected: 6): 6
+additions: done

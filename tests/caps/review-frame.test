@@ -1,0 +1,15 @@
+# The kernel's review (roadmap os-server.md P15), finding 2: THREAD_FRAME's write of a ring-3 thread's CS 0008h makes
+# its RPL the thread's ring; the way back refuses it, a fault, never ring 0
+# (before: the kernel ran the caller's IP at CPL 0). tests/programs/
+# additions.asm, TEST_RV_FRAME; Bochs, whose timing the races need.
+program: additions
+define: TEST_CAPS
+define: TEST_RV_FRAME
+emulators: bochs
+match: contains
+timeout: 60
+---
+additions: FRAME_WRITE of CS 0008h: 0
+rx286: program fault #GP(0008) at 000B:03C6
+additions: still here: the kernel refused it
+additions: done

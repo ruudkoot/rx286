@@ -19,8 +19,8 @@
 ; has no BSF. When no thread is ready the kernel idles on its stack.
 ;
 ; A thread waits inside the kernel only for its turn at the log, and then
-; only until the next interrupt: every IRQ wakes every waiting thread, which
-; calls again (call_enter; l4.md X15). Every other wait is IPC's, whose
+; only until the next tick: every tick, and every IRQ not a driver's, wakes
+; every waiting thread, which calls again (call_enter; l4.md X15). Every other wait is IPC's, whose
 ; results its waker writes into its frame. Preemption happens on the way
 ; back to its ring and at the kernel's own interrupt windows (kpreempt),
 ; where the call gives way and is resumed later (CONT_KCALL), never in the
@@ -312,8 +312,16 @@ kpreempt:
         cmp bx, SEL_IDLE
         je .idle
         mov es, bx
+        test byte [es:T_FLAGS], TF_DEAD ; dead, or its space dead: never off the CPU
+        jnz .die                        ;    with its call half done, where its object
+        test byte [es:T_FLAGS], TF_ORPHAN   ; could be given out again: it ends here,
+        jnz .orphan                     ;    as at its way back (os-server.md P15)
         mov byte [es:T_CONT], CONT_KCALL
         jmp preempt
+.die:
+        jmp thread_die
+.orphan:
+        jmp thread_orphan
 .idle:
         pop bx
 .done:

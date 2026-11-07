@@ -237,11 +237,9 @@ cap_lookup:
         ret
 
 ; ----------------------------------------------------------------------------
-; untyped_carve - room in untyped memory for an object: in the hole an
-; earlier object's alignment left, if it fits there (l4.md L10: the arena's
-; objects of 16, 512 and 4,096 bytes left a quarter of it in holes); else at
-; the watermark, which moves, and the room skipped to align it becomes the
-; hole if it is larger than the one kept
+; untyped_carve - room in untyped memory for an object, at the watermark,
+; which moves (every alignment is a paragraph since os-server.md P3, so no
+; room is skipped and no hole kept, as l4.md L10's was: P15)
 ;   In:       ES:SI = the untyped's shadow entry; CX = the object's
 ;             paragraphs; DX = its alignment in paragraphs (a power of two)
 ;   Out:      CF clear and DL:AX = its base paragraph (20 bits: above 1 MB
@@ -252,31 +250,11 @@ untyped_carve:
         push bx
         push cx
         push dx
-        mov ax, [es:si + SH_HOLE]
-        mov bx, [es:si + SH_HOLE_END]
-        call retype_place               ; within the hole?
-        jc .watermark
-        mov [es:si + SH_HOLE], dx       ; the hole now starts past it
-        jmp .placed
-.watermark:
-        pop dx
-        push dx
-        mov ax, [es:si + SH_WATERMARK]
-        mov bx, [es:si + SH_SIZE]
+        mov ax, [es:si + SH_WATERMARK]  ; (every alignment a paragraph: no room
+        mov bx, [es:si + SH_SIZE]       ;    skipped, no hole kept: P15)
         call retype_place               ; AX = its place, DX = the new watermark
         jc .done
-        mov bx, ax
-        sub bx, [es:si + SH_WATERMARK]  ; BX = the room skipped
-        mov cx, [es:si + SH_HOLE_END]
-        sub cx, [es:si + SH_HOLE]       ; CX = the hole kept
-        cmp bx, cx
-        jbe .kept
-        mov bx, [es:si + SH_WATERMARK]
-        mov [es:si + SH_HOLE], bx
-        mov [es:si + SH_HOLE_END], ax
-.kept:
         mov [es:si + SH_WATERMARK], dx
-.placed:
         pop dx
         mov dl, [es:si + SH_HIGH]
         add ax, [es:si + SH_OBJECT]
@@ -467,8 +445,8 @@ phys_zero:
 ; T_ZERO_DONE, where the call resumes if the thread gives way (kpreempt).
 ; After the windows the retype goes on only if the caller's space lives, its
 ; slot is still empty and the untyped still holds what was carved; a revoke
-; of the same untyped by another thread of the same space is the caller's
-; own race
+; that gives the untyped's memory back meanwhile cancels it before it
+; writes another byte (retypes_cancel, os-server.md P15)
 ;   In:       BP = the frame (DX the untyped, SI the slot); the running
 ;             thread's T_ZERO_*
 ;   Out:      CF set if the retype cannot go on
@@ -476,6 +454,8 @@ phys_zero:
 ; ----------------------------------------------------------------------------
 retype_zero:
         mov es, [cur_thread]
+        cmp word [es:T_ZERO_SLOT], ZERO_CANCELLED
+        je .changed                     ; its memory given back meanwhile (P15)
         mov cx, [es:T_ZERO_PARAS]
         sub cx, [es:T_ZERO_DONE]        ; CX = paragraphs left
         jz .zeroed
@@ -557,13 +537,20 @@ phys_copy:
 
 ; ----------------------------------------------------------------------------
 ; space_make - a space of so many slots, from untyped memory: an object, an
-; LDT descriptor of the pool for its LDT, every slot empty
+; LDT descriptor of the pool for its LDT, every slot empty; KE_POOL past
+; SPACE_MAX spaces
 ;   In:       ES:SI = the untyped's shadow entry; CX = slots (a power of two,
 ;             SPACE_SLOTS_MIN to SPACE_SLOTS_MAX)
 ;   Out:      CF clear and BX = the space; CF set and AL = KE_*
 ;   Destroys: AX, CX, DX, DI
 ; ----------------------------------------------------------------------------
 space_make:
+        mov al, KE_POOL
+        cmp word [space_bytes], SPACE_MAX * 2   ; (the list of spaces full: refused
+        jb .room                        ;    before anything is taken, P15)
+        stc
+        ret
+.room:
         call obj_take                   ; BX = the LDT's descriptor
         mov al, KE_POOL
         jc .done
@@ -860,6 +847,10 @@ ext_detect:
         mov al, CMOS_EXT_LOW | CMOS_NMI_DISABLE
         out CMOS_INDEX, al
         in al, CMOS_DATA
+        push ax
+        mov al, CMOS_REG_D              ; NMI on again, as pm_start left it (P15)
+        out CMOS_INDEX, al
+        pop ax
         cmp ax, EXT_KB_MAX
         jbe .sized
         mov ax, EXT_KB_MAX
@@ -1115,8 +1106,8 @@ boot_slot_shadow:
         sub [es:di + SH_SIZE], ax
         xor ax, ax
         mov [es:di + SH_WATERMARK], ax
-        mov [es:di + SH_HOLE], ax
-        mov [es:di + SH_HOLE_END], ax
+        mov [es:di + SH_PREV], ax       ; (in no list)
+        mov [es:di + SH_PREV_SLOT], ax
         push ds
         pop es
         ret
@@ -1611,6 +1602,8 @@ kc_thread:
         ; are (check_buffer): TFR_SIZE of them at SI:DI
         test byte [es:T_FLAGS], TF_SUSPENDED
         jz kc_done.state
+        cmp byte [es:T_STATE], TS_STOPPED   ; (and stopped: no frame of a thread that
+        jne kc_done.state               ;    runs or is ready, os-server.md P15)
         mov [frame_thread], bx
         mov ax, [bp + FRAME_SI]
         mov si, [bp + FRAME_DI]
@@ -1651,6 +1644,21 @@ kc_thread:
         call thread_flags               ; IF on and the thread's IOPL, whatever was
         and word [es:T_FRAME + FRAME_FLAGS], FLAGS_USER_KEEP   ; written; NT never (E6)
         or [es:T_FRAME + FRAME_FLAGS], ax
+        mov al, [es:T_RING]             ; CS's and SS's RPL the thread's ring, whatever
+        xor ah, ah                      ;    was written: the way back checks them at
+        and word [es:T_FRAME + FRAME_CS], ~RPL_MASK     ; it (os-server.md P15)
+        or [es:T_FRAME + FRAME_CS], ax
+        and word [es:T_FRAME + FRAME_USER_SS], ~RPL_MASK
+        or [es:T_FRAME + FRAME_USER_SS], ax
+        cmp byte [es:T_CONT], CONT_KCALL    ; stopped in a call half done: the call
+        jne .frame_written              ;    is given up, the thread goes back with
+        mov byte [es:T_CONT], CONT_NONE ;    the frame written, nothing of the call
+        mov word [es:T_ZERO_PARAS], 0   ;    kept (P15)
+        mov word [es:T_LOG_DONE], 0
+        cmp [call_owner], bx
+        jne .frame_written
+        mov word [call_owner], 0
+.frame_written:
         push ds
         pop es
         jmp kc_done.ok
@@ -1769,6 +1777,8 @@ thread_module_name:
         mov ax, [es:SP_LDT + 2]         ; slot 0's base, in paragraphs (the
         shr ax, 4                       ; image's: below 1 MB)
         mov dl, [es:SP_LDT + 4]
+        test dl, 0xF0
+        jnz .done                       ; (code above 1 MB: no module's, P15)
         xor dh, dh
         shl dx, 12
         or dx, ax

@@ -1,0 +1,15 @@
+# The kernel's review (roadmap os-server.md P15), finding 3: spaces past SPACE_MAX (128 in all) are KE_POOL, and the
+# kernel's data past the list of spaces stays whole (before: no limit, and
+# the 129th space was written over the list's length). tests/programs/
+# additions.asm, TEST_RV_SPACES; Bochs, whose timing the races need.
+program: additions
+define: TEST_CAPS
+define: TEST_RV_SPACES
+emulators: bochs
+match: contains
+timeout: 60
+---
+additions: spaces made by the program (KE_POOL due at 128 in all): 115
+additions: all of them deleted: 0
+additions: an endpoint retyped after: 0
+additions: done

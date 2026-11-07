@@ -28,6 +28,12 @@
 ;                     that a revoke deletes, then all revoked; a 64 KB
 ;                     segment retyped, its zeroing in pieces (TEST_STRETCH
 ;                     measures them: no delete looks through every slot, D9)
+;   TEST_ADD_SIBLINGS a list of 3,072 siblings: an endpoint copied into
+;                     every slot of twelve spaces of 256, six of them
+;                     deleted (each delete unlinks one copy), then the
+;                     endpoint (the other 1,536 adopted at once);
+;                     TEST_STRETCH measures: no stretch grows with the list
+;                     (os-server.md P15)
 ; Its lines come through uprint; the workers' through KCALL_LOG.
 ; ============================================================================
 
@@ -169,6 +175,22 @@ entry:
         jmp suspend_part
 %elifdef TEST_ADD_RESUME
         jmp resume_part
+%elifdef TEST_RV_FRAME
+        jmp rv_frame_part
+%elifdef TEST_RV_RETYPE
+        jmp rv_retype_part
+%elifdef TEST_RV_DEAD
+        jmp rv_dead_part
+%elifdef TEST_RV_SPACES
+        jmp rv_spaces_part
+%elifdef TEST_RV_MISC
+        jmp rv_misc_part
+%elifdef TEST_RV_FLUSH
+        jmp rv_flush_part
+%elifdef TEST_RV_LEAK
+        jmp rv_leak_part
+%elifdef TEST_ADD_SIBLINGS
+        jmp siblings_part
 %else
         jmp pools_part
 %endif
@@ -1383,6 +1405,95 @@ pools_part:
         report "zeroed (0)"
         jmp done
 
+SIB_SPACES          equ 12          ; TEST_ADD_SIBLINGS' spaces of 256 slots
+
+; ----------------------------------------------------------------------------
+; siblings_part - TEST_ADD_SIBLINGS: an endpoint's 3,072 copies, in twelve
+; spaces of 256 slots; six of the spaces deleted, each slot's delete one
+; copy out of the long list; then the endpoint, its other 1,536 copies
+; adopted at once (os-server.md P15)
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+siblings_part:
+        mov dx, UT_MEMORY
+        mov al, CAP_UNTYPED
+        mov si, UT_POOLS
+        mov cx, (SIB_SPACES * (16 + 32 * 256) + 64) >> 4
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_POOLS
+        mov al, CAP_ENDPOINT
+        mov si, S_EP
+        kcall KCALL_RETYPE
+        must
+        call sibling_copies
+        report "copies made (3072)"
+        mov si, sib_slots
+        mov cx, SIB_SPACES / 2
+.delete:
+        push cx
+        push si
+        mov dx, [si]
+        kcall KCALL_DELETE              ; each slot's delete unlinks a copy
+        pop si
+        pop cx
+        add si, 2
+        loop .delete
+        mov ax, 0
+        report "half the spaces deleted with them (0)"
+        mov dx, S_EP
+        kcall KCALL_DELETE              ; its other 1,536 copies adopted at once
+        status "the endpoint deleted (0)"
+        jmp done
+
+; ----------------------------------------------------------------------------
+; sibling_copies - SIB_SPACES spaces of 256 slots, each slot a copy of S_EP
+;   In:       nothing
+;   Out:      AX = the copies made
+;   Destroys: everything but DS
+; ----------------------------------------------------------------------------
+sibling_copies:
+        mov word [made], 0
+        mov si, sib_slots
+        mov cx, SIB_SPACES
+.space:
+        push cx
+        push si
+        mov dx, UT_POOLS
+        mov al, CAP_SPACE
+        mov si, [si]
+        mov cx, 256
+        kcall KCALL_RETYPE
+        must
+        pop si
+        push si
+        mov bx, [si]
+        mov di, 0x07                    ; its slot 0 on
+        mov cx, 256
+.copy:
+        push cx
+        push di
+        push bx
+        mov dx, bx
+        mov si, S_EP
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        inc word [made]
+        pop bx
+        pop di
+        pop cx
+        add di, 8
+        loop .copy
+        pop si
+        pop cx
+        add si, 2
+        loop .space
+        mov ax, [made]
+        ret
+
 ; ----------------------------------------------------------------------------
 ; many_spaces - 64 spaces more, each with a copy of an endpoint, moved into
 ; a space that holds them all; the endpoint revoked
@@ -1435,6 +1546,754 @@ many_spaces:
         mov dx, S_EP
         kcall KCALL_REVOKE
         status "their copies of an endpoint revoked (0)"
+        ret
+
+; ============================================================================ review tests
+%ifndef KPANIC
+KPANIC              equ 0x03C6          ; panic's offset in the kernel's code (kernel.map)
+%endif
+%ifndef KMSG
+KMSG                equ 0x8352          ; a message of kdata's (kernel.map)
+%endif
+RV_T                equ 0x1A7           ; 52
+NTF_GO              equ 0x1AF           ; 53
+NTF_B               equ 0x1B7           ; 54
+RV_SPACE            equ 0x1BF           ; 55
+RV_UT               equ 0x1C7           ; 56
+UT3                 equ 0x1CF           ; 57
+RV_HOLD             equ 0x1D7           ; 58
+RV_SEG              equ 0x1DF           ; 59
+RV_TMP              equ 0x1E7           ; 60
+RV_EPS              equ 200
+
+begin_udata
+in_retype           dw 0
+acted               dw 0
+b_revoke            dw 0
+b_space             dw 0
+b_ut                dw 0
+trials              dw 0
+made                dw 0
+b_wakes             dw 0
+b_inside            dw 0
+pre_call            dw 0
+sib_slots           dw HOLDER, SMALL, UT_SEG, T_HOLDER, 0x1A7, 0x1AF, 0x1B7, 0x1BF, 0x1C7
+                    dw 0x1CF, 0x1F7, 0x1FF
+end_udata
+
+; ----------------------------------------------------------------------------
+; rv_frame_part - finding 2 of os-server.md P15's kernel review: THREAD_FRAME's write
+; of a ring-3 thread's CS 0008h, then its start: the CS's RPL is the
+; thread's ring, and the way back refuses it (a fault), never ring 0
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_frame_part:
+        mov dx, UT_ARENA
+        mov al, CAP_ENDPOINT
+        mov si, S_EP
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_NOTIFY
+        mov si, NTF_STOP
+        kcall KCALL_RETYPE
+        must
+        mov ax, ROLE_COUNT
+        call make_worker
+        mov cx, 3
+        call sleep
+        call suspend_worker
+        mov bl, FRAME_READ
+        call worker_frame
+        must
+        mov ax, [frame + TFR_CS]
+        report "the worker's CS before"
+        mov word [frame + TFR_CS], 0x0008      ; SEL_KCODE, RPL 0
+        mov word [frame + TFR_IP], KPANIC
+        mov word [frame + TFR_SI], KMSG
+        mov word [frame + TFR_BP], 0
+        mov word [frame + TFR_DS], 0x0010      ; SEL_KDATA
+        mov word [frame + TFR_ES], 0x0010
+        mov bl, FRAME_WRITE
+        call worker_frame
+        status "FRAME_WRITE of CS 0008h"
+        call resume_worker
+        mov cx, 5
+        call sleep
+        PRINT "additions: still here: the kernel refused it", CHAR_LF
+        jmp done
+
+RV_D                equ 0x1EF           ; 61: thread D, which retypes over and over
+; ----------------------------------------------------------------------------
+; rv_retype_part - finding 1: a segment's retype resumed after a revoke gave its
+; untyped's memory back meanwhile ends KE_STATE, writing nothing more
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_retype_part:
+        mov dx, UT_MEMORY
+        mov al, CAP_UNTYPED
+        mov si, UT_SEG
+        mov cx, 0x1000
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_NOTIFY
+        mov si, NTF_GO
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_NOTIFY
+        mov si, NTF_B
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_THREAD
+        mov si, RV_T
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_THREAD
+        mov si, RV_D
+        kcall KCALL_RETYPE
+        must
+        mov dx, RV_T                    ; B: priority 2, a tick at a time
+        mov si, MY_SPACE
+        mov bx, rv_b
+        mov cx, 0x400
+        mov al, THREAD_CONFIGURE
+        kcall KCALL_THREAD
+        must
+        mov dx, RV_D                    ; D: priority 1, retypes for ever
+        mov si, MY_SPACE
+        mov bx, rv_d
+        mov cx, 0x200
+        mov al, THREAD_CONFIGURE
+        kcall KCALL_THREAD
+        must
+        mov dx, RV_T
+        mov cl, 2
+        call start_thread
+        mov dx, RV_D
+        mov cl, 1
+        call start_thread
+        mov dx, NTF_GO                  ; D says when it is done
+        kcall KCALL_RECV
+        mov ax, [trials]
+        report "D's retypes"
+        mov ax, [b_wakes]
+        report "B's ticks"
+        mov ax, [b_inside]
+        report "B found D inside its retype"
+        cmp word [acted], 1
+        jne .end
+        mov ax, [b_revoke]
+        status "B: revoke of the untyped D retypes from"
+        mov ax, [b_space]
+        status "B: a space of 256 slots retyped from it"
+        mov ax, [b_ut]
+        status "B: the rest of it retyped as untyped"
+        mov ax, [made]
+        status "D: its 64 KB segment's retype, resumed (KE_STATE expected: 6)"
+        cmp byte [made], KE_OK
+        jne .end
+        mov ax, BIG
+        mov es, ax
+        mov ax, [es:0]
+        push ds
+        pop es
+        report "D's segment's word 0, the space's SP_SLOTS (256: a segment over a kernel object)"
+        mov ax, BIG
+        mov es, ax
+        mov ax, [es:2]
+        push ds
+        pop es
+        report "and word 2, its LDT's GDT selector"
+.end:
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rv_d - thread D (finding 1): a 64 KB segment retyped from UT_SEG,
+; deleted and its memory given back, over and over, until B has acted
+; inside a retype
+;   In:       a thread's start
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_d:
+.loop:
+        inc word [trials]
+        cmp word [trials], 3000
+        ja .over
+        mov dx, UT_SEG
+        mov al, CAP_SEGMENT
+        mov si, BIG
+        mov cx, 0xFFFF
+        mov bl, 0xF2
+        mov word [in_retype], 1
+        kcall KCALL_RETYPE
+        mov word [in_retype], 0
+        mov [made], ax
+        cmp word [acted], 1
+        jne .again
+        mov dx, BIG                     ; B came after the call, and its revoke
+        kcall KCALL_SEGMENT             ; deleted the segment: not the race
+        jc .over
+        jmp .over
+.again:
+        mov dx, BIG
+        kcall KCALL_DELETE
+        mov dx, UT_SEG
+        kcall KCALL_REVOKE
+        jmp .loop
+.over:
+        mov dx, NTF_GO
+        kcall KCALL_SIGNAL
+.stay:
+        mov dx, NTF_GO
+        kcall KCALL_POLL
+        jmp .stay
+
+; ----------------------------------------------------------------------------
+; rv_b - thread B (finding 1): a tick at a time; inside D's retype, its
+; revoke and retypes of the same untyped
+;   In:       a thread's start
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_b:
+.loop:
+        mov dx, NTF_B
+        mov cx, 1
+        kcall KCALL_TIMER
+        mov dx, NTF_B
+        kcall KCALL_RECV
+        inc word [b_wakes]
+        cmp word [in_retype], 1
+        jne .loop
+        inc word [b_inside]
+        mov dx, UT_SEG
+        kcall KCALL_REVOKE
+        mov [b_revoke], ax
+        mov dx, UT_SEG
+        mov al, CAP_SPACE
+        mov si, RV_SPACE
+        mov cx, 256
+        kcall KCALL_RETYPE
+        mov [b_space], ax
+        mov dx, UT_SEG
+        mov al, CAP_UNTYPED
+        mov si, RV_UT
+        mov cx, 0x1000 - 513
+        kcall KCALL_RETYPE
+        mov [b_ut], ax
+        mov word [acted], 1
+.stay:
+        mov dx, NTF_B
+        kcall KCALL_RECV
+        jmp .stay
+
+; ----------------------------------------------------------------------------
+; rv_dead_part - finding 7: a thread that lost its last capability while it ran
+; ends at its call's next window, never off the CPU while its control
+; block's memory is given out again
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_dead_part:
+        mov dx, UT_MEMORY
+        mov al, CAP_UNTYPED
+        mov si, UT3
+        mov cx, (RV_EPS + 16)
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_SPACE
+        mov si, RV_HOLD
+        mov cx, 256
+        kcall KCALL_RETYPE
+        must
+        mov di, 0x07
+        mov cx, RV_EPS
+.ep:
+        push cx
+        push di
+        mov dx, UT3
+        mov al, CAP_ENDPOINT
+        mov si, RV_TMP
+        kcall KCALL_RETYPE
+        must
+        pop di
+        push di
+        mov dx, RV_HOLD
+        mov si, RV_TMP
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        must
+        pop di
+        pop cx
+        add di, 8
+        loop .ep
+        mov dx, UT3                     ; R's thread: U3's newest child
+        mov al, CAP_THREAD
+        mov si, RV_T
+        kcall KCALL_RETYPE
+        must
+        mov dx, RV_T
+        mov si, MY_SPACE
+        mov bx, rv_r
+        mov cx, 0x300
+        mov al, THREAD_CONFIGURE
+        kcall KCALL_THREAD
+        must
+        mov dx, RV_T
+        mov cl, 2
+        call start_thread
+        mov cx, 1                       ; R revokes U3 meanwhile
+        call sleep
+        mov ax, [made]
+        report "R got back from its revoke (0: it is dead, off the CPU)"
+        mov dx, RV_T
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD
+        status "our capability to R (1: gone)"
+        mov dx, UT3                     ; its memory back, R still queued
+        kcall KCALL_REVOKE
+        status "A's revoke of U3"
+        mov dx, UT3
+        mov al, CAP_SEGMENT
+        mov si, RV_SEG
+        mov cx, (RV_EPS + 16) * 16
+        mov bl, 0xF2
+        kcall KCALL_RETYPE
+        status "A's segment over all of U3"
+        mov ax, RV_SEG
+        mov es, ax
+        mov di, RV_EPS * 16             ; R's control block
+        mov word [es:di + 0], 0         ; T_CONT: none
+        mov word [es:di + 8], 0         ; T_LDT
+        mov word [es:di + 184 + TFR_CS], 0x0008
+        mov word [es:di + 184 + TFR_IP], KPANIC
+        mov word [es:di + 184 + TFR_SI], KMSG
+        mov word [es:di + 184 + TFR_BP], 0
+        mov word [es:di + 184 + TFR_DS], 0x0010
+        mov word [es:di + 184 + TFR_ES], 0x0010
+        mov word [es:di + 184 + TFR_FLAGS], 0x0002
+        push ds
+        pop es
+        PRINT "additions: R's control block written through a segment", CHAR_LF
+        mov cx, 5
+        call sleep
+        PRINT "additions: still here", CHAR_LF
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rv_r - thread R (finding 7): its revoke, which deletes its own last
+; capability
+;   In:       a thread's start
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_r:
+        mov dx, UT3
+        kcall KCALL_REVOKE
+        mov word [made], 1
+.spin:
+        jmp .spin
+
+; ----------------------------------------------------------------------------
+; rv_spaces_part - finding 3: spaces are refused (KE_POOL) past SPACE_MAX, and
+; the kernel's data past the list of spaces stays whole
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_spaces_part:
+        mov dx, UT_ARENA
+        mov al, CAP_SPACE
+        mov si, RV_HOLD
+        mov cx, 256
+        kcall KCALL_RETYPE
+        must
+        mov word [made], 0
+        mov di, 0x07
+        mov cx, 250
+.space:
+        push cx
+        push di
+        mov dx, UT_ARENA
+        mov al, CAP_SPACE
+        mov si, RV_TMP
+        mov cx, 8
+        kcall KCALL_RETYPE
+        jc .refused
+        pop di
+        push di
+        mov dx, RV_HOLD
+        mov si, RV_TMP
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        must
+        inc word [made]
+        pop di
+        pop cx
+        add di, 8
+        loop .space
+        jmp .counted
+.refused:
+        pop di
+        pop cx
+        status "a retype refused"
+.counted:
+        mov ax, [made]
+        report "spaces made by the program (KE_POOL due at 128 in all)"
+        mov dx, RV_HOLD
+        kcall KCALL_DELETE
+        status "all of them deleted"
+        mov dx, UT_ARENA
+        mov al, CAP_ENDPOINT
+        mov si, RV_TMP
+        kcall KCALL_RETYPE
+        status "an endpoint retyped after"
+        jmp done
+
+
+; ----------------------------------------------------------------------------
+; rv_flush_part - finding 9: a dead space still to be emptied is emptied before
+; a revoke gives its untyped's memory back
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_flush_part:
+        mov dx, UT_ARENA
+        mov al, CAP_ENDPOINT
+        mov si, S_EP
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_MEMORY               ; U: just the space S
+        mov al, CAP_UNTYPED
+        mov si, UT3
+        mov cx, 513
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT3
+        mov al, CAP_SPACE
+        mov si, RV_SPACE
+        mov cx, 256
+        kcall KCALL_RETYPE
+        must
+        mov di, 0x07                    ; every slot of S: a copy of S_EP
+        mov cx, 256
+.copy:
+        push cx
+        push di
+        mov dx, RV_SPACE
+        mov si, S_EP
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        pop di
+        pop cx
+        add di, 8
+        loop .copy
+        mov dx, UT_ARENA
+        mov al, CAP_THREAD
+        mov si, RV_T
+        kcall KCALL_RETYPE
+        must
+        mov dx, RV_T                    ; X: deletes S, at priority 2
+        mov si, MY_SPACE
+        mov bx, rv_x
+        mov cx, 0x300
+        mov al, THREAD_CONFIGURE
+        kcall KCALL_THREAD
+        must
+        mov cx, 1
+        call sleep                      ; a tick's edge
+        mov dx, RV_T
+        mov cl, 2
+        call start_thread
+        mov cx, 2
+        call sleep                      ; X flushes S meanwhile
+        mov ax, [made]
+        mov [b_wakes], ax
+        mov dx, RV_SPACE
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD
+        mov [b_inside], ax
+        mov dx, RV_T
+        kcall_thread THREAD_INFO
+        mov [pre_call], bx
+        mov dx, UT3                     ; U has no child left: its memory back
+        kcall KCALL_REVOKE
+        mov [b_revoke], ax
+        mov dx, UT3
+        mov al, CAP_SEGMENT
+        mov si, RV_SEG
+        mov cx, 8208
+        mov bl, 0xF2
+        kcall KCALL_RETYPE
+        mov [b_space], ax
+        jc .no_seg
+        mov ax, RV_SEG
+        mov es, ax
+        mov word [es:0], 8              ; SP_SLOTS
+        mov word [es:8], 0              ; SP_FLUSH
+        mov byte [es:16 + 64], CAP_NOTIFY       ; slot 0's shadow: a notification...
+        mov word [es:16 + 64 + 2], 0x0008       ; ...whose object is SEL_KCODE
+        push ds
+        pop es
+.no_seg:
+        mov ax, [b_wakes]
+        report "X back from its delete (0: still flushing)"
+        mov ax, [b_inside]
+        status "S's capability (1: deleted by X)"
+        mov ax, [pre_call]
+        status "X's state (1: ready, given way)"
+        mov ax, [b_revoke]
+        status "A's revoke of U"
+        mov ax, [b_space]
+        status "A's segment over S's memory"
+        PRINT "additions: S's header and slot 0 written through the segment", CHAR_LF
+        mov cx, 5
+        call sleep
+        mov ax, [made]
+        report "X back from its delete"
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rv_x - thread X (finding 9): its delete of a space's last capability
+;   In:       a thread's start
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_x:
+        mov dx, RV_SPACE
+        kcall KCALL_DELETE
+        mov word [made], 1
+.stay:
+        jmp .stay
+
+
+; ----------------------------------------------------------------------------
+; rv_leak_part - finding 4: a dead thread whose space dies is not left in the
+; list of threads with no capability to it
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_leak_part:
+        mov dx, UT_MEMORY
+        mov al, CAP_UNTYPED
+        mov si, UT3
+        mov cx, (RV_EPS + 16)
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_SPACE
+        mov si, RV_HOLD
+        mov cx, 256
+        kcall KCALL_RETYPE
+        must
+        mov di, 0x07
+        mov cx, RV_EPS
+.ep:
+        push cx
+        push di
+        mov dx, UT3
+        mov al, CAP_ENDPOINT
+        mov si, RV_TMP
+        kcall KCALL_RETYPE
+        must
+        pop di
+        push di
+        mov dx, RV_HOLD
+        mov si, RV_TMP
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        must
+        pop di
+        pop cx
+        add di, 8
+        loop .ep
+        mov dx, UT3                     ; R's thread: U3's newest child
+        mov al, CAP_THREAD
+        mov si, RV_T
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA                ; R's space: our code, its data and stack, U3
+        mov al, CAP_SPACE
+        mov si, W_SPACE
+        mov cx, 16
+        kcall KCALL_RETYPE
+        must
+        mov dx, W_SPACE
+        mov si, MY_CODE
+        mov di, WK_CODE
+        mov al, COPY_COPY
+        kcall KCALL_COPY
+        must
+        mov bx, W_SPACE
+        mov si, W_DATA_MINE
+        mov di, WK_DATA
+        call worker_segment
+        mov bx, W_SPACE
+        mov si, W_STACK_MINE
+        mov di, WK_STACK
+        call worker_segment
+        mov dx, W_SPACE
+        mov si, UT3
+        mov di, WK_X
+        mov al, COPY_MOVE
+        kcall KCALL_COPY
+        must
+        mov dx, RV_T
+        mov si, W_SPACE
+        mov bx, rv_r2
+        mov cx, W_SIZE
+        mov al, THREAD_CONFIGURE
+        kcall KCALL_THREAD
+        must
+        mov cx, 1
+        call sleep                      ; a tick's edge
+        mov dx, RV_T
+        mov cl, 2
+        call start_thread
+        mov cx, 1
+        call sleep                      ; R revokes U3 meanwhile, dead at once
+        mov dx, RV_T
+        mov al, THREAD_INFO
+        kcall KCALL_THREAD
+        mov [b_inside], ax
+        mov dx, W_SPACE                 ; its space gone while it is off the CPU
+        kcall KCALL_DELETE
+        mov [b_revoke], ax
+        mov cx, 5
+        call sleep
+        mov ax, [b_inside]
+        status "our capability to R (1: gone, R dead)"
+        mov ax, [b_revoke]
+        status "R's space deleted"
+        PRINT "additions: the threads now:", CHAR_LF
+        mov al, TEST_DUMP
+        kcall KCALL_TEST
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rv_r2 - thread R (finding 4): its revoke, as rv_r's
+;   In:       a thread's start
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_r2:
+        mov dx, WK_X
+        kcall KCALL_REVOKE
+.spin:
+        jmp .spin
+
+; ----------------------------------------------------------------------------
+; rv_misc_part - finding 8: a thread whose space died keeps nothing of that
+; life: THREAD_FRAME of it running is KE_STATE, an old suspend's mark
+; and notification are gone
+;   In:       the program's start
+;   Out:      does not return (done)
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+rv_misc_part:
+        mov dx, UT_ARENA
+        mov al, CAP_ENDPOINT
+        mov si, S_EP
+        kcall KCALL_RETYPE
+        must
+        mov dx, UT_ARENA
+        mov al, CAP_NOTIFY
+        mov si, NTF_STOP
+        kcall KCALL_RETYPE
+        must
+        ; (a) suspended, its space deleted, configured and started again
+        mov ax, ROLE_COUNT
+        call make_worker
+        mov cx, 2
+        call sleep
+        call suspend_worker
+        mov dx, W_SPACE
+        kcall KCALL_DELETE
+        must
+        mov dx, W_THREAD
+        kcall_thread THREAD_INFO
+        mov al, bl
+        status "(a) the suspended worker, its space gone: state (0)"
+        call rv_new_space
+        mov dx, W_THREAD
+        mov cl, 2
+        call start_thread
+        mov cx, 3
+        call sleep
+        call worker_count
+        report "(a) it counts again in its new space (non-zero)"
+        mov bl, FRAME_READ
+        call worker_frame
+        status "(a) THREAD_FRAME of it, running (KE_STATE expected: 6)"
+        ; (b) marked to suspend while it waits, its space deleted, started again
+        mov ax, ROLE_CALL
+        call make_worker
+        mov cx, 2
+        call sleep
+        mov dx, W_THREAD
+        kcall_thread THREAD_INFO
+        mov al, bl
+        status "(b) the calling worker's state (4: sending)"
+        mov dx, W_THREAD
+        mov al, THREAD_SUSPEND
+        mov si, NTF_STOP
+        kcall KCALL_THREAD
+        status "(b) marked to suspend"
+        mov dx, W_SPACE
+        kcall KCALL_DELETE
+        must
+        call rv_new_space
+        mov dx, W_THREAD
+        mov cl, 2
+        call start_thread
+        mov cx, 3
+        call sleep
+        call worker_count
+        report "(b) its count in its new space (non-zero expected)"
+        mov dx, W_THREAD
+        kcall_thread THREAD_INFO
+        mov al, bl
+        status "(b) its state (2 or 1 expected; 8: stopped by the old mark)"
+        mov dx, NTF_STOP
+        kcall KCALL_POLL
+        status "(b) the old notification signalled (8: KE_EMPTY expected)"
+        jmp done
+
+; ----------------------------------------------------------------------------
+; rv_new_space - a new space for the worker's thread (W_THREAD kept): code,
+; data (zeroed: role 0 counts), stack, configured
+;   In:       nothing
+;   Out:      nothing (a failure ends the test: must)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+rv_new_space:
+        mov dx, RV_TMP
+        kcall KCALL_DELETE
+        mov bx, W_SPACE
+        mov dx, RV_TMP
+        mov si, MY_CODE
+        call worker_space
+        mov dx, W_THREAD
+        mov si, W_SPACE
+        mov bx, worker
+        mov cx, W_SIZE
+        mov al, THREAD_CONFIGURE
+        kcall KCALL_THREAD
+        must
         ret
 
 %include "uprint.asm"

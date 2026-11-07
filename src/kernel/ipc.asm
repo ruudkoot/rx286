@@ -449,7 +449,11 @@ ipc_send:
         call cap_lookup                 ; ES:SI = its shadow entry
         jc kc_done.cap
         cmp byte [es:si + SH_TYPE], CAP_REPLY
-        je .reply
+        jne .endpoint
+        cmp byte [ipc_calling], 0       ; a reply is sent, never called (P15)
+        jne kc_done.cap
+        jmp .reply
+.endpoint:
         cmp byte [es:si + SH_TYPE], CAP_ENDPOINT
         jne kc_done.cap
         test byte [es:si + SH_RIGHTS], RIGHT_SEND

@@ -16,6 +16,7 @@
 
 RPL_KERNEL          equ 0
 RPL_USER            equ 3
+RPL_MASK            equ 3           ; a selector's RPL bits (os-server.md P15)
 SEL_TI_LDT          equ 0x04        ; the table indicator: an LDT selector
 
 SEL_NULL            equ 0x00

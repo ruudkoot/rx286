@@ -185,8 +185,9 @@ now (roadmap os-server.md D9), and stays under 3.6 ms, as does a 64 KB
 retype, zeroed 2 KB at a time, with 40 spaces more (`tests/caps/pools.test`).
 
 An IRQ at either point nests once on the kernel's stack: handlers run with IF clear and never
-wait. After every IRQ, a thread waiting its turn at the log is made ready
-to look again (`wake_waiters`).
+wait. After every tick, and every IRQ that is not a driver's, a thread waiting
+its turn at the log is made ready to look again (`wake_waiters`): within
+a tick of the log's end.
 
 A restart that arrives while a thread is inside the kernel - the OS
 server's `THREAD_RESTART` for Ctrl+Break or an exit, which takes the OS

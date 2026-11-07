@@ -1,0 +1,15 @@
+# The kernel's review (roadmap os-server.md P15), finding 7: a thread that lost its last capability while it ran ends at
+# its call's next window, never off the CPU while its control block's
+# memory is given out again (before: the scheduler ran a control block
+# written through a segment). tests/programs/
+# additions.asm, TEST_RV_DEAD; Bochs, whose timing the races need.
+program: additions
+define: TEST_CAPS
+define: TEST_RV_DEAD
+emulators: bochs
+match: contains
+timeout: 60
+---
+additions: R's control block written through a segment
+additions: still here
+additions: done

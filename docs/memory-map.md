@@ -151,13 +151,13 @@ root's but its own data and stack.
 
 | Object | Bytes | What |
 |---|---|---|
-| a thread | 256 | its control block (216), whose last 34 bytes keep its frame while it does not run; the running thread's is at the top of the kernel's one stack, where SP0 puts every interrupt's from rings 1-3 (roadmap os-server.md P3) |
-| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its parent, its first child and its next sibling: roadmap os-server.md D9): a driver's of 8 slots 272 bytes, a program's of 16 528, the root's and the OS server's of 256 8,208 |
+| a thread | 256 | its control block (220), whose bytes 184 to 217 keep its frame while it does not run; the running thread's is at the top of the kernel's one stack, where SP0 puts every interrupt's from rings 1-3 (roadmap os-server.md P3) |
+| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its parent, its first child and its next and previous siblings: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's of 256 8,208, the root's of 512 16,400 |
 | an endpoint, a notification | 16 | |
 
-An object lies at a paragraph, zeroed. The room an alignment skips is
-kept as the untyped memory's hole, and a later object that fits is placed
-there (roadmap l4.md L10). The GDT's pool holds `OBJ_MAX` descriptors, one
+An object lies at a paragraph, zeroed: every retype is aligned to a
+paragraph alone, so no room is skipped, and an untyped keeps no hole for
+it (l4.md L10's; P15). The GDT's pool holds `OBJ_MAX` descriptors, one
 for each object and for each space's LDT; the kernel lists `SPACE_MAX`
 spaces and `THREAD_MAX` threads at most.
 
