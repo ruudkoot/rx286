@@ -74,12 +74,11 @@ RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, progra
                                                    notification, */
 #define W_CONTROL (14 * 8 + 4)                  /* its control notification, */
 #define W_FOREGROUND (15 * 8 + 4)               /* the foreground program's thread */
-#define OS_CONTROL_N 16                         /* its control thread's number */
-#define OS_SLOTS 256                            /* the OS server's space: 8n + k for program
+#define OS_SLOTS 512                            /* the OS server's space: 8n + k for program
                                                    n, */
-#define OS_SLOT_SLEEP 128                       /* and n's thread's notification at 128 + n */
-#define OS_STACK 4                              /* each of its threads' SP at a start: 4n,
-                                                   n its program (src/os/start.asm) */
+#define OS_SLOT_SLEEP 128                       /* and n's thread's notification at 128 + n;
+                                                   its threads' SP at a start: OS_STACK n
+                                                   (os.inc, src/os/start.asm) */
 #ifdef TEST_CAPS
 #define CAPS_SLOTS 64                           /* the program's, with what TEST_CAPS gives: */
 #define CAPS_UNTYPED (10 * 8 + 4)               /* the memory for segments */
@@ -472,11 +471,13 @@ static rx_u16 keyboard_space(void)
  * keyboard driver gets its thread's notification to signal each key on */
 static void serve_program(unsigned module)
 {
+    static unsigned sessions;           /* the programs before it: its part of the
+                                           server's stacks (src/os/start.asm) */
     rx_u16 top = (rx_u16)(module * OS_STACK);   /* its SP at a start */
     rx_u16 to = (rx_u16)(module * 64 + 4);      /* the server's slots 8n + k */
 
-    if (top > m_stack)
-        return;                         /* past the server's stack: unserved */
+    if (top > m_stack || sessions++ >= OS_SESSIONS)
+        return;                         /* past the server's stack or its parts: unserved */
     program_slots(module);
     give_server(s.ep, to);
     give_server(s.thread, (rx_u16)(to + 8));

@@ -1,11 +1,12 @@
 # The processes (roadmap os-server.md P6): init, process 1, starts
 # tests/posix/proc.c from /z (TEST_POSIX_PROC), which forks, execs, spawns
 # and waits, takes a child's fault and a kill as their signals, uses the
-# heap, and is refused a fork once the table is full. The idle program
-# waits for a key meanwhile; the test ends when the wait is over. A data
-# segment grows by a copy into a new one (ROOT_BRK), so its 6 KB more past
-# 33 KB need a second 64 KB block, which DOSBox-X's 1 MB does not have
-# free: there the root refuses it, ENOMEM.
+# heap, and is refused a fork once the table is full (25 entries: init,
+# this, 23 children). The idle program waits for a key meanwhile; the test
+# ends when the wait is over. A data segment grows in place while its
+# block has room (ROOT_BRK, P15), so its 6 KB more past 33 KB need no second
+# 64 KB block, which DOSBox-X's 1 MB would not have free; nor do the
+# server's threads for the 23 children, from the arena, split its memory.
 program: idle
 define: TEST_POSIX_PROC
 keys: {wait 250}{wait 250}
@@ -32,8 +33,8 @@ proc: the killed (SIGTERM 15): ended by signal 15
 proc: kill init (-1, EPERM 1): -1, 1
 proc: kill no one (-1, ESRCH 3): -1, 3
 proc: 3000 bytes of heap: yes; the break moved: yes
-proc: a fork bomb: 13 children, then EAGAIN (11): 11
-proc: all 13 reaped; then ECHILD (10): 10
+proc: a fork bomb: 23 children, then EAGAIN (11): 11
+proc: all 23 reaped; then ECHILD (10): 10
 proc: nice to 19 (-1, errno 5 kept): -1, 5
 proc: kill(zombie, 0), its session (0 1): 0 1
 proc: waitpid with an option it does not know (-1, EINVAL 22): -1, 22
@@ -42,9 +43,6 @@ proc: poll of a terminal without keys, a read's 0 at once (1 POLLIN): 1 1
 proc: SIGCONT blocked: pending, then none (1 0): 1 0
 proc: a sleep past 2^32 ticks, then an alarm (-1, EINTR 4, 1): -1, 4, 1
 proc: malloc past 60 KB (none, ENOMEM 12): none, 12
-@bochs proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no
-@bochs proc: and they whole: yes
-@mame proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no
-@mame proc: and they whole: yes
-@dosbox-x proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes no no
+proc: 28 KB and 6 KB more (yes yes), then 32 KB more (no): yes yes no
+proc: and they whole: yes
 proc: done

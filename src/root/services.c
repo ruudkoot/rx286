@@ -25,10 +25,12 @@
 #include "buddy.h"
 
 #define PROCS_MAX 32                    /* processes at once */
-#define CODES_MAX 16                    /* codes in the table at once */
+#define CODES_MAX 32                    /* codes in the table at once: the server's loads,
+                                           and a code for each process at most (P15) */
 #define OBJECT_PARAS 64                 /* a process's objects: 528 + 256 + 16 bytes */
 #define LOW_UNTYPED SLOT(ROOT_SLOT_LOW_UNTYPED)
 #define UNTYPED SLOT(ROOT_SLOT_UNTYPED)
+#define ARENA SLOT(ROOT_SLOT_ARENA)     /* the arena: the server's own threads (serve) */
 #define MEMORY_WITHOUT_EXTENDED 0x2000  /* paragraphs of the memory for segments: 128 KB */
 #define SCRATCH SLOT(ROOT_SLOT_DYNAMIC - 1)     /* a badged copy on its way */
 
@@ -393,29 +395,54 @@ static int brk(rx_u16 n, rx_u16 bytes, rx_u16 to)
     return 0;
 }
 
+/* slot_drop - a slot of the root's emptied, every copy of what it held
+ * too, and free again (0: none) */
+static void slot_drop(rx_u16 slot)
+{
+    if (slot == 0)
+        return;
+    revoke(slot);
+    kcall(KCALL_DELETE, 0, 0, 0, slot, 0, 0);
+    slot_give(slot);
+}
+
 /* serve - ROOT_SERVE: a thread of the OS server's own and its notification,
- * from a block of theirs that the server keeps for its life, the thread
- * started at the server's entry with SP sp (os-server.md P6) */
+ * which the server keeps for its life, the thread started at the server's
+ * entry with SP sp (os-server.md P6). They come from the arena while it has
+ * room - made once each, never given back - and from a block after: blocks
+ * of 1 KB kept for good, spread through the memory for segments, would
+ * leave no large block for a process (P15) */
 static int serve(rx_u16 sp, rx_u16 to)
 {
-    int block, status = E_NOMEM;
-    rx_u16 thread = 0, notify = 0;
+    int block = -1, status = E_NOMEM;
+    rx_u16 thread, notify;
 
     if (services_space != server_space)
         return E_INVAL;                 /* the server's alone */
-    block = buddy_alloc(OBJECT_PARAS);
-    if (block < 0)
-        return E_NOMEM;
     thread = slot_take();
     notify = slot_take();
-    if (thread && notify && retype(buddy_slot(block), CAP_THREAD, thread, 0, 0) == 0
-            && retype(buddy_slot(block), CAP_NOTIFY, notify, 0, 0) == 0) {
+    if (thread && notify && (retype(ARENA, CAP_THREAD, thread, 0, 0)
+                             || retype(ARENA, CAP_NOTIFY, notify, 0, 0))) {
+        kcall(KCALL_DELETE, 0, 0, 0, thread, 0, 0);     /* the arena full: a block */
+        kcall(KCALL_DELETE, 0, 0, 0, notify, 0, 0);
+        block = buddy_alloc(OBJECT_PARAS);
+        if (block < 0 || retype(buddy_slot(block), CAP_THREAD, thread, 0, 0)
+                || retype(buddy_slot(block), CAP_NOTIFY, notify, 0, 0))
+            goto failed;
+    }
+    if (thread && notify) {
         status = E_IO;
         if (give(thread, to) == 0 && give(notify, (rx_u16)(to + 8)) == 0
                 && serve_thread(thread, sp) == 0)
             return 0;
     }
-    block_free(block, thread, notify);
+failed:
+    if (block >= 0) {
+        block_free(block, thread, notify);
+        return status;
+    }
+    slot_drop(thread);
+    slot_drop(notify);
     return status;
 }
 

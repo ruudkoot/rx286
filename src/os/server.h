@@ -27,12 +27,12 @@
 #define OS_ROOT SLOT(OS_SLOT_ROOT)      /* the root's endpoint, for requests */
 #define OS_SERVICE(s) SLOT((OS_SLOT_SERVICE + (s)) & 0xFF)  /* a driver's endpoint */
 #define OS_SLOT_SLEEP 128               /* program n's thread's notification: + n */
-#define OS_CONTROL_N 16                 /* the control thread's number */
 #define OS_PART 1024                    /* each thread's part of the stacks (start.asm) */
-#define PROCS 15                        /* the processes at once (proc.c; P6, P11) */
+#define PROCS OS_PROCS                  /* the processes and threads at once (os.inc;
+                                           proc.c; P6, P11, P15) */
 #define PROC_SLOT0 166                  /* process entry i's slots: PROC_SLOT0 + 6i on */
 #define PROC_SLOTS_EACH 6
-#define PROC_N0 17                      /* the server's thread for entry i: PROC_N0 + i */
+#define PROC_N0 OS_PROC_N0              /* the server's thread for entry i: PROC_N0 + i */
 
 /* A program's slots of the server's: 8n + k (6 and 7 unused) */
 #define OS_K_EP 0                       /* the endpoint it calls on */
@@ -100,7 +100,7 @@ int proc_break_seen(void);
 void proc_lend(int i, int on);
 #define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */
 #define OS_TIMER SLOT(OS_SLOT_TIMER)    /* the control notification, CONTROL_TIMER (P10) */
-#define TTY_N 32                        /* the tty thread's number (P11) */
+#define TTY_N OS_TTY_N                  /* the tty thread's number (P11) */
 #define TTYS VIDEO_PAGES                /* the terminals: the EGA's pages, at most */
 #define TTY_THREAD SLOT(164)            /* its thread and notification (ROOT_SERVE) */
 #define TTY_NOTIFY SLOT(165)

@@ -177,7 +177,7 @@ FAULT_COUNTED       equ 1   ; DI: a test build counted it (the fuzzer): say noth
 
 PRIORITY_MAX        equ 7
 SPACE_SLOTS_MIN     equ 8   ; a space's slots: a power of two between these
-SPACE_SLOTS_MAX     equ 256
+SPACE_SLOTS_MAX     equ 512
 
 ; The root's slots at its start (roadmap l4.md L5): slots 0, 1 and 2 its
 ; code, data and stack, as every program's; then the kernel's gifts.

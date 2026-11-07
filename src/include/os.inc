@@ -20,6 +20,22 @@ PROGRAM_SLOTS       equ 16      ; a program's space: room for them
 
 FAULT_BADGE         equ 0x8000  ; a program's fault endpoint: its endpoint, badged so
 
+; The OS server's threads (os-server.md P6, P15): each starts with SP
+; OS_STACK times its number in the server's stack segment, which is how it
+; knows which it is (src/os/start.asm): a program's, its module's number
+; (2 to 15), for OS_SESSIONS programs at most; the control thread; one for
+; each entry of the process table, OS_PROCS; the tty thread. Each has its
+; part of the stacks in the server's data, a program's by the programs
+; before it in the module table, so that no part waits for a module that
+; is a driver
+OS_STACK            equ 4
+OS_SESSIONS         equ 2
+OS_CONTROL_N        equ 16
+OS_PROC_N0          equ 17
+OS_PROCS            equ 25
+OS_TTY_N            equ OS_PROC_N0 + OS_PROCS
+OS_STACK_SIZE       equ (OS_TTY_N + 1) * OS_STACK  ; the server's stack segment at least
+
 ; The OS server's requests to the root (l4.md L11): calls on the root's
 ; fault endpoint, badged ROOT_BADGE_OS, from slot OS_SLOT_ROOT of the server's
 ROOT_BADGE_OS       equ 0x4000

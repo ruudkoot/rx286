@@ -354,7 +354,7 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 
 ## The table
 
-The server has room for `PROCS` (15) processes and threads at once; a fork,
+The server has room for `PROCS` (25, `OS_PROCS`) processes and threads at once; a fork,
 a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
 (`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and the
 walks over the processes pass over it, and its signal state is its

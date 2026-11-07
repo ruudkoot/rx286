@@ -43,7 +43,7 @@ its own:
    nor a driver): an endpoint to the OS server. (Until roadmap os-server.md
    P14 a transfer segment and a files segment too, and a background
    program's own untyped, which its `kill` revoked.)
-3. **For every module, in order:** a space (the OS server's of 256 slots, a
+3. **For every module, in order:** a space (the OS server's of 512 slots, a
    driver's of `DRV_SLOTS`, a program's of `PROGRAM_SLOTS`); its code,
    copied in as slot 0; a data segment of its room as slot 1, initialised
    from its data as assembled; a stack as slot 2. A driver gets an endpoint,
@@ -123,9 +123,11 @@ names:
   code's count lowered, the code gone at none; with CX 1 kept, for an
   exec of the same file, whose `ROOT_SPAWN` runs it again (P12).
 - **`ROOT_SERVE`:** a thread of the server's own, at its entry with the SP
-  asked for, and its notification, from a block of theirs the server keeps:
-  the server's thread for each entry of its table of processes
-  (*docs/processes.md*).
+  asked for, and its notification, which the server keeps: the server's
+  thread for each entry of its table of processes (*docs/processes.md*).
+  They come from the arena while it has room, and then from a block each
+  (P15): blocks of 1 KB kept for good, spread through the memory for
+  segments, left no 64 KB block for a process without extended memory.
 
 The memory is a buddy allocator's (`src/root/buddy.c`; D10), from the
 first request on: with extended memory, all the memory below 1 MB

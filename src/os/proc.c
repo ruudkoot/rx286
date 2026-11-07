@@ -77,8 +77,8 @@ struct proc {
     char name[AR_NAME_SIZE];
 };
 
-#if PROCS > 15
-#error "a badge holds an entry in 4 bits"
+#if PROCS > 31
+#error "a badge holds an entry in 5 bits"
 #endif
 
 /* A new image, between exec's checks and the process it becomes */
@@ -568,13 +568,13 @@ static int entry_new(void)
 }
 
 /* badge_new - entry c's badge for the endpoint of a new image or thread
- * of its: the entry + 1 in bits 0-3, its generation in bits 4-14 (below
+ * of its: the entry + 1 in bits 0-4, its generation in bits 5-14 (below
  * FAULT_BADGE), so that a call received from an image or thread gone
  * since is known by its badge (handle; P15) */
 static rx_u16 badge_new(int c)
 {
-    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x7FF);
-    procs[c].badge = (rx_u16)(procs[c].gen << 4 | (unsigned)(c + 1));
+    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x3FF);
+    procs[c].badge = (rx_u16)(procs[c].gen << 5 | (unsigned)(c + 1));
     return procs[c].badge;
 }
 

@@ -53,16 +53,17 @@ enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_
 
 /* A pipe: its ends' descriptions, its bytes, the entries whose threads wait
  * to read or write (-1: none) */
-struct pipe {
-    rx_u8 used, readers, writers;
-    rx_u16 reading, writing;            /* the entries waiting at each end, a bit each:
-                                           all woken (P15) */
-    rx_u16 head, count;
+/* Entries that wait, a bit each (bytes: no 32-bit shifts for gcc-ia16) */
+struct waiters {
+    rx_u8 bits[(PROCS + 7) / 8];
 };
 
-#if PROCS > 16
-#error "a pipe's waiters are bits of a word"
-#endif
+struct pipe {
+    rx_u8 used, readers, writers;
+    struct waiters reading, writing;    /* the entries waiting at each end: all woken
+                                           (P15) */
+    rx_u16 head, count;
+};
 
 /* An open file description */
 struct ofd {
@@ -572,25 +573,25 @@ static void wake(int i)
 }
 
 /* wake_all - the server threads of the entries waiting at a pipe's end */
-static void wake_all(rx_u16 who)
+static void wake_all(const struct waiters *who)
 {
     int i;
 
-    for (i = 0; who; i++, who >>= 1)
-        if (who & 1)
+    for (i = 0; i < PROCS; i++)
+        if (who->bits[i >> 3] & (1u << (i & 7)))
             wake(i);
 }
 
 /* pipe_wait - process i's thread waits, the lock given up, until another
  * signals it: 1; 0 if the process ended meanwhile; -1 if a signal is ready
  * for it (P10) */
-static int pipe_wait(int i, rx_u16 *who)
+static int pipe_wait(int i, struct waiters *who)
 {
-    *who |= (rx_u16)(1u << i);
+    who->bits[i >> 3] |= (rx_u8)(1u << (i & 7));
     lock_give();
     proc_sleep(i);
     lock_take(PROC_NOTIFY(i));
-    *who &= (rx_u16)~(1u << i);
+    who->bits[i >> 3] &= (rx_u8)~(1u << (i & 7));
     if (!proc_still(i))
         return 0;
     return sig_ready(i) ? -1 : 1;
@@ -618,10 +619,10 @@ static rx_u16 ofd_unused(int k)
         error = entry_back(&ofds[k]);
         if (ofds[k].kind == K_PIPE_R) {
             p->readers--;
-            wake_all(p->writing);
+            wake_all(&p->writing);
         } else if (ofds[k].kind == K_PIPE_W) {
             p->writers--;
-            wake_all(p->reading);
+            wake_all(&p->reading);
         }
         if ((ofds[k].kind == K_PIPE_R || ofds[k].kind == K_PIPE_W) && !p->readers
                 && !p->writers)
@@ -679,7 +680,6 @@ static int px_pipe(int i, int *error, rx_u16 *write_fd)
     memset(&pipes[p], 0, sizeof pipes[p]);
     pipes[p].used = 1;
     pipes[p].readers = pipes[p].writers = 1;
-    pipes[p].reading = pipes[p].writing = 0;
     ofds[r].unit = ofds[w].unit = (rx_u16)p;
     ofds[r].flags = O_RDONLY;
     ofds[w].flags = O_WRONLY;
@@ -690,7 +690,7 @@ static int px_pipe(int i, int *error, rx_u16 *write_fd)
 /* pipe_hold - pipe_wait with the description held, so that a close of it
  * by another thread meanwhile frees neither it nor its pipe; 2 if it was
  * closed so (then freed) (P15) */
-static int pipe_hold(int i, struct ofd *o, rx_u16 *who)
+static int pipe_hold(int i, struct ofd *o, struct waiters *who)
 {
     int w;
 
@@ -730,7 +730,7 @@ static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
         to[k] = buf[(p->head + k) % PIPE_SIZE];
     p->head = (rx_u16)((p->head + n) % PIPE_SIZE);
     p->count = (rx_u16)(p->count - n);
-    wake_all(p->writing);
+    wake_all(&p->writing);
     return n;
 }
 
@@ -749,7 +749,7 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
             return done ? (int)done : VFS_SIGPIPE;
         room = (rx_u16)(PIPE_SIZE - p->count);
         if (room < (n <= PIPE_BUF && done == 0 ? n : 1)) {
-            wake_all(p->reading);
+            wake_all(&p->reading);
             if ((w = pipe_hold(i, o, &p->writing)) == 0)
                 return VFS_GONE;
             if (w == 2)
@@ -763,7 +763,7 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
             buf[(p->head + p->count + k) % PIPE_SIZE] = from[done + k];
         p->count = (rx_u16)(p->count + take);
         done = (rx_u16)(done + take);
-        wake_all(p->reading);
+        wake_all(&p->reading);
     }
     return done;
 }

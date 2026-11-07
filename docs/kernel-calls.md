@@ -451,7 +451,7 @@ os-server.md P4).
 The root (`src/root/root.c`; in C since roadmap os-server.md P4) builds a
 space for every other module: the module's code copied in as slot 0; a
 data segment of its room, initialised from its data, as slot 1; a stack as
-slot 2. The OS server's module ("os") gets a space of 256 slots and a
+slot 2. The OS server's module ("os") gets a space of 512 slots and a
 thread for each program, which serves it alone (`START_SESSION`), with the
 program's capabilities in slots 8n to 8n + 5 (*docs/os-server.md*), and
 in slot 128 + n a notification the thread sleeps on, a tick at a time or,

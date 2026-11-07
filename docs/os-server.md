@@ -13,16 +13,21 @@ it.
 
 | Thread | Its stack | What |
 |---|---|---|
-| program n's | part n - 1 of the stacks in its data segment, n the program's module number | serves program n, a program the root builds, alone: its calls and its faults |
-| the control thread | part 15 (n = 16) | at boot, init (*docs/processes.md*); then Ctrl+Break: the keyboard driver signals the control notification; the thread ends a sound, drops the keys waiting and restarts the foreground program. The processes' timers ring on the same notification, badged `CONTROL_TIMER` (P10) |
-| process entry i's | part 15 + i (n = 17 + i, `PROC_N0` + i), from `ROOT_SERVE` | serves the process in entry i alone, and sleeps while there is none (roadmap os-server.md P6); its notification bound to it, it runs the process's signals' handlers (P10) |
-| the tty thread | part 30 (n = 32, `TTY_N`: SP = 4n, the most the server's 128 bytes of stack allow), from `ROOT_SERVE`, when the processes have the keys | each key through the shown terminal's line discipline (P11; *docs/processes.md*) |
+| program n's | part 0 or 1 of the stacks in its data segment, by the programs before it in the module table (`OS_SESSIONS`, two at most), n the program's module number | serves program n, a program the root builds, alone: its calls and its faults |
+| the control thread | part 2 (n = 16, `OS_CONTROL_N`) | at boot, init (*docs/processes.md*); then Ctrl+Break: the keyboard driver signals the control notification; the thread ends a sound, drops the keys waiting and restarts the foreground program. The processes' timers ring on the same notification, badged `CONTROL_TIMER` (P10) |
+| process entry i's | part 3 + i (n = 17 + i, `OS_PROC_N0` + i), from `ROOT_SERVE` | serves the process in entry i alone, and sleeps while there is none (roadmap os-server.md P6); its notification bound to it, it runs the process's signals' handlers (P10) |
+| the tty thread | part 28 (n = 42, `OS_TTY_N`: SP = 4n, within the server's 256 bytes of stack), from `ROOT_SERVE`, when the processes have the keys | each key through the shown terminal's line discipline (P11; *docs/processes.md*) |
 
-The root starts each thread with SP = 4n in the server's small stack
-segment; that is how a thread knows its program. Its start
-(`src/os/start.asm`), in place of C's crt0, moves it to its part of the
-stacks at the bottom of the data segment, 1 KB each, since C's small model
-wants SS = DS, and calls `os_thread(n)` (`src/os/os.c`). Each part's lowest
+The root starts each thread with SP = 4n (`OS_STACK` n) in the server's
+small stack segment, `OS_STACK_SIZE` bytes at least; that is how a thread
+knows its program (`os.inc` numbers them: `OS_SESSIONS` programs at most,
+`OS_CONTROL_N`, `OS_PROC_N0` on for the `OS_PROCS` entries, `OS_TTY_N`).
+Its start (`src/os/start.asm`), in place of C's crt0, moves it to its part
+of the stacks at the bottom of the data segment, 1 KB each, since C's small
+model wants SS = DS, and calls `os_thread(n)` (`src/os/os.c`). Only the
+programs the root builds have parts, two at most, so that no part waits
+for a module number that is a driver's (roadmap os-server.md P15: 14 KB of
+parts did, which now hold ten entries more of the table). Each part's lowest
 word is a guard, which the thread checks after every message: a thread
 that overflowed its part says so on the log and serves no more. On a
 thread's first start its part is filled with the guard's word, so that
@@ -59,9 +64,9 @@ program's thread's notification whenever the keyboard sent it something
 | 162 | the processes' keys' notification, when no program the root builds has the keys (`OS_SLOT_KEYS`) |
 | 163 | the control notification, badged `CONTROL_TIMER`: the processes' timers (`OS_SLOT_TIMER`) |
 | 164, 165 | the tty thread and its notification (`ROOT_SERVE`; P11) |
-| 166 + 6i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it and that thread's notification (`PROC_SLOT0`, `PROC_SLOTS_EACH`; fifteen) |
+| 166 + 6i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it and that thread's notification (`PROC_SLOT0`, `PROC_SLOTS_EACH`; 25, to 315) |
 
-Its space has 256 slots.
+Its space has 512 slots (256 until P15, when the table grew).
 
 ## A program's call
 
