@@ -524,6 +524,7 @@ static const char help_text[] =
     "           lp (to the printer), echo\n"
     "Processes: ps [-e], kill [-SIGNAL] PID, sleep SECONDS, env [NAME=VALUE] [CMD]\n"
     "Machine:   date [+FORMAT], uptime, clear, keys, mem, fpu, crash KIND, spin\n"
+    "Devices:   beep, play, joy, mouse, term (COM2)\n"
     "Lines:     CMD | CMD, CMD; CMD, && ||, & (in the background), < > >> 2>\n"
     "Keys:      Backspace, Up and Down (the last lines), ^C (stop), ^Z (stop a\n"
     "           job), ^D (the end), Alt+F1 to F8 (the terminals)\n";

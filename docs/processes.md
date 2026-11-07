@@ -181,7 +181,7 @@ The tree is one (D13 C, `src/os/vfs.c`): `/` is the server's own and
 read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
 programs and `/dev` the devices (`null`; `tty`, the caller's terminal;
 `tty1` to `tty8`, the terminals, as many as the EGA holds pages; `lpt1`,
-`lpt2`). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A
+`lpt2`; `speaker`, `joystick`, `mouse`, `com2`: *The devices* below). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A
 path is made absolute against the process's current directory,
 which starts at its parent's (`/` for init), and its "." and ".." taken out
 before it is followed; within a volume a name is 8.3, matched in any case
@@ -208,6 +208,8 @@ its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end. libc's `opendir` and `readdir` read through it (`dirent.h`) |
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk |
 | `PX_PIPE` | | a pipe (P9): its read end's descriptor, and its write end's in SI |
+| `PX_IOCTL` | BX the descriptor, CX a request (`RXIO_*`), SI its argument | a device's request (*The devices* below); `ENOTTY` for any other descriptor or request, `EFAULT` for an argument past the data (P12) |
+| `PX_POLL` | SI the `struct pollfd`s (`PF_FD`, `PF_EVENTS`, `PF_REVENTS`; `PF_BYTES` each), CX how many (`OPEN_MAX` at most), BX the timeout in ms (-1: none; 0: at once) | how many have news, each one's `PF_REVENTS` set: `POLLIN` (bytes, or a pipe's end), `POLLOUT` (room: `PIPE_BUF` bytes in a pipe), `POLLERR` (a pipe without a reader), `POLLHUP` (without a writer), `POLLNVAL` (not open; `POLLPRI` never). It waits in the server thread: the terminals it asks about wake it, as their reader; the rest it looks at each tick. A signal's handler ends it with `EINTR`, `SA_RESTART` or not (XSH poll); a stop makes it again (P12) |
 
 A pipe holds 1 KB, in a segment of the server's; eight may be open at
 once. A read of an empty pipe waits, in the reader's server thread, until a
@@ -221,6 +223,23 @@ The terminal's keys (P9): when no program the root builds has them (an
 image built with `PROGRAM=none`, and the shell in C's), the keyboard driver
 signals a notification of the processes' (`OS_SLOT_KEYS`), and `/dev/tty`
 has them, through its line discipline (*The terminals* below).
+
+## The devices
+
+The devices that drivers serve (P12; `src/os/dev.c`, `sys/ioctl.h`) are
+calls on their drivers, with the process's data segment passed where the
+driver reads or writes the bytes (D5 C), checked first against its limit.
+A wait for one gives up the server's lock.
+
+| Device | What |
+|---|---|
+| `/dev/speaker` | `ioctl` `RXIO_TONE`: a tone (`struct rx_tone`: `TONE_HZ`, `TONE_TICKS`; `TONE_BYTES`) of 19 to 20,000 Hz, or a rest (0), for up to 500 ticks; the call returns once it is over (`EINVAL` otherwise, as the sound driver says). A read or write is `EINVAL` |
+| `/dev/joystick` | a read of `JS_BYTES` or more: `struct rx_joystick`, the buttons down (`JS_BUTTONS`), then four axes in microseconds or `JOY_ABSENT` (`JS_AXES`), as the sound driver times them with its own `DRV_JOYSTICK`, which writes them at the offset given |
+| `/dev/mouse` | an open without a mouse that said who it is is `ENXIO`. A read of `MS_BYTES` or more waits until the mouse moves or a button changes, then gives `struct rx_mouse` (`MS_BUTTONS`, `MS_X` 0-639, `MS_Y` 0-199, as DOS's mouse driver keeps them in text mode); `ioctl` `RXIO_MOUSE` gives it at once |
+| `/dev/com2` | the modem's line: a read waits for bytes and gives what came (up to `SERIAL_MAX`), a write sends; an open is `EBUSY` where COM2 carries the kernel's log (debug and test builds, but those built for the modem's tests) |
+
+The mouse driver and the serial driver do not signal their news: a read
+that waits for them, and a poll, ask again each tick (`proc_nap`).
 
 ## The terminals
 
@@ -416,6 +435,10 @@ drive C has those three alone:
 | `head` | the first 10 lines, or `-n N` (or `-N`), of each file or descriptor 0; of several files each under "==> NAME <==" |
 | `lp` | each file, or descriptor 0, to `/dev/lpt1`; `-d lpt2` to the other |
 | `more` | 23 lines at a time, then "--More--": a key from `/dev/tty`, without Enter, `q` to stop |
+| `beep`, `play` | a tone of 880 Hz for 10 ticks; a tune of 13 notes and a rest (`/dev/speaker`) |
+| `joy` | one reading of `/dev/joystick`: "buttons: none; axes: absent absent absent absent" |
+| `mouse` | where the mouse is, then again whenever it moves or a button changes ("x 320, y 100 (column 40, row 12), buttons: none"), until Esc or both buttons; it waits in `poll` for the terminal and the mouse |
+| `term` | a terminal on COM2: what comes is shown, what is typed is sent (Enter as CR), raw, until Esc alone; it waits in `poll`. Where COM2 is the log it says so |
 | `ps` | the processes of the caller's terminal, or `-e` all: pid, parent, group, session, terminal, state, name (`PX_PS`) |
 | `kill` | `SIGTERM`, or `-s NAME`, `-NAME`, `-NUMBER`, to each pid (below -1: a group); `-l` the signals' names, `-l STATUS` the one that ended a process |
 | `sleep` | a wait of so many seconds |

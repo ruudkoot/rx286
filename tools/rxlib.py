@@ -355,10 +355,11 @@ def compile_keys(script):
     once, waiting or not), {ctrl-X} and {alt-X} for a key X or a named one
     ({alt-f2}), {ctrl-break}, {ctrl-alt-del} (typed at once, even if the
     program does not wait), {now K}: the key {K} typed at once, as ^C for a
-    program that never reads ({now ctrl-c}), {wait N} (N ticks), {mouse DX DY B}: a Microsoft mouse's
-    packet, DX right and DY down (-128 to 127), B the buttons down (L, R, LR
-    or -), and {mouse-bytes A B C}: three bytes from the mouse as they are,
-    in hexadecimal."""
+    program that never reads ({now ctrl-c}), {wait N} (N ticks),
+    {mouse DX DY B}: a Microsoft mouse's packet, DX right and DY down (-128
+    to 127), B the buttons down (L, R, LR or -), and {mouse-bytes A B C}:
+    three bytes from the mouse as they are, in hexadecimal; a packet, as a
+    key, while a reader waits (os-server.md P12)."""
     out = []
     when = [OP_WHEN_WAITING]            # {now K}'s: OP_NOW for its key alone
 

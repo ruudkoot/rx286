@@ -1,14 +1,16 @@
 # A Plug and Play mouse follows its "M" with its identity between
 # parentheses, "(MSH0001)" here; its letters would begin packets and move
-# the mouse. The driver passes over it: only the packet after counts.
-program: shell
+# the mouse. The driver passes over it: only the packet after counts
+# (mouse, roadmap os-server.md P12).
+program: sh
+emulators: bochs mame
+install: C /BIN/MOUSE z-mouse.rx
 keys: {wait 20}{mouse-bytes 28 4D 53}{mouse-bytes 48 30 30}{mouse-bytes 30 31 29}mouse\n{wait 5}{mouse 8 0 -}{wait 2}{mouse 0 0 LR}
 ---
 rx286, test build
-rx286 shell: type help for the commands
-A:\>mouse
+/a$ mouse
 Move the mouse; Esc or both buttons end.
 x 320, y 100 (column 40, row 12), buttons: none
 x 328, y 100 (column 41, row 12), buttons: none
 x 328, y 100 (column 41, row 12), buttons: both
-A:\>
+/a$

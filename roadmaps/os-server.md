@@ -130,7 +130,7 @@ What it rests on:
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
-| P12 | The commands and the devices | in progress (step 1 of 4, branch `os-server`) |
+| P12 | The commands and the devices | in progress (steps 1-2 of 4, branch `os-server`) |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
 | P15 | The documents, a review, the release | not started |
@@ -2515,6 +2515,30 @@ The largest change to the kernel since l4.md, in three steps, each with every su
       clearing it at its end left none: `spin &`, `echo`, `fg` said "no such job".
     - **`execvp` without `PATH`** ran the name as a path. It now looks along `/z:/c/bin`.
     - **`printf` stops at 128 bytes,** which cut `help` short: it writes its text whole.
+* **Step 2 done (2026-11-07): the devices.**
+  - **`/dev/speaker`, `/dev/joystick`, `/dev/mouse` and `/dev/com2`** (`src/os/dev.c`): calls on
+    their drivers, the process's data segment passed where they read or write (D5 C). The
+    speaker's tone is an `ioctl`, `RXIO_TONE`, over when the tone is; the joystick a read;
+    the mouse a read that waits for a change, or `RXIO_MOUSE` at once, and `ENXIO` without
+    one; COM2 reads and writes, `EBUSY` where it is the log. The sound driver's
+    `DRV_JOYSTICK` writes at an offset given, as a process's buffer is not a transfer
+    segment.
+  - **`ioctl` and `poll`** (`PX_IOCTL`, `PX_POLL`; `sys/ioctl.h`, `poll.h`). A poll waits in the
+    server thread: the terminals it asks about wake it as their reader, which is also what a
+    test build types for; the mouse, COM2 and pipes it looks at each tick (`proc_nap`), as
+    their drivers do not signal news. A handler ends it with `EINTR`, `SA_RESTART` or not.
+  - **The programs:** `beep`, `play`, `joy`, `mouse` and `term`, in C's `/BIN`; `mouse` and
+    `term` wait in `poll` for the terminal and their device.
+  - **The tests:** `tests/devices`' tests of the old shell's device commands are now the new
+    programs' (Bochs and MAME; `term` and its modem on Bochs, as MAME has no COM3 for the
+    log). `tests/posix/poll` tests the calls. The devices test program's `calls` and
+    `modem` keep the old calls until P14.
+  - **Found on the way:**
+    - **Every `TEST_POSIX_*` build carried every test's programs** in `/z`: with `poll` the image
+      grew to 143 KB of its 128. Each build's `/z` now holds its own test's programs alone.
+    - **A mouse's packet in a key script was sent at once,** where a key waits for a reader.
+      On MAME a program from C started after every packet had come. Packets now wait as keys
+      do, for a program that polls the terminal.
 
 ### P13. POSIX threads (M, about 1,200)
 

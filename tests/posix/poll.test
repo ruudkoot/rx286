@@ -1,0 +1,33 @@
+# poll and ioctl (roadmap os-server.md P12): init starts tests/posix/poll.c
+# (TEST_POSIX_POLL). A pipe's states as poll sees them, at once and with a
+# timeout; a child's write that wakes a poll; SIGALRM breaking one off,
+# SA_RESTART or not; the devices of /dev that drivers serve, and ioctl's
+# refusals. (The joystick's axes and the mouse's packets: tests/devices.)
+program: idle
+define: TEST_POSIX_POLL
+keys: {wait 250}{wait 250}
+match: contains
+timeout: 120
+emulators: bochs mame
+---
+poll: an empty pipe, at once (0): 0
+poll: its write end, room (104): 104
+poll: a byte in it (101): 101
+poll: three, one passed over, one not open (2 1 0 32): 2 1 0 32
+poll: 200 ms on an empty pipe (0, 1): 0, 1
+poll: woken by a child's write (101, 1): 101, 1
+poll: broken off by SIGALRM, though SA_RESTART (-1 4 14): -1 4 14
+poll: no writer left (117): 117
+poll: no reader left (108): 108
+ioctl: /dev/null's (-1 25): -1 25
+ioctl: the speaker, 18 Hz (-1 22): -1 22
+ioctl: the speaker, no such request (-1 25): -1 25
+ioctl: the speaker, an argument past the data (-1 14): -1 14
+read: the speaker (-1 22): -1 22
+poll: the speaker (104): 104
+read: the joystick, too little room (-1 22): -1 22
+read: the joystick (10): 10
+ioctl: the mouse, where it is (0 320 100 0): 0 320 100 0
+poll: the mouse, still (0): 0
+open: COM2, the log's (-1 16): -1 16
+poll: done

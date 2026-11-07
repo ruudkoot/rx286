@@ -119,7 +119,9 @@ void proc_interrupt(void);
  * process i's read (lock held, given up while it waits): the bytes, 0 at
  * EOF, VFS_GONE, VFS_INTR, VFS_RESTART or VFS_EIO; tty_getattr, tty_setattr
  * - termios to and from a process's segment (TCSA*); tty_flush - the input
- * dropped (lock held) */
+ * dropped (lock held); tty_ready - would a read of a byte take one now?
+ * tty_watch - process i waits in poll for a terminal's bytes, or no longer
+ * (P12; lock held) */
 int tty_keys(void);
 int tty_terminals(void);
 int tty_shown(void);
@@ -129,6 +131,8 @@ int tty_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n);
 void tty_getattr(int unit, rx_u16 data, rx_u16 at);
 void tty_setattr(int unit, rx_u16 data, rx_u16 at, int action);
 void tty_flush(int unit);
+int tty_ready(int unit);
+void tty_watch(int i, int unit, int on);
 /* Job control (tty.c; P11; lock held): tty_controlling - process i's
  * session's terminal, or -1; tty_open - process i opens a terminal, which a
  * session's leader with none makes its session's; tty_access - may it read,
@@ -178,13 +182,14 @@ void lock_give(void);
  * woken; proc_still - is it still the process whose call its server thread
  * serves (a wait's test, once it has the lock again: the process may have
  * ended, and a new one taken its entry); proc_wake - its server thread
- * woken; proc_sleep - its server thread
- * sleeps until woken; proc_data_limit - its data segment's last offset (proc.c;
- * lock held, but proc_sleep) */
+ * woken; proc_sleep - its server thread sleeps until woken; proc_nap - a
+ * tick at most (P12); proc_data_limit - its data segment's last offset
+ * (proc.c; lock held, but proc_sleep and proc_nap) */
 void proc_end(int i, int sig);
 int proc_still(int i);
 void proc_wake(int i);
 void proc_sleep(int i);
+void proc_nap(int i);
 rx_u16 proc_data_limit(int i);
 /* Job control (proc.c; P11; lock held): proc_is_init - is entry i init?
  * proc_stopped, proc_continued - its stop or continue, for its parent's

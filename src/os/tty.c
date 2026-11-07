@@ -400,6 +400,25 @@ int tty_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n)
     return k;
 }
 
+/* tty_ready - would a read of a byte of a terminal take one now? (server.h;
+ * poll's POLLIN, P12) */
+int tty_ready(int unit)
+{
+    return tty_keys() && enough(&ttys[unit], 1);
+}
+
+/* tty_watch - process i waits in poll for a terminal's bytes, as a reader
+ * (so the tty thread wakes it, and a test build types), or no longer
+ * (server.h; lock held) */
+void tty_watch(int i, int unit, int on)
+{
+    if (on)
+        ttys[unit].readers |= (rx_u16)(1u << i);
+    else
+        ttys[unit].readers &= (rx_u16)~(1u << i);
+    reader_flag();
+}
+
 /* tty_getattr - a terminal's termios into a process's segment (server.h) */
 void tty_getattr(int unit, rx_u16 data, rx_u16 at)
 {

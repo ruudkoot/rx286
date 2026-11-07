@@ -131,7 +131,7 @@ RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
     files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ) \
-    time.$(OBJ) ps.$(OBJ))
+    time.$(OBJ) ps.$(OBJ) devices.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -164,7 +164,7 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 # The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
 # (start.asm), a thread a program, each on its part of the stacks
 SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ) \
-    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ))
+    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ) dev.$(OBJ))
 $(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
 
@@ -180,20 +180,36 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     signals=$(C_B)/tests/posix/signal.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
     sigfpu=$(C_B)/tests/posix/sigfpu.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
     tty=$(C_B)/tests/posix/tty.$(OBJ) jobs=$(C_B)/tests/posix/jobs.$(OBJ) \
-    console=$(C_B)/tests/posix/console.$(OBJ)
+    console=$(C_B)/tests/posix/console.$(OBJ) poll=$(C_B)/tests/posix/poll.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
+# Each TEST_POSIX_* build's: its own program and those it runs from /z (or,
+# for exec, installs on C), so that the image keeps under 128 KB (P12)
+Z_FOR_PROC := proc child
+Z_FOR_FILES := files
+Z_FOR_EXEC := execs child
+Z_FOR_PIPE := pipes child
+Z_FOR_KEYS := keys
+Z_FOR_SIGNAL := signals
+Z_FOR_SIGFPU := sigfpu
+Z_FOR_TTY := tty
+Z_FOR_JOBS := jobs
+Z_FOR_CONSOLE := console
+Z_FOR_POLL := poll
+Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
+    $(Z_FOR_$(t)))
+Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))
 # The shell and its first commands (P9), where init runs the shell
 Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls,$(c)=$(C_B)/bin/$(c).$(OBJ))
-Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS)) \
+Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED)) \
     $(if $(filter sh,$(PROGRAM)),$(Z_SHELL))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
 # install: lines put them on a run's drive C, `make run` all of them in
 # /c/bin (tools/install-programs). The shell's commands but its first
 # three are there, as D11 has it (P12): the image holds 128 KB
 BIN_COMMANDS := $(foreach c,cp mv rm mkdir rmdir wc lp more clear uptime date sleep env head \
-    kill ps spin keys mem, \
+    kill ps spin keys mem beep play joy mouse term, \
     $(c)=$(C_B)/bin/$(c).$(OBJ)) crash=$(C_B)/bin/crash.$(OBJ)+$(C_B)/bin/crashes.$(OBJ) \
     fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ)
 DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ)) \

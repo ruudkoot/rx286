@@ -86,6 +86,7 @@ void vfs_exit(int i);
 #define VFS_INTR (-4)                   /*    a wait a signal broke off (sig_interrupt) */
 #define VFS_RESTART (-5)                /*    a stop's: ERESTART, made again (P11) */
 #define VFS_EIO (-6)                    /*    EIO (a background read, SIGTTIN not taken) */
+#define VFS_EINTR (-7)                  /*    as VFS_INTR, but never made again: poll's (P12) */
 
 int pipes_init(void);
 /* (the terminal's reader is tty.c's: P11)
@@ -97,5 +98,18 @@ int pipes_init(void);
 int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out);
 /* vfs_tty_open - has any process a terminal open? (P11) */
 int vfs_tty_open(int unit);
+
+/* dev.c: /dev's devices that drivers serve (P12), their units; dev_open,
+ * dev_read, dev_write, dev_ioctl - a process's calls on one, its buffer
+ * checked (lock held, given up while one waits): as vfs_call's, with
+ * VFS_GONE, VFS_INTR, VFS_RESTART; dev_ready - POLLIN, POLLOUT now;
+ * dev_bytes - an ioctl request's argument's bytes, 0 for none */
+enum { DEV_SPEAKER, DEV_JOYSTICK, DEV_MOUSE, DEV_COM2, DEVS };
+int dev_open(int unit);
+int dev_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error);
+int dev_write(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error);
+int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *error);
+int dev_ready(int unit);
+rx_u16 dev_bytes(rx_u16 request);
 
 #endif

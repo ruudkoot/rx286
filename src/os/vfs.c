@@ -41,7 +41,7 @@
 /* What a node of the tree is: the server's own (the root, /dev, /z and its
  * files, the devices), or a volume's (a directory, a file) */
 enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_FILE, K_PIPE_R,
-       K_PIPE_W };
+       K_PIPE_W, K_DEV };
 
 #define PIPES 8                         /* the pipes at once (P9) */
 #define PIPE_SIZE 1024                  /* each one's buffer, in the server's segment */
@@ -99,8 +99,10 @@ static int pipes_ready;
 static struct files files_of[PROCS];
 static struct vol vols[DRIVES];
 static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
-static const char *const dev_names[] = { "null", "tty", "lpt1", "lpt2" };
-#define DEV_NAMES 4                     /* then "tty1" to the last terminal's (P11) */
+static const char *const dev_names[] = { "null", "tty", "lpt1", "lpt2", "speaker", "joystick",
+                                         "mouse", "com2" };   /* (from "speaker": dev.c's, P12) */
+#define DEV_NAMES 8                     /* then "tty1" to the last terminal's (P11) */
+#define DEV_FIRST 4                     /* the first of dev.c's (DEV_SPEAKER) */
 #define TTY_OWN 0xFF                    /* /dev/tty's unit: the opener's terminal */
 static const char punctuation[] = "!#$%&'()-@^_`{}~";
 
@@ -359,8 +361,8 @@ static int lookup(struct path *p, struct node *n)
         for (k = 0; k < DEV_NAMES; k++)
             if (p->parts == 2 && same(p->part[1], dev_names[k])) {
                 strcpy(p->part[1], dev_names[k]);
-                n->kind = k == 0 ? K_NULL : k == 1 ? K_TTY : K_LPT;
-                n->unit = (rx_u16)(k == 1 ? TTY_OWN : k - 2);
+                n->kind = k == 0 ? K_NULL : k == 1 ? K_TTY : k < DEV_FIRST ? K_LPT : K_DEV;
+                n->unit = (rx_u16)(k == 1 ? TTY_OWN : k < DEV_FIRST ? k - 2 : k - DEV_FIRST);
                 return 0;
             }
         if (p->parts == 2 && (e = tty_unit(p->part[1])) >= 0) {
@@ -894,6 +896,8 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
         return file_io(o, data, at, n, 1, error);
     case K_PIPE_W:
         return pipe_write(i, o, data, at, n);
+    case K_DEV:
+        return dev_write(i, o->unit, data, at, n, error);
     }
     *error = EBADF;
     return -1;
@@ -925,6 +929,8 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
         return file_io(o, data, at, n, 0, error);
     case K_ZFILE:
         return zfile_io(o, data, at, n);
+    case K_DEV:
+        return dev_read(i, o->unit, data, at, n, error);
     case K_DIR:
     case K_TOP:
     case K_DEVDIR:
@@ -994,6 +1000,8 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
         *error = n.kind == K_ZFILE ? EROFS : EACCES;
         return -1;
     }
+    if (n.kind == K_DEV && (*error = dev_open(n.unit)) != 0)
+        return -1;                      /* no mouse; COM2 the log (P12) */
     if ((k = ofd_new(n.kind)) < 0) {
         *error = ENFILE;
         return -1;
@@ -1056,7 +1064,7 @@ static void stat_put(rx_u16 data, rx_u16 at, int kind, const rx_u8 *entry, rx_u1
         mode = S_IFREG | (entry && (entry[DIR_ATTRIBUTES] & ATTR_READ_ONLY) ? 0444 : 0644);
     else if (kind == K_ZFILE)
         mode = S_IFREG | 0555;
-    else if (kind == K_NULL || kind == K_TTY || kind == K_LPT)
+    else if (kind == K_NULL || kind == K_TTY || kind == K_LPT || kind == K_DEV)
         mode = S_IFCHR | 0666;
     else if (kind == K_PIPE_R || kind == K_PIPE_W)
         mode = S_IFIFO | 0600;
@@ -1371,7 +1379,7 @@ static int px_lseek(int i, struct rx_kregs *r, int *error, rx_u16 *high)
         return -1;
     }
     if (o->kind == K_TTY || o->kind == K_NULL || o->kind == K_LPT || o->kind == K_PIPE_R
-            || o->kind == K_PIPE_W) {
+            || o->kind == K_PIPE_W || o->kind == K_DEV) {
         *error = ESPIPE;
         return -1;
     }
@@ -1524,6 +1532,116 @@ int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
     return result;
 }
 
+/* px_ioctl - PX_IOCTL: a device's request (dev.c), its argument checked */
+static int px_ioctl(int i, rx_u16 data, struct rx_kregs *r, int *error)
+{
+    struct ofd *o = ofd_of(i, r->bx);
+
+    if (!o) {
+        *error = EBADF;
+        return -1;
+    }
+    if (o->kind != K_DEV || dev_bytes(r->cx) == 0) {
+        *error = ENOTTY;
+        return -1;
+    }
+    if (!in_segment(data, r->si, dev_bytes(r->cx))) {
+        *error = EFAULT;
+        return -1;
+    }
+    return dev_ioctl(i, o->unit, data, r->cx, r->si, error);
+}
+
+/* ready - what a poll finds a description ready for (POLL*); *nap set if it
+ * has to look again a tick later, as nothing signals it; a terminal's kept
+ * in *watch (a bit a unit), whose news wake the poller */
+static rx_u16 ready(const struct ofd *o, rx_u16 events, int *nap, rx_u16 *watch)
+{
+    const struct pipe *p = &pipes[o->unit % PIPES];
+    rx_u16 there = POLLIN | POLLOUT;
+
+    switch (o->kind) {
+    case K_TTY:
+        there = (rx_u16)(POLLOUT | (tty_ready(o->unit) ? POLLIN : 0));
+        if (!(there & POLLIN))
+            *watch |= (rx_u16)(1u << o->unit);
+        break;
+    case K_PIPE_R:
+        there = (rx_u16)(p->count || !p->writers ? POLLIN : 0);
+        if (!p->writers)
+            there |= POLLHUP;
+        break;
+    case K_PIPE_W:
+        there = (rx_u16)(!p->readers ? POLLERR : PIPE_SIZE - p->count >= PIPE_BUF ? POLLOUT : 0);
+        break;
+    case K_DEV:
+        there = (rx_u16)dev_ready(o->unit);
+        break;
+    }
+    if (!(there & events & (POLLIN | POLLOUT)) && o->kind != K_TTY)
+        *nap = 1;
+    return (rx_u16)(there & (events | POLLERR | POLLHUP));
+}
+
+/* px_poll - PX_POLL: the descriptors ready for what each asks (PF_*), at
+ * once or once one is, waiting up to the timeout (BX ms; -1 for ever) in
+ * the server thread: the terminals wake it, the rest it looks at each tick
+ * (lock held, given up while it waits): how many are ready; or -1 and
+ * EINVAL, EFAULT; or VFS_GONE, VFS_INTR, VFS_RESTART */
+static int px_poll(int i, rx_u16 data, struct rx_kregs *r, int *error)
+{
+    rx_u16 RX_FAR *f;
+    int timeout = (int)r->bx, count, nap, u;
+    rx_u16 k, watch;
+    rx_u32 until = rx_ticks() + ((rx_u32)(rx_u16)timeout * TICKS_HZ + 999) / 1000;
+    const struct ofd *o;
+
+    if (r->cx > OPEN_MAX) {
+        *error = EINVAL;
+        return -1;
+    }
+    if (!in_segment(data, r->si, (rx_u16)(r->cx * PF_BYTES))) {
+        *error = EFAULT;
+        return -1;
+    }
+    for (;;) {
+        count = nap = 0;
+        watch = 0;
+        for (k = 0; k < r->cx; k++) {
+            f = (rx_u16 RX_FAR *)RX_MK_FP(data, r->si + k * PF_BYTES);
+            f[PF_REVENTS / 2] = 0;
+            if ((int)f[PF_FD / 2] < 0)
+                continue;
+            if (!(o = ofd_of(i, f[PF_FD / 2])))
+                f[PF_REVENTS / 2] = POLLNVAL;
+            else
+                f[PF_REVENTS / 2] = ready(o, f[PF_EVENTS / 2], &nap, &watch);
+            if (f[PF_REVENTS / 2])
+                count++;
+        }
+        if (count || timeout == 0 || (timeout > 0 && rx_ticks() >= until))
+            return count;
+        for (u = 0; u < TTYS; u++)
+            if (watch & (1u << u))
+                tty_watch(i, u, 1);
+        lock_give();
+        if (nap || timeout > 0)
+            proc_nap(i);
+        else
+            proc_sleep(i);
+        lock_take(PROC_NOTIFY(i));
+        for (u = 0; u < TTYS; u++)
+            if (watch & (1u << u))
+                tty_watch(i, u, 0);
+        if (!proc_still(i))
+            return VFS_GONE;
+        if (sig_stopped(i))
+            return VFS_RESTART;
+        if (sig_ready(i))
+            return VFS_EINTR;           /* SA_RESTART or not (XSH poll) */
+    }
+}
+
 /* call_files - a file call, by its number */
 static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
 {
@@ -1643,6 +1761,10 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             return fd;                  /* the background's: SIGTTOU first (P11) */
         tty_setattr(o->unit, data, r->si, r->cx);
         return 0;
+    case PX_IOCTL:
+        return px_ioctl(i, data, r, error);
+    case PX_POLL:
+        return px_poll(i, data, r, error);
     case PX_TCGETPGRP:
     case PX_TCSETPGRP:                  /* job control's (P11; tty.c) */
         if (!(o = ofd_of(i, r->bx))) {

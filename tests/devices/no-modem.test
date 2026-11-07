@@ -1,11 +1,13 @@
-# term in a test build: COM2 carries the kernel's log, so there is no
-# terminal. A release build makes COM2 the modem's line.
-program: shell
+# term in a test build (roadmap os-server.md P12): COM2 carries the
+# kernel's log, so /dev/com2 is busy and there is no terminal. A release
+# build makes COM2 the modem's line.
+program: sh
+emulators: bochs mame
+install: C /BIN/TERM z-term.rx
 keys: term\n
 ---
 rx286, test build
-rx286 shell: type help for the commands
-A:\>term
+/a$ term
 COM2 carries the kernel's log in this build; a release build
 makes it the modem's line.
-A:\>
+/a$

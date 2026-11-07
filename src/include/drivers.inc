@@ -82,7 +82,8 @@ DRV_SERIAL_NEWS     equ 3       ; -> BX 1 if bytes wait
 DRV_SOUND           equ 1       ; BX hertz (0: a rest), CX ticks -> BX 0 or E_INVAL, once
                                 ;    the sound is over or stopped (DRV_STOP_BIT)
 DRV_JOYSTICK        equ 2       ;    the segment passed, a transfer segment: its block's AX
-                                ;    the buttons, BX CX DX SI the axes (as SYS_JOYSTICK)
+                                ;    the buttons, BX CX DX SI the axes (as SYS_JOYSTICK);
+                                ;    with SI not 0, five words at SI there (os-server.md P12)
 ; The RTC driver
 DRV_CLOCK_TIME      equ 1       ; -> BX hours and minutes, CX century and year, SI month
                                 ;    and day, DI seconds: BCD, as SYS_TIME's BX, CX, DX, AL

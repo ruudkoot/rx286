@@ -17,6 +17,7 @@ Files:     ls [-l], cat, head [-n N], wc, cp, mv, rm, mkdir, rmdir, more,
            lp (to the printer), echo
 Processes: ps [-e], kill [-SIGNAL] PID, sleep SECONDS, env [NAME=VALUE] [CMD]
 Machine:   date [+FORMAT], uptime, clear, keys, mem, fpu, crash KIND, spin
+Devices:   beep, play, joy, mouse, term (COM2)
 Lines:     CMD | CMD, CMD; CMD, && ||, & (in the background), < > >> 2>
 Keys:      Backspace, Up and Down (the last lines), ^C (stop), ^Z (stop a
            job), ^D (the end), Alt+F1 to F8 (the terminals)

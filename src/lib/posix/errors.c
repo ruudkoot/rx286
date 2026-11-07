@@ -42,6 +42,7 @@ char *strerror(int e)
     case EINTR: return "interrupted";
     case ENOTTY: return "not a terminal";
     case EOVERFLOW: return "too large";
+    case ENXIO: return "no such device";
     }
     return "unknown error";
 }

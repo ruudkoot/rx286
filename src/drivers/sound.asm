@@ -177,10 +177,12 @@ speaker_off:
         ret
 
 ; ----------------------------------------------------------------------------
-; joystick - the buttons pressed and the four axes, into the block of the
-; transfer segment passed: AX the buttons (bit n set: button n pressed), BX,
-; CX, DX, SI axes 0-3 in microseconds, or JOY_ABSENT
-;   In:       BP = the segment (0: none came)
+; joystick - the buttons pressed and the four axes, into the segment passed:
+; with SI 0 its transfer segment's block, AX the buttons (bit n set: button
+; n pressed), BX, CX, DX, SI axes 0-3 in microseconds, or JOY_ABSENT; else
+; five words at SI, the buttons and then the axes (a process's read of
+; /dev/joystick, os-server.md P12)
+;   In:       BP = the segment (0: none came); SI = 0, or an offset there
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
@@ -189,19 +191,22 @@ joystick:
         jz .done
         verw bp                         ; (a program killed meanwhile: l4.md L12)
         jnz .done
+        push si
+        push ds
+        pop es
+        call joy_axes
+        pop di
+        verw bp
+        jnz .done
         mov dx, GAME_PORT
         in al, dx
         not al
         shr al, GAME_PORT_BUTTON_SHIFT
         xor ah, ah
         mov es, bp
+        test di, di
+        jnz .words
         mov [es:XFER_AX], ax
-        push ds
-        pop es
-        call joy_axes
-        verw bp
-        jnz .done
-        mov es, bp
         mov ax, [joy_times]
         mov [es:XFER_BX], ax
         mov ax, [joy_times + 2]
@@ -210,7 +215,15 @@ joystick:
         mov [es:XFER_DX], ax
         mov ax, [joy_times + 6]
         mov [es:XFER_SI], ax
+        jmp .done
+.words:
+        stosw                           ; the buttons, then the axes
+        mov si, joy_times
+        mov cx, JOY_AXES
+        rep movsw
 .done:
+        push ds
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------

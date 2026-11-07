@@ -73,6 +73,10 @@ null
 tty
 lpt1
 lpt2
+speaker
+joystick
+mouse
+com2
 tty1
 tty2
 tty3

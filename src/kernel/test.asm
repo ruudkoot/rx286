@@ -275,14 +275,15 @@ test_tick:
         mov al, [si]
         cmp al, TEST_OP_WAIT
         je .wait
-        cmp al, TEST_OP_MOUSE
-        je .mouse
         cmp al, TEST_OP_NOW
         je .now
-        ; TEST_OP_WHEN_WAITING and TEST_OP_END: only while a reader waits
-        ; with nothing buffered
+        ; TEST_OP_WHEN_WAITING, TEST_OP_MOUSE and TEST_OP_END: only while a
+        ; reader waits with nothing buffered (a mouse's packet too, since
+        ; os-server.md P12: its program polls the terminal as it waits)
         cmp byte [test_reader], TEST_READER_NONE
         je .done
+        cmp al, TEST_OP_MOUSE
+        je .mouse
         cmp al, TEST_OP_END
 %ifdef TEST_FUZZ
         je .done                        ; the fuzzer ends by its count, not by keys

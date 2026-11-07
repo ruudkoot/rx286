@@ -76,11 +76,16 @@ PX_TIME             equ 44      ; -> 0, and the seconds since 1970-01-01 00:00:0
                                 ;    real-time clock's, taken as UTC
 PX_PS               equ 45      ; BX a table entry, DI PI_BYTES of room: the first process
                                 ;    from that entry on -> its entry + 1; or -1, ESRCH, none
-PX_CALLS            equ 46
+PX_IOCTL            equ 46      ; BX a descriptor, CX a request (RXIO_*), SI its argument:
+                                ;    a device's request (dev.c) -> 0; or -1, ENOTTY
+PX_POLL             equ 47      ; SI the pollfds (PF_*), CX how many, BX the timeout in ms
+                                ;    (-1: none) -> those with news, their revents set
+PX_CALLS            equ 48
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
 ENOENT              equ 2
+ENXIO               equ 6       ; a device that is not there: no mouse (P12)
 ESRCH               equ 3
 EINTR               equ 4
 EIO                 equ 5
@@ -211,6 +216,30 @@ PI_STATE            equ 8       ; byte: 'R' running or ready, 'S' waiting in a c
 PI_TTY              equ 9       ; byte: its session's terminal, 0 to 7, or FFh: none
 PI_COMMAND          equ 10      ; its file's name, zero-padded (AR_NAME_SIZE)
 PI_BYTES            equ 22
+
+; The devices of /dev (P12; dev.c, sys/ioctl.h, poll.h)
+RXIO_TONE           equ 1       ; /dev/speaker: a tone, TONE_BYTES at SI
+TONE_HZ             equ 0       ;    word: hertz, 0 a rest
+TONE_TICKS          equ 2       ;    word: ticks, up to 500
+TONE_BYTES          equ 4
+RXIO_MOUSE          equ 2       ; /dev/mouse: its state now, MS_BYTES at SI
+MS_BUTTONS          equ 0       ; /dev/mouse's state, as a read gives it: the buttons
+MS_X                equ 2       ;    (MOUSE_LEFT, MOUSE_RIGHT), x 0-639, y 0-199
+MS_Y                equ 4
+MS_BYTES            equ 6
+JS_BUTTONS          equ 0       ; /dev/joystick's read: the buttons down, then four axes in
+JS_AXES             equ 2       ;    microseconds, or JOY_ABSENT
+JS_BYTES            equ 10
+PF_FD               equ 0       ; struct pollfd: the descriptor (below 0: passed over),
+PF_EVENTS           equ 2       ;    what is asked for,
+PF_REVENTS          equ 4       ;    what is there
+PF_BYTES            equ 6
+POLLIN              equ 1       ; bytes to read (or its end)
+POLLPRI             equ 2       ;    (none: rx286 has no such bytes)
+POLLOUT             equ 4       ; room to write
+POLLERR             equ 8       ; a pipe without a reader
+POLLHUP             equ 16      ; a pipe without a writer
+POLLNVAL            equ 32      ; not an open descriptor
 S_IFMT              equ 0xF000
 S_IFDIR             equ 0x4000
 S_IFCHR             equ 0x2000

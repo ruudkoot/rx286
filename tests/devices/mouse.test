@@ -1,17 +1,19 @@
-# mouse: packets as a Microsoft mouse sends them (the key script's {mouse},
-# handed to the driver as IRQ4 would): moves right and down, left with the
-# left button, far down against the screen's edge, then both buttons, which
-# end the command.
-program: shell
+# mouse (roadmap os-server.md P12): /dev/mouse, packets as a Microsoft mouse
+# sends them (the key script's {mouse}, handed to the driver as IRQ4
+# would): moves right and down, left with the left button, far down against
+# the screen's edge, then both buttons, which end it. It waits in poll for
+# the terminal and the mouse.
+program: sh
+emulators: bochs mame
+install: C /BIN/MOUSE z-mouse.rx
 keys: {wait 20}mouse\n{wait 5}{mouse 16 8 -}{wait 2}{mouse -40 0 L}{wait 2}{mouse 127 127 -}{wait 2}{mouse 0 0 LR}
 ---
 rx286, test build
-rx286 shell: type help for the commands
-A:\>mouse
+/a$ mouse
 Move the mouse; Esc or both buttons end.
 x 320, y 100 (column 40, row 12), buttons: none
 x 336, y 108 (column 42, row 13), buttons: none
 x 296, y 108 (column 37, row 13), buttons: left
 x 423, y 199 (column 52, row 24), buttons: none
 x 423, y 199 (column 52, row 24), buttons: both
-A:\>
+/a$

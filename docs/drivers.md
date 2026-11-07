@@ -181,6 +181,8 @@ tone and the silence after it (`KCALL_TEST`). `DRV_JOYSTICK` times the
 game port's four axes with timer channel 0's latched count, interrupts off
 for 4 ms at most, and puts the buttons and the axes in the block of the
 transfer segment passed: five results, more than a reply's four words.
+With SI not 0 it writes them as five words at SI of the segment passed
+instead: a process's read of `/dev/joystick` (os-server.md P12).
 
 ## The RTC driver
 

@@ -194,6 +194,15 @@ void proc_sleep(int i)
     procs[i].asleep = 0;
 }
 
+/* proc_nap - entry i's server thread sleeps until woken, or a tick at most:
+ * a wait for a driver's news, which it does not signal (server.h; P12) */
+void proc_nap(int i)
+{
+    procs[i].asleep = 1;
+    sleep_on(P_SLOT(i, PK_NOTIFY), 1);
+    procs[i].asleep = 0;
+}
+
 /* proc_data_limit - process i's data segment's last offset (server.h) */
 rx_u16 proc_data_limit(int i)
 {
@@ -1002,7 +1011,8 @@ static int handle(int i, struct rx_kregs *r)
     default:
         if (((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
                 || (r->ax & 0xFF) == PX_TCGETATTR || (r->ax & 0xFF) == PX_TCSETATTR
-                || (r->ax & 0xFF) == PX_TCGETPGRP || (r->ax & 0xFF) == PX_TCSETPGRP)
+                || (r->ax & 0xFF) == PX_TCGETPGRP || (r->ax & 0xFF) == PX_TCSETPGRP
+                || (r->ax & 0xFF) == PX_IOCTL || (r->ax & 0xFF) == PX_POLL)
             result = vfs_call(i, P_SLOT(i, PK_DATA), r, &error, &status);
         else
             error = ENOSYS;
@@ -1012,9 +1022,9 @@ static int handle(int i, struct rx_kregs *r)
         result = -1;
         error = EPIPE;
     }
-    if (result == VFS_INTR) {           /* a wait a signal broke off */
+    if (result == VFS_INTR || result == VFS_EINTR) {    /* a wait a signal broke off */
+        error = sig_interrupt(i, result == VFS_INTR);
         result = -1;
-        error = sig_interrupt(i, 1);
     }
     if (result == VFS_RESTART) {        /* a stop's: the call made again (P11) */
         result = -1;
