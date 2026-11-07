@@ -37,7 +37,7 @@ time (`cat`) ends its input at ^D.
 | `exit [STATUS]` | ends the shell; init starts it again |
 | `export NAME=VALUE`, `unset NAME`, `set` | the variables |
 | `alias NAME=VALUE`, `unalias NAME` | the aliases; `alias` alone lists them |
-| `jobs`, `fg [%N]`, `bg [%N]` | the jobs: each pipeline is one; ^Z stops the one in the foreground |
+| `jobs`, `fg [%N]`, `bg [%N]` | the jobs: each pipeline is one; ^Z stops the one in the foreground, and `fg` gives it back the terminal as it left it (`more`'s keys raw) |
 | `true`, `false`, `help` | |
 
 | Program | What |

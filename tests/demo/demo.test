@@ -1,32 +1,86 @@
-# The demonstration (roadmap l4.md L11, D19; os-server.md P12), as `make
-# run` shows it: init starts the clock and the counter, daemons, which put
-# the time and how fast the counter counts - how much of the CPU nothing
-# else wants - on the status line, while the shell runs commands. In a
-# TEST_DEMO build init starts them as it does outside the tests, and the OS
-# server puts their status on the log too, where the runner sets it apart
-# ("status, NAME: TEXT", after the line each fell in). ps lists them, init's
-# orphans; the clock, at the shell's priority, ticks on while a command
-# spins, until ^C; the counter, below every process, does not count then.
-# (MAME's AT counts some 22,000 a second: its first report, after 65,536
-# counts, takes three seconds.)
+# The demonstration (roadmap os-server.md D20, P14; l4.md L11, D19), as
+# `make run` shows it: a shell on each terminal, the daemons on every
+# page's status line. On terminal 1 a pipeline and a redirect into a file
+# on B; on terminal 2 a long cat into more, stopped with ^Z, listed by
+# jobs, and brought back with fg; on terminal 3 crash gp, a SIGSEGV, and
+# the shell goes on; on terminal 4 ps -e, the shells, the daemons and ps;
+# back on terminal 1, the clock, at the shell's priority, ticks on while a
+# command spins, until ^C.
+# In a TEST_DEMO build init starts the daemons as it does outside the
+# tests, and the server puts their status on the log too ("status, NAME:
+# TEXT"); this TEST_SCREEN build's console driver puts each page Alt+Fn
+# shows on the log, its status line (00) the daemons' fields: the
+# counter's "idle NNk/s" ends at column 59, the clock's time fills the
+# line's last eight, so "k/s" and nine blanks is a line with both. DOSBox-X
+# has no drive for rx286's drivers (docs/emulators.md). (MAME's AT counts
+# some 22,000 a second: its first report, after 65,536 counts, takes three
+# seconds.)
 program: shell
 define: TEST_DEMO
+define: TEST_SCREEN
 emulators: bochs mame
+install: C /BIN/WC z-wc.rx
+install: C /BIN/MORE z-more.rx
+install: C /BIN/CRASH z-crash.rx
 install: C /BIN/PS z-ps.rx
 install: C /BIN/SPIN z-spin.rx
-keys: {wait 250}{wait 100}ps -e\nspin\n{wait 150}{now ctrl-c}echo done\n
-timeout: 120
+keys: {wait 250}ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt\n
+keys: {alt-f2}\ncat b:/frag.txt | more\n{wait 20}{ctrl-z}jobs\nfg\nq
+keys: {alt-f3}\ncrash gp\n{alt-f4}\nps -e\n{wait 20}
+keys: {alt-f2}{alt-f3}{alt-f4}{alt-f1}spin\n{wait 150}{now ctrl-c}echo done\n
+timeout: 180
 match: contains
+file: B /DOCS.TXT HELLO.TXT\nPRINTME.TXT\n
 ---
-/a$ ps -e
+rx286, test build
+/a$ ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt
 status, clock:
 status, counter: idle
-   11     1    11    11 -
-   13     1    13    13 -    R 39 counter
-/a$ spin
+2
+HELLO.TXT
+PRINTME.TXT
+screen 1: shown
+k/s         
+screen 1 01: rx286 terminal 2: press Enter for a shell
+screen 2: shown
+k/s         
+screen 2 01: rx286 terminal 3: press Enter for a shell
+rx286: crash[
+screen 3: shown
+k/s         
+screen 3 01: rx286 terminal 4: press Enter for a shell
+screen 1: shown
+k/s         
+screen 1 17: --More--
+screen 1 18: [1] Stopped  cat b:/frag.txt | more
+screen 1 19: /a$ jobs
+screen 1 20: [1] Stopped  cat b:/frag.txt | more
+screen 1 21: /a$ fg
+screen 1 22: cat b:/frag.txt | more
+screen 1 24: /a$
+screen 2: shown
+k/s         
+screen 2 03: /a$ crash gp
+screen 2 04: crash: jump past the end of my code
+screen 2 05: rx286: crash[
+screen 2 06: /a$
+screen 3: shown
+k/s         
+screen 3 03: /a$ ps -e
+screen 3 04:   PID  PPID  PGID   SID TTY  S NI COMMAND
+screen 3 05:     1     0     1     1 -    S 20 init
+screen 3 06:     2     1     2     2 tty1 S 20 sh
+screen 3 07:     3     1     3     3 tty2 S 20 sh
+screen 3 08:     4     1     4     4 tty3 S 20 sh
+screen 3 09:     5     1     5     5 tty4 S 20 sh
+ 20 clock
+ 39 counter
+screen 0: shown
+k/s         
+screen 0 01: /a$ ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt
+spin
 Spinning; ^C ends it.
-^C
 status, clock:
 status, clock:
-/a$ echo done
+echo done
 done

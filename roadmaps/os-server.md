@@ -132,7 +132,7 @@ What it rests on:
 | P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
 | P12 | The commands and the devices | done (2026-11-07, branch `os-server`) |
 | P13 | POSIX threads | done (2026-11-07, branch `os-server`) |
-| P14 | The old calls deleted; the demonstration | not started |
+| P14 | The old calls deleted; the demonstration | done (2026-11-07, branch `os-server`) |
 | P15 | The documents, a review, the release | not started |
 
 **Decided (2026-11-06):** every decision as recommended, except these, and D5 with a
@@ -2621,6 +2621,44 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - nothing calls the old interface;
   - the demonstration's test passes on all three emulators.
 * **Decisions:** D19, D20, D21.
+* **Done (2026-11-07), in three steps:**
+  - **The system calls' tests in C:** the disk, printer and device calls' test programs in
+    assembly (`syscalls`, `storage`, `devices`) went; what only they checked is checked
+    through the processes' calls: `tests/posix/drives.c`, a file written, fsync'd and read
+    back on each of A to D and found on the host's images, `KERNEL.BIN` read whole, a
+    write-protected B refused with `EROFS`; `tests/posix/devices.c`, the speaker's tones and
+    refusals, the game port, the mouse's reset, COM2 busy as the log, and three console
+    writes of 2 KB across which the ticks keep pace with the RTC, on all three emulators;
+    `tests/sh/absent.test`, no drive D. They found three faults: a write the driver refused
+    at a call's end was `EIO` whatever it said (now `EROFS` for a write-protected diskette);
+    a sector the driver refused stayed dirty in the cache, so every later file call failed on
+    it (now dropped); and on MAME's AT, whose fixed disks are IDE drives, a reset with the
+    absent D selected hid C's status (the driver selects the drive before the reset too).
+  - **The old calls go:** the 24 calls, the stub, the transfer and files segments, the
+    server's DOS-like file calls and their FAT12 library, the root's `ROOT_INFO`,
+    `ROOT_KILL` and `ROOT_START` and the background programs' own untyped. A program the
+    root builds is no process: it calls through a NASM binding (`src/userland/px.asm`, the
+    `px` macro) or `lib/os` in C, with the processes' convention, and the server answers it
+    `PX_WRITE`, `PX_READ` (a key: its ASCII and scancode), `PX_NANOSLEEP` and `PX_EXIT`; its
+    faults and exits still restart it, which the attack suite and the fuzzer need (D21).
+    `syscalls.inc`'s other constants went into `drivers.inc`. The attack suite lost the
+    disk, print and file attacks with their calls and gained the new calls' refusals (74
+    attacks); the fuzzer's random calls are any `PX_*`.
+  - **The demonstration** (`tests/demo/demo.test`, D20): on terminal 1 `ls c:/docs | wc
+    -l` and a redirect into a file of B; on terminal 2 `cat b:/frag.txt | more`, ^Z, `jobs`,
+    `fg`, `q`; on terminal 3 `crash gp`; on terminal 4 `ps -e`; each page shown by Alt+Fn
+    put on the log (`TEST_SCREEN`), its status line holding the clock's and the counter's
+    fields. It found two faults of the shell's job control, fixed: a stopped pipeline was
+    said once a process, and `fg` did not give a job back the terminal's modes it stopped
+    with (XCU 2.11), so `more`'s keys came back cooked.
+  - **Not as planned:** the demonstration's test runs on Bochs and MAME, not DOSBox-X,
+    which has no fixed disk controller and no diskette interrupt (*docs/emulators.md*): no
+    drive works there, and the demonstration's first two terminals need them. DOSBox-X runs
+    the terminals, the devices and the processes in their own tests.
+  - **`make sizes`** lists every part of the release build against its room: the boot code,
+    the kernel, each driver, the root and the server (code and data segments), `/z` and
+    each of its programs, every program of C's `/BIN`, and the image (85% full after the
+    old calls went, from 90%).
 
 ### P15. The documents, a review, the release (M, about 1,000 of documents)
 

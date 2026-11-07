@@ -22,7 +22,8 @@
  * its own, which it makes the terminal's foreground while it waits for it.
  * ^Z stops the job, which jobs lists, fg brings back and bg continues in the
  * background; a job's stop or end in the background is said before the
- * next prompt.
+ * next prompt, once for the job. A job stopped keeps the terminal's modes,
+ * and fg gives them back (P14): more's keys stay raw.
  * ============================================================================ */
 
 #include <limits.h>
@@ -79,12 +80,14 @@ static unsigned pool_used;
 static struct command cmds[PIPELINE];
 
 /* A job: a pipeline's processes, in a group of their own; whether its
- * state has been said; its last command's status; its text */
+ * state has been said; its last command's status; its text; the
+ * terminal's modes it stopped with, which fg gives it back (XCU 2.11) */
 struct job {
-    int state, said;
+    int state, said, moded;
     pid_t pgid, pids[PIPELINE];
     int n, left, code;
     char text[40];
+    struct termios modes;
 };
 
 static struct job jobs[JOBS + 1];       /* (the last: a foreground job without room) */
@@ -426,9 +429,11 @@ static void job_update(pid_t pid, int st)
         if (k == j->n)
             continue;
         if (WIFSTOPPED(st)) {
-            j->state = J_STOPPED;
+            if (j->state != J_STOPPED) {    /* (once a job, not once a process) */
+                j->state = J_STOPPED;
+                j->said = 0;
+            }
             j->code = 128 + WSTOPSIG(st);
-            j->said = 0;
             if (j != &jobs[JOBS])
                 last_job = j;
         } else if (WIFCONTINUED(st)) {
@@ -496,10 +501,14 @@ static int job_wait(struct job *j)
         }
         job_update(pid, st);
     }
+    if (job_control && j->state == J_STOPPED)
+        j->moded = tcgetattr(0, &j->modes) == 0;    /* (more's raw keys, say) */
     if (job_control)
         tcsetpgrp(0, shell_pgid);
     code = j->code;
     if (j->state == J_STOPPED) {
+        if (j->moded && !(j->modes.c_lflag & ECHO))
+            printf("\n");              /* the line the terminal's echo of ^Z ends */
         job_say(j);
     } else {
         j->state = J_FREE;
@@ -577,8 +586,11 @@ static int builtin(struct command *c)
         else
             printf("[%d] %s &\n", (int)(j - jobs) + 1, j->text);
         j->state = J_RUNNING;
-        if (name[0] == 'f' && job_control)
+        if (name[0] == 'f' && job_control) {
+            if (j->moded)               /* its modes, while the terminal is ours */
+                tcsetattr(0, TCSADRAIN, &j->modes);
             tcsetpgrp(0, j->pgid);      /* the terminal first, then SIGCONT */
+        }
         kill(-j->pgid, SIGCONT);
         return name[0] == 'f' ? job_wait(j) : 0;
     }

@@ -113,9 +113,9 @@ is fixed by its slot.
 `tools/mkexe` writes one from the linker's output (`--287` first sets
 `RXF_287`: the Makefile's `Z_287` names the programs of `/z` that use the
 287, whose state then survives a signal's handler, *docs/processes.md*),
-and a map in NASM's form beside it, so that `tools/run-test` (`{c:rx_ud2}`), `tools/map2sym` and
-`tools/sizes` read a C module as they read an assembled one; its symbols
-are C's names. `tools/mkimage` takes an executable as a module of the boot
+and a map in NASM's form beside it, so that `tools/run-test` (`{c:rx_ud2}`) and `tools/map2sym`
+read a C module as they read an assembled one; its symbols are C's names.
+`tools/sizes` reads an executable's header (`make sizes`). `tools/mkimage` takes an executable as a module of the boot
 image (`counter=build/test/counter.rx:3:1`).
 
 ## The tests of C

@@ -16,7 +16,7 @@
 #                        the reproducibility check, lint and the documents' checks
 #   make check-ia16      the C built with gcc-ia16, and its tests (not in check)
 #   make doctor          the tools and their versions
-#   make sizes           each segment against its room
+#   make sizes           each segment against its room, every program's too
 #   make clean
 #
 # One flavour at a time is built into build/<flavour>/ (FLAVOUR=release,
@@ -278,7 +278,7 @@ doctor:
 	@tools/doctor
 
 sizes: release
-	$(PYTHON) tools/sizes build/release
+	$(PYTHON) tools/sizes build/release $(foreach p,$(BIN_COMMANDS),$(firstword $(subst =, ,$(p))))
 
 clean:
 	rm -rf build

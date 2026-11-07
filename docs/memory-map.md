@@ -156,5 +156,10 @@ it by its physical address, which the driver asks the kernel for
 (`KCALL_SEGMENT`). Since the 8237's address counter has 16 bits, the root
 takes another if one crosses a 64 KB boundary (*docs/storage.md*).
 
-`make sizes` prints how full each room is, and the boot image against
-`IMAGE_MAX`.
+`make sizes` prints how full each room is, for the release build
+(roadmap os-server.md P14): the boot sector and loader, the kernel's entry,
+code and data, each driver's code and data, the root's and the OS server's
+code and data segments (64 KB each, the data with its stacks), `/z` against
+the 64 KB a module's data holds and each of its programs, each program of
+C's `/BIN`, and the boot image against `IMAGE_MAX`. A program's sizes come
+from its executable's header (`exe.inc`). It warns at 90%.

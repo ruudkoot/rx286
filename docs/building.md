@@ -126,4 +126,4 @@ E5):
 | `make lint` | the sources follow *docs/style.md* |
 | `make check-docs` | the documents name every constant; the bochsrc matches |
 | `make check` | all of the above (about 75 s) |
-| `make sizes` | each segment against its room |
+| `make sizes` | each segment of the release build against its room: the boot code, the kernel, the drivers, the root, the OS server, `/z` and every program |
