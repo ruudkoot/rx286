@@ -13,6 +13,10 @@
  *                  ioctl RXIO_MOUSE: them at once. ENXIO without a mouse
  *   /dev/com2      read and write: the modem's line; EBUSY where COM2
  *                  carries the kernel's log (debug and test builds)
+ *   /dev/status    write: text in a field of the status line, on every
+ *                  page; each description opened has a field of its own,
+ *                  from the right, blank again at its last close (EBUSY
+ *                  once all four are taken): the daemons' (clock, counter)
  *
  * The mouse and COM2 do not signal their news: a read that waits for them,
  * and a poll, look again each tick. A call that waits gives up the lock,
@@ -22,6 +26,34 @@
 #include "server.h"
 #include "fs.h"
 #include "posix.h"
+#include "archive.h"
+
+#define FIELDS (VIDEO_COLUMNS / CON_FIELD)     /* the status line's */
+#define STATUS_START 0x01               /* around a status on a test's log */
+#define STATUS_END 0x02
+
+static int fields[FIELDS];              /* each field's description + 1, or 0 */
+static char text[CON_FIELD + 16];       /* a field's text (lock held: one at a time) */
+
+/* field_of - the field of /dev/status's description `who`, or -1 */
+static int field_of(int who)
+{
+    int f;
+
+    for (f = 0; f < FIELDS; f++)
+        if (fields[f] == who + 1)
+            return f;
+    return -1;
+}
+
+/* field_put - text's first n bytes in field f, blanks after them */
+static void field_put(int f, unsigned n)
+{
+    while (n < CON_FIELD)
+        text[n++] = ' ';
+    console(OS_DATA, (rx_u16)(unsigned)text, CON_FIELD, CON_STATUS,
+            (rx_u16)(VIDEO_COLUMNS - f * CON_FIELD));
+}
 
 /* news - does a driver have news (its BX not 0)? */
 static int news(int service, int label)
@@ -60,11 +92,21 @@ static int mouse_put(rx_u16 data, rx_u16 at)
     return 0;
 }
 
-/* dev_open - a device opened (fs.h): 0, or ENXIO (no mouse), EBUSY (COM2
- * the log) */
-int dev_open(int unit)
+/* dev_open - a device opened, as description `who` (fs.h): 0, or ENXIO
+ * (no mouse), EBUSY (COM2 the log; no field left) */
+int dev_open(int unit, int who)
 {
     struct rx_kregs r;
+    int f;
+
+    if (unit == DEV_STATUS) {
+        for (f = 0; f < FIELDS; f++)
+            if (fields[f] == 0) {
+                fields[f] = who + 1;
+                return 0;
+            }
+        return EBUSY;
+    }
 
     if (unit == DEV_MOUSE && (call(OS_SERVICE(SERVICE_MOUSE), DRV_MOUSE_GET, 0, 0, 0, 0, 0, &r)
                               || !(r.di & MOUSE_PRESENT)))
@@ -130,14 +172,64 @@ int dev_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error)
     return -1;
 }
 
-/* dev_write - a device's write by process i from its segment (fs.h; lock
- * held, given up while the driver sends): the bytes; or -1 and *error; or
- * VFS_GONE */
-int dev_write(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error)
+/* dev_close - description `who` of a device closed at last: a field of the
+ * status line blank again, and free (fs.h) */
+void dev_close(int unit, int who)
+{
+    int f = unit == DEV_STATUS ? field_of(who) : -1;
+
+    if (f >= 0) {
+        field_put(f, 0);
+        fields[f] = 0;
+    }
+}
+
+/* status - /dev/status's write by process i: its field's text, the first
+ * CON_FIELD bytes, blanks after them; in a test build that asks, on the log
+ * too, as "\1NAME: TEXT\2", which the runner makes "status, NAME: TEXT"
+ * (tools/rxlib.py): all of the bytes */
+static int status(int i, int who, rx_u16 data, rx_u16 at, rx_u16 n)
+{
+    const rx_u8 RX_FAR *from = (const rx_u8 RX_FAR *)RX_MK_FP(data, at);
+    unsigned k, shown = n < CON_FIELD ? n : CON_FIELD;
+    int f = field_of(who);
+
+    for (k = 0; k < shown; k++)
+        text[k] = (char)(from[k] >= ' ' && from[k] < 0x7F ? from[k] : ' ');
+#if defined(TEST_DEMO) || defined(TEST_DAEMONS)
+    {
+        static char line[CON_FIELD + AR_NAME_SIZE + 4];
+        const char *name = proc_name(i);
+        unsigned m = 0;
+
+        line[m++] = STATUS_START;
+        for (k = 0; name[k] && k < AR_NAME_SIZE; k++)
+            line[m++] = name[k];
+        line[m++] = ':';
+        line[m++] = ' ';
+        for (k = 0; k < shown; k++)
+            line[m++] = text[k];
+        line[m++] = STATUS_END;
+        rx_log(line, m);
+    }
+#else
+    (void)i;
+#endif
+    if (f >= 0)
+        field_put(f, shown);
+    return n;
+}
+
+/* dev_write - a device's write by process i, as description `who`, from
+ * its segment (fs.h; lock held, given up while the driver sends): the
+ * bytes; or -1 and *error; or VFS_GONE */
+int dev_write(int i, int unit, int who, rx_u16 data, rx_u16 at, rx_u16 n, int *error)
 {
     struct rx_kregs r;
     int failed;
 
+    if (unit == DEV_STATUS)
+        return status(i, who, data, at, n);
     if (unit != DEV_COM2) {
         *error = EINVAL;
         return -1;
@@ -196,6 +288,7 @@ int dev_ready(int unit)
 {
     switch (unit) {
     case DEV_SPEAKER:
+    case DEV_STATUS:
         return POLLOUT;
     case DEV_JOYSTICK:
         return POLLIN;

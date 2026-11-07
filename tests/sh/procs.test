@@ -22,31 +22,31 @@ rx286, test build
 /a$ sleep 50 &
 [1] 10
 /a$ ps
-  PID  PPID  PGID   SID TTY  S COMMAND
-    2     1     2     2 tty1 S sh
-   10     2    10     2 tty1 S sleep
-   11     2    11     2 tty1 R ps
+  PID  PPID  PGID   SID TTY  S NI COMMAND
+    2     1     2     2 tty1 S 20 sh
+   10     2    10     2 tty1 S 20 sleep
+   11     2    11     2 tty1 R 20 ps
 /a$ kill 10
 [1] Done  sleep 50
 /a$ ps -e
-  PID  PPID  PGID   SID TTY  S COMMAND
-    1     0     1     1 -    S init
-    2     1     2     2 tty1 S sh
-    3     1     3     3 tty2 S init
-    4     1     4     4 tty3 S init
-    5     1     5     5 tty4 S init
-    6     1     6     6 tty5 S init
-    7     1     7     7 tty6 S init
-    8     1     8     8 tty7 S init
-    9     1     9     9 tty8 S init
-   13     2    13     2 tty1 R ps
+  PID  PPID  PGID   SID TTY  S NI COMMAND
+    1     0     1     1 -    S 20 init
+    2     1     2     2 tty1 S 20 sh
+    3     1     3     3 tty2 S 20 init
+    4     1     4     4 tty3 S 20 init
+    5     1     5     5 tty4 S 20 init
+    6     1     6     6 tty5 S 20 init
+    7     1     7     7 tty6 S 20 init
+    8     1     8     8 tty7 S 20 init
+    9     1     9     9 tty8 S 20 init
+   13     2    13     2 tty1 R 20 ps
 /a$ sleep 30 &
 [1] 14
 /a$ kill -s STOP 14; ps
-  PID  PPID  PGID   SID TTY  S COMMAND
-    2     1     2     2 tty1 S sh
-   14     2    14     2 tty1 T sleep
-   16     2    16     2 tty1 R ps
+  PID  PPID  PGID   SID TTY  S NI COMMAND
+    2     1     2     2 tty1 S 20 sh
+   14     2    14     2 tty1 T 20 sleep
+   16     2    16     2 tty1 R 20 ps
 [1] Stopped  sleep 30
 /a$ kill -CONT 14; kill -9 14
 [1] Done  sleep 30

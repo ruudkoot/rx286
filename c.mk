@@ -131,7 +131,7 @@ RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
     files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ) \
-    time.$(OBJ) ps.$(OBJ) devices.$(OBJ))
+    time.$(OBJ) ps.$(OBJ) devices.$(OBJ) daemon.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -200,8 +200,10 @@ Z_FOR_POLL := poll
 Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))
-# The shell and its first commands (P9), where init runs the shell
-Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls,$(c)=$(C_B)/bin/$(c).$(OBJ))
+# The shell and its first commands (P9), where init runs the shell, and
+# the daemons it starts (P12)
+Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls clock counter, \
+    $(c)=$(C_B)/bin/$(c).$(OBJ))
 Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED)) \
     $(if $(filter sh,$(PROGRAM)),$(Z_SHELL))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
@@ -209,7 +211,7 @@ Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_US
 # /c/bin (tools/install-programs). The shell's commands but its first
 # three are there, as D11 has it (P12): the image holds 128 KB
 BIN_COMMANDS := $(foreach c,cp mv rm mkdir rmdir wc lp more clear uptime date sleep env head \
-    kill ps spin keys mem beep play joy mouse term, \
+    kill ps spin keys mem beep play joy mouse term nice, \
     $(c)=$(C_B)/bin/$(c).$(OBJ)) crash=$(C_B)/bin/crash.$(OBJ)+$(C_B)/bin/crashes.$(OBJ) \
     fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ)
 DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ)) \

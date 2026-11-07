@@ -56,6 +56,7 @@ struct proc {
     rx_u8 served;                       /* entry i has its server thread (ROOT_SERVE) */
     rx_u8 report, stopsig;              /* R_*, and the signal that stopped it (P11) */
     rx_u8 asleep;                       /* its server thread waits in a call (P12's ps) */
+    rx_u8 nice;                         /* 0 to 2 NZERO - 1: its priority (P12) */
     pid_t pid, ppid;
     pid_t pgid, sid;                    /* its group and session (P11) */
     rx_u16 root, code;                  /* the root's numbers for it and its code */
@@ -201,6 +202,33 @@ void proc_nap(int i)
     procs[i].asleep = 1;
     sleep_on(P_SLOT(i, PK_NOTIFY), 1);
     procs[i].asleep = 0;
+}
+
+/* proc_priority - process i's thread's priority, by its nice value: 3 up to
+ * NZERO, 2 up to NZERO + 10, else 1, above the idle loop alone (server.h;
+ * P12) */
+int proc_priority(int i)
+{
+    return procs[i].nice <= NZERO ? PROC_PRIORITY : procs[i].nice <= NZERO + 10
+           ? PROC_PRIORITY - 1 : PROC_PRIORITY - 2;
+}
+
+/* proc_name - process i's file's name (server.h) */
+const char *proc_name(int i)
+{
+    return procs[i].name;
+}
+
+/* px_nice - PX_NICE: the nice value moved, 0 to 2 NZERO - 1 (no users: any
+ * process may lower it too), its thread restarted at its priority once its
+ * call is answered (sig_renice): the value - NZERO */
+static int px_nice(int i, int increment)
+{
+    int n = procs[i].nice + increment;
+
+    procs[i].nice = (rx_u8)(n < 0 ? 0 : n > 2 * NZERO - 1 ? 2 * NZERO - 1 : n);
+    sig_renice(i);
+    return procs[i].nice - NZERO;
 }
 
 /* proc_data_limit - process i's data segment's last offset (server.h) */
@@ -450,6 +478,7 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
 
     p->state = P_ALIVE;
     p->waiting = p->asleep = 0;
+    p->nice = parent >= 0 ? procs[parent].nice : NZERO;     /* a fork's, a spawn's */
     p->report = R_NONE;
     p->pid = next_pid++;
     p->ppid = ppid;
@@ -460,7 +489,7 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
     p->brk_max = brk_max;
     memcpy(p->name, name, AR_NAME_SIZE);
     signal_entry((unsigned)i);
-    thread_op(P_SLOT(i, PK_THREAD), THREAD_START, 0, 0, PROC_PRIORITY);
+    thread_op(P_SLOT(i, PK_THREAD), THREAD_START, 0, 0, (rx_u16)proc_priority(i));
 }
 
 /* spawn - a new process of a file of /z, argv and environ from a segment:
@@ -621,7 +650,7 @@ static int px_exec(int i, const char *path, rx_u16 argv, rx_u16 envp, int *error
     memcpy(procs[i].name, img.name, AR_NAME_SIZE);
     procs[i].brk = procs[i].brk_min = img.bytes;
     procs[i].brk_max = img.most;
-    thread_op(P_SLOT(i, PK_THREAD), THREAD_START, 0, 0, PROC_PRIORITY);
+    thread_op(P_SLOT(i, PK_THREAD), THREAD_START, 0, 0, (rx_u16)proc_priority(i));
     return NO_REPLY;
 }
 
@@ -899,6 +928,7 @@ static int px_ps(int i, rx_u16 k, rx_u16 at, int *error)
     b[PI_TTY] = (rx_u8)t;
     for (t = 0; t < AR_NAME_SIZE; t++)
         b[PI_COMMAND + t] = (rx_u8)procs[k].name[t];
+    b[PI_NICE] = procs[k].nice;
     return k + 1;
 }
 
@@ -997,6 +1027,9 @@ static int handle(int i, struct rx_kregs *r)
         break;
     case PX_PS:
         result = px_ps(i, r->bx, r->di, &error);
+        break;
+    case PX_NICE:
+        result = px_nice(i, (int)r->bx);
         break;
     case PX_SIGACTION:
     case PX_SIGPROCMASK:

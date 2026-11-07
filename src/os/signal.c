@@ -47,10 +47,11 @@ struct action {
 /* A process's signals: pending, blocked; sigsuspend's mask for after the
  * handler; its alarm's and its sleep's ends, in ticks (0: none); whether
  * its thread is to stop, whether the process is stopped, and its thread
- * held so; libc's trampoline; 287 or not */
+ * held so; libc's trampoline; 287 or not; whether its thread is to start
+ * again at another priority (nice, P12) */
 struct sigs {
     rx_u32 pending, blocked, restore, alarm_at, sleep_at;
-    rx_u8 restoring, suspending, stopped, held, fpu;
+    rx_u8 restoring, suspending, stopped, held, fpu, renice;
     rx_u16 tramp;
     struct action act[SIG_MAX + 1];
 };
@@ -89,12 +90,19 @@ static int thread_call(int i, int op, rx_u16 bx, rx_u16 si, rx_u16 di, struct rx
 {
     r->ax = (rx_u16)((KCALL_THREAD << 8) | op);
     r->bx = bx;
-    r->cx = PROC_PRIORITY;
+    r->cx = (rx_u16)proc_priority(i);
     r->dx = P_SLOT(i, PK_THREAD);
     r->si = si;
     r->di = di;
     r->bp = 0;
     return rx_kcall(r);
+}
+
+/* sig_renice - process i's thread to start again at its priority, at its
+ * server thread's next turn (server.h; P12) */
+void sig_renice(int i)
+{
+    sigs[i].renice = 1;
 }
 
 /* sig_start - process i's signals as it starts (server.h) */
@@ -122,7 +130,7 @@ void sig_start(int i, int from, int how)
     }
     s->suspending = 0;
     s->restoring = 0;
-    s->stopped = s->held = 0;
+    s->stopped = s->held = s->renice = 0;
     s->sleep_at = 0;
     if (how != SIG_FROM_FORK)
         s->tramp = 0;
@@ -422,6 +430,12 @@ void sig_step(int i)
             if (!deliver(i))
                 return;                 /* it ended, or stopped */
             continue;                   /* another handler may be due: nested */
+        }
+        if (s->renice && !s->stopped) { /* a nice value's priority: a stop, and a */
+            s->renice = 0;              /*    start at it (deliver, no signal due) */
+            if (thread_call(i, THREAD_SUSPEND, 0, PROC_NOTIFY(i), 0, &r) == 0)
+                s->suspending = 1;
+            return;
         }
         if (s->stopped) {               /* stopped, its thread not yet */
             thread_call(i, THREAD_INFO, 0, 0, 0, &r);

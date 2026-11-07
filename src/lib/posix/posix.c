@@ -58,6 +58,15 @@ ssize_t write(int fd, const void *bytes, size_t n)
     return px(PX_WRITE, (rx_u16)fd, (rx_u16)n, (rx_u16)(unsigned)bytes, 0, &r);
 }
 
+/* nice - PX_NICE: the nice value moved, its new value - NZERO; or -1 (and
+ * errno, which a nice value of -1 leaves alone) */
+int nice(int increment)
+{
+    struct rx_kregs r;
+
+    return px(PX_NICE, (rx_u16)increment, 0, 0, 0, &r);
+}
+
 /* getpid - PX_GETPID */
 pid_t getpid(void)
 {

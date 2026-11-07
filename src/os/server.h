@@ -183,13 +183,16 @@ void lock_give(void);
  * serves (a wait's test, once it has the lock again: the process may have
  * ended, and a new one taken its entry); proc_wake - its server thread
  * woken; proc_sleep - its server thread sleeps until woken; proc_nap - a
- * tick at most (P12); proc_data_limit - its data segment's last offset
- * (proc.c; lock held, but proc_sleep and proc_nap) */
+ * tick at most (P12); proc_priority - its thread's, by its nice value;
+ * proc_name - its file's name; proc_data_limit - its data segment's last
+ * offset (proc.c; lock held, but proc_sleep and proc_nap) */
 void proc_end(int i, int sig);
 int proc_still(int i);
 void proc_wake(int i);
 void proc_sleep(int i);
 void proc_nap(int i);
+int proc_priority(int i);
+const char *proc_name(int i);
 rx_u16 proc_data_limit(int i);
 /* Job control (proc.c; P11; lock held): proc_is_init - is entry i init?
  * proc_stopped, proc_continued - its stop or continue, for its parent's
@@ -217,7 +220,8 @@ int proc_group_in(pid_t pgid, pid_t sid);
  * would it take a signal, neither ignored nor blocked? sig_caught - has it
  * a handler for one? sig_nocldstop - SA_NOCLDSTOP for its SIGCHLD? sig_step
  * - its server thread's turn at the signals: a handler's
- * frame, a default action; sig_call - PX_SIGACTION to PX_NANOSLEEP: the
+ * frame, a default action; sig_renice - its thread started again at its
+ * priority, once stopped for it (nice, P12); sig_call - PX_SIGACTION to PX_NANOSLEEP: the
  * result, or SIG_GONE if the process ended as it waited; sig_timers - the
  * deadlines that have come (alarm, nanosleep), the timer armed again */
 #define SIG_FROM_SPAWN 0
@@ -235,6 +239,7 @@ int sig_takes(int i, int sig);
 int sig_caught(int i, int sig);
 int sig_nocldstop(int i);
 void sig_step(int i);
+void sig_renice(int i);
 int sig_call(int i, struct rx_kregs *r, int *error);
 void sig_timers(void);
 /* os_stack_ok, os_stack_used - thread n's part of the stacks (start.asm):

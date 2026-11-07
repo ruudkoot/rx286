@@ -15,7 +15,8 @@ Built in:  cd [DIR], pwd, exit [STATUS], export NAME=VALUE, unset NAME, set,
            false, help
 Files:     ls [-l], cat, head [-n N], wc, cp, mv, rm, mkdir, rmdir, more,
            lp (to the printer), echo
-Processes: ps [-e], kill [-SIGNAL] PID, sleep SECONDS, env [NAME=VALUE] [CMD]
+Processes: ps [-e], kill [-SIGNAL] PID, sleep SECONDS, env [NAME=VALUE] [CMD],
+           nice [-n N] CMD; the daemons clock and counter, again by name
 Machine:   date [+FORMAT], uptime, clear, keys, mem, fpu, crash KIND, spin
 Devices:   beep, play, joy, mouse, term (COM2)
 Lines:     CMD | CMD, CMD; CMD, && ||, & (in the background), < > >> 2>

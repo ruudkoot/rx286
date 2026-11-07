@@ -17,6 +17,8 @@ struct rx_ps {
     char state;
     signed char tty;
     char command[12];
+    unsigned char nice;                 /* 0 to 2 NZERO - 1 (P12) */
+    unsigned char pad;
 };
 
 /* rx_ps - the first process from table entry k on, into *p: the entry to

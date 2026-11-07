@@ -101,13 +101,15 @@ int vfs_tty_open(int unit);
 
 /* dev.c: /dev's devices that drivers serve (P12), their units; dev_open,
  * dev_read, dev_write, dev_ioctl - a process's calls on one, its buffer
- * checked (lock held, given up while one waits): as vfs_call's, with
- * VFS_GONE, VFS_INTR, VFS_RESTART; dev_ready - POLLIN, POLLOUT now;
+ * checked (lock held, given up while one waits), `who` its description: as
+ * vfs_call's, with VFS_GONE, VFS_INTR, VFS_RESTART; dev_close - its
+ * description closed at last; dev_ready - POLLIN, POLLOUT now;
  * dev_bytes - an ioctl request's argument's bytes, 0 for none */
-enum { DEV_SPEAKER, DEV_JOYSTICK, DEV_MOUSE, DEV_COM2, DEVS };
-int dev_open(int unit);
+enum { DEV_SPEAKER, DEV_JOYSTICK, DEV_MOUSE, DEV_COM2, DEV_STATUS, DEVS };
+int dev_open(int unit, int who);
+void dev_close(int unit, int who);
 int dev_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error);
-int dev_write(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error);
+int dev_write(int i, int unit, int who, rx_u16 data, rx_u16 at, rx_u16 n, int *error);
 int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *error);
 int dev_ready(int unit);
 rx_u16 dev_bytes(rx_u16 request);

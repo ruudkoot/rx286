@@ -1,0 +1,32 @@
+# The daemons (roadmap os-server.md P12): init starts the clock and the
+# counter in a TEST_DAEMONS build. Each makes itself a daemon - its first
+# process gone, the second a session's leader without a terminal, init's -
+# and writes to its field of the status line (/dev/status), which this
+# build puts on the log too ("status, NAME: TEXT"); the counter runs at the
+# lowest nice value. Killed, the clock is started again by its name; nice
+# runs a command lower. (The clock's state is checked nowhere: it may be
+# reading the time as ps looks. MAME's RTC keeps the host's time.)
+program: sh
+define: TEST_DAEMONS
+emulators: bochs mame
+install: C /BIN/PS z-ps.rx
+install: C /BIN/KILL z-kill.rx
+install: C /BIN/NICE z-nice.rx
+keys: {wait 100}ps -e\nkill 11\n{wait 20}clock\n{wait 100}ps -e\nnice -n 5 ps\n
+match: contains
+timeout: 60
+---
+/a$ ps -e
+status, clock:
+  PID  PPID  PGID   SID TTY  S NI COMMAND
+    1     0     1     1 -    S 20 init
+   11     1    11    11 -
+   13     1    13    13 -    R 39 counter
+/a$ kill 11
+/a$ clock
+/a$ ps -e
+status, counter: idle
+   17     1    17    17 -
+   13     1    13    13 -    R 39 counter
+/a$ nice -n 5 ps
+   19     2    19     2 tty1 R 25 ps

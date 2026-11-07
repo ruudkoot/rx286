@@ -130,7 +130,7 @@ What it rests on:
 | P9 | Pipes and the shell in C | done, the old shell's deletion moved to P12 (2026-11-06, branch `os-server`) |
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
-| P12 | The commands and the devices | in progress (steps 1-2 of 4, branch `os-server`) |
+| P12 | The commands and the devices | in progress (steps 1-3 of 4, branch `os-server`) |
 | P13 | POSIX threads | not started |
 | P14 | The old calls deleted; the demonstration | not started |
 | P15 | The documents, a review, the release | not started |
@@ -2539,6 +2539,21 @@ The largest change to the kernel since l4.md, in three steps, each with every su
     - **A mouse's packet in a key script was sent at once,** where a key waits for a reader.
       On MAME a program from C started after every packet had come. Packets now wait as keys
       do, for a program that polls the terminal.
+* **Step 3 done (2026-11-07): the daemons.**
+  - **The clock and the counter as processes** (`src/bin/clock.c`, `counter.c`, in `/z`):
+    each makes itself a daemon (`rx_daemon`: a fork, the parent gone, the child a session's
+    leader without a terminal), which init starts once the shells are, but in a test build
+    that does not ask (`TEST_DAEMONS`). The modules of the same names stay, for the tests of
+    the kernel that run them (`tests/threads`, `tests/root`) until step 4 and P14.
+  - **`/dev/status`:** a field of the status line for each description opened, from the
+    right, blank again at its last close; on the log as "status, NAME: TEXT" in the builds
+    that ask, as `TEST_DEMO`'s modules' were.
+  - **`nice`** (`PX_NICE`, and the command): the counter runs at the lowest nice value, priority
+    1, below every other process, as its module ran below the programs. The server stops the
+    thread and starts it at its new priority, through the signals' suspension.
+  - **`start` goes** with the old shell: a daemon killed is started again by its name.
+  - **The tests:** `tests/sh/daemons` (Bochs and MAME): both daemons as init's orphans, their
+    status, the clock killed and started again, `nice`. `ps` shows the nice value.
 
 ### P13. POSIX threads (M, about 1,200)
 

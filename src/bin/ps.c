@@ -3,7 +3,7 @@
  * ps: the processes (roadmap os-server.md P12, XCU ps), as the OS server
  * keeps them (rx_ps): those of the caller's terminal, or with -e (or -A)
  * all of them; each with its pid, its parent's, its group, its session,
- * its terminal, its state and its command (rx/ps.h).
+ * its terminal, its state, its nice value and its command (rx/ps.h).
  * ============================================================================ */
 
 #include <stdio.h>
@@ -39,7 +39,7 @@ int main(int argc, char **argv)
         return 1;
     }
     mine = tty_of(getpid());
-    printf("  PID  PPID  PGID   SID TTY  S COMMAND\n");
+    printf("  PID  PPID  PGID   SID TTY  S NI COMMAND\n");
     while ((k = rx_ps(k, &p)) > 0) {
         if (!all && (p.tty != mine || mine < 0))
             continue;
@@ -49,8 +49,8 @@ int main(int argc, char **argv)
             snprintf(tty, sizeof tty, "tty%d", p.tty + 1);
         memcpy(command, p.command, sizeof p.command);
         command[sizeof p.command] = 0;
-        printf("%5d %5d %5d %5d %-4s %c %s\n", p.pid, p.ppid, p.pgid, p.sid, tty, p.state,
-               command);
+        printf("%5d %5d %5d %5d %-4s %c %2u %s\n", p.pid, p.ppid, p.pgid, p.sid, tty, p.state,
+               p.nice, command);
     }
     return 0;
 }

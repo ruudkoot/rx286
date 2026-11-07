@@ -48,7 +48,8 @@ no transfer segment.
 | `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`) |
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is |
 | `PX_TIME` | | the seconds since 1970-01-01 00:00:00 in SI:DI: the real-time clock's (the RTC driver's), taken as UTC; `EIO` if it does not answer (P12) |
-| `PX_PS` | BX a table entry, DI room for `PI_BYTES` | the first process from that entry on, as `struct rx_ps` (`rx/ps.h`): its pid, its parent's, its group and session (words `PI_PID`, `PI_PPID`, `PI_PGID`, `PI_SID`), its state (byte `PI_STATE`: `R` running or ready, `S` waiting in a call, `T` stopped, `Z` a zombie), its session's terminal (byte `PI_TTY`: 0 to 7, or FFh) and its file's name (`PI_COMMAND`, 12 bytes); the entry after it, or `ESRCH` past the last. rx286's own, for `ps` (P12) |
+| `PX_NICE` | BX an increment | the nice value moved by it, kept within 0 to 2 `NZERO` - 1 (any process may lower it as well as raise it: there are no users); returns it - `NZERO`. The thread's priority follows it: 3 up to `NZERO` (20), 2 up to `NZERO` + 10, else 1, above the idle loop alone. The server stops the thread once the call is answered and starts it again at that priority (`sig_renice`); a fork's and a spawn's child keep the value, and an exec (P12) |
+| `PX_PS` | BX a table entry, DI room for `PI_BYTES` | the first process from that entry on, as `struct rx_ps` (`rx/ps.h`): its pid, its parent's, its group and session (words `PI_PID`, `PI_PPID`, `PI_PGID`, `PI_SID`), its state (byte `PI_STATE`: `R` running or ready, `S` waiting in a call, `T` stopped, `Z` a zombie), its session's terminal (byte `PI_TTY`: 0 to 7, or FFh), its file's name (`PI_COMMAND`, 12 bytes) and its nice value (byte `PI_NICE`); the entry after it, or `ESRCH` past the last. rx286's own, for `ps` (P12) |
 
 The files' calls (roadmap os-server.md P7) are below. `PX_CALLS` counts
 them all. A path has `PX_PATH_MAX` (80) bytes at most, its zero too, so
@@ -236,6 +237,7 @@ A wait for one gives up the server's lock.
 | `/dev/speaker` | `ioctl` `RXIO_TONE`: a tone (`struct rx_tone`: `TONE_HZ`, `TONE_TICKS`; `TONE_BYTES`) of 19 to 20,000 Hz, or a rest (0), for up to 500 ticks; the call returns once it is over (`EINVAL` otherwise, as the sound driver says). A read or write is `EINVAL` |
 | `/dev/joystick` | a read of `JS_BYTES` or more: `struct rx_joystick`, the buttons down (`JS_BUTTONS`), then four axes in microseconds or `JOY_ABSENT` (`JS_AXES`), as the sound driver times them with its own `DRV_JOYSTICK`, which writes them at the offset given |
 | `/dev/mouse` | an open without a mouse that said who it is is `ENXIO`. A read of `MS_BYTES` or more waits until the mouse moves or a button changes, then gives `struct rx_mouse` (`MS_BUTTONS`, `MS_X` 0-639, `MS_Y` 0-199, as DOS's mouse driver keeps them in text mode); `ioctl` `RXIO_MOUSE` gives it at once |
+| `/dev/status` | a write: its first 20 bytes in a field of the status line, on every page, blanks after them; each description opened has a field of its own, from the right (`EBUSY` once all four are taken), blank again at its last close. In a `TEST_DEMO` or `TEST_DAEMONS` build the text goes to the log too, as "\1NAME: TEXT\2", which the runner makes "status, NAME: TEXT" |
 | `/dev/com2` | the modem's line: a read waits for bytes and gives what came (up to `SERIAL_MAX`), a write sends; an open is `EBUSY` where COM2 carries the kernel's log (debug and test builds, but those built for the modem's tests) |
 
 The mouse driver and the serial driver do not signal their news: a read
@@ -385,9 +387,17 @@ session's, as descriptors 0 to 2, and runs the shell. On the first
 terminal it does at once; on the others it says "rx286 terminal N: press
 Enter for a shell" and waits for Enter, so that a shell's memory is taken
 only where one is wanted (128 KB in all without extended memory). init
-starts a terminal's shell again whenever it ends. In the other images
-today's shell is still a program the root builds, beside it, until P12. In `TEST_POSIX_*` builds init starts a test of
-`tests/posix` instead (`tests/posix/proc.test`).
+starts a terminal's shell again whenever it ends. Once the shells are
+started it starts the daemons, `/z/clock` and `/z/counter` (P12; not in a
+test build, unless it asks, `TEST_DAEMONS`, as they would change every
+test's pids and timing). Each makes itself a daemon (`rx_daemon`,
+`rx/daemon.h`): its first process ends at once, the second leads a
+session of its own without a terminal, in `/`, its descriptors 0 to 2
+`/dev/null`, and init has it as an orphan. Each writes to its field of the
+status line through `/dev/status`; killed, it is started again by its name
+(`clock`), from any shell. In the other images today's shell is still a
+program the root builds, beside it, until P12. In `TEST_POSIX_*` builds
+init starts a test of `tests/posix` instead (`tests/posix/proc.test`).
 
 ## The shell
 
@@ -439,7 +449,9 @@ drive C has those three alone:
 | `joy` | one reading of `/dev/joystick`: "buttons: none; axes: absent absent absent absent" |
 | `mouse` | where the mouse is, then again whenever it moves or a button changes ("x 320, y 100 (column 40, row 12), buttons: none"), until Esc or both buttons; it waits in `poll` for the terminal and the mouse |
 | `term` | a terminal on COM2: what comes is shown, what is typed is sent (Enter as CR), raw, until Esc alone; it waits in `poll`. Where COM2 is the log it says so |
-| `ps` | the processes of the caller's terminal, or `-e` all: pid, parent, group, session, terminal, state, name (`PX_PS`) |
+| `ps` | the processes of the caller's terminal, or `-e` all: pid, parent, group, session, terminal, state, nice value, name (`PX_PS`) |
+| `nice` | a command run with its nice value moved by `-n N`, or 10 |
+| `clock`, `counter` | the daemons, in `/z`: the time of day in a field of the status line, five looks a second; and, at the lowest nice value, a count of what the machine has to spare ("idle 741k/s"), each second |
 | `kill` | `SIGTERM`, or `-s NAME`, `-NAME`, `-NUMBER`, to each pid (below -1: a group); `-l` the signals' names, `-l STATUS` the one that ended a process |
 | `sleep` | a wait of so many seconds |
 | `env` | the environment; with a command, that command run in it, changed by the `NAME=VALUE` before it, emptied first with `-i` |

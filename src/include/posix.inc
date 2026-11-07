@@ -80,7 +80,10 @@ PX_IOCTL            equ 46      ; BX a descriptor, CX a request (RXIO_*), SI its
                                 ;    a device's request (dev.c) -> 0; or -1, ENOTTY
 PX_POLL             equ 47      ; SI the pollfds (PF_*), CX how many, BX the timeout in ms
                                 ;    (-1: none) -> those with news, their revents set
-PX_CALLS            equ 48
+PX_NICE             equ 48      ; BX an increment: the process's nice value moved by it, 0 to
+                                ;    2 NZERO - 1 -> that value - NZERO
+PX_CALLS            equ 49
+NZERO               equ 20      ; nice's middle: priority 3 to it, 2 to NZERO + 10, else 1
 
 ; POSIX's errno values, rx286's numbers (errno.h)
 EPERM               equ 1
@@ -215,7 +218,8 @@ PI_STATE            equ 8       ; byte: 'R' running or ready, 'S' waiting in a c
                                 ;    stopped, 'Z' a zombie
 PI_TTY              equ 9       ; byte: its session's terminal, 0 to 7, or FFh: none
 PI_COMMAND          equ 10      ; its file's name, zero-padded (AR_NAME_SIZE)
-PI_BYTES            equ 22
+PI_NICE             equ 22      ; byte: its nice value, 0 to 2 NZERO - 1
+PI_BYTES            equ 24
 
 ; The devices of /dev (P12; dev.c, sys/ioctl.h, poll.h)
 RXIO_TONE           equ 1       ; /dev/speaker: a tone, TONE_BYTES at SI

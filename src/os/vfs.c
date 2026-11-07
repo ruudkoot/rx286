@@ -99,9 +99,10 @@ static int pipes_ready;
 static struct files files_of[PROCS];
 static struct vol vols[DRIVES];
 static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
-static const char *const dev_names[] = { "null", "tty", "lpt1", "lpt2", "speaker", "joystick",
-                                         "mouse", "com2" };   /* (from "speaker": dev.c's, P12) */
-#define DEV_NAMES 8                     /* then "tty1" to the last terminal's (P11) */
+static const char *const dev_names[] = {     /* from "speaker" on, dev.c's (P12) */
+    "null", "tty", "lpt1", "lpt2", "speaker", "joystick", "mouse", "com2", "status"
+};
+#define DEV_NAMES 9                     /* then "tty1" to the last terminal's (P11) */
 #define DEV_FIRST 4                     /* the first of dev.c's (DEV_SPEAKER) */
 #define TTY_OWN 0xFF                    /* /dev/tty's unit: the opener's terminal */
 static const char punctuation[] = "!#$%&'()-@^_`{}~";
@@ -539,6 +540,8 @@ static rx_u16 ofd_drop(int k)
         if ((ofds[k].kind == K_PIPE_R || ofds[k].kind == K_PIPE_W) && !p->readers
                 && !p->writers)
             p->used = 0;
+        if (ofds[k].kind == K_DEV)
+            dev_close(ofds[k].unit, k);
         ofds[k].kind = K_FREE;
     }
     return error;
@@ -897,7 +900,7 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
     case K_PIPE_W:
         return pipe_write(i, o, data, at, n);
     case K_DEV:
-        return dev_write(i, o->unit, data, at, n, error);
+        return dev_write(i, o->unit, (int)(o - ofds), data, at, n, error);
     }
     *error = EBADF;
     return -1;
@@ -1000,13 +1003,17 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
         *error = n.kind == K_ZFILE ? EROFS : EACCES;
         return -1;
     }
-    if (n.kind == K_DEV && (*error = dev_open(n.unit)) != 0)
-        return -1;                      /* no mouse; COM2 the log (P12) */
     if ((k = ofd_new(n.kind)) < 0) {
         *error = ENFILE;
         return -1;
     }
+    if (n.kind == K_DEV && (*error = dev_open(n.unit, k)) != 0) {
+        ofds[k].kind = K_FREE;          /* no mouse; COM2 the log; no field (P12) */
+        return -1;
+    }
     if ((fd = fd_new(i, k, 0)) < 0) {
+        if (n.kind == K_DEV)
+            dev_close(n.unit, k);
         ofds[k].kind = K_FREE;
         *error = EMFILE;
         return -1;

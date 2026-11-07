@@ -10,7 +10,11 @@
  * terminal, which so becomes its session's, as descriptors 0 to 2, and
  * runs the shell; again whenever it ends. On the terminals but the first
  * the child waits for Enter first, so that a shell's memory is taken only
- * where one is wanted (a machine without extended memory has 128 KB).
+ * where one is wanted (a machine without extended memory has 128 KB). Once
+ * the shells are started it starts the daemons, the clock and the counter
+ * (P12), which leave it at once and run on as its orphans: not in a test
+ * build, unless it asks (TEST_DAEMONS), since they would change every
+ * test's pids and timing.
  * ============================================================================ */
 
 #include "fcntl.h"
@@ -64,16 +68,30 @@ static pid_t shell(int n)
     }
     return pid;
 }
+
+#if !defined(TEST) || defined(TEST_DAEMONS)
+/* daemon_start - a daemon of /z started (it makes itself one: rx_daemon) */
+static void daemon_start(char *path)
+{
+    char *argv[2];
+    pid_t pid;
+
+    argv[0] = path;
+    argv[1] = 0;
+    posix_spawn(&pid, path, 0, 0, argv, environ);
+}
+#define WITH_DAEMONS
+#endif
 #endif
 
 /* main - wait, for ever; in a build with the shell in C, a shell on each
- * terminal, started again whenever it ends */
+ * terminal, started again whenever it ends, and the daemons */
 int main(void)
 {
     int status;
 #ifdef INIT_SHELL
     pid_t got;
-    int n, k;
+    int n, k, daemons = 0;
 
     for (n = 0; n < TERMINALS && there(n); n++)
         shells[n] = -1;
@@ -81,6 +99,12 @@ int main(void)
         for (k = 0; k < n; k++)
             if (shells[k] < 0)
                 shells[k] = shell(k);
+        if (!daemons++) {
+#ifdef WITH_DAEMONS
+            daemon_start("/z/clock");
+            daemon_start("/z/counter");
+#endif
+        }
         got = wait(&status);
         for (k = 0; k < n; k++)
             if (shells[k] == got || (got < 0 && shells[k] < 0))

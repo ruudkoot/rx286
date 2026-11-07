@@ -29,6 +29,7 @@ int dup(int fd);
 int dup2(int fd, int to);
 int unlink(const char *path);
 int pause(void);
+int nice(int increment);
 int setpgid(pid_t pid, pid_t pgid);
 pid_t getpgrp(void);
 pid_t setsid(void);
