@@ -53,24 +53,24 @@ no transfer segment (*docs/syscalls.md*).
 | `PX_PS` | BX a table entry, DI room for `PI_BYTES` | the first process from that entry on, as `struct rx_ps` (`rx/ps.h`): its pid, its parent's, its group and session (words `PI_PID`, `PI_PPID`, `PI_PGID`, `PI_SID`), its state (byte `PI_STATE`: `R` running or ready, `S` waiting in a call, `T` stopped, `Z` a zombie), its session's terminal (byte `PI_TTY`: 0 to 7, or FFh), its file's name (`PI_COMMAND`, 12 bytes) and its nice value (byte `PI_NICE`); the entry after it, or `ESRCH` past the last. rx286's own, for `ps` (P12) |
 
 The files' calls, `read` and `write` among them (roadmap os-server.md P7),
-are below; *docs/posix.md* lists every call. `PX_CALLS` counts them all. A path has `PX_PATH_MAX` (80) bytes at most, its zero too, so
-that every path DOS reaches, its 64 characters, fits behind its drive's
-`/b`; `limits.h` calls it `PATH_MAX`. A program's
-names a file of `/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and
-`environ` together, their pointers too, have `PX_ARG_MAX` bytes at most
-(`E2BIG`).
+are below; *docs/posix.md* lists every call. `PX_CALLS` is one past the
+last call's number. A path has `PX_PATH_MAX` (80) bytes at most, its zero
+too, so that every path DOS reaches, its 64 characters, fits behind its
+drive's `/b`; `limits.h` calls it `PATH_MAX`. A program's names a file of
+`/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and `environ`
+together, their pointers too, have `PX_ARG_MAX` bytes at most (`E2BIG`).
 
 The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
 `EINTR`, `EIO`, `E2BIG`, `ENOEXEC`, `EBADF`, `ECHILD`, `EAGAIN` (the table
-is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`, `EOVERFLOW` (`gmtime` of a
-time before 1970). The signals: `SIGHUP`,
-`SIGINT`, `SIGQUIT`, `SIGILL` (#UD), `SIGTRAP` (#DB, #BP), `SIGABRT`,
-`SIGFPE` (#DE, a 287 error), `SIGKILL`, `SIGUSR1`, `SIGSEGV` (any other
-fault), `SIGUSR2`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGCHLD`, `SIGCONT`,
-`SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`, up to `SIG_MAX`. The files,
-the terminals and the threads add more errors (*docs/posix.md* has them all). A wait status
-is the exit's code in bits 8-15, or the signal in bits 0-6; a stop is 7Fh
-and the signal in bits 8-15, a continue FFFFh (`sys/wait.h`).
+is full), `ENOMEM`, `EFAULT`, `EINVAL`, `ENOSYS`, `EOVERFLOW` (`gmtime` of
+a time before 1970). The signals: `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGILL`
+(#UD), `SIGTRAP` (#DB, #BP), `SIGABRT`, `SIGFPE` (#DE, a 287 error),
+`SIGKILL`, `SIGUSR1`, `SIGSEGV` (any other fault), `SIGUSR2`, `SIGPIPE`,
+`SIGALRM`, `SIGTERM`, `SIGCHLD`, `SIGCONT`, `SIGSTOP`, `SIGTSTP`,
+`SIGTTIN`, `SIGTTOU`, up to `SIG_MAX`. The files, the terminals and the
+threads add more errors (*docs/posix.md* has them all). A wait status is
+the exit's code in bits 8-15, or the signal in bits 0-6; a stop is 7Fh and
+the signal in bits 8-15, a continue FFFFh (`sys/wait.h`).
 
 ## Signals
 
@@ -81,10 +81,10 @@ A process's signals are the server's (roadmap os-server.md P10, D7 A;
 Every default action ends the process but `SIGCHLD`'s, which ignores the
 signal, `SIGCONT`'s, which continues it, and the stop signals' (`SIGSTOP`,
 `SIGTSTP`, `SIGTTIN`, `SIGTTOU`), which stop it (*docs/terminals.md*);
-`SIGKILL` and `SIGSTOP` are never caught, ignored or blocked. init takes
-no default action. A fork keeps the
-actions and the mask; an exec puts back the default action of each signal
-caught; a spawn keeps the mask and what is ignored.
+`SIGKILL` and `SIGSTOP` are never caught, ignored or blocked. init takes no
+default action. A fork keeps the actions and the mask; an exec puts back
+the default action of each signal caught; a spawn keeps the mask and what
+is ignored.
 
 | Call | Arguments | What the server does |
 |---|---|---|
@@ -98,32 +98,32 @@ caught; a spawn keeps the mask and what is ignored.
 
 A signal sent (`kill`, a fault, a pipe without a reader, Ctrl+Break, a
 child's end, an alarm) is dropped if ignored; its default action ends the
-process at once unless it is blocked; else it is pending, and the
-process's server thread is woken. That thread looks at the signals at
-every turn: after each call, and whenever its notification fires, which is
-bound to it (`THREAD_BIND`) so that it wakes as it waits for a call. For a
-signal pending and not blocked with a handler, it marks the process's
-thread to stop (`THREAD_SUSPEND`). The mark takes effect on the thread's
-way back to ring 3, after the reply to any call it is in. Then the server
-thread reads its frame (`THREAD_FRAME`), and writes the signal's frame
-below its SP (`SF_*`, `src/include/posix.inc`): the signal, the handler,
-the mask for after it, and the registers ES, DS, `PUSHA`'s eight words,
-IP, CS and FLAGS. Its SS must be the process's data (0Fh, which crt0
-takes) or its stack's copy (17h, a forked child's), with room below SP
-above the guard word, or `SIGSEGV` ends it. Then the thread starts again at
+process at once unless it is blocked; else it is pending, and the process's
+server thread is woken. That thread looks at the signals at every turn:
+after each call, and whenever its notification fires, which is bound to it
+(`THREAD_BIND`) so that it wakes as it waits for a call. For a signal
+pending and not blocked with a handler, it marks the process's thread to
+stop (`THREAD_SUSPEND`). The mark takes effect on the thread's way back to
+ring 3, after the reply to any call it is in. Then the server thread reads
+its frame (`THREAD_FRAME`), and writes the signal's frame below its SP
+(`SF_*`, `src/include/posix.inc`): the signal, the handler, the mask for
+after it, and the registers ES, DS, `PUSHA`'s eight words, IP, CS and
+FLAGS. Its SS must be the process's data (0Fh, which crt0 takes) or its
+stack's copy (17h, a forked child's), with room below SP above the guard
+word (*docs/c.md*), or `SIGSEGV` ends it. Then the thread starts again at
 libc's trampoline (`src/lib/posix/sigtramp.asm`), with DS and ES the data
 and DF clear, and the signal blocked while its handler runs (`SA_NODEFER`
 aside). The trampoline calls the handler with the signal, 0 and the frame
 (where `SA_SIGINFO`'s arguments would be), gives the mask back
-(`PX_SIGRETURN`; a signal pending runs its handler first), and returns
-with the frame's `POPA` and `IRET`. At ring 3 `IRET` takes back IP, CS and
-FLAGS but not IOPL; a frame the handler spoilt faults there, and ends the
-process (`SIGSEGV`). NT set in the frame stays set, and does nothing until
-the program's own `IRET`, a task's return through a back link of 0, which
-faults (#TS, `SIGSEGV`): the kernel clears NT whenever it writes a frame.
-A signal due as a handler runs nests, on its stack. The 287 is saved
-around a handler (`SF_287`: `FSAVE`, which leaves it as `FNINIT` does,
-then `FRSTOR`) when the process's executable says it uses it (`RXF_287`,
+(`PX_SIGRETURN`; a signal pending runs its handler first), and returns with
+the frame's `POPA` and `IRET`. At ring 3 `IRET` takes back IP, CS and FLAGS
+but not IOPL; a frame the handler spoilt faults there, and ends the process
+(`SIGSEGV`). NT set in the frame stays set, and does nothing until the
+program's own `IRET`, a task's return through a back link of 0, which
+faults (#TS, `SIGSEGV`): the kernel clears NT whenever it writes a frame. A
+signal due as a handler runs nests, on its stack. The 287 is saved around a
+handler (`SF_287`: `FSAVE`, which leaves it as `FNINIT` does, then
+`FRSTOR`) when the process's executable says it uses it (`RXF_287`,
 `tools/mkexe --287`; a fork's child inherits it); else a handler that uses
 the 287 leaves it as it left it.
 
@@ -165,13 +165,13 @@ code, an entry outside the code, code and data past the file's end, a
 stack too small for `main`'s three words, data past a segment, or more data
 than its own most. A directory is `EACCES`.
 
-init's environment is `PATH=/z:/c/bin`, which its children inherit; libc's
-`execvp` and `posix_spawnp` look for a name without a slash along it, or
-along `/z:/c/bin` without one (`src/lib/posix/path.c`, with `getenv`; XSH
-exec leaves that to the system). `make run` puts the programs a build made
-in C's `/BIN` (`tools/install-programs`), and run-test's `install:` lines
-put them on a run's drive. A process is named by its file's last name, a
-volume's in lower case ("ps").
+init's environment is `PATH=/z:/c/bin` and `HOME=/a`, which its children
+inherit; libc's `execvp` and `posix_spawnp` look for a name without a slash
+along it, or along `/z:/c/bin` without one (`src/lib/posix/path.c`, with
+`getenv`; XSH exec leaves that to the system). `make run` puts the programs
+a build made in C's `/BIN` (`tools/install-programs`), and run-test's
+`install:` lines put them on a run's drive. A process is named by its
+file's last name, a volume's in lower case ("ps").
 
 An exec of the process's own file (`env` running `env`) finds its code in
 the table, still the old image's: the server tells the root to keep it
@@ -184,40 +184,44 @@ The tree is one (D13 C, `src/os/vfs.c`): `/` is the server's own and
 read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
 programs and `/dev` the devices (`null`; `tty`, the caller's terminal;
 `tty1` to `tty8`, the terminals, as many as the EGA holds pages; `lpt1`,
-`lpt2`; `speaker`, `joystick`, `mouse`, `com2`: *The devices* below). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A
-path is made absolute against the process's current directory,
-which starts at its parent's (`/` for init), and its "." and ".." taken out
-before it is followed; within a volume a name is 8.3, matched in any case
-and kept upper case. The current directory keeps each name in its own
-case, as the server or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A
-path that ends with "/" names a directory: a file's is `ENOTDIR`, a new
-name's `O_CREAT` `EISDIR` (XBD 4.13). A create is refused before anything
-is made: with no descriptor (`EMFILE`) or description (`ENFILE`) left, or
-`O_DIRECTORY` asked for; and a call's FAT and directory sectors are
-written at its end whatever its result, an `open` and a growing `write`
-before they answer, which undo what they did if that fails. `stat` of an
-open file gives its size as its descriptions have it (P15). A
-process has `OPEN_MAX` (20) descriptors, each naming
-an open file description of the server's (32 in all): its kind, its flags,
-its offset, shared by `dup` and `fork`; `exec` keeps them but those marked
+`lpt2`; `speaker`, `joystick`, `mouse`, `com2`, `status`: *The devices*
+below). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A path
+is made absolute against the process's current directory, which starts at
+its parent's (`/` for init), and its "." and ".." taken out before it is
+followed; within a volume a name is 8.3, matched in any case and kept upper
+case. The current directory keeps each name in its own case, as the server
+or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A path that ends with "/"
+names a directory: a file's is `ENOTDIR`, a new name's `O_CREAT` `EISDIR`
+(XBD 4.13). A path has 12 names at most once its ".." are taken out
+(`ENAMETOOLONG`).
+
+A process has `OPEN_MAX` (20) descriptors, each naming an open file
+description of the server's (32 in all): its kind, its flags, its offset,
+shared by `dup` and `fork`; `exec` keeps them but those marked
 `FD_CLOEXEC`. Every description of one file has its first cluster and
 size, as the last change through any of them left them: the file's entry
-is written at each one's last close (P15). init's descriptors 0 to 2 are `/dev/tty`.
+is written at each one's last close (P15). A create is refused before
+anything is made: with no descriptor (`EMFILE`) or description
+(`ENFILE`) left, or `O_DIRECTORY` asked for; and a call's FAT and
+directory sectors are written at its end whatever its result, an `open`
+and a growing `write` before they answer, which undo what they did if that
+fails. `stat` of an open file gives its size as its descriptions have it
+(P15). init's descriptors 0 to 2 are `/dev/tty`.
 
 | Call | Arguments | What the server does |
 |---|---|---|
 | `PX_OPEN` | SI the path, BX the flags | a descriptor, the lowest free: `O_RDONLY`, `O_WRONLY` or `O_RDWR` (`O_ACCMODE`); `O_CREAT` makes a volume's file, `O_EXCL` refuses one there (`EEXIST`), `O_TRUNC` empties it, `O_APPEND` writes at its end, `O_DIRECTORY` refuses a file (`ENOTDIR`), `O_CLOEXEC` marks it |
 | `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written |
 | `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many (32,767 at most, `SSIZE_MAX`: more moves that many) | by the kind: a volume's file, through the cache (a write past its end leaves a hole of zeros; one past what the volume could hold is `EFBIG`; one that fails leaves the file as it was); a terminal (*docs/terminals.md*; a read 0 where the processes have no keys); `/dev/null`; a printer; a device (*The devices* below); a pipe; a file of `/z`, read only |
-| `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset's bits 0-14, its bits 15-30 in SI (so that no result is negative); `ESPIPE` for a device |
+| `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset's bits 0-14, its bits 15-30 in SI (so that no result is negative); `ESPIPE` for a pipe, a terminal or a device |
 | `PX_DUP`, `PX_DUP2` | BX the descriptor (CX the one it becomes) | another descriptor of the same description |
 | `PX_FCNTL` | BX, CX the command, SI its argument | `F_DUPFD`, `F_GETFD` and `F_SETFD` (`FD_CLOEXEC`), `F_GETFL` |
-| `PX_STAT`, `PX_FSTAT` | SI the path or BX the descriptor, DI `ST_BYTES` of room | `ST_MODE` (`S_IFREG`, `S_IFDIR` or `S_IFCHR` within `S_IFMT`, and 0644, 0444 for a read-only file, 0755 for a directory), `ST_INO` (the entry's place: its directory's cluster and its index), `ST_NLINK` (1), `ST_SIZE`, `ST_MTIME` (DOS's time stamp, as seconds since 1970), `ST_DEV` (the drive) |
+| `PX_STAT`, `PX_FSTAT` | SI the path or BX the descriptor, DI `ST_BYTES` of room | `ST_MODE` (`S_IFREG`, `S_IFDIR` or `S_IFCHR` within `S_IFMT`, and 0644, 0444 for a read-only file, 0755 for a directory; a file of `/z` 0555, a device, a terminal, a printer and `/dev/null` `S_IFCHR` 0666, a pipe `S_IFIFO` 0600), `ST_INO` (a dword: the entry's place, its sector on the disk times 16 and its slot there; a volume's root 1; the server's own names in `getdents`' order), `ST_NLINK` (1), `ST_SIZE`, `ST_MTIME` (DOS's time stamp, as seconds since 1970), `ST_DEV` (the drive; `ST_DEV_SERVER` for `/`, `/dev`, `/z` and the pipes) |
 | `PX_UNLINK`, `PX_RMDIR` | SI the path | a file's, or an empty directory's (`ENOTEMPTY`), entry and clusters gone; `EBUSY` while open, or while it is a process's current directory; `rmdir` of "." or ".." is `EINVAL` |
 | `PX_MKDIR` | SI the path | a cluster with "." and "..", and its entry |
 | `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): the entry made anew in the new directory, the old deleted, a file of the new name replaced, a directory's ".." its new parent, and every current directory in it moved with it; a directory into itself or one inside it, or "." or "..", is `EINVAL`; over a current directory, `EBUSY` |
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short) |
-| `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end. libc's `opendir` and `readdir` read through it (`dirent.h`) |
+| `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, a dword as `ST_INO`, and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end. libc's `opendir` and `readdir` read through it (`dirent.h`) |
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk |
 | `PX_PIPE` | | a pipe (P9): its read end's descriptor, and its write end's in SI |
 | `PX_IOCTL` | BX the descriptor, CX a request (`RXIO_*`), SI its argument | a device's request (*The devices* below); `ENOTTY` for any other descriptor or request, `EFAULT` for an argument past the data (P12) |
@@ -296,18 +300,18 @@ the process's entry's; its waits are its own.
 libc gives each thread a stack of `RX_STACK` (2 KB) bytes, malloc'd and
 aligned to its size, with its own data at the base (`rx/tls.h`): its
 `errno` (`errno.h` makes `errno` the calling thread's), its endpoint, which
-every call goes through, its state, its keys' values; SP finds it. The
-main thread's is a static, `rx_main_tls`, below which its stack lies. A
-thread starts at `rx_thread_entry` (`thread.asm`), which runs its routine
-and `pthread_exit`. A mutex is a word, 0 free, 1 taken, 2 taken and
-perhaps waited for, taken with `XCHG` at ring 3 (`LOCK` would fault on a
-286): a contended one waits in `PX_FUTEX`; neither lock nor trylock needs
-the compare-and-exchange a 286 lacks. A condition is a word each signal
+every call goes through, its state, its keys' values; SP finds it. The main
+thread's is a static, `rx_main_tls`, below which its stack lies. A thread
+starts at `rx_thread_entry` (`thread.asm`), which runs its routine and
+`pthread_exit`. A mutex is a word, 0 free, 1 taken, 2 taken and perhaps
+waited for, taken with `XCHG` at ring 3 (`LOCK` would fault on a 286): a
+contended one waits in `PX_FUTEX`; neither lock nor trylock needs the
+compare-and-exchange a 286 lacks. A condition is a word each signal
 increments in one instruction (`rx_inc`): a waiter waits while it holds
 what it read before it gave the mutex up. `pthread_join` waits for
-`THREAD_DONE`, then frees the stack (a join of itself is `EDEADLK`); a detached thread's is freed by the
-next `pthread_create`. The main thread's `pthread_exit` waits for the
-others, then ends the process.
+`THREAD_DONE`, then frees the stack (a join of itself is `EDEADLK`); a
+detached thread's is freed by the next `pthread_create`. The main thread's
+`pthread_exit` waits for the others, then ends the process.
 
 A signal goes to the main thread; `pthread_sigmask` is `sigprocmask`, and
 `sigsuspend` from another thread is `ENOSYS`. A stop stops every thread,
@@ -344,43 +348,43 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 
 ## The table
 
-The server has room for `PROCS` (15) processes and threads at once; a
-fork, a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
-(`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and
-the walks over the processes pass over it, and its signal state is its
+The server has room for `PROCS` (15) processes and threads at once; a fork,
+a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
+(`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and the
+walks over the processes pass over it, and its signal state is its
 process's. A new process's pid is the next after the last given, from 2
 again after 32,767, passing over any a process, a zombie, a group or a
-session still has (P15). Entry i has its slots of the server's, `PROC_SLOT0`
-(166) + 6i on: the process's endpoint, thread, space and data segment (as the
-root gives them), the server's thread for it and that thread's
-notification. The thread, thread `PROC_N0` + i of the server's (`ROOT_SERVE`),
-serves process i alone and sleeps while the entry is empty. One lock guards
-the table, taken with XCHG (`rx_xchg`), and given up before a wait for a
-child and before the console (but for `/dev/status`'s short writes to the
-status line, and its last close, which keep it). A wait that gives it up asks, once it has
-it again, whether its process is still the one whose call it serves: the
-process may have ended and a new one taken its entry meanwhile
-(`proc_still`).
+session still has (P15). Entry i has its slots of the server's,
+`PROC_SLOT0` (166) + 6i on: the process's endpoint, thread, space and data
+segment (as the root gives them), the server's thread for it and that
+thread's notification. The thread, thread `PROC_N0` + i of the server's
+(`ROOT_SERVE`), serves process i alone and sleeps while the entry is empty.
+One lock guards the table, taken with XCHG (`rx_xchg`), and given up before
+a wait for a child and before the console (but for `/dev/status`'s short
+writes to the status line, and its last close, which keep it). A wait that
+gives it up asks, once it has it again, whether its process is still the
+one whose call it serves: the process may have ended and a new one taken
+its entry meanwhile (`proc_still`).
 
 ## init
 
 init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
-process that ends become its own. In an image built with `PROGRAM=shell` (`sh` too) it
-starts the shell, `/z/sh`, on each terminal, as getty does
+process that ends become its own. In an image built with `PROGRAM=shell`
+(`sh` too) it starts the shell, `/z/sh`, on each terminal, as getty does
 (*docs/terminals.md*, *init's terminals*): on the first at once, on the
 others once Enter is pressed there, so that a shell's memory is taken only
-where one is wanted (128 KB in all without extended memory). Once the shells are
-started it starts the daemons, `/z/clock` and `/z/counter` (P12; not in a
-test build, unless it asks, `TEST_DAEMONS`, as they would change every
-test's pids and timing). Each makes itself a daemon (`rx_daemon`,
-`rx/daemon.h`): its first process ends at once, the second leads a
-session of its own without a terminal, in `/`, its descriptors 0 to 2
-`/dev/null`, and init has it as an orphan. Each writes to its field of the
-status line through `/dev/status`; killed, it is started again by its name
-(`clock`), from any shell. In `TEST_POSIX_*` builds init starts a test of
-`tests/posix` instead (`tests/posix/proc.test`).
+where one is wanted (128 KB in all without extended memory). Once the
+shells are started it starts the daemons, `/z/clock` and `/z/counter` (P12;
+not in a test build, unless it asks, `TEST_DAEMONS` or `TEST_DEMO`, as they
+would change every test's pids and timing). Each makes itself a daemon
+(`rx_daemon`, `rx/daemon.h`): its first process ends at once, the second
+leads a session of its own without a terminal, in `/`, its descriptors 0 to
+2 `/dev/null`, and init has it as an orphan. Each writes to its field of
+the status line through `/dev/status`; killed, it is started again by its
+name (`clock`), from any shell. In `TEST_POSIX_*` builds init starts a test
+of `tests/posix` instead (`tests/posix/proc.test`).
 
 ## The shell
 

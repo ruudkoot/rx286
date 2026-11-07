@@ -53,7 +53,10 @@ static void listing(const char *path)
 int main(void)
 {
     struct stat st;
+    struct dirent *e;
+    DIR *dp;
     char cwd[32];
+    unsigned long ino;
     int fd, fd2, i, k, n, status, same;
     long l1, l2, l3;
     pid_t pid;
@@ -210,6 +213,29 @@ int main(void)
     check("rmdir . (-1, EINVAL 22)", rmdir("."));
     chdir("/");
     check("rmdir it once I left it (0)", rmdir("/b/f"));
+
+    mkdir("/b/i1", 0755);               /* inodes: two directories side by side, */
+    mkdir("/b/i2", 0755);               /*    the first's 67th entry against the */
+    for (k = 0; k < 65; k++) {          /*    second's 3rd (P15: one number) */
+        snprintf(cwd, sizeof cwd, "/b/i1/f%d", k);
+        close(open(cwd, O_WRONLY | O_CREAT));
+    }
+    close(open("/b/i2/g", O_WRONLY | O_CREAT));
+    stat("/b/i1/f64", &st);
+    ino = (unsigned long)st.st_ino;
+    stat("/b/i2/g", &st);
+    printf("files: two files' inodes differ (1): %d\n", ino != (unsigned long)st.st_ino);
+    same = 0;
+    if ((dp = opendir("/b/i1")) != 0) {
+        while ((e = readdir(dp)) != 0)
+            if (strcmp(e->d_name, "F64") == 0)
+                same = (unsigned long)e->d_ino == ino;
+        closedir(dp);
+    }
+    printf("files: readdir's d_ino is stat's (1): %d\n", same);
+    check("13 names, then 12 ..: /b (0)",
+          stat("/b/q/q/q/q/q/q/q/q/q/q/q/q/../../../../../../../../../../../..", &st));
+    check("13 names (-1, ENAMETOOLONG 36)", stat("/b/q/q/q/q/q/q/q/q/q/q/q/q", &st));
     printf("files: done\n");
     return 0;
 }

@@ -38,8 +38,8 @@ PX_LSEEK            equ 14      ; BX a descriptor, CX:SI the offset (CX high), D
 PX_DUP              equ 15      ; BX a descriptor -> the lowest free one, the same file
 PX_DUP2             equ 16      ; BX a descriptor, CX the one it becomes -> CX
 PX_FCNTL            equ 17      ; BX a descriptor, CX F_*, SI the argument -> the answer
-PX_STAT             equ 18      ; SI the path, DI ST_SIZE bytes of room
-PX_FSTAT            equ 19      ; BX a descriptor, DI ST_SIZE bytes of room
+PX_STAT             equ 18      ; SI the path, DI ST_BYTES bytes of room
+PX_FSTAT            equ 19      ; BX a descriptor, DI ST_BYTES bytes of room
 PX_UNLINK           equ 20      ; SI the path
 PX_RENAME           equ 21      ; SI the old path, DI the new
 PX_MKDIR            equ 22      ; SI the path
@@ -221,12 +221,13 @@ SEEK_END            equ 2
 OPEN_MAX            equ 20      ; a process's descriptors (_POSIX_OPEN_MAX)
 ; struct stat (sys/stat.h): what FAT12 can say of a file (os-server.md W2)
 ST_MODE             equ 0       ; word: S_IF* and the permissions
-ST_INO              equ 2       ; word: its entry's place: the directory's cluster, its index
-ST_NLINK            equ 4       ; word: 1
-ST_SIZE             equ 6       ; dword
-ST_MTIME            equ 10      ; dword: seconds since 1970, from DOS's time stamp
-ST_DEV              equ 14      ; word: the drive
-ST_BYTES            equ 16
+ST_INO              equ 2       ; dword: its entry's place, its sector * 16 + its slot (P15)
+ST_NLINK            equ 6       ; word: 1
+ST_SIZE             equ 8       ; dword
+ST_MTIME            equ 12      ; dword: seconds since 1970, from DOS's time stamp
+ST_DEV              equ 16      ; word: the drive; ST_DEV_SERVER for the server's own names
+ST_BYTES            equ 18
+ST_DEV_SERVER       equ 4       ; /, /dev, /z and the pipes
 ; A process, as PX_PS gives it (rx/ps.h): rx286's own, as POSIX has no call
 PI_PID              equ 0       ; word
 PI_PPID             equ 2       ; word
@@ -268,10 +269,10 @@ S_IFCHR             equ 0x2000
 S_IFIFO             equ 0x1000
 S_IFREG             equ 0x8000
 ; A directory's records, as PX_GETDENTS gives them (dirent.h)
-DE_INO              equ 0       ; word
-DE_NAME             equ 2       ; NAME.EXT and its zero
+DE_INO              equ 0       ; dword: as ST_INO
+DE_NAME             equ 4       ; NAME.EXT and its zero
 DE_NAME_SIZE        equ 14
-DE_SIZE             equ 16
+DE_SIZE             equ 18
 ; struct termios (termios.h; XBD 11): four words of flags, then NCCS bytes
 TC_IFLAG            equ 0
 TC_OFLAG            equ 2

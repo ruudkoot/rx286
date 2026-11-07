@@ -38,6 +38,11 @@
 #include "archive.h"
 #include "exe.h"
 #include "vectors.h"
+#include "limits.h"
+
+#if CHILD_MAX != PROCS
+#error limits.h's CHILD_MAX is not the server's PROCS
+#endif
 
 #define LOAD_SLOT SLOT(148)             /* a load, while code is read into it */
 #define ARCHIVE SLOT(OS_SLOT_ARCHIVE)

@@ -1,9 +1,11 @@
 # C
 
-rx286's programs, its root and its OS server are C, built
-against rx286's own crt and libc (roadmap os-server.md P1, D1, D22). The
-kernel and the drivers stay assembly. This document is the toolchain, the
-conventions C and NASM meet by, and rx286's executable format.
+rx286's processes, its root and its OS server are C, built against
+rx286's own crt and libc (roadmap os-server.md P1, D1, D22). The kernel,
+the drivers and the kernel's test programs the root builds stay assembly
+(D21), the latter calling the server through `src/userland/px.asm`. This
+document is the toolchain, the conventions C and NASM meet by, and
+rx286's executable format.
 
 ## The compilers
 
@@ -36,7 +38,7 @@ into a binary, so no licence comes with one.
 |---|---|
 | 0 | the code |
 | 1 | the data segment: the stack at its bottom (`RXH_STACK` bytes, a guard word at offset 0), then the initialised data, then `.bss` |
-| 2 | the kernel's stack for the program's start: crt0 leaves it at once for the stack in slot 1 |
+| 2 | the stack the program starts on: for a program the root builds, a segment of its own, which crt0 leaves at once for the stack in slot 1; for a process, a copy of slot 1 (*docs/processes.md*) |
 
 An overflow of the stack wraps past the data segment's limit and faults
 (roadmap os-server.md E7). crt0 (`src/lib/crt/crt0.asm`) sets SS = DS, the
@@ -44,9 +46,9 @@ stack and the guard word, then calls `rx_crt_main` (`start.c`), which calls
 `main` with argc, argv and envp, the stack's top three words (a process's,
 which the OS server put there; zeros for a program the root builds), and
 ends the program with its status (roadmap os-server.md P6). A process
-links `src/lib/posix/` in place of `src/lib/os/` (*docs/processes.md*). Nothing zeroes the data: the
-root made the segment zeroed, and a restarted program keeps its data, as
-every rx286 program does.
+links `src/lib/posix/` in place of `src/lib/os/` (*docs/processes.md*).
+Nothing zeroes the data: the root made the segment zeroed, and a
+restarted program keeps its data, as every rx286 program does.
 
 ## The conventions C and NASM meet by
 
@@ -72,7 +74,13 @@ every rx286 program does.
 - **Nothing compiler-specific outside `compiler.h`:** no `__far`,
   `__declspec`, `__attribute__`, `#pragma aux` or `asm` (`tools/lint`).
   The widths are `compiler.h`'s: `int` is 16 bits on the 286 and 32 on the
-  host, so 32 bits are `rx_u32` (`uint32_t`), never `long`.
+  host, so 32 bits are `rx_u32` (`uint32_t`), never `long`, in code the
+  host compiles too (`src/lib/c/`, the root's allocator). POSIX's types
+  keep the standard's: `time_t` and `sigset_t` are `long`s, as are
+  `tv_nsec` and what programs built for the 286 alone keep in them.
+- **Far pointers:** `RX_FAR` and `RX_MK_FP(selector, offset)`
+  (`compiler.h`) reach a segment other than DS, such as a process's data
+  or the cache's; on the host they are plain pointers.
 - **No `LOCK`:** it is #GP at ring 3 on a 286 (os-server.md W4).
   `check-286` refuses it in a C object.
 
@@ -111,12 +119,13 @@ is fixed by its slot.
 | 16 | `RXH_ENTRY` | the IP of the start |
 
 `tools/mkexe` writes one from the linker's output (`--287` first sets
-`RXF_287`: the Makefile's `Z_287` names the programs of `/z` that use the
-287, whose state then survives a signal's handler, *docs/processes.md*),
-and a map in NASM's form beside it, so that `tools/run-test` (`{c:rx_ud2}`) and `tools/map2sym`
-read a C module as they read an assembled one; its symbols are C's names.
-`tools/sizes` reads an executable's header (`make sizes`). `tools/mkimage` takes an executable as a module of the boot
-image (`counter=build/test/counter.rx:3:1`).
+`RXF_287`: `c.mk`'s `Z_287` names the programs of `/z` that use the 287,
+whose state then survives a signal's handler, *docs/processes.md*), and a
+map in NASM's form beside it, so that `tools/run-test` (`{c:rx_ud2}`) and
+`tools/map2sym` read a C module as they read an assembled one; its
+symbols are C's names. `tools/sizes` reads an executable's header (`make
+sizes`). `tools/mkimage` takes an executable as a module of the boot image
+(`counter=build/test/counter.rx:3:1`).
 
 ## The tests of C
 

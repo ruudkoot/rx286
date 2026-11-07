@@ -94,15 +94,15 @@ has it. `kill` takes a pid, 0 for the caller's group, -1 for every process
 A stop marks the process's threads to stop and holds them stopped. A call
 one waits in (the terminal, `waitpid`, `poll`, a device) ends with
 `ERESTART`, so that libc makes it again once the process continues: a stop
-is never `EINTR`. A pipe's read or write waits on through the stop, and
-its thread, answered, stays stopped until the process continues. A
-`sigsuspend` takes a stop signal it unblocks there, gives the mask back
-and ends with `ERESTART`, so that it waits again once continued. `SIGCONT` continues it, as it is sent, whatever its
-action, and runs its handler first if it has one; a stop signal drops a
-`SIGCONT` pending, and `SIGCONT` the stop signals pending. The parent's
-`waitpid` sees a stop with `WUNTRACED`, a continue with `WCONTINUED`, and
-gets `SIGCHLD` for each unless its action has `SA_NOCLDSTOP`. Orphaned
-process groups are not yet told apart.
+is never `EINTR`. A pipe's read or write waits on through the stop, and its
+thread, answered, stays stopped until the process continues. A `sigsuspend`
+takes a stop signal it unblocks there, gives the mask back and ends with
+`ERESTART`, so that it waits again once continued. `SIGCONT` continues it,
+as it is sent, whatever its action, and runs its handler first if it has
+one; a stop signal drops a `SIGCONT` pending, and `SIGCONT` the stop
+signals pending. The parent's `waitpid` sees a stop with `WUNTRACED`, a
+continue with `WCONTINUED`, and gets `SIGCHLD` for each unless its action
+has `SA_NOCLDSTOP`. Orphaned process groups are not yet told apart.
 
 The shell is the terminals' job control's user (*docs/shell.md*): each
 pipeline a group, made the foreground while it runs; a job stopped keeps

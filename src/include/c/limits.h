@@ -11,5 +11,8 @@
 
 #define PATH_MAX PX_PATH_MAX            /* a path's bytes, its zero too */
 #define ARG_MAX PX_ARG_MAX              /* argv's and environ's bytes */
+#define CHILD_MAX 15                    /* processes and threads at once: the OS
+                                           server's PROCS (P15) */
+#define SSIZE_MAX 32767                 /* a read's or a write's bytes at most */
 
 #endif

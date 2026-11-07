@@ -87,8 +87,8 @@ void proc_boot(void);
 rx_u16 key_take(void);
 void test_reader(int how);
 /* proc_alive - is process entry i's process alive? proc_interrupt - Ctrl+Break
- * with no program the root builds having the keys: SIGINT to every process
- * but init and its children (proc.c) */
+ * with no program the root builds having the keys: SIGINT for the shown
+ * terminal's foreground group, its input dropped (proc.c; P11) */
 int proc_alive(int i);
 void proc_interrupt(void);
 #define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */

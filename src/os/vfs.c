@@ -111,6 +111,10 @@ static const char *const dev_names[] = {     /* from "speaker" on, dev.c's (P12)
 #define DEV_NAMES 9                     /* then "tty1" to the last terminal's (P11) */
 #define DEV_FIRST 4                     /* the first of dev.c's (DEV_SPEAKER) */
 #define TTY_OWN 0xFF                    /* /dev/tty's unit: the opener's terminal */
+#define INO_TOP 0x10                    /* the server's own names' inodes (ino_of, P15): */
+#define INO_DEV 0x100                   /*    /'s, /dev's, /z's names, by getdents' */
+#define INO_Z 0x200                     /*    order; a pipe's */
+#define INO_PIPE 0x400
 static const char punctuation[] = "!#$%&'()-@^_`{}~";
 
 /* errno_of - a volume's or a driver's error (E_*, drivers.inc) as POSIX's */
@@ -188,7 +192,7 @@ static void path_text(struct path *p)
 static int path_make(const char *cwd, const char *in, struct path *p)
 {
     char *s, *e;
-    unsigned n;
+    unsigned n, over = 0;               /* names past PARTS, for a ".." to take (P15) */
 
     if (in[0] == 0)
         return ENOENT;
@@ -225,14 +229,20 @@ split:
         if (strcmp(s, ".") == 0)
             continue;
         if (strcmp(s, "..") == 0) {
-            if (p->parts)
+            if (over)
+                over--;
+            else if (p->parts)
                 p->parts--;
             continue;
         }
-        if (p->parts == PARTS)
-            return ENAMETOOLONG;
+        if (p->parts == PARTS) {
+            over++;
+            continue;
+        }
         p->part[p->parts++] = s;
     }
+    if (over)
+        return ENAMETOOLONG;
     path_text(p);
     return 0;
 }
@@ -1221,10 +1231,56 @@ static rx_u32 dos_seconds(rx_u16 date, rx_u16 time)
     return vol_seconds(t);
 }
 
+/* place_ino - a volume's entry's inode: its sector's 16 slots on the disk,
+ * its own among them (P15) */
+static rx_u32 place_ino(const struct place *where)
+{
+    return (rx_u32)where->sector * 16 + where->at / DIR_ENTRY_SIZE;
+}
+
+/* ino_of - a node's or a description's inode, unique on its device
+ * (dev_of): a volume's entry's place; a volume's root 1; the server's own
+ * names by getdents' order (P15) */
+static rx_u32 ino_of(int kind, const struct place *where, rx_u16 unit)
+{
+    switch (kind) {
+    case K_FILE:
+    case K_DIR:                         /* (no entry, sector 0: a volume's root) */
+        return where->sector ? place_ino(where) : 1;
+    case K_TOP:
+        return 1;
+    case K_DEVDIR:
+        return INO_TOP + 4;             /* top_names' "dev" */
+    case K_ZDIR:
+        return INO_TOP + 5;
+    case K_NULL:
+        return INO_DEV;
+    case K_TTY:
+        return INO_DEV + (unit == TTY_OWN ? 1 : DEV_NAMES + unit);
+    case K_LPT:
+        return INO_DEV + 2 + unit;
+    case K_DEV:
+        return INO_DEV + DEV_FIRST + unit;
+    case K_ZFILE:
+        return INO_Z + unit;
+    }
+    return INO_PIPE + unit;             /* a pipe's ends */
+}
+
+/* dev_of - a node's or a description's device: its drive, on a volume;
+ * else the server's own (P15) */
+static rx_u16 dev_of(int kind, rx_u16 drive)
+{
+#if ST_DEV_SERVER < DRIVES
+#error the server's device is a drive's
+#endif
+    return kind == K_FILE || kind == K_DIR ? drive : ST_DEV_SERVER;
+}
+
 /* stat_put - a node's or a description's struct stat, into a process's
  * segment (ST_*) */
-static void stat_put(rx_u16 data, rx_u16 at, int kind, const rx_u8 *entry, rx_u16 ino,
-                     rx_u32 size, rx_u16 drive)
+static void stat_put(rx_u16 data, rx_u16 at, int kind, const rx_u8 *entry, rx_u32 ino,
+                     rx_u32 size, rx_u16 dev)
 {
     rx_u16 RX_FAR *w = (rx_u16 RX_FAR *)RX_MK_FP(data, at);
     rx_u16 mode = S_IFDIR | 0755;
@@ -1241,13 +1297,14 @@ static void stat_put(rx_u16 data, rx_u16 at, int kind, const rx_u8 *entry, rx_u1
     if (entry && (kind == K_FILE || kind == K_DIR))
         time = dos_seconds(w16(entry + DIR_DATE), w16(entry + DIR_TIME));
     w[ST_MODE / 2] = mode;
-    w[ST_INO / 2] = ino;
+    w[ST_INO / 2] = (rx_u16)ino;
+    w[ST_INO / 2 + 1] = (rx_u16)(ino >> 16);
     w[ST_NLINK / 2] = 1;
     w[ST_SIZE / 2] = (rx_u16)size;
     w[ST_SIZE / 2 + 1] = (rx_u16)(size >> 16);
     w[ST_MTIME / 2] = (rx_u16)time;
     w[ST_MTIME / 2 + 1] = (rx_u16)(time >> 16);
-    w[ST_DEV / 2] = drive;
+    w[ST_DEV / 2] = dev;
 }
 
 /* zfile_size - a file of /z's bytes */
@@ -1282,8 +1339,8 @@ static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error
         end = 1;                        /* a file's entry: its time, its read-only bit */
         if (o->kind == K_FILE)
             vol_dir_entry(&vols[o->drive], o->parent, o->index, &where, entry, &end);
-        stat_put(data, r->di, o->kind, end ? 0 : entry, (rx_u16)(o->parent * 64 + o->index),
-                 o->kind == K_ZFILE ? zfile_size(o->unit) : o->size, o->drive);
+        stat_put(data, r->di, o->kind, end ? 0 : entry, ino_of(o->kind, &o->where, o->unit),
+                 o->kind == K_ZFILE ? zfile_size(o->unit) : o->size, dev_of(o->kind, o->drive));
         return 0;
     }
     if ((*error = resolve(i, data, r->si, &p, &n)) != 0)
@@ -1303,7 +1360,7 @@ static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error
     } else if (n.kind == K_ZFILE)
         size = zfile_size(n.unit);
     stat_put(data, r->di, n.kind, on_volume(&n, &p) ? n.entry : 0,
-             (rx_u16)(n.parent * 64 + n.index), size, n.drive);
+             ino_of(n.kind, &n.where, n.unit), size, dev_of(n.kind, n.drive));
     return 0;
 }
 
@@ -1608,13 +1665,15 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
             if (entry[DIR_NAME] == DIR_DELETED || (entry[DIR_ATTRIBUTES] & DIR_ATTR_VOLUME))
                 continue;
             name_text(entry, (char *)record + DE_NAME);
-            put16(record + DE_INO, (rx_u16)(o->first * 64 + k));
+            put16(record + DE_INO, (rx_u16)place_ino(&where));
+            put16(record + DE_INO + 2, (rx_u16)(place_ino(&where) >> 16));
             far_bytes(data, (rx_u16)(at + done), record, DE_SIZE);
             done = (rx_u16)(done + DE_SIZE);
             continue;
         }
-        o->offset++;
-        put16(record + DE_INO, k);
+        o->offset++;                    /* the server's own names: as ino_of */
+        put16(record + DE_INO, (rx_u16)((o->kind == K_TOP ? INO_TOP : o->kind == K_DEVDIR
+                                         ? INO_DEV : INO_Z) + k));
         far_bytes(data, (rx_u16)(at + done), record, DE_SIZE);
         done = (rx_u16)(done + DE_SIZE);
     }

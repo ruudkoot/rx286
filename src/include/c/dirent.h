@@ -12,7 +12,7 @@
 #include "posix.h"
 
 struct dirent {
-    rx_u16 d_ino;
+    rx_u32 d_ino;                       /* as stat's st_ino (P15) */
     char d_name[DE_NAME_SIZE];
 };
 

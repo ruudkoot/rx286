@@ -21,13 +21,14 @@ enum { C_EMPTY, C_CLEAN, C_DIRTY, C_META };
 /* A sector of the cache: its drive, its number, its state, when last used */
 struct cached {
     rx_u8 drive, state;
-    rx_u16 sector, used;
+    rx_u16 sector;
+    rx_u32 used;                        /* (32 bits: a clock that never wraps, P15) */
 };
 
 static struct cached cache[CACHE_SECTORS];
 static rx_u16 lost[DRIVES];             /* a dirty sector an eviction could not write: the
                                            drive's next flush says so (P15) */
-static rx_u16 clock;
+static rx_u32 clock;
 static int ready;                       /* the segment is there */
 
 /* cache_init - the cache's segment, from the root (at boot): 0 or KE_* */

@@ -50,7 +50,7 @@ struct dirent *readdir(DIR *d)
         d->have = (unsigned)got;
         d->next = 0;
     }
-    memcpy(&d->entry.d_ino, d->records + d->next + DE_INO, 2);
+    memcpy(&d->entry.d_ino, d->records + d->next + DE_INO, 4);
     memcpy(d->entry.d_name, d->records + d->next + DE_NAME, DE_NAME_SIZE);
     d->next += DE_SIZE;
     return &d->entry;
