@@ -98,6 +98,8 @@ ROOT_SERVE          equ 13      ; CX an SP; DI two slots -> a thread of the serv
                                 ;    its entry with that SP and its priority, started, its
                                 ;    faults the root's; a notification; the server's copies
                                 ;    of the thread and the notification at DI, DI + 8 (P6)
+ROOT_UNTHREAD       equ 14      ; BX a process, CX a thread of ROOT_THREAD's: it and its
+                                ;    endpoint gone, every copy with them (os-server.md P13)
 PROC_SLOTS          equ 16      ; a process's space
 PROC_THREADS        equ 7       ; the threads ROOT_THREAD adds to a process at most
 

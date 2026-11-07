@@ -131,7 +131,7 @@ RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
 OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
     files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ) \
-    time.$(OBJ) ps.$(OBJ) devices.$(OBJ) daemon.$(OBJ))
+    time.$(OBJ) ps.$(OBJ) devices.$(OBJ) daemon.$(OBJ) pthread.$(OBJ) thread.$(OBJ))
 C_LIBS := $(addprefix $(C_B)/,crt.lib c.lib rx286.lib os.lib)
 C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 # A process's (roadmap os-server.md P6): posix in place of today's os
@@ -180,7 +180,8 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     signals=$(C_B)/tests/posix/signal.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
     sigfpu=$(C_B)/tests/posix/sigfpu.$(OBJ)+$(C_B)/tests/posix/sigasm.$(OBJ) \
     tty=$(C_B)/tests/posix/tty.$(OBJ) jobs=$(C_B)/tests/posix/jobs.$(OBJ) \
-    console=$(C_B)/tests/posix/console.$(OBJ) poll=$(C_B)/tests/posix/poll.$(OBJ)
+    console=$(C_B)/tests/posix/console.$(OBJ) poll=$(C_B)/tests/posix/poll.$(OBJ) \
+    thread=$(C_B)/tests/posix/thread.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -197,6 +198,7 @@ Z_FOR_TTY := tty
 Z_FOR_JOBS := jobs
 Z_FOR_CONSOLE := console
 Z_FOR_POLL := poll
+Z_FOR_THREAD := thread
 Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))

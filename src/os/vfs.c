@@ -97,6 +97,7 @@ static struct ofd ofds[OFDS];
 static struct pipe pipes[PIPES];
 static int pipes_ready;
 static struct files files_of[PROCS];
+#define FILES(i) files_of[proc_leader(i)]   /* a thread's are its process's (P13) */
 static struct vol vols[DRIVES];
 static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
 static const char *const dev_names[] = {     /* from "speaker" on, dev.c's (P12) */
@@ -424,7 +425,7 @@ static int resolve(int i, rx_u16 data, rx_u16 at, struct path *p, struct node *n
     int error = string_of(data, at, in);
 
     if (!error)
-        error = path_make(files_of[i].cwd, in, p);
+        error = path_make(FILES(i).cwd, in, p);
     if (!error)
         error = lookup(p, n);
     return error;
@@ -585,7 +586,7 @@ static int px_pipe(int i, int *error, rx_u16 *write_fd)
     }
     if ((fr = fd_new(i, r, 0)) < 0 || (fw = fd_new(i, w, 0)) < 0) {
         if (fr >= 0)
-            files_of[i].fd[fr] = NO_FD;
+            FILES(i).fd[fr] = NO_FD;
         ofds[r].kind = ofds[w].kind = K_FREE;
         *error = EMFILE;
         return -1;
@@ -668,9 +669,9 @@ static int fd_new(int i, int k, int from)
     int fd;
 
     for (fd = from; fd < OPEN_MAX; fd++)
-        if (files_of[i].fd[fd] == NO_FD) {
-            files_of[i].fd[fd] = (rx_u8)k;
-            files_of[i].cloexec[fd] = 0;
+        if (FILES(i).fd[fd] == NO_FD) {
+            FILES(i).fd[fd] = (rx_u8)k;
+            FILES(i).cloexec[fd] = 0;
             return fd;
         }
     return -1;
@@ -679,17 +680,17 @@ static int fd_new(int i, int k, int from)
 /* ofd_of - a process's descriptor's description, or 0 */
 static struct ofd *ofd_of(int i, rx_u16 fd)
 {
-    if (fd >= OPEN_MAX || files_of[i].fd[fd] == NO_FD)
+    if (fd >= OPEN_MAX || FILES(i).fd[fd] == NO_FD)
         return 0;
-    return &ofds[files_of[i].fd[fd]];
+    return &ofds[FILES(i).fd[fd]];
 }
 
 /* fd_close - a descriptor closed */
 static rx_u16 fd_close(int i, int fd)
 {
-    int k = files_of[i].fd[fd];
+    int k = FILES(i).fd[fd];
 
-    files_of[i].fd[fd] = NO_FD;
+    FILES(i).fd[fd] = NO_FD;
     return ofd_drop(k);
 }
 
@@ -698,7 +699,7 @@ static rx_u16 fd_close(int i, int fd)
  * close on exec */
 void vfs_spawned(int i, int parent)
 {
-    struct files *f = &files_of[i];
+    struct files *f = &FILES(i);
     int fd, k;
 
     memset(f->fd, NO_FD, sizeof f->fd);
@@ -738,7 +739,7 @@ void vfs_exec(int i)
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
-        if (files_of[i].fd[fd] != NO_FD && files_of[i].cloexec[fd])
+        if (FILES(i).fd[fd] != NO_FD && FILES(i).cloexec[fd])
             fd_close(i, fd);
 }
 
@@ -748,7 +749,7 @@ void vfs_exit(int i)
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
-        if (files_of[i].fd[fd] != NO_FD)
+        if (FILES(i).fd[fd] != NO_FD)
             fd_close(i, fd);
 }
 
@@ -1038,7 +1039,7 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
         }
     }
     if (flags & O_CLOEXEC)
-        files_of[i].cloexec[fd] = 1;
+        FILES(i).cloexec[fd] = 1;
     if (n.kind == K_TTY)
         tty_open(i, o->unit);           /* a session's leader's: its terminal (P11) */
     return fd;
@@ -1413,19 +1414,19 @@ static int px_fcntl(int i, struct rx_kregs *r, int *error)
     }
     switch (r->cx) {
     case F_DUPFD:
-        if (r->si >= OPEN_MAX || (fd = fd_new(i, files_of[i].fd[r->bx], r->si)) < 0) {
+        if (r->si >= OPEN_MAX || (fd = fd_new(i, FILES(i).fd[r->bx], r->si)) < 0) {
             *error = r->si >= OPEN_MAX ? EINVAL : EMFILE;
             return -1;
         }
         o->refs++;
         return fd;
     case F_GETFD:
-        return files_of[i].cloexec[r->bx] ? FD_CLOEXEC : 0;
+        return FILES(i).cloexec[r->bx] ? FD_CLOEXEC : 0;
     case F_SETFD:
         if (r->si & FD_CLOEXEC)
-            files_of[i].cloexec[r->bx] = 1;
+            FILES(i).cloexec[r->bx] = 1;
         else
-            files_of[i].cloexec[r->bx] = 0;
+            FILES(i).cloexec[r->bx] = 0;
         return 0;
     case F_GETFL:
         return o->flags;
@@ -1465,7 +1466,7 @@ int vfs_exe_open(int i, const char *path, struct exe_file *f)
     const char *last;
     int error, k;
 
-    if ((error = path_make(i < 0 ? "/" : files_of[i].cwd, path, &p)) != 0
+    if ((error = path_make(i < 0 ? "/" : FILES(i).cwd, path, &p)) != 0
             || (error = lookup(&p, &n)) != 0)
         return error;
     if (!n.exists)
@@ -1680,7 +1681,7 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
     case PX_LSEEK:
         return px_lseek(i, r, error, si_out);
     case PX_DUP:
-        if (!(o = ofd_of(i, r->bx)) || (fd = fd_new(i, files_of[i].fd[r->bx], 0)) < 0) {
+        if (!(o = ofd_of(i, r->bx)) || (fd = fd_new(i, FILES(i).fd[r->bx], 0)) < 0) {
             *error = o ? EMFILE : EBADF;
             return -1;
         }
@@ -1693,10 +1694,10 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         }
         if (r->cx == r->bx)
             return r->cx;
-        if (files_of[i].fd[r->cx] != NO_FD)
+        if (FILES(i).fd[r->cx] != NO_FD)
             fd_close(i, r->cx);
-        files_of[i].fd[r->cx] = files_of[i].fd[r->bx];
-        files_of[i].cloexec[r->cx] = 0;
+        FILES(i).fd[r->cx] = FILES(i).fd[r->bx];
+        FILES(i).cloexec[r->cx] = 0;
         o->refs++;
         return r->cx;
     case PX_FCNTL:
@@ -1715,7 +1716,7 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         return px_rename(i, data, r->si, r->di, error);
     case PX_CHDIR:
         if ((*error = string_of(data, r->si, in)) != 0
-                || (*error = path_make(files_of[i].cwd, in, &p)) != 0
+                || (*error = path_make(FILES(i).cwd, in, &p)) != 0
                 || (*error = lookup(&p, &n)) != 0)
             return -1;
         if (!n.exists || !(n.kind == K_TOP || n.kind == K_DEVDIR || n.kind == K_ZDIR
@@ -1724,15 +1725,15 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             return -1;
         }
         path_text(&p);                  /* each name in its own case: "/c/DOCS" */
-        strcpy(files_of[i].cwd, p.text);
+        strcpy(FILES(i).cwd, p.text);
         return 0;
     case PX_GETCWD:
-        len = strlen(files_of[i].cwd) + 1;
+        len = strlen(FILES(i).cwd) + 1;
         if (len > r->cx || !in_segment(data, r->di, (rx_u16)len)) {
             *error = len > r->cx ? ERANGE : EFAULT;
             return -1;
         }
-        far_bytes(data, r->di, (const rx_u8 *)files_of[i].cwd, (rx_u16)len);
+        far_bytes(data, r->di, (const rx_u8 *)FILES(i).cwd, (rx_u16)len);
         return 0;
     case PX_GETDENTS:
         return px_getdents(i, data, r->bx, r->di, r->cx, error);

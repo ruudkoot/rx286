@@ -82,7 +82,21 @@ PX_POLL             equ 47      ; SI the pollfds (PF_*), CX how many, BX the tim
                                 ;    (-1: none) -> those with news, their revents set
 PX_NICE             equ 48      ; BX an increment: the process's nice value moved by it, 0 to
                                 ;    2 NZERO - 1 -> that value - NZERO
-PX_CALLS            equ 49
+; POSIX's threads (P13)
+PX_THREAD           equ 49      ; BX the new thread's IP, CX its SP, SI where its endpoint's
+                                ;    selector goes: a thread in the caller's process, started
+                                ;    -> its number, 1 to PROC_THREADS; or -1, EAGAIN
+PX_THREAD_EXIT      equ 50      ; BX its state word: THREAD_DONE written there and its waiters
+                                ;    woken, the thread gone; no reply (the main thread: EINVAL)
+PX_FUTEX            equ 51      ; BX FUTEX_WAIT or FUTEX_WAKE, SI a word of the process's, CX
+                                ;    the value it should hold (WAIT), or how many (WAKE) ->
+                                ;    WAIT: 0 once woken, or -1, EAGAIN if the word differs,
+                                ;    EINTR; WAKE: how many were woken
+PX_CALLS            equ 52
+FUTEX_WAIT          equ 0
+FUTEX_WAKE          equ 1
+THREAD_RUNNING      equ 1       ; a thread's state word, libc's (pthread.h)
+THREAD_DONE         equ 2       ;    once it has ended, written by the server
 NZERO               equ 20      ; nice's middle: priority 3 to it, 2 to NZERO + 10, else 1
 
 ; POSIX's errno values, rx286's numbers (errno.h)
@@ -112,6 +126,7 @@ EEXIST              equ 17
 EBUSY               equ 16
 EACCES              equ 13
 ERANGE              equ 34
+EDEADLK             equ 35      ; a thread's join of itself (P13)
 ENAMETOOLONG        equ 36
 ENOSYS              equ 38
 ENOTEMPTY           equ 39

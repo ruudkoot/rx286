@@ -1,0 +1,235 @@
+/* ============================================================================
+ * rx286 - tests/posix/thread.c
+ * POSIX's threads (roadmap os-server.md P13; tests/posix/thread.test):
+ * init starts it (TEST_POSIX_THREAD) from /z as "thread". Eight threads,
+ * the main one too, on a shared counter under a mutex; joins and their
+ * results; a condition between a producer and a consumer; each thread's
+ * errno; a mutex waited for in the server; trylock; keys and once; the most a process may have; a fork from
+ * a thread; and a thread's fault, which ends its process.
+ * ============================================================================ */
+
+#include <stdio.h>
+#include "errno.h"
+#include "fcntl.h"
+#include "pthread.h"
+#include "signal.h"
+#include "time.h"
+#include "unistd.h"
+#include "sys/wait.h"
+#include "rx/rx286.h"
+
+#define WORKERS 7                       /* and the main thread: eight */
+#define ROUNDS 300
+#define ITEMS 20
+
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+static pthread_key_t key;
+static volatile unsigned counter;
+static volatile int item, have, sum, onces, destroyed, got;
+
+/* add - ROUNDS increments of the counter under the lock, each a while
+ * inside it so that the others find it taken */
+static void add(void)
+{
+    volatile int spin;
+    int k;
+    unsigned c;
+
+    for (k = 0; k < ROUNDS; k++) {
+        pthread_mutex_lock(&lock);
+        c = counter;
+        for (spin = 0; spin < 20; spin++)
+            ;
+        counter = c + 1;
+        pthread_mutex_unlock(&lock);
+    }
+}
+
+/* once_routine, destructor - pthread_once's and a key's */
+static void once_routine(void)
+{
+    onces++;
+}
+
+static void destructor(void *v)
+{
+    destroyed += (int)(unsigned)v;
+}
+
+/* worker - a counting thread: its number times ten as its result */
+static void *worker(void *arg)
+{
+    pthread_once(&once, once_routine);
+    pthread_setspecific(key, (void *)1);
+    add();
+    return (void *)((unsigned)arg * 10);
+}
+
+/* consumer - ITEMS items, one at a time, from the producer */
+static void *consumer(void *arg)
+{
+    int k;
+
+    (void)arg;
+    for (k = 0; k < ITEMS; k++) {
+        pthread_mutex_lock(&lock);
+        while (!have)
+            pthread_cond_wait(&ready, &lock);
+        sum += item;
+        have = 0;
+        pthread_cond_signal(&ready);
+        pthread_mutex_unlock(&lock);
+    }
+    return 0;
+}
+
+/* own_errno - a failing call's errno in this thread, and the main one's
+ * left as it was */
+static void *own_errno(void *arg)
+{
+    (void)arg;
+    close(-1);
+    return (void *)(unsigned)errno;
+}
+
+/* blocker - a lock the main thread holds, waited for in the server */
+static void *blocker(void *arg)
+{
+    pthread_mutex_lock((pthread_mutex_t *)arg);
+    got = 1;
+    pthread_mutex_unlock((pthread_mutex_t *)arg);
+    return 0;
+}
+
+/* holder - trylock on a mutex the main thread holds */
+static void *holder(void *arg)
+{
+    return (void *)(unsigned)pthread_mutex_trylock((pthread_mutex_t *)arg);
+}
+
+/* sleeper - a thread that waits until it is told */
+static void *sleeper(void *arg)
+{
+    pthread_mutex_lock(&lock);
+    while (!*(volatile int *)arg)
+        pthread_cond_wait(&ready, &lock);
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
+
+/* forker - a fork from a thread: the child, the one thread of its process,
+ * ends with 5; its status as the result */
+static void *forker(void *arg)
+{
+    int status;
+    pid_t pid;
+
+    (void)arg;
+    if ((pid = fork()) == 0)
+        _exit(getpid() > 1 ? 5 : 6);
+    waitpid(pid, &status, 0);
+    return (void *)(unsigned)(WIFEXITED(status) ? WEXITSTATUS(status) : 100);
+}
+
+/* faulter - a fault in a thread */
+static void *faulter(void *arg)
+{
+    (void)arg;
+    rx_ud2();
+    return 0;
+}
+
+/* main - the tests, in order */
+int main(void)
+{
+    pthread_t t[WORKERS + 1];
+    pthread_attr_t attr;
+    pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+    struct timespec nap;
+    void *result;
+    int k, n, made, sum_results = 0, go = 0, status;
+    pid_t pid;
+
+    pthread_key_create(&key, destructor);
+    for (k = 0; k < WORKERS; k++)
+        pthread_create(&t[k], 0, worker, (void *)(unsigned)(k + 1));
+    add();
+    for (k = 0; k < WORKERS; k++) {
+        pthread_join(t[k], &result);
+        sum_results += (int)(unsigned)result;
+    }
+    printf("thread: eight threads, %d rounds each, under a mutex (%u): %u\n", ROUNDS,
+           (unsigned)(8 * ROUNDS), counter);
+    printf("thread: their results joined (280): %d\n", sum_results);
+    printf("thread: once (1): %d; a key's destructor, for each (7): %d\n", onces, destroyed);
+
+    pthread_create(&t[0], 0, consumer, 0);
+    for (k = 1; k <= ITEMS; k++) {
+        pthread_mutex_lock(&lock);
+        while (have)
+            pthread_cond_wait(&ready, &lock);
+        item = k;
+        have = 1;
+        pthread_cond_signal(&ready);
+        pthread_mutex_unlock(&lock);
+    }
+    pthread_join(t[0], 0);
+    printf("thread: a consumer's sum of %d items, by a condition (210): %d\n", ITEMS, sum);
+
+    open("/nothing", O_RDONLY);
+    pthread_create(&t[0], 0, own_errno, 0);
+    pthread_join(t[0], &result);
+    n = errno;
+    printf("thread: errno, its own and the main thread's (9 2): %d %d\n", (int)(unsigned)result,
+           n);
+
+    pthread_mutex_lock(&m);
+    pthread_create(&t[0], 0, blocker, &m);
+    nap.tv_sec = 0;
+    nap.tv_nsec = 200000000L;
+    nanosleep(&nap, 0);
+    printf("thread: a mutex held, its waiter asleep (0, 2): %d, %d\n", got, m.state);
+    pthread_mutex_unlock(&m);
+    pthread_join(t[0], 0);
+    printf("thread: woken as it was given up (1, 0): %d, %d\n", got, m.state);
+
+    pthread_mutex_lock(&m);
+    pthread_create(&t[0], 0, holder, &m);
+    pthread_join(t[0], &result);
+    pthread_mutex_unlock(&m);
+    printf("thread: trylock of a mutex held (16): %d; then (0): %d\n", (int)(unsigned)result,
+           pthread_mutex_trylock(&m));
+    printf("thread: self (1), join of itself (35): %d %d\n",
+           pthread_equal(pthread_self(), pthread_self()), pthread_join(pthread_self(), 0));
+
+    for (made = 0; made <= WORKERS; made++)
+        if (pthread_create(&t[made], 0, sleeper, &go) != 0)
+            break;
+    printf("thread: the most beside the main one (7): %d, then EAGAIN\n", made);
+    pthread_mutex_lock(&lock);
+    go = 1;
+    pthread_cond_broadcast(&ready);
+    pthread_mutex_unlock(&lock);
+    for (k = 0; k < made; k++)
+        pthread_join(t[k], 0);
+
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&t[0], &attr, own_errno, 0);
+    pthread_create(&t[1], 0, forker, 0);
+    pthread_join(t[1], &result);
+    printf("thread: a fork from a thread, its child's status (5): %d\n", (int)(unsigned)result);
+
+    if ((pid = fork()) == 0) {
+        pthread_create(&t[0], 0, faulter, 0);
+        pthread_join(t[0], 0);
+        _exit(0);
+    }
+    waitpid(pid, &status, 0);
+    printf("thread: a thread's fault ends its process (SIGILL 4): %d\n",
+           WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+    printf("thread: done\n");
+    return 0;
+}

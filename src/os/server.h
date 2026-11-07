@@ -183,7 +183,9 @@ void lock_give(void);
  * serves (a wait's test, once it has the lock again: the process may have
  * ended, and a new one taken its entry); proc_wake - its server thread
  * woken; proc_sleep - its server thread sleeps until woken; proc_nap - a
- * tick at most (P12); proc_priority - its thread's, by its nice value;
+ * tick at most (P12); proc_leader - its process's entry, a thread's (P13);
+ * proc_next_thread - process p's next thread entry after k, or -1 (P13);
+ * proc_priority - its thread's, by its nice value;
  * proc_name - its file's name; proc_data_limit - its data segment's last
  * offset (proc.c; lock held, but proc_sleep and proc_nap) */
 void proc_end(int i, int sig);
@@ -191,6 +193,8 @@ int proc_still(int i);
 void proc_wake(int i);
 void proc_sleep(int i);
 void proc_nap(int i);
+int proc_leader(int i);
+int proc_next_thread(int p, int k);
 int proc_priority(int i);
 const char *proc_name(int i);
 rx_u16 proc_data_limit(int i);

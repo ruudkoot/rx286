@@ -204,9 +204,9 @@ it alone. `src/include/os.inc` holds the interface:
   `SYS_KILL` and `SYS_START`. On the same capability the root serves the
   processes the C server will run (roadmap os-server.md P4; *docs/root.md*):
   `ROOT_LOAD`, `ROOT_SEAL`, `ROOT_FIND` and `ROOT_UNLOAD` for code;
-  `ROOT_SPAWN`, `ROOT_FORK`, `ROOT_THREAD`, `ROOT_BRK` and `ROOT_EXIT` for
-  processes, each a space of `PROC_SLOTS` with up to `PROC_THREADS`
-  threads more; `ROOT_SERVE` for a thread of the server's own for each
+  `ROOT_SPAWN`, `ROOT_FORK`, `ROOT_THREAD`, `ROOT_UNTHREAD`, `ROOT_BRK` and
+  `ROOT_EXIT` for processes, each a space of `PROC_SLOTS` with up to
+  `PROC_THREADS` threads more; `ROOT_SERVE` for a thread of the server's own for each
   (roadmap os-server.md P6; *docs/processes.md*). In `TEST_SERVICES` builds
   a test program makes them too, through a copy badged `ROOT_BADGE_TEST`.
   The server holds `/z`, the archive of programs, in its slot

@@ -329,6 +329,49 @@ through the same cache, so the shell sees what processes wrote. The
 diskette driver still moves a sector at a time and has no change line:
 its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
 
+## Threads
+
+POSIX's threads (P13, D17; `pthread.h`, `src/lib/posix/pthread.c`) are
+the kernel's threads in the process's space, seven beside the main one at
+most (`PROC_THREADS`), each with an endpoint of its own in the process's
+slot 8 + n, which the root makes (`ROOT_THREAD`) and frees once it ends
+(`ROOT_UNTHREAD`). Each takes an entry of the server's table, whose
+server thread serves it alone (D4 A): a thread is as dear as a process.
+Its process's descriptors, signals, ids, data segment and nice value are
+the process's entry's; its waits are its own.
+
+| Call | Arguments | What the server does |
+|---|---|---|
+| `PX_THREAD` | BX its IP, CX its SP, SI where its endpoint's selector goes | a thread in the process's space, configured at that IP and SP, its endpoint's selector written in the process's data first, started at the process's priority: its number, 1 to 7; `EAGAIN` with seven, or the table full |
+| `PX_THREAD_EXIT` | BX its state word, `THREAD_RUNNING` while it runs | `THREAD_DONE` written there and its waiters woken, then the thread gone; no reply, so nothing runs on its stack once a joiner frees it. The main thread's is `EINVAL` |
+| `PX_FUTEX` | BX `FUTEX_WAIT` or `FUTEX_WAKE`, SI a word of the process's, CX a value or a count | `FUTEX_WAIT`: a wait while the word holds the value (at once `EAGAIN` if it does not), until a `FUTEX_WAKE` on the same word, a stop (`ERESTART`) or, for the main thread, a handler (`EINTR`); `FUTEX_WAKE`: up to so many waiters woken, how many. The server checks and sleeps as one step, since a process's threads never run while it does (priority 3 against 5) |
+
+libc gives each thread a stack of `RX_STACK` (2 KB) bytes, malloc'd and
+aligned to its size, with its own data at the base (`rx/tls.h`): its
+`errno` (`errno.h` makes `errno` the calling thread's), its endpoint, which
+every call goes through, its state, its keys' values; SP finds it. The
+main thread's is a static, `rx_main_tls`, below which its stack lies. A
+thread starts at `rx_thread_entry` (`thread.asm`), which runs its routine
+and `pthread_exit`. A mutex is a word, 0 free, 1 taken, 2 taken and
+perhaps waited for, taken with `XCHG` at ring 3 (`LOCK` would fault on a
+286): a contended one waits in `PX_FUTEX`; neither lock nor trylock needs
+the compare-and-exchange a 286 lacks. A condition is a word each signal
+increments in one instruction (`rx_inc`): a waiter waits while it holds
+what it read before it gave the mutex up. `pthread_join` waits for
+`THREAD_DONE`, then frees the stack (a join of itself is `EDEADLK`); a detached thread's is freed by the
+next `pthread_create`. The main thread's `pthread_exit` waits for the
+others, then ends the process.
+
+A signal goes to the main thread; `pthread_sigmask` is `sigprocmask`, and
+`sigsuspend` from another thread is `ENOSYS`. A stop stops every thread,
+and a continue starts them all. A fault in any thread ends the process by
+its signal's default action ("rx286: thread[4] fault #UD at 0007:103E").
+An exit, a signal's end, and an exec end every thread; an exec from a
+thread starts the new image in the process's entry. A fork copies the
+process with the calling thread alone, which becomes the child's main
+thread, its endpoint the child's. The other threads do not run while the
+root copies: they are at 3, the root at 6.
+
 ## The library
 
 `src/lib/posix/` is the binding: `unistd.h` (`_exit`, `fork`, `_Fork`,
@@ -363,8 +406,10 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 
 ## The table
 
-The server has room for `PROCS` (15) processes at once; a fork or a spawn
-past that is `EAGAIN`. Entry i has its slots of the server's, `PROC_SLOT0`
+The server has room for `PROCS` (15) processes and threads at once; a
+fork, a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
+(`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and
+the walks over the processes pass over it. Entry i has its slots of the server's, `PROC_SLOT0`
 (166) + 6i on: the process's endpoint, thread, space and data segment (as the
 root gives them), the server's thread for it and that thread's
 notification. The thread, thread `PROC_N0` + i of the server's (`ROOT_SERVE`),

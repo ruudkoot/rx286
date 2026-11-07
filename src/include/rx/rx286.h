@@ -37,5 +37,7 @@ unsigned rx_lsl(unsigned selector);
 unsigned rx_cs(void);
 unsigned rx_ds(void);
 unsigned rx_ss(void);
+/* rx_sp - the caller's SP, near enough */
+unsigned rx_sp(void);
 
 #endif

@@ -136,38 +136,59 @@ void sig_start(int i, int from, int how)
         s->tramp = 0;
 }
 
-/* stop - process i stopped by a signal: its thread to stop and be held so,
- * its waits ended, its parent told (lock held) */
-static void stop(int i, int sig)
+/* halt - entry i's thread to stop and be held so, its waits ended */
+static void halt(int i)
 {
     struct sigs *s = &sigs[i];
     struct rx_kregs r;
 
-    if (s->stopped)
-        return;
     s->stopped = 1;
-    proc_stopped(i, sig);
     if (!s->suspending && !s->held
             && thread_call(i, THREAD_SUSPEND, 0, PROC_NOTIFY(i), 0, &r) == 0)
         s->suspending = 1;
     proc_wake(i);
 }
 
-/* cont - process i continued: its thread started again by its server
- * thread, a handler first if one is due; its parent told (lock held) */
-static void cont(int i)
+/* stop - process i stopped by a signal: its threads to stop and be held so
+ * (P13), its waits ended, its parent told (lock held) */
+static void stop(int i, int sig)
+{
+    int k;
+
+    if (sigs[i].stopped)
+        return;
+    proc_stopped(i, sig);
+    halt(i);
+    for (k = proc_next_thread(i, -1); k >= 0; k = proc_next_thread(i, k))
+        halt(k);
+}
+
+/* resume - entry i's thread started again by its server thread, a handler
+ * first if one is due */
+static void resume(int i)
 {
     struct sigs *s = &sigs[i];
 
-    if (!s->stopped)
-        return;
     s->stopped = 0;
-    proc_continued(i);
     if (s->held) {
         s->held = 0;
         s->suspending = 1;              /* (its thread stopped: sig_step takes it on) */
     }
     proc_wake(i);
+}
+
+/* cont - process i continued, its threads too (P13); its parent told (lock
+ * held) */
+static void cont(int i)
+{
+    int k;
+
+    if (!sigs[i].stopped)
+        return;
+    proc_continued(i);
+    resume(i);
+    for (k = proc_next_thread(i, -1); k >= 0; k = proc_next_thread(i, k))
+        resume(k);
 }
 
 /* sig_stopped - is process i stopped? (server.h) */
@@ -253,10 +274,12 @@ void sig_timers(void)
 /* sig_send - a signal for process t (server.h; lock held) */
 void sig_send(int t, int sig)
 {
-    struct sigs *s = &sigs[t];
+    struct sigs *s;
     struct action *a;
     rx_u32 b;
 
+    t = proc_leader(t);                 /* a process's, its main thread's to take (P13) */
+    s = &sigs[t];
     if (!proc_alive(t) || sig <= 0 || sig > SIG_MAX)
         return;
     a = &s->act[sig];
@@ -341,7 +364,7 @@ static int deliver(int i)
     rx_u16 kf[TFR_SIZE / 2], f[SF_SIZE / 2], sp, k;
     rx_u16 RX_FAR *to;
     rx_u32 b;
-    int sig;
+    int sig, t;
 
     s->suspending = 0;
     for (;;) {
@@ -355,8 +378,10 @@ static int deliver(int i)
             break;
         s->pending &= ~b;
         if (a->handler == PX_SIG_DFL && stops(sig)) {
-            s->stopped = s->held = 1;   /* unblocked, a stop: its thread stopped already */
+            s->stopped = s->held = 1;   /* unblocked, a stop: its thread stopped already, */
             proc_stopped(i, sig);
+            for (t = proc_next_thread(i, -1); t >= 0; t = proc_next_thread(i, t))
+                halt(t);                /*    its other threads to stop (P13) */
             return 0;
         }
         if (a->handler == PX_SIG_DFL && !ignores(sig)) {
@@ -494,7 +519,8 @@ static int action_out(int i, rx_u16 at, const struct action *a)
  * while sigsuspend and nanosleep wait) */
 int sig_call(int i, struct rx_kregs *r, int *error)
 {
-    struct sigs *s = &sigs[i];
+    int p = proc_leader(i);             /* the process's signals, a thread's too (P13) */
+    struct sigs *s = &sigs[p];
     struct action a, old;
     rx_u32 set = (rx_u32)r->cx | (rx_u32)r->si << 16, now, left;
     int sig = (int)r->bx;
@@ -506,8 +532,8 @@ int sig_call(int i, struct rx_kregs *r, int *error)
             return -1;
         }
         old = s->act[sig];
-        if ((r->si && (*error = action_in(i, r->si, &a)) != 0)
-                || (r->di && (*error = action_out(i, r->di, &old)) != 0))
+        if ((r->si && (*error = action_in(p, r->si, &a)) != 0)
+                || (r->di && (*error = action_out(p, r->di, &old)) != 0))
             return -1;
         if (r->si) {
             a.mask &= ~UNBLOCKABLE;
@@ -537,6 +563,10 @@ int sig_call(int i, struct rx_kregs *r, int *error)
         r->di = (rx_u16)(s->pending >> 16);
         return 0;
     case PX_SIGSUSPEND:
+        if (i != p) {
+            *error = ENOSYS;            /* a handler runs on the main thread alone */
+            return -1;
+        }
         s->restore = s->blocked;
         s->restoring = 1;
         s->blocked = set & ~UNBLOCKABLE;
@@ -559,6 +589,7 @@ int sig_call(int i, struct rx_kregs *r, int *error)
         timers_arm();
         return (int)left;
     case PX_NANOSLEEP:
+        s = &sigs[i];                   /* the thread's own sleep */
         if (set == 0)
             return 0;
         s->sleep_at = rx_ticks() + set;

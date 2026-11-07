@@ -12,9 +12,63 @@
 #include "unistd.h"
 #include "sys/wait.h"
 #include "rx/rx286.h"
+#include "rx/tls.h"
 #include "os.h"
 
-int errno;
+int rx_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs *r);
+
+/* The main thread's own data: its endpoint the process's, OS_EP (P13) */
+struct rx_tls rx_main_tls = { 0, OS_EP, THREAD_RUNNING, 0, 0, 0, 0, 0, 0, { 0 } };
+
+/* rx_tls - the calling thread's own data: the main thread's, whose stack is
+ * below every static, or at the base of the block of RX_STACK bytes its SP
+ * is in (rx/tls.h) */
+struct rx_tls *rx_tls(void)
+{
+    unsigned sp = rx_sp();
+
+    if (sp < (unsigned)&rx_main_tls)
+        return &rx_main_tls;
+    return (struct rx_tls *)(sp & ~(unsigned)(RX_STACK - 1));
+}
+
+/* rx_futex - PX_FUTEX, errno left as it was (rx/tls.h) */
+int rx_futex(int op, void *word, unsigned value)
+{
+    struct rx_kregs r;
+    int e = errno, n = rx_px(PX_FUTEX, (rx_u16)op, (rx_u16)value, (rx_u16)(unsigned)word, 0, &r);
+
+    errno = e;
+    return n;
+}
+
+/* rx_lock_waited - a lock taken, marked waited for: a waiter's way, which
+ * writes 2 again over a 2 its first XCHG made 1 (rx/tls.h) */
+void rx_lock_waited(int *word)
+{
+    while (rx_xchg(word, 2) != 0)
+        rx_futex(FUTEX_WAIT, word, 2);
+}
+
+/* rx_lock - a lock taken (XCHG), waited for if it is held (rx/tls.h) */
+void rx_lock(int *word)
+{
+    if (rx_xchg(word, 1) != 0)
+        rx_lock_waited(word);
+}
+
+/* rx_unlock - a lock free, a waiter woken if it was waited for (rx/tls.h) */
+void rx_unlock(int *word)
+{
+    if (rx_xchg(word, 0) == 2)
+        rx_futex(FUTEX_WAKE, word, 1);
+}
+
+/* rx_errno - the calling thread's errno (errno.h) */
+int *rx_errno(void)
+{
+    return &rx_tls()->errno_;
+}
 
 /* rx_px - a call on the OS server: its result, or -1 and errno; made again
  * while the server says ERESTART, a wait a handler broke off (SA_RESTART;
@@ -25,7 +79,7 @@ int rx_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs 
         r->ax = (rx_u16)((KCALL_CALL << 8) | call);
         r->bx = bx;
         r->cx = cx;
-        r->dx = OS_EP;
+        r->dx = rx_tls()->ep;           /* the calling thread's endpoint (P13) */
         r->si = si;
         r->di = di;
         r->bp = 0;
@@ -163,17 +217,20 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
     return 0;
 }
 
-/* rx_px_fork_raw - fork.asm: DX the error, AX the result */
-rx_u32 rx_px_fork_raw(void);
+/* rx_px_fork_raw - fork.asm: through an endpoint, the calling thread's; DX
+ * the error, AX the result */
+rx_u32 rx_px_fork_raw(unsigned ep);
 
 /* fork - PX_FORK: a child, a copy of this process, which returns 0; the
  * parent gets its pid */
 pid_t fork(void)
 {
-    rx_u32 r = rx_px_fork_raw();
+    rx_u32 r = rx_px_fork_raw(rx_tls()->ep);
 
     if ((int)(rx_u16)r == -1)
         errno = (int)(r >> 16);
+    if ((rx_u16)r == 0)
+        rx_tls()->ep = OS_EP;           /* the child: its one thread, the process's endpoint */
     return (int)(rx_u16)r;
 }
 

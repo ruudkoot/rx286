@@ -3,10 +3,12 @@
  * The heap (roadmap os-server.md P6): blocks above the break, which sbrk
  * moves, each with a word of its size; a free list, first fit, its
  * neighbours merged when a block is freed. Small, as the small model is.
+ * A lock keeps the list whole between threads (rx_lock; P13, XSH 2.9.1).
  * ============================================================================ */
 
 #include "stdlib.h"
 #include "unistd.h"
+#include "rx/tls.h"
 
 #define UNIT sizeof(struct block)
 
@@ -17,15 +19,14 @@ struct block {
 };
 
 static struct block start;              /* the free list's head, of no size */
+static int heap_lock;
 
-/* malloc - the first free block that fits, split; else more from sbrk */
-void *malloc(size_t size)
+/* taken - malloc's work, the lock held */
+static void *taken(size_t size)
 {
     struct block *prev = &start, *b;
     size_t units = (size + UNIT - 1) / UNIT + 1;
 
-    if (size == 0 || size > 0xF000)
-        return 0;
     for (b = start.next; b; prev = b, b = b->next) {
         if (b->units >= units) {
             if (b->units > units) {     /* its end, taken */
@@ -45,6 +46,19 @@ void *malloc(size_t size)
     return b + 1;
 }
 
+/* malloc - the first free block that fits, split; else more from sbrk */
+void *malloc(size_t size)
+{
+    void *p;
+
+    if (size == 0 || size > 0xF000)
+        return 0;
+    rx_lock(&heap_lock);
+    p = taken(size);
+    rx_unlock(&heap_lock);
+    return p;
+}
+
 /* free - a block back on the list, in address order, merged with its
  * neighbours */
 void free(void *p)
@@ -54,6 +68,7 @@ void free(void *p)
     if (!p)
         return;
     b = (struct block *)p - 1;
+    rx_lock(&heap_lock);
     while (prev->next && prev->next < b)
         prev = prev->next;
     b->next = prev->next;
@@ -66,4 +81,5 @@ void free(void *p)
         prev->units += b->units;
         prev->next = b->next;
     }
+    rx_unlock(&heap_lock);
 }

@@ -23,7 +23,8 @@ KR_SI               equ 8
 KR_DI               equ 10
 KR_BP               equ 12
 
-global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_xchg, rx_lsl, rx_cs, rx_ds, rx_ss
+global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_xchg
+global rx_lsl, rx_cs, rx_ds, rx_ss, rx_sp
 
 code_section
 
@@ -135,6 +136,17 @@ rx_ds:
 ; ----------------------------------------------------------------------------
 rx_ss:
         mov ax, ss
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_sp - unsigned rx_sp(void): the caller's SP, less its return address
+; (a thread's own data is at the base of its stack: os-server.md P13)
+;   In:       nothing
+;   Out:      AX = SP
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_sp:
+        mov ax, sp
         ret
 
 ; ----------------------------------------------------------------------------

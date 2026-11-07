@@ -133,6 +133,8 @@ names:
   thread more in a process's space, with its own endpoint (up to
   `PROC_THREADS`); **`ROOT_BRK`:** the data replaced by a segment of
   another size, its bytes kept, every copy of the old revoked;
+  **`ROOT_UNTHREAD`:** one of `ROOT_THREAD`'s threads gone with its
+  endpoint, every copy of either with them (os-server.md P13);
   **`ROOT_EXIT`:** everything of a process revoked, its memory free, its
   code's count lowered, the code gone at none; with CX 1 kept, for an
   exec of the same file, whose `ROOT_SPAWN` runs it again (P12).

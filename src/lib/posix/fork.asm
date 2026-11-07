@@ -20,18 +20,20 @@ global rx_px_fork_raw
 code_section
 
 ; ----------------------------------------------------------------------------
-; rx_px_fork_raw - rx_u32 rx_px_fork_raw(void): PX_FORK
-;   In:       nothing
+; rx_px_fork_raw - rx_u32 rx_px_fork_raw(unsigned ep): PX_FORK, through the
+; calling thread's endpoint (OS_EP, or a pthread's: os-server.md P13)
+;   In:       the stack: the endpoint
 ;   Out:      AX = the child's pid (0 in the child), or -1 and DX = the error
 ;   Destroys: BX, CX
 ; ----------------------------------------------------------------------------
 rx_px_fork_raw:
         push bp
+        mov bp, sp
+        mov dx, ARG(0)
         push si
         push di
         mov bx, .child                  ; the child's IP
         mov cx, sp                      ; and its SP: these three, then the return
-        mov dx, OS_EP
         xor bp, bp
         mov ax, (KCALL_CALL << 8) | PX_FORK
         int KCALL_VECTOR

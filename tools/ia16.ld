@@ -11,6 +11,6 @@ SECTIONS {
   . = 0;
   .stackbot . (NOLOAD) : AT(0x100000) { *(.stackbot) }
   .data . : AT(0x100000 + SIZEOF(.stackbot)) { *(.rodata*) *(.data*) }
-  .bss . : { *(.bss*) *(COMMON) }
+  .bss . : AT(0x100000 + SIZEOF(.stackbot) + SIZEOF(.data)) { *(.bss*) *(COMMON) }
   /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame) }
 }

@@ -131,7 +131,7 @@ What it rests on:
 | P10 | Signals | done (2026-11-06, branch `os-server`) |
 | P11 | Terminals, the eight virtual terminals, job control | done (2026-11-07, branch `os-server`) |
 | P12 | The commands and the devices | done (2026-11-07, branch `os-server`) |
-| P13 | POSIX threads | not started |
+| P13 | POSIX threads | done (2026-11-07, branch `os-server`) |
 | P14 | The old calls deleted; the demonstration | not started |
 | P15 | The documents, a review, the release | not started |
 
@@ -2582,6 +2582,33 @@ The largest change to the kernel since l4.md, in three steps, each with every su
 * **Done when:** `tests/posix/thread` passes on Bochs and MAME: eight threads on a shared
   counter under a mutex; a condition; join; a thread's fault ending the process.
 * **Decisions:** D17.
+* **Done (2026-11-07):**
+  - **The threads:** `PX_THREAD` makes one in the process's space (`ROOT_THREAD`), at the IP
+    and SP libc gives, its endpoint's selector written in its data first; it takes an entry
+    of the server's table (`P_THREAD`), whose server thread serves it alone, and which names
+    its process's entry. Descriptors, signals, ids, the data segment and the nice value are
+    the process's; waits are the thread's. `PX_THREAD_EXIT` writes `THREAD_DONE` in its state
+    word, wakes its joiners and ends it (`ROOT_UNTHREAD`, new), so that nothing runs on its
+    stack once a joiner frees it.
+  - **Synchronisation:** `PX_FUTEX`'s wait and wake, per (process, word) (D17 A). A mutex is a
+    word taken with `XCHG`: lock, trylock and unlock need no compare-and-exchange, which a
+    286 lacks; a condition is a word incremented in one instruction. malloc takes the same
+    lock (XSH 2.9.1); printf's buffer is on the caller's stack.
+  - **Per-thread data:** at the base of each thread's stack, 2 KB aligned to its size: its
+    `errno` (`errno.h`'s `errno` is the calling thread's), its endpoint, its state, its keys'
+    values. Every call goes through the calling thread's endpoint; fork's too.
+  - **fork from a thread:** the child's one thread is the caller, its endpoint the child's. The
+    other threads do not run while the root copies, at 6 above their 3, so nothing stops them.
+  - **Signals** go to the main thread; a stop stops every thread and a continue starts them; a
+    fault in any thread ends the process; an exit or an exec ends every thread.
+  - **The test:** `tests/posix/thread` on Bochs and MAME (and gcc-ia16): eight threads on a
+    counter under a mutex, joins, once and keys, a condition, each thread's `errno`, a mutex
+    waited for in the server (its word 2 while the waiter sleeps), trylock, seven threads at
+    most, a fork from a thread, a thread's fault ending its process (SIGILL).
+  - **Found on the way:** `rx_sp`, which every program needs for `errno`, was first in
+    `thread.asm` beside the thread's entry, whose reference pulled `pthread.c` and malloc into
+    every program: the image grew past its 128 KB. It is `lib/rx286`'s now. gcc-ia16's
+    linker script gave `.bss` no load address after `.data`, which every program has now.
 
 ### P14. The old calls deleted; the demonstration (M, about 1,000)
 

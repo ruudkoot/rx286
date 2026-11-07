@@ -1,0 +1,28 @@
+# POSIX's threads (roadmap os-server.md P13): init starts
+# tests/posix/thread.c (TEST_POSIX_THREAD). Eight threads, the main one
+# too, on a shared counter under a mutex; joins and their results, once, a
+# key's destructor; a condition between a producer and a consumer; each
+# thread's errno; a mutex waited for in the server (PX_FUTEX); trylock, a
+# join of itself; seven threads beside the main one at most; a fork from a
+# thread; and a thread's fault, which ends its process (SIGILL).
+program: idle
+define: TEST_POSIX_THREAD
+keys: {wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+emulators: bochs mame
+---
+thread: eight threads, 300 rounds each, under a mutex (2400): 2400
+thread: their results joined (280): 280
+thread: once (1): 1; a key's destructor, for each (7): 7
+thread: a consumer's sum of 20 items, by a condition (210): 210
+thread: errno, its own and the main thread's (9 2): 9 2
+thread: a mutex held, its waiter asleep (0, 2): 0, 2
+thread: woken as it was given up (1, 0): 1, 0
+thread: trylock of a mutex held (16): 16; then (0): 0
+thread: self (1), join of itself (35): 1 35
+thread: the most beside the main one (7): 7, then EAGAIN
+thread: a fork from a thread, its child's status (5): 5
+rx286: thread[
+thread: a thread's fault ends its process (SIGILL 4): 4
+thread: done

@@ -43,6 +43,7 @@ char *strerror(int e)
     case ENOTTY: return "not a terminal";
     case EOVERFLOW: return "too large";
     case ENXIO: return "no such device";
+    case EDEADLK: return "would deadlock";
     }
     return "unknown error";
 }

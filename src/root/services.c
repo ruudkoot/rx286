@@ -262,6 +262,18 @@ static void thread_free(struct process *p, int n)
     }
 }
 
+/* unthread - ROOT_UNTHREAD: a thread of ROOT_THREAD's gone, its endpoint
+ * and every copy of either with it (os-server.md P13) */
+static int unthread(rx_u16 n, rx_u16 t)
+{
+    struct process *p = proc_of(n);
+
+    if (!p || t < 1 || t > PROC_THREADS || p->threads[t].objects < 0)
+        return E_INVAL;
+    thread_free(p, (int)t);
+    return 0;
+}
+
 /* proc_make - a process of a code with a data segment of so many bytes,
  * its space filled, the server's copies at `to`; for ROOT_SPAWN and
  * ROOT_FORK */
@@ -458,6 +470,9 @@ void service(int what, struct rx_kregs *r)
         break;
     case ROOT_UNLOAD:
         status = unload(r->bx);
+        break;
+    case ROOT_UNTHREAD:
+        status = unthread(r->bx, r->cx);
         break;
     case ROOT_SERVE:
         status = serve(r->cx, r->di);
