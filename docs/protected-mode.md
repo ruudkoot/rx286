@@ -68,8 +68,8 @@ slots are the same in every space:
 | 27h-3Fh | | | | 00h | empty |
 
 Then slot 8 holds its endpoint to the OS server (an all-zero descriptor,
-like an empty slot's) and slot 9 its transfer segment (F3h); slots 10 to
-15 are empty.
+like an empty slot's); slots 9 to 15 are empty (slot 9 held its transfer
+segment until roadmap os-server.md P14).
 
 A program of another ring has the same slots at its ring's RPL: the root's,
 in ring 2, are 06h, 0Eh and 16h. `make run`'s shell says where its own

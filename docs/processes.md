@@ -34,12 +34,12 @@ label the call's number, BX, CX, SI and DI its arguments; the reply's BX
 the result, -1 on an error, and CX the error, which libc puts in `errno`. A
 buffer is an offset in the process's own data segment, which the server
 reaches through its copy and checks against the segment's limit. There is
-no transfer segment.
+no transfer segment (*docs/syscalls.md*).
 
 | Call | Arguments | What the server does |
 |---|---|---|
 | `PX_EXIT` | BX the status | the process ends: a zombie with the status (bits 8-15), until its parent's `waitpid` |
-| `PX_WRITE` | BX the descriptor, SI the bytes, CX how many | 0 to 2 are the console, as a foreground program's `SYS_WRITE`: the log and the main screen; any other is `EBADF` |
+| `PX_WRITE` | BX the descriptor, SI the bytes, CX how many | 0 to 2 are the console, as a foreground program's write: the log and the main screen; any other is `EBADF` |
 | `PX_FORK` | BX the child's IP, CX its SP | the root copies the process (`ROOT_FORK`); the child starts at libc's return path with the parent's SP (`src/lib/posix/fork.asm`) and returns 0 |
 | `PX_EXECVE` | SI the path, DI `argv`, BX `envp` | the file is checked and its arguments taken first; then the old image goes and the new one takes its slots, the pid kept. Past that point a failure ends the process (`SIGKILL`) |
 | `PX_SPAWN` | SI the path, DI `argv`, BX `envp` | a new process of the file, without a copy (`posix_spawn` without file actions or attributes) |
@@ -324,9 +324,10 @@ The volumes are read and written through a cache of 32 sectors in a
 segment of the server's (`src/os/cache.c`, `src/os/vol.c`): the FAT, in
 every copy, and the directories are written at the end of each call that
 changed them; a file's data at its close, its `fsync`, or when its sector
-leaves the cache. Today's file calls (`SYS_FIND` to `SYS_FREE`) read
-through the same cache, so the shell sees what processes wrote. The
-diskette driver still moves a sector at a time and has no change line:
+leaves the cache. A sector the driver refuses to write is dropped from
+the cache: the call that changed it gets the error, `EROFS` for a
+write-protected diskette, and the disk's copy counts again. The diskette
+driver still moves a sector at a time and has no change line:
 its rework is the disk subsystem's (`roadmaps/disk-scheduler.md`).
 
 ## Threads

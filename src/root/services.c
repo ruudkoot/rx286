@@ -19,7 +19,7 @@
 #include "rx/compiler.h"
 #include "rx/rx286.h"
 #include "kcalls.h"
-#include "syscalls.h"
+#include "drivers.h"
 #include "os.h"
 #include "root.h"
 #include "buddy.h"

@@ -21,7 +21,6 @@ bits 16
 %include "selectors.inc"
 %include "vectors.inc"
 %include "descriptors.inc"
-%include "syscalls.inc"
 %include "kcalls.inc"
 %include "disks.inc"
 %include "kernel.inc"

@@ -7,7 +7,7 @@
 ; with 360 KB media (roadmap D2). C and D are the AT's fixed-disk types 2
 ; and 1 (IBM, Technical Reference, the BIOS's table FD_TBL), with the
 ; cylinder from which writes are precompensated. The drive numbers
-; (DRIVE_A ...) are in syscalls.inc.
+; (DRIVE_A ...) are in drivers.inc.
 ; ============================================================================
 
 %ifndef RX286_DISKS_INC

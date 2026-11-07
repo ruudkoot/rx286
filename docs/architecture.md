@@ -13,7 +13,7 @@ L5):
 | the OS server | `src/os/` | a C module of the image, ring 2, a thread for each program; the files, in DOS's way | about 8.7 KB of code; its threads' stacks, 15 KB, in its data |
 | the drivers | `src/drivers/` | modules of the image, ring 1 with IOPL 1: the printer's, the mouse's, the console's, the keyboard's, the diskettes', the fixed disks', the serial line's, the sound's and the RTC's | 140 to 760 bytes of code each, the diskettes' 1.1 KB |
 | the processes | `src/userland/init.c`, `src/bin/` | programs of `/z` (in the image) and of C's `/BIN`, ring 3, which the OS server runs (*docs/processes.md*): init, the shell in C on each terminal (*docs/shell.md*), its commands, the daemons (the clock, the counter) | the shell about 13 KB, a command 1 to 8 KB |
-| a test program | `tests/programs/` | a module of the image in a test build, ring 3 (or 1, 2), on today's system calls; the counter (`src/userland/counter.c`), a C module, beside it when a test asks | |
+| a test program | `tests/programs/` | a module of the image in a test build, ring 3 (or 1, 2), which makes four of the OS server's calls (*docs/syscalls.md*); the counter (`src/userland/counter.c`), a C module, beside it when a test asks | |
 
 `src/include/` holds what more than one part shares: the memory layout, the
 ports, the selectors, the vectors, the system calls, the drives, the
@@ -45,10 +45,11 @@ server.
    every other capability there is; `thread.asm` starts it, and becomes the
    idle loop. The first switch starts the root in ring 2 with `IRET`.
 6. The root (`src/root/`) builds a space for every other module: the
-   drivers; the OS server, with a thread for each program; the shell, and
-   the clock and the counter beside it, each with a thread, an endpoint to
-   the OS server and a transfer segment. It starts them, the shell in the
-   foreground; then it waits for the OS server's faults and questions.
+   drivers; the OS server, with a thread for each program the root builds;
+   and in test builds a test program, with a thread and an endpoint to the
+   OS server. It starts them; then it waits for the OS server's faults and
+   requests. The OS server starts init, a process from `/z`, which runs a
+   shell on each terminal and the daemons (*docs/processes.md*).
 
 ## The boot image
 
@@ -174,32 +175,30 @@ everything else: the untyped memory left, the module table, each other
 module's code and data. For each other module it builds a space - the
 module's code, a data segment initialised from the module, a stack. The OS
 server gets a thread for each program; every other module is a program and
-gets a thread, an endpoint to the OS server and a transfer segment, and
-its faults go to the OS server (l4.md D18). The root starts them at the
-priorities the module table gives. Then it serves the OS server's faults:
-it reports each with the kernel's old line, puts back any of the server's
-segments that is gone from its slot, and restarts it at its entry
-(*docs/kernel-calls.md*). On the same endpoint it answers the OS server's
-questions about the modules, and kills and starts the background programs
-(`ps`, `kill`, `start`; roadmap l4.md L11, L12): each is made of untyped
-memory of its own, which `kill` revokes and `start` builds it again from.
+gets a thread and an endpoint to the OS server, and its faults go to the
+OS server (l4.md D18). The root starts them at the priorities the module
+table gives. Then it serves the OS server's faults: it reports each with
+the kernel's old line, puts back any of the server's segments that is gone
+from its slot, and restarts it at its entry (*docs/kernel-calls.md*). On
+the same endpoint it serves the OS server's requests for the processes:
+their code, their spaces, forks, threads and ends (roadmap os-server.md
+P4). Until P14 it killed and started the background programs too (`ps`,
+`kill`, `start`; l4.md L11, L12).
 
 ## The OS server
 
 *docs/os-server.md* has the details. The OS server (`src/os/`, in C since
-roadmap os-server.md P5; roadmap l4.md L6, D16) serves the
-programs' system calls as messages, with a thread for each program that
-serves it alone, so that one program's wait holds up no other (l4.md X13).
-The `sys` macro calls a stub that puts the registers and a buffer in the
-program's transfer segment and calls the server; the server's thread
-answers from that segment, through the driver of the device, the kernel's
-log and ticks, or itself, and puts the results back (*docs/syscalls.md*). The files are its
-own (`files.asm`, `fat.asm`; roadmap l4.md L9): each program's current
-drive and directories, and the FAT12 library, which reads a sector at a
-time from the disk drivers into a files segment the root gives the server
-for that program (*docs/storage.md*). The server also handles its
-programs' faults: it reports each with the kernel's old line, puts back
-what the program lost, and restarts it.
+roadmap os-server.md P5; roadmap l4.md L6, D16) serves the system calls as
+messages, with a thread for each process and for each program the root
+builds, so that one's wait holds up no other (l4.md X13). A call's label is
+its number, its arguments are registers, and its buffers offsets in the
+caller's data segment, which the server holds (*docs/syscalls.md*): it
+answers through the driver of the device, the kernel's log and ticks, or
+itself. The processes' files are its own (`vol.c`, `vfs.c`, `cache.c`;
+roadmap os-server.md P7): FAT12 volumes read and written through a cache
+of sectors (*docs/processes.md*, *docs/storage.md*). The server also
+handles the faults: a process's is a signal; a program's the root built is
+reported with the kernel's old line, and the program restarts.
 
 ## The drivers
 
@@ -217,23 +216,21 @@ device.
 A process (*docs/processes.md*) sees its code, its data segment with its
 stack at the bottom, and its endpoint to the OS server, through which it
 makes POSIX's calls: it ends, and nothing restarts it. A program the root
-builds from a module, a test program today, sees three segments (code,
-data, stack: selectors 07h, 0Fh, 17h), its endpoint to the OS server and
-its transfer segment (47h, 4Fh), and through them today's system calls
-(*docs/syscalls.md*): the console, the keyboard, the clocks, the four
-drives a sector at a time or as files, and the two printers
-(*docs/storage.md*). It starts with its registers zero, IF on and IOPL 0;
-when it faults or exits, the OS server restarts it at its entry with a
-fresh stack, and so it does when it is broken off with Ctrl+Break, which
-the keyboard driver signals to it. Its data survives.
+builds from a module, a test program, sees three segments (code, data,
+stack: selectors 07h, 0Fh, 17h) and its endpoint to the OS server (47h),
+and through it four calls (*docs/syscalls.md*): a write to the console and
+the log, a key read, a sleep and an exit. It starts with its registers
+zero, IF on and IOPL 0; when it faults or exits, the OS server restarts it
+at its entry with a fresh stack, and so it does when it is broken off with
+Ctrl+Break, which the keyboard driver signals to it. Its data survives.
 
 The shell is a process in C (`src/bin/sh/sh.c`, *docs/shell.md*; roadmap
 os-server.md P9, P12), and so are its commands (`src/bin/`). The shell in
-assembly, a module the root built, went in P12. The programs of today's
-system calls in assembly (`tests/programs/`) share `src/userland/`'s
-`uprint.asm` (output through `SYS_WRITE`), `stub.asm` and `program.inc`
-(the sections and the `PRINT` macro), and `src/lib/`'s `format.asm`,
-`fat12.asm` and `fatname.asm`, each pure and tested on the host.
+assembly, a module the root built, went in P12. The kernel's test programs
+in assembly (`tests/programs/`) share `src/userland/`'s `uprint.asm`
+(output through `PX_WRITE`), `px.asm` (the calls' binding) and
+`program.inc` (the sections and the `px` and `PRINT` macros), and
+`src/lib/`'s `format.asm`, pure and tested on the host.
 
 ## Builds
 

@@ -14,9 +14,10 @@
 ; `overruns` counts. A 16550's FIFO, turned on where there is one, holds 16.
 ; A port that reads all ones has no UART.
 ;
-; The OS server takes what is in the ring for SYS_SERIAL_READ, which never
-; waits, and asks whether bytes wait for SYS_WAIT (DRV_SERIAL_NEWS).
-; SYS_SERIAL_WRITE sends bytes whenever the UART can take them, for 2 s at
+; The OS server takes what is in the ring for a read of /dev/com2
+; (DRV_SERIAL_READ, which never waits), and asks whether bytes wait for a
+; read that waits and for poll (DRV_SERIAL_NEWS). A write (DRV_SERIAL_WRITE)
+; sends bytes whenever the UART can take them, for 2 s at
 ; most: a FIFO's worth (16 bytes) at a time on a 16550, one on a 16450, so
 ; the driver sleeps between rather than spinning. A segment passed is looked
 ; at again after each wait, since its program may have been killed
@@ -26,7 +27,6 @@
 
 cpu 286
 bits 16
-%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"

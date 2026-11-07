@@ -24,11 +24,11 @@ SPIN_TICKS          equ 30              ; six time slices of each thread
 ; ----------------------------------------------------------------------------
 entry:
         fldpi
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         mov bx, ax
         add bx, SPIN_TICKS
 .spin:
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         cmp ax, bx
         jb .spin
         fldpi
@@ -41,8 +41,7 @@ entry:
 .lost:
         PRINT "program: its 287 state LOST", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 %include "uprint.asm"

@@ -15,5 +15,5 @@ additions: seal the copy (6): 6
 additions: seal a segment of DPL 2 (2): 2
 additions: seal an endpoint (1): 1
 child: running from a sealed segment
-rx286: program fault #GP(0000) at 0007:0185
+rx286: program fault #GP(0000) at 0007:{seal_part.write_f}
 additions: done

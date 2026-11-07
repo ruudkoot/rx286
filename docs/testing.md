@@ -130,8 +130,8 @@ The suites:
 | `tests/caps` | the kernel's calls on capabilities: every kind of object retyped, every refusal, a space built for a new thread by copy, move and mint, the thread started (*docs/kernel-calls.md*); the seal, a thread suspended and its frame moved, the pools, and calls that give way and resume (`tests/programs/additions.asm`; roadmap os-server.md P2, P3) |
 | `tests/ipc` | IPC between threads the program makes: 1,000 calls; a segment passed, deleted, passed again, kept and refused; the kernel's timer; a saved reply; three callers queued, served in order with their badges; notifications, bound and not; a client above its server and below it; every refusal; a call nobody answers, ended by Ctrl+Break (Bochs and MAME) |
 | `tests/timing` | the instructions of an IPC round trip, on Bochs, against a budget: a regression check, since no emulator gives an AT's clocks |
-| `tests/attack` | 82 attacks (*docs/security.md*) |
-| `tests/fuzz` | 10,000 iterations of random code in ring 3, with random system calls through the stub and random kernel calls on `INT 31h` |
+| `tests/attack` | 74 attacks (*docs/security.md*) |
+| `tests/fuzz` | 10,000 iterations of random code in ring 3, with random calls on the OS server (`os_px`) and random kernel calls on `INT 31h` |
 | `tests/unit` | the host tests (layer 3) |
 
 `make check-ia16` (not in `make check`) runs the suites whose images carry C

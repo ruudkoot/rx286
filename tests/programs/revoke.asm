@@ -105,8 +105,7 @@ entry:
         call check_copies
         PRINT "revoke: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------

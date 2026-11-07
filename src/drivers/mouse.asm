@@ -23,13 +23,13 @@
 ; It also looks every MOUSE_POLL_TICKS, on its timer (DRV_TIMER_BIT), for
 ; bytes whose interrupt was lost (an edge can go, as on a shared line). In
 ; test builds a key script's mouse bytes come from the kernel (KCALL_TEST),
-; with IRQ4's bits. The OS server asks it for SYS_MOUSE (DRV_MOUSE_GET) and,
-; for SYS_WAIT, whether the mouse has news (DRV_MOUSE_NEWS).
+; with IRQ4's bits. The OS server asks it for the state (DRV_MOUSE_GET) and
+; whether the mouse has news (DRV_MOUSE_NEWS), for /dev/mouse's reads,
+; ioctl and poll.
 ; ============================================================================
 
 cpu 286
 bits 16
-%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"

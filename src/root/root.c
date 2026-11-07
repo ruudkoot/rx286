@@ -11,18 +11,17 @@
  * that serves that program alone (START_SESSION), started with SP = 4n,
  * which tells it its program (src/os/start.asm), with the program's
  * capabilities in its slots (src/os/os.c).
- * Every other module is a program: it gets a thread, an endpoint to the OS
- * server badged with its module's number (OS_SLOT_EP) and a transfer
- * segment it shares with the server (OS_SLOT_XFER; os.inc); the server
- * alone gets the program's files segment (FILES_SIZE); and its faults go to
- * the OS server, on the same endpoint badged FAULT_BADGE (l4.md D18). The
- * root starts each at the priority the module table gives, the program the
- * keys are for in the foreground; then it handles the OS server's faults
+ * Every other module is a program: it gets a thread and an endpoint to the
+ * OS server badged with its module's number (OS_SLOT_EP), on which it makes
+ * its calls (docs/syscalls.md); and its faults go to the OS server, on the
+ * same endpoint badged FAULT_BADGE (l4.md D18). The root starts each at
+ * the priority the module table gives, the program the keys are for in the
+ * foreground; then it handles the OS server's faults
  * (and a program's, if there is no OS server): it reports each as the
  * kernel did ("rx286: os fault #GP(0000) at 0006:0123"), puts back any of
  * the module's three segments that is gone from its slot, and restarts it
- * at its entry; and it answers the OS server's requests about its programs,
- * and for processes (services.c), on the same endpoint.
+ * at its entry; and it answers the OS server's requests for processes
+ * (services.c), on the same endpoint.
  *
  * Ring 2 gives it nothing that ring 3 lacks (l4.md D12): its capabilities
  * are its power. In TEST_CAPS builds it gives the program, in slots 10-13 of
@@ -34,14 +33,12 @@
  * code and data (tests/root). Its lines go to the kernel's log.
  * ============================================================================ */
 
-#include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
 #include "rx/compiler.h"
 #include "rx/rx286.h"
 #include "layout.h"
 #include "kcalls.h"
-#include "syscalls.h"
 #include "os.h"
 #include "drivers.h"
 #include "descriptors.h"
@@ -56,23 +53,17 @@
 #define FAULT_SLOT (ROOT_SLOT_MODULE + 2 * (MODULE_MAX - 1))   /* past every module's two */
 #define FAULT_EP SLOT(FAULT_SLOT)               /* the fault endpoint */
 #define SCRATCH SLOT(FAULT_SLOT + 1)            /* a badged copy on its way */
-#define CHILD_SLOT (FAULT_SLOT + 2)             /* a background program's own untyped: two a
-                                                   module, the arena's and the memory's */
-#define CHILD_ARENA_PARAS (2560 >> 4)           /* its space, thread, endpoint, OS thread,
-                                                   notification */
 #define PROGRAM_SLOT (ROOT_SLOT_IRQ + 16)       /* past the kernel's gifts: eight a module */
 #define CONTROL SLOT(ROOT_SLOT_VIDEO - 1)       /* the OS server's control notification */
 #define PROGRAMS_MAX (MODULE_MAX - 1)           /* every module but the root */
 
 RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, program_slots);
-RX_STATIC_ASSERT(CHILD_SLOT + 2 * PROGRAMS_MAX <= ROOT_SLOT_LOW_UNTYPED, child_slots);
 
 /* A module's slots in its own space, as selectors (any RPL names a slot) */
 #define W_CODE 0x04
 #define W_DATA 0x0C
 #define W_STACK 0x14
 #define W_EP (OS_SLOT_EP * 8 + 4)
-#define W_XFER (OS_SLOT_XFER * 8 + 4)
 #define W_MODULES (3 * 8 + 4)                   /* the OS server's: the module table */
 #define W_DRV_EP (DRV_SLOT_EP * 8 + 4)          /* a driver's */
 #define W_DRV_NOTIFY (DRV_SLOT_NOTIFY * 8 + 4)
@@ -99,8 +90,6 @@ RX_STATIC_ASSERT(CHILD_SLOT + 2 * PROGRAMS_MAX <= ROOT_SLOT_LOW_UNTYPED, child_s
 #endif
 
 #define ACC_DATA 0x92                           /* present, data, writable: DPL to add */
-#define ACC_XFER 0xF2                           /* the same, of DPL 3: a transfer segment */
-#define ACC_FILES 0xD2                          /* of DPL 2: the OS server's files segment */
 
 /* A module's entry in the module table, through the root's capability */
 typedef const rx_u8 RX_FAR *entry_ptr;
@@ -109,7 +98,7 @@ typedef const rx_u8 RX_FAR *entry_ptr;
 
 /* A module's slots of the root's (program_slots) */
 struct slots {
-    rx_u16 code, template_, space, thread, data, stack, ep, xfer, server, files;
+    rx_u16 code, template_, space, thread, data, stack, ep, notify, server;
 };
 
 static unsigned programs;               /* the modules it builds: 1 to programs */
@@ -119,10 +108,6 @@ rx_u16 server_space;                    /* its space, of the root's */
 #ifdef TEST_SERVICES
 static rx_u16 test_space;               /* the test program's, its requests' (give_caps) */
 #endif
-static rx_u16 ut_arena = ARENA;         /* where a module's objects come from: the */
-static rx_u16 ut_memory = UNTYPED;      /* root's, or a background program's own */
-static int building;                    /* while program_build builds: a failure is its */
-static jmp_buf build_failed;
 static struct slots s;                  /* the module being built's */
 static rx_u16 m_entry, m_stack;         /* the OS server's, for its threads */
 static rx_u8 m_priority;
@@ -133,15 +118,12 @@ void say(const char *text)
     rx_log(text, (unsigned)strlen(text));
 }
 
-/* failed - a kernel call the root needs failed: say so, and stop; while it
- * builds a program again, that build's failure instead (program_build) */
+/* failed - a kernel call the root needs failed: say so, and stop */
 static void failed(int status)
 {
     char line[64];
     struct rx_kregs r;
 
-    if (building)
-        longjmp(build_failed, 1);
     snprintf(line, sizeof line, "rx286: the root could not build the system: status %d\n",
              status);
     say(line);
@@ -262,7 +244,8 @@ static entry_ptr entry_of(unsigned module)
 }
 
 /* program_slots - a module's slots of the root's: its code and its data as
- * assembled (the kernel's gifts), and the eight the root fills for it */
+ * assembled (the kernel's gifts), and those the root fills for it, of eight
+ * (the eighth unused): a driver's notification in `notify` */
 static void program_slots(unsigned module)
 {
     rx_u16 base = (rx_u16)(SLOT(PROGRAM_SLOT) + (module - 1) * 64);
@@ -274,79 +257,14 @@ static void program_slots(unsigned module)
     s.data = (rx_u16)(base + 16);
     s.stack = (rx_u16)(base + 24);
     s.ep = (rx_u16)(base + 32);
-    s.xfer = (rx_u16)(base + 40);
+    s.notify = (rx_u16)(base + 40);
     s.server = (rx_u16)(base + 48);
-    s.files = (rx_u16)(base + 56);
-}
-
-/* module_kind - what a module is (PS_*), and its main thread; -1 if there
- * is no such module */
-static int module_kind(unsigned module, rx_u16 *thread)
-{
-    rx_u8 flags;
-
-    if (module == 0) {
-        *thread = SLOT(ROOT_SLOT_THREAD);
-        return PS_ROOT;
-    }
-    if (module > programs)
-        return -1;
-    program_slots(module);
-    *thread = s.thread;
-    flags = ENTRY_B(entry_of(module), M_FLAGS);
-    if (flags & MF_ARCHIVE)
-        return -1;                      /* no program: /z (os-server.md P6) */
-    if (module == server)
-        return PS_OS;
-    if (flags & MF_DRIVER)
-        return PS_DRIVER;
-    if (flags & MF_FOREGROUND)
-        return PS_FOREGROUND;
-    return PS_BACKGROUND;
-}
-
-/* children_slots - a background program's own untyped, in the root's slots:
- * the arena's, then the memory's */
-static rx_u16 child_arena(unsigned module)
-{
-    return (rx_u16)(SLOT(CHILD_SLOT) + (module - 1) * 16);
 }
 
 /* paragraphs - bytes as paragraphs, rounded up (FFFFh bytes: 1000h) */
 rx_u16 paragraphs(rx_u16 bytes)
 {
     return (rx_u16)(((rx_u32)bytes + 15) >> 4);
-}
-
-/* children_make - a background program's own untyped, at the start: from
- * the arena's, room for its kernel objects; from the memory's, for its data,
- * stack, transfer and files segments; so that killing it gives them back */
-static void children_make(unsigned module)
-{
-    rx_u16 thread, room;
-    entry_ptr e;
-
-    if (module_kind(module, &thread) != PS_BACKGROUND)
-        return;
-    must(retype(ARENA, CAP_UNTYPED, child_arena(module), CHILD_ARENA_PARAS, 0));
-    e = entry_of(module);
-    room = (rx_u16)(paragraphs(ENTRY_W(e, M_DATA_ROOM)) + paragraphs(ENTRY_W(e, M_STACK))
-                    + ((XFER_SIZE + 15) >> 4) + ((FILES_SIZE + 15) >> 4));
-    must(retype(UNTYPED, CAP_UNTYPED, (rx_u16)(child_arena(module) + 8), room, 0));
-}
-
-/* use_untyped - where a module's objects come from: a background program's
- * own untyped, else the root's */
-static void use_untyped(unsigned module)
-{
-    rx_u16 thread;
-
-    ut_arena = ARENA;
-    ut_memory = UNTYPED;
-    if (module_kind(module, &thread) == PS_BACKGROUND) {
-        ut_arena = child_arena(module);
-        ut_memory = (rx_u16)(child_arena(module) + 8);
-    }
 }
 
 /* give - a copy of a capability of the root's into the module's space */
@@ -359,7 +277,7 @@ static void give(rx_u16 from, rx_u16 to)
  * of the root's */
 static void new_segment(rx_u16 slot, rx_u16 bytes, int dpl)
 {
-    must(retype(ut_memory, CAP_SEGMENT, slot, bytes, (dpl << 5) | ACC_DATA));
+    must(retype(UNTYPED, CAP_SEGMENT, slot, bytes, (dpl << 5) | ACC_DATA));
 }
 
 /* fault_to - a thread's faults to an endpoint of the root's, with a badge */
@@ -370,19 +288,16 @@ static void fault_to(rx_u16 thread, rx_u16 endpoint, rx_u16 badge)
     must(kcall(KCALL_DELETE, 0, 0, 0, SCRATCH, 0, 0));
 }
 
-/* program_ends - a program's endpoint to the OS server, its transfer
- * segment and its files segment, if there is an OS server and the module is
- * neither it nor a driver */
-static void program_ends(unsigned module)
+/* program_endpoint - a program's endpoint to the OS server, if there is an
+ * OS server and the module is neither it nor a driver */
+static void program_endpoint(unsigned module)
 {
     if (server == 0 || module == server)
         return;
     if (ENTRY_B(entry_of(module), M_FLAGS) & (MF_DRIVER | MF_ARCHIVE))
         return;                         /* a driver: its endpoint comes with build */
     program_slots(module);
-    must(retype(ut_arena, CAP_ENDPOINT, s.ep, 0, 0));
-    must(retype(ut_memory, CAP_SEGMENT, s.xfer, XFER_SIZE, ACC_XFER));
-    must(retype(ut_memory, CAP_SEGMENT, s.files, FILES_SIZE, ACC_FILES));
+    must(retype(ARENA, CAP_ENDPOINT, s.ep, 0, 0));
 }
 
 /* far_copy_at - bytes from one segment of the root's to another, from an
@@ -439,15 +354,15 @@ static void build_driver(int irq, int service)
 
     must(retype(ARENA, CAP_ENDPOINT, s.ep, 0, 0));
     give(s.ep, W_DRV_EP);
-    must(retype(ARENA, CAP_NOTIFY, s.xfer, 0, 0));  /* (in its transfer segment's slot) */
-    give(s.xfer, W_DRV_NOTIFY);
-    must(thread_call(s.thread, THREAD_BIND, s.xfer, 0, 0));
+    must(retype(ARENA, CAP_NOTIFY, s.notify, 0, 0));
+    give(s.notify, W_DRV_NOTIFY);
+    must(thread_call(s.thread, THREAD_BIND, s.notify, 0, 0));
     driver_device(service);
     if (irq == 0)
         return;
     line = (rx_u16)(SLOT(ROOT_SLOT_IRQ) + (irq - 1) * 8);
     give(line, W_DRV_IRQ);
-    must(copy(MY_SPACE, s.xfer, SCRATCH, COPY_MINT, DRV_IRQ_BIT, 0));
+    must(copy(MY_SPACE, s.notify, SCRATCH, COPY_MINT, DRV_IRQ_BIT, 0));
     must(kcall(KCALL_IRQ, IRQ_BIND, 0, 0, line, SCRATCH, 0));
     must(kcall(KCALL_DELETE, 0, 0, 0, SCRATCH, 0, 0));
 }
@@ -482,9 +397,9 @@ static void build(unsigned module)
 #endif
         }
     }
-    must(retype(ut_arena, CAP_SPACE, s.space, slots, 0));
+    must(retype(ARENA, CAP_SPACE, s.space, slots, 0));
     if (module != server)
-        must(retype(ut_arena, CAP_THREAD, s.thread, 0, 0));
+        must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
     /* its code, as the kernel gave it */
     give(s.code, W_CODE);
     /* its data: a segment of its room, initialised from the module; of the
@@ -506,10 +421,8 @@ static void build(unsigned module)
         fault_ep = FAULT_EP;            /* no OS server: the root's */
         badge = (rx_u16)module;
     } else {
-        /* the OS server's endpoint and transfer segment; its faults to the
-         * OS server */
+        /* the OS server's endpoint; its faults to the OS server */
         must(copy(s.space, s.ep, W_EP, COPY_MINT, (rx_u16)module, RIGHT_SEND));
-        give(s.xfer, W_XFER);
         fault_ep = s.ep;
         badge = (rx_u16)(module | FAULT_BADGE);
     }
@@ -571,18 +484,16 @@ static void serve_program(unsigned module)
     give_server(s.code, (rx_u16)(to + 24));
     give_server(s.data, (rx_u16)(to + 32));
     give_server(s.stack, (rx_u16)(to + 40));
-    give_server(s.xfer, (rx_u16)(to + 48));
-    give_server(s.files, (rx_u16)(to + 56));
     /* its thread's notification, to sleep on: made in the scratch slot, moved
      * to the server's OS_SLOT_SLEEP + n */
-    must(retype(ut_arena, CAP_NOTIFY, SCRATCH, 0, 0));
+    must(retype(ARENA, CAP_NOTIFY, SCRATCH, 0, 0));
     if (module == foreground && keyboard_space())
         must(copy(keyboard_space(), SCRATCH, W_DRV_KEYS, COPY_MINT, KEY_SIGNAL_BIT,
                   RIGHT_SEND));
     must(copy(server_space, SCRATCH, (rx_u16)((OS_SLOT_SLEEP + module) * 8 + 4), COPY_MOVE,
               0, 0));
     /* its thread */
-    must(retype(ut_arena, CAP_THREAD, s.server, 0, 0));
+    must(retype(ARENA, CAP_THREAD, s.server, 0, 0));
     fault_to(s.server, FAULT_EP, (rx_u16)server);
     must(thread_call(s.server, THREAD_CONFIGURE, server_space, m_entry, top));
     must(thread_call(s.server, THREAD_START, 0, 0,
@@ -640,12 +551,12 @@ static void give_service(unsigned module, int service)
     program_slots(module);
     give_server(s.ep, (rx_u16)(((OS_SLOT_SERVICE + service) & 0xFF) * 8 + 4));
     if (service == SERVICE_SOUND)
-        must(copy(server_space, s.xfer, W_SOUND_STOP, COPY_MINT, DRV_STOP_BIT, RIGHT_SEND));
+        must(copy(server_space, s.notify, W_SOUND_STOP, COPY_MINT, DRV_STOP_BIT, RIGHT_SEND));
 }
 
 /* build_server - the OS server's threads: one for each program, which
  * serves it alone, with the program's capabilities in the server's slots
- * 8n to 8n + 7 */
+ * 8n to 8n + 5 */
 static void build_server(void)
 {
     unsigned module;
@@ -658,7 +569,7 @@ static void build_server(void)
     server_params();
     give_server(MODULES, W_MODULES);    /* the module table */
     server_control();
-    /* its requests about the programs, on the fault endpoint, badged so */
+    /* its requests for processes, on the fault endpoint, badged so */
     must(copy(server_space, FAULT_EP, OS_SLOT_ROOT * 8 + 4, COPY_MINT, ROOT_BADGE_OS,
               RIGHT_SEND));
     if (!foreground && keyboard_space()) {  /* no program the root builds has the keys: */
@@ -677,93 +588,8 @@ static void build_server(void)
             program_slots(module);      /* /z: its bytes, read-only */
             give_server(s.template_, OS_SLOT_ARCHIVE * 8 + 4);
         } else {
-            use_untyped(module);
             serve_program(module);
         }
-    }
-}
-
-/* program_kill - a background program killed (roadmap l4.md L12): its own
- * untyped revoked, so that everything made for it dies - its space, thread,
- * endpoint, segments, the OS server's thread for it and every copy of them -
- * and its memory is free again; and every copy of its code */
-static void program_kill(unsigned module)
-{
-    program_slots(module);
-    kcall(KCALL_REVOKE, 0, 0, 0, child_arena(module), 0, 0);
-    kcall(KCALL_REVOKE, 0, 0, 0, (rx_u16)(child_arena(module) + 8), 0, 0);
-    kcall(KCALL_REVOKE, 0, 0, 0, s.code, 0, 0);
-}
-
-/* program_build - a background program killed, built again from its own
- * untyped as at the start: its endpoint, transfer and files segments, space,
- * data, stack and thread, and the OS server's thread for it; 0, or E_IO if
- * a kernel call failed (what it made revoked) */
-static rx_u16 program_build(unsigned module)
-{
-    if (setjmp(build_failed)) {
-        building = 0;
-        ut_arena = ARENA;
-        ut_memory = UNTYPED;
-        program_kill(module);
-        return E_IO;
-    }
-    building = 1;
-    use_untyped(module);
-    program_ends(module);
-    build(module);
-    server_params();
-    serve_program(module);
-    building = 0;
-    ut_arena = ARENA;
-    ut_memory = UNTYPED;
-    return 0;
-}
-
-/* request - the OS server's request about a module (os.inc): what runs it,
- * or a background program killed or built again; the reply in r's BX (0 or
- * the error), and for ROOT_INFO CL the kind, CH the state, SI the
- * priority, DI the times it ran */
-static void request(int what, unsigned module, struct rx_kregs *r)
-{
-    rx_u16 thread, state, runs;
-    int kind = module_kind(module, &thread), alive;
-    struct rx_kregs t;
-
-    if (kind < 0) {
-        r->bx = E_INVAL;
-        return;
-    }
-    t.ax = (KCALL_THREAD << 8) | THREAD_INFO;
-    t.dx = thread;
-    t.bp = 0;
-    alive = rx_kcall(&t) == 0;          /* no thread: a program killed */
-    state = t.bx;
-    runs = t.cx;
-    if (what == ROOT_INFO) {
-        if (!alive) {                   /* killed: stopped, at its priority */
-            state = (rx_u16)(STATE_STOPPED | (ENTRY_B(entry_of(module), M_PRIORITY) << 8));
-            runs = 0;
-        }
-        r->cx = (rx_u16)(kind | ((state & 0xFF) << 8));
-        r->si = (rx_u16)(state >> 8);
-        r->di = runs;
-        r->bx = 0;
-        return;
-    }
-    if (kind != PS_BACKGROUND) {
-        r->bx = E_INVAL;                /* only a background program */
-    } else if (what == ROOT_KILL) {
-        if (alive) {
-            program_kill(module);
-            r->bx = 0;
-        } else {
-            r->bx = E_BUSY;             /* killed already */
-        }
-    } else if (what == ROOT_START) {
-        r->bx = alive ? E_BUSY : program_build(module);
-    } else {
-        r->bx = E_INVAL;
     }
 }
 
@@ -901,20 +727,11 @@ int RX_MAIN_CALL main(void)
                 failed(KE_ARG);         /* slots, 8n on, must miss its own (mkimage) */
         }
     }
-    for (module = 1; module <= programs; module++) {    /* the programs' endpoints and */
-        children_make(module);                          /* transfer segments */
-        use_untyped(module);
-        program_ends(module);
-    }
-    for (module = 1; module <= programs; module++) {
-        use_untyped(module);
+    for (module = 1; module <= programs; module++)      /* the programs' endpoints */
+        program_endpoint(module);
+    for (module = 1; module <= programs; module++)
         build(module);
-    }
-    ut_arena = ARENA;
-    ut_memory = UNTYPED;
     build_server();
-    ut_arena = ARENA;
-    ut_memory = UNTYPED;
 #ifdef TEST_ROOT_REPORT
     module_report();
 #endif
@@ -924,8 +741,8 @@ int RX_MAIN_CALL main(void)
 #ifdef TEST_ROOT_FAULT
     rx_ud2();                           /* the root's own fault: a panic (D8) */
 #endif
-    /* the fault handler, and the OS server's requests for its programs
-     * (l4.md L11), on the same endpoint */
+    /* the fault handler, and the OS server's requests for processes
+     * (os-server.md P4), on the same endpoint */
     r.ax = KCALL_RECV << 8;
     r.dx = FAULT_EP;
     r.bp = 0;
@@ -936,15 +753,13 @@ int RX_MAIN_CALL main(void)
             r.bp = 0;
             continue;
         }
-        if ((r.dx == ROOT_BADGE_OS || r.dx == ROOT_BADGE_TEST) && (r.ax & 0xFF) >= ROOT_LOAD) {
+        if (r.dx == ROOT_BADGE_OS || r.dx == ROOT_BADGE_TEST) {
             services_space = server_space;  /* where the copies go: the OS server's, */
 #ifdef TEST_SERVICES
             if (r.dx == ROOT_BADGE_TEST)    /* or the test program's */
                 services_space = test_space;
 #endif
             service(r.ax & 0xFF, &r);
-        } else if (r.dx == ROOT_BADGE_OS) {
-            request(r.ax & 0xFF, r.bx, &r);
         } else {
             module = r.dx;              /* the badge: the module's number */
             if (!(r.di & FAULT_COUNTED))

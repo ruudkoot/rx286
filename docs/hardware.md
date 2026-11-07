@@ -25,8 +25,8 @@ numbers below are the Technical Reference's.
 | Fixed disk | controller at 1F0h-1F7h, IRQ14; drive 0 type 2 (615/4/17, 20 MB), drive 1 type 1 (306/4/17, 10 MB) | the fixed disk driver |
 | Serial | COM1 3F8h IRQ4, COM2 2F8h IRQ3, COM3 3E8h IRQ4, COM4 2E8h IRQ3 | COM1 the mouse; COM2 the log (debug and test builds) or the modem (release builds); COM3, COM4 kept quiet (*docs/devices.md*) |
 | Parallel | LPT1 378h IRQ7, LPT2 278h IRQ5 | the printer driver, polled |
-| Speaker | timer channel 2, gated through port B | `SYS_SOUND` |
-| Game port | 201h: two joysticks, four buttons, four axes | `SYS_JOYSTICK` |
+| Speaker | timer channel 2, gated through port B | the sound driver: `/dev/speaker` |
+| Game port | 201h: two joysticks, four buttons, four axes | the sound driver: `/dev/joystick` |
 | Video | IBM EGA, colour display, 80x25 text at B8000h | the console |
 
 ## I/O ports
@@ -45,7 +45,7 @@ numbers below are the Technical Reference's.
 | 0F0h | clear the 287's busy latch | `FPU_CLEAR_BUSY` | the IRQ13 handler |
 | 0F1h | reset the 287 | `FPU_RESET` | never |
 | 1F0h-1F7h, 3F6h | fixed disk controller | `HDC_DATA`, `HDC_ERROR`, `HDC_PRECOMP`, `HDC_SECTOR_COUNT`, `HDC_SECTOR`, `HDC_CYLINDER_LOW`, `HDC_CYLINDER_HIGH`, `HDC_DRIVE_HEAD`, `HDC_STATUS`, `HDC_COMMAND`, `HDC_CONTROL` | the fixed disk driver |
-| 201h | game port | `GAME_PORT` | `SYS_JOYSTICK` |
+| 201h | game port | `GAME_PORT` | the sound driver |
 | 278h-27Ah | LPT2 | `LPT2_BASE` | the printer driver |
 | 2E8h-2EFh | COM4 | `COM4_BASE` | kept quiet |
 | 2F8h-2FFh | COM2 | `COM2_BASE` | the log in debug and test builds; the modem in release builds |

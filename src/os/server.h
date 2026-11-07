@@ -1,7 +1,7 @@
 /* ============================================================================
  * rx286 - src/os/server.h
  * What the OS server's files share (roadmap os-server.md P5): its slots, a
- * thread's program, the transfer segment, and the calls on the drivers.
+ * thread's program, and the calls on the drivers.
  * ============================================================================ */
 
 #ifndef RX_OS_SERVER_H
@@ -12,7 +12,6 @@
 #include "sys/types.h"
 #include "build.h"
 #include "kcalls.h"
-#include "syscalls.h"
 #include "os.h"
 #include "drivers.h"
 #include "layout.h"
@@ -35,15 +34,13 @@
 #define PROC_SLOTS_EACH 6
 #define PROC_N0 17                      /* the server's thread for entry i: PROC_N0 + i */
 
-/* A program's slots of the server's: 8n + k */
+/* A program's slots of the server's: 8n + k (6 and 7 unused) */
 #define OS_K_EP 0                       /* the endpoint it calls on */
 #define OS_K_THREAD 1
 #define OS_K_SPACE 2
 #define OS_K_CODE 3
-#define OS_K_DATA 4
+#define OS_K_DATA 4                     /* its data, where its calls' buffers are */
 #define OS_K_STACK 5
-#define OS_K_XFER 6                     /* its transfer segment */
-#define OS_K_FILES 7                    /* its files segment (files.c), the server's alone */
 
 /* A thread's program: the module it serves alone */
 struct session {
@@ -52,16 +49,6 @@ struct session {
 
 /* k_slot - a slot of the server's for the thread's program */
 #define K_SLOT(s, k) SLOT((s)->n * 8 + (k))
-
-/* The transfer segment: the registers of a call, then its buffer (os.inc) */
-struct xfer {
-    rx_u16 ax, bx, cx, dx, si, di, flags, unused;
-    rx_u8 data[XFER_DATA_SIZE];
-};
-typedef struct xfer RX_FAR *xfer_ptr;
-
-/* The thread's program's transfer segment */
-#define XFER(s) ((xfer_ptr)RX_MK_FP(K_SLOT(s, OS_K_XFER), 0))
 
 /* call - KCALL_CALL on an endpoint, BP a segment to pass (0: none): its
  * status; the reply in *r, if r */
@@ -72,9 +59,9 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
 rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 offset);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
-/* files - a file call (SYS_FIND to SYS_FREE), on the program's files
- * segment (files.c) */
-void files(struct session *s, int function);
+/* in_segment - may a buffer of a data segment of the server's be used:
+ * does it lie within the segment's limit? (vfs.c) */
+int in_segment(rx_u16 data, rx_u16 at, rx_u16 n);
 /* os_thread - a thread's C, from start.asm: n its program's module number,
  * OS_CONTROL_N, or PROC_N0 and on for the processes */
 void os_thread(unsigned n);

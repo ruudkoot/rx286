@@ -128,7 +128,7 @@ int dev_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error)
 
     switch (unit) {
     case DEV_JOYSTICK:
-        if (n < JS_BYTES || at == 0) {  /* (SI 0 is a transfer segment's block) */
+        if (n < JS_BYTES) {
             *error = EINVAL;
             return -1;
         }

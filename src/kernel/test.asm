@@ -22,7 +22,7 @@
 ;                       though rx286 has no driver for them
 ;   TEST_FPU_KERNEL     a 287 error raised by the kernel itself
 ;   TEST_TICKS          compare the timer with the RTC
-;   TEST_SOUND          measure every tone SYS_SOUND starts, by its output and
+;   TEST_SOUND          measure every tone the sound driver starts, by its output and
 ;                       port B's bits, and check the silence after each sound
 ;   TEST_IMAGE_SUM      the sum of KERNEL.BIN's words (entry.asm)
 ;   TEST_TYPE_DIRECT    type keys by handing each byte to the driver instead

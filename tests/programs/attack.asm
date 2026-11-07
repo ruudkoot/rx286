@@ -39,9 +39,7 @@ FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 begin_udata
 next_attack         dw 0
 scratch             times 8 db 0
-scratch_sector      times SECTOR_SIZE db 0
 bounds              dw 0, 5
-path_root           db '\', 0
 fpu_cw              dw FPU_CW_ZM
 end_udata
 
@@ -76,8 +74,7 @@ entry:
 .done:
         PRINT "attack: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------
@@ -173,10 +170,11 @@ attacks:
 .fpu_f:                                 ;    here (os-server.md P12)
         PRINT "attack: no 287 error arrived (no 287 emulated?)", CHAR_LF
         jmp entry
-.write: mov si, UDATA_ROOM - 2
+.write: mov bx, 1                       ; the standard output, from bytes
+        mov si, UDATA_ROOM - 2          ;    across the data's limit
         mov cx, 4
-        sys SYS_WRITE                   ; refused: past the limit
-        call report_refusal
+        px PX_WRITE                     ; refused: EFAULT
+        call report_errno
         jmp entry
 .ins:   mov dx, KBC_DATA
 .ins_f: insb                            ; IOPL 0
@@ -192,19 +190,11 @@ attacks:
         fwait                           ; #MP (vector 9) on a 286, #GP on Bochs
         PRINT "attack: the 287 read across the limit (no 287 emulated?)", CHAR_LF
         jmp entry
-.nullw: push ds
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov cx, 1
-        sys SYS_WRITE                   ; refused: a null selector
-        pop ds
-        call report_refusal
-        jmp entry
-.wrap:  mov si, 0xFFF0
+.wrap:  mov bx, 1
+        mov si, 0xFFF0                  ; bytes past FFFFh
         mov cx, 0x20
-        sys SYS_WRITE                   ; refused: past FFFFh
-        call report_refusal
+        px PX_WRITE                     ; refused: EFAULT
+        call report_errno
         jmp entry
 .reads: sidt [scratch]                  ; unprivileged on the 286: all allowed
         str ax
@@ -226,111 +216,29 @@ attacks:
 .smsw:  smsw ax                         ; unprivileged on the 286: allowed
         PRINT "attack: smsw allowed", CHAR_LF
         jmp entry
-.dcode: push es                         ; a sector into the code: not writable
-        push cs
-        pop es
-        xor di, di
-        jmp disk_read_attack
-.dnull: push es                         ; a sector through a null ES
-        xor ax, ax
-        mov es, ax
-        xor di, di
-        jmp disk_read_attack
-.dlimit: push es                        ; a sector across the data's limit
-        mov di, UDATA_ROOM - SECTOR_SIZE / 2
-        jmp disk_read_attack
-.dwrap: push es                         ; a sector at FF00h: past the limit, and
-        mov di, 0x10000 - SECTOR_SIZE / 2   ; past FFFFh (the limit refuses it first)
-        jmp disk_read_attack
-.dwnull: push ds                        ; a sector written from a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov al, DRIVE_B
-        xor cx, cx
-        sys SYS_DISK_WRITE
-        pop ds
-        call report_refusal
+; The calls on the OS server (roadmap os-server.md P14): a buffer is an
+; offset in the program's data, which the server checks against its limit;
+; no selector is passed, so none can be forged. The server answers a program
+; the root builds four calls alone.
+.rlimit: xor bx, bx                     ; a key read into bytes across the limit:
+        mov di, UDATA_ROOM - 1          ;    refused before it waits, EFAULT
+        mov cx, 2
+        px PX_READ
+        call report_errno
         jmp entry
-.pnull: push ds                         ; printed from a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov al, PRINTER_LPT1
+.badfd: mov bx, 5                       ; a descriptor it has not: EBADF
+        mov si, scratch
         mov cx, 1
-        sys SYS_PRINT
-        pop ds
-        call report_refusal
+        px PX_WRITE
+        call report_errno
         jmp entry
-.drive: push es                         ; drive 80h: no such drive
-        mov di, scratch_sector
-        mov al, 0x80
-        xor cx, cx
-        sys SYS_DISK_READ
-        pop es
-        call report_refusal
+.open:  mov si, scratch                 ; a process's call: ENOSYS
+        xor bx, bx
+        px PX_OPEN
+        call report_errno
         jmp entry
-.sector: push es                        ; sector FFFFh: past A's end
-        mov di, scratch_sector
-        mov al, DRIVE_A
-        mov cx, 0xFFFF
-        sys SYS_DISK_READ
-        pop es
-        call report_refusal
-        jmp entry
-; The file calls (roadmap l4.md L9): the OS server's, refused as the
-; sectors' are: a buffer the stub checks, then the OS server's own checks
-.fnull: push ds                         ; a path through a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov di, scratch_sector
-        mov al, DRIVE_A
-        sys SYS_FIND
-        pop ds
-        call report_refusal
-        jmp entry
-.fcode: push es                         ; a record into the code: not writable
-        push cs
-        pop es
-        xor di, di
-        mov si, path_root
-        mov al, DRIVE_A
-        sys SYS_FIND
-        pop es
-        call report_refusal
-        jmp entry
-.flimit: mov di, UDATA_ROOM - PATH_MAX / 2  ; a directory's path across the limit
-        mov al, DRIVE_A
-        sys SYS_GETCWD
-        call report_refusal
-        jmp entry
-.fdrive: mov si, path_root              ; drive 80h: no such drive
-        mov di, scratch_sector
-        mov al, 0x80
-        sys SYS_FIND
-        call report_refusal
-        jmp entry
-.flong: mov di, scratch_sector          ; a path with no end in the bytes passed
-        mov cx, PATH_IN_MAX + 8
-        mov al, 'A'
-        rep stosb
-        mov si, scratch_sector
-        mov al, DRIVE_A
-        sys SYS_CHDIR
-        call report_refusal
-        jmp entry
-.fnone: mov di, scratch_sector          ; a file's sector, nothing found
-        sys SYS_FILE_NEXT
-        call report_refusal
-        jmp entry
-.fsect: push es                         ; a file's sector into the code
-        push cs
-        pop es
-        xor di, di
-        sys SYS_FILE_NEXT
-        pop es
-        call report_refusal
+.pxnone: px 0xFF                        ; no such call: ENOSYS
+        call report_errno
         jmp entry
 .empty: mov ax, SEL_EMPTY_SLOT          ; an empty slot of the LDT: all zeros
 .empty_f: mov ds, ax
@@ -456,21 +364,25 @@ ldt_slots:
         jmp entry
 
 ; ----------------------------------------------------------------------------
-; disk_read_attack - SYS_DISK_READ of A's sector 0 into ES:DI, reported
-;   In:       ES:DI = the buffer; the program's ES pushed by the attack
-;   Out:      does not return: the next attack
-;   Destroys: everything
+; report_errno - "attack: refused, errno N" after a call on the OS server
+;   In:       BX and CX as the call returned them
+;   Out:      nothing
+;   Destroys: AX
 ; ----------------------------------------------------------------------------
-disk_read_attack:
-        mov al, DRIVE_A
-        xor cx, cx
-        sys SYS_DISK_READ
-        pop es
-        call report_refusal
-        jmp entry
+report_errno:
+        cmp bx, -1
+        jne .accepted
+        PRINT "attack: refused, errno "
+        mov ax, cx
+        call print_dec
+        call print_newline
+        ret
+.accepted:
+        PRINT "attack: ACCEPTED", CHAR_LF
+        ret
 
 ; ----------------------------------------------------------------------------
-; report_refusal - "attack: refused, error N" after a system call
+; report_refusal - "attack: refused, error N" after a kernel call
 ;   In:       CF and AX as the call returned them
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -538,27 +450,15 @@ attack_table:
         attack "jump through the null selector", attacks.nulljmp
         attack "pop past the stack's top", attacks.pop
         attack "a 287 operand across the limit", attacks.fpuop
-        attack "write from a null selector", attacks.nullw
         attack "write past FFFFh", attacks.wrap
         attack "unprivileged reads", attacks.reads
         attack "int 31h at the end of the code", attacks.edge
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
-        attack "read a sector into the code", attacks.dcode
-        attack "read a sector through a null ES", attacks.dnull
-        attack "read a sector across the limit", attacks.dlimit
-        attack "read a sector at FF00h", attacks.dwrap
-        attack "write a sector from a null selector", attacks.dwnull
-        attack "print from a null selector", attacks.pnull
-        attack "read drive 80h", attacks.drive
-        attack "read sector FFFFh of A", attacks.sector
-        attack "find a path through a null DS", attacks.fnull
-        attack "find into the code", attacks.fcode
-        attack "a directory's path across the limit", attacks.flimit
-        attack "find on drive 80h", attacks.fdrive
-        attack "a path with no end", attacks.flong
-        attack "a file's sector, nothing found", attacks.fnone
-        attack "a file's sector into the code", attacks.fsect
+        attack "read a key past the limit", attacks.rlimit
+        attack "write to a descriptor it has not", attacks.badfd
+        attack "open, a process's call", attacks.open
+        attack "a call on the server that does not exist", attacks.pxnone
         attack "an empty slot of the LDT", attacks.empty
         attack "every slot of the LDT", attacks.slots
         attack "probe: data not present", attacks.pds

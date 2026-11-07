@@ -12,7 +12,7 @@ def test_libc_on_the_host():
     with tempfile.TemporaryDirectory() as tmp:
         inc = os.path.join(tmp, 'inc')
         os.mkdir(inc)
-        for name in ('kcalls', 'syscalls', 'build'):
+        for name in ('kcalls', 'drivers', 'build'):
             subprocess.run(['python3', os.path.join(ROOT, 'tools', 'inc2h'),
                             os.path.join(ROOT, 'src', 'include', name + '.inc'),
                             os.path.join(inc, name + '.h')], check=True)

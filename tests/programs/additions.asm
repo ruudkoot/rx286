@@ -182,8 +182,7 @@ entry:
 done:
         PRINT "additions: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------
@@ -267,7 +266,7 @@ seal_part:
         call sleep
         mov ax, S_SEG                   ; a write through it: #GP
         mov es, ax
-        mov byte [es:0], 0x90
+.write_f: mov byte [es:0], 0x90
         PRINT "additions: the write went through", CHAR_LF
         jmp done
 

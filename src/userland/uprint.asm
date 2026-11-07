@@ -1,9 +1,11 @@
 ; ============================================================================
 ; rx286 - src/userland/uprint.asm
-; A program's output: strings, characters and numbers, through SYS_WRITE.
+; A program's output: strings, characters and numbers, written to its
+; standard output (PX_WRITE through px.asm, which this includes).
 ;
 ; Numbers are formatted by src/lib/format.asm (the same code the kernel
-; uses) into a buffer in the program's data segment.
+; uses) into a buffer in the program's data segment, where every buffer of
+; a call must be.
 ; ============================================================================
 
 PRINT_BUF_SIZE      equ 12              ; ten digits of a 32-bit number, with room to spare
@@ -11,6 +13,23 @@ PRINT_BUF_SIZE      equ 12              ; ten digits of a 32-bit number, with ro
 begin_udata
 print_buf           times PRINT_BUF_SIZE db 0
 end_udata
+
+; ----------------------------------------------------------------------------
+; write_stdout - bytes of the program's data to its standard output
+;   In:       DS:SI = the bytes (DS the program's data); CX = how many
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+write_stdout:
+        push ax
+        push bx
+        push cx
+        mov bx, 1
+        px PX_WRITE
+        pop cx
+        pop bx
+        pop ax
+        ret
 
 ; ----------------------------------------------------------------------------
 ; print_str - write a zero-terminated string
@@ -27,12 +46,12 @@ print_str:
         pop es
         mov di, si
         xor al, al
-        mov cx, WRITE_MAX
+        mov cx, LOG_MAX
         repne scasb
         mov cx, di
         sub cx, si
         dec cx                          ; CX = its length
-        sys SYS_WRITE
+        call write_stdout
         pop es
         pop di
         pop cx
@@ -52,7 +71,7 @@ print_char:
         mov [print_buf], al
         mov si, print_buf
         mov cx, 1
-        sys SYS_WRITE
+        call write_stdout
         pop si
         pop cx
         pop ax
@@ -107,7 +126,7 @@ print_buffer:
         mov cx, di
         mov si, print_buf
         sub cx, si
-        sys SYS_WRITE
+        call write_stdout
         pop si
         pop cx
         pop ax
@@ -166,6 +185,4 @@ print_newline:
         pop ax
         ret
 
-%ifndef KERNEL_LOG
-%include "stub.asm"                     ; what the sys macro calls
-%endif
+%include "px.asm"                       ; what the px macro calls

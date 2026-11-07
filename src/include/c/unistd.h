@@ -1,8 +1,8 @@
 /* ============================================================================
  * rx286 - src/include/c/unistd.h
- * POSIX's unistd.h, rx286's own. _exit has two bindings: today's system
- * calls' (src/lib/os/today.c, for the programs the root builds) and the
- * processes' (src/lib/posix/; roadmap os-server.md P6), which have the rest.
+ * POSIX's unistd.h, rx286's own. _exit has two bindings: the programs' the
+ * root builds (src/lib/os/module.c; roadmap os-server.md P14) and the
+ * processes' (src/lib/posix/; P6), which have the rest.
  * ============================================================================ */
 
 #ifndef RX_UNISTD_H

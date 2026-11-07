@@ -26,7 +26,7 @@
 #include "rx/oscall.h"
 #include "rx/rx286.h"
 #include "kcalls.h"
-#include "syscalls.h"
+#include "drivers.h"
 #include "os.h"
 
 #define SEL(n) ((rx_u16)((n) * 8 + 7))  /* a slot of mine, as a selector */
@@ -420,8 +420,6 @@ static void drivers(void)
 /* main - the checks, then a reader waiting for ever: the test's end */
 int main(void)
 {
-    struct os_regs r;
-
 #ifdef SERVICES_DRIVERS
     drivers();
 #else
@@ -429,8 +427,6 @@ int main(void)
     rounds();
 #endif
     say("services: done\n");
-    for (;;) {                          /* a reader waiting for ever: the test's end */
-        r.ax = (SYS_READ_KEY << 8) | KEY_WAIT;
-        os_call_regs(&r);
-    }
+    for (;;)                            /* a reader waiting for ever: the test's end */
+        os_key();
 }

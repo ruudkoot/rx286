@@ -32,7 +32,7 @@ MY_SPACE            equ 0x67            ; slot 12: its own space
 MY_THREAD           equ 0x6F            ; slot 13: its own thread
 MY_EMPTY            equ 0x77            ; slot 14: empty
 PAST_MY_SPACE       equ 0x207           ; slot 64: past its 64 slots
-; (slots 8 and 9: its endpoint to the OS server, its transfer segment)
+; (slot 8: its endpoint to the OS server)
 GDT_SELECTOR        equ 0x10            ; the kernel's data: no slot of anyone's
 ACC_DATA3           equ 0xF2            ; present, DPL 3, data, writable
 ACC_CODE3           equ 0xFA            ; present, DPL 3, code, readable
@@ -306,12 +306,11 @@ entry:
         mov es, ax
 .done:
         PRINT "caps: done", CHAR_LF
-        mov al, WAIT_MOUSE              ; a few ticks for the new thread, below
-        mov cx, 5                       ; this program, before the test ends
-        sys SYS_WAIT
+        xor cx, cx                      ; a few ticks for the new thread, below
+        mov si, 5                       ; this program, before the test ends
+        px PX_NANOSLEEP
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------

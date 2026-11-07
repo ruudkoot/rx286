@@ -1,7 +1,8 @@
 ; ============================================================================
 ; rx286 - src/include/drivers.inc
 ; The drivers outside the kernel (roadmap l4.md L7-L10, D10, D11): their
-; slots, and what they are asked.
+; slots, what they are asked, and what they answer: the drives, the
+; devices' limits and the errors (syscalls.inc's until os-server.md P14).
 ;
 ; A driver is a module of ring 1 with IOPL 1 (MF_DRIVER), which the root
 ; builds with an endpoint it serves, a notification bound to its thread for
@@ -81,11 +82,52 @@ DRV_SERIAL_NEWS     equ 3       ; -> BX 1 if bytes wait
 ; The sound driver: the speaker and the game port
 DRV_SOUND           equ 1       ; BX hertz (0: a rest), CX ticks -> BX 0 or E_INVAL, once
                                 ;    the sound is over or stopped (DRV_STOP_BIT)
-DRV_JOYSTICK        equ 2       ;    the segment passed, a transfer segment: its block's AX
-                                ;    the buttons, BX CX DX SI the axes (as SYS_JOYSTICK);
-                                ;    with SI not 0, five words at SI there (os-server.md P12)
+DRV_JOYSTICK        equ 2       ; SI where in the segment passed: five words, the buttons
+                                ;    (bit n, button n + 1), then axes 0-3 in microseconds
+                                ;    or JOY_ABSENT (os-server.md P12)
 ; The RTC driver
 DRV_CLOCK_TIME      equ 1       ; -> BX hours and minutes, CX century and year, SI month
-                                ;    and day, DI seconds: BCD, as SYS_TIME's BX, CX, DX, AL
+                                ;    and day, DI seconds: BCD
+
+; The drives (roadmap storage D1): a sector is SECTOR_SIZE bytes, numbered
+; from 0 across the whole disk, partitions and all
+DRIVE_A             equ 0       ; 1.2 MB diskette, the boot disk
+DRIVE_B             equ 1       ; 360 KB diskette
+DRIVE_C             equ 2       ; fixed disk 0
+DRIVE_D             equ 3       ; fixed disk 1
+DRIVES              equ 4
+PRINTERS            equ 2       ; LPT1 and LPT2
+; The devices' limits
+SERIAL_MAX          equ 4096    ; a serial transfer's bytes at most
+SOUND_MIN_HZ        equ 19      ; the 8254's slowest square wave
+SOUND_MAX_HZ        equ 20000
+SOUND_MAX_TICKS     equ 500     ; ten seconds
+JOY_ABSENT          equ 0xFFFF  ; an axis that did not answer
+JOY_AXIS_MAX_US     equ 4000    ; how long an axis is timed at most
+MOUSE_PRESENT       equ 1       ; the mouse said who it is
+MOUSE_LEFT          equ 1       ; buttons
+MOUSE_RIGHT         equ 2
+MOUSE_X_MAX         equ 639     ; the position, as DOS's mouse driver keeps it in
+MOUSE_Y_MAX         equ 199     ;    text mode: eight to a character cell
+; Scancodes (set 1) of keys without ASCII, which the keyboard driver passes
+SC_ESC              equ 0x01
+SC_UP               equ 0x48
+SC_DOWN             equ 0x50
+SC_LEFT             equ 0x4B
+SC_RIGHT            equ 0x4D
+
+; The errors the drivers, the FAT12 volumes and the root's services answer
+; (docs/drivers.md); the server makes them POSIX's for the processes
+E_FAULT             equ 1       ; a segment passed the driver may not use so
+E_INVAL             equ 3       ; an argument out of range
+E_IO                equ 4       ; the device reported an error, on every try
+E_TIMEOUT           equ 5       ; the device did not answer: no diskette, no printer
+E_PROTECTED         equ 6       ; the diskette is write-protected
+E_PAPER             equ 7       ; the printer is out of paper (or not there)
+E_BUSY              equ 8       ; the device is the kernel's: COM2 carries the log
+E_NOT_FAT12         equ 16      ; no FAT12 volume: no partition, or no such BPB
+E_NOT_FOUND         equ 17      ; no such file, or no such code (ROOT_FIND)
+E_BROKEN            equ 20      ; a cluster outside the volume, or a chain that loops
+E_NOMEM             equ 21      ; no memory, or no room in a table, for it (os-server.md P4)
 
 %endif

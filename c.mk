@@ -21,7 +21,7 @@ C_B := $(B)/c
 INC_H := $(B)/inc
 
 # The C headers made from the NASM include files (tools/inc2h)
-INC_NAMES := build syscalls kcalls os layout disks drivers ports selectors descriptors posix archive \
+INC_NAMES := build kcalls os layout disks drivers ports selectors descriptors posix archive \
     vectors exe
 INC_HEADERS := $(addprefix $(INC_H)/,$(addsuffix .h,$(INC_NAMES)))
 # (and the servers' own: a change of one rebuilds every object, os-server.md P11)
@@ -128,7 +128,7 @@ START_OBJS := $(addprefix $(C_B)/lib/crt/,crt0.$(OBJ) start.$(OBJ))
 CRT_OBJS := $(addprefix $(C_B)/lib/crt/,memory.$(OBJ) setjmp.$(OBJ) helpers.$(OBJ))
 LIBC_OBJS := $(addprefix $(C_B)/lib/c/,string.$(OBJ) printf.$(OBJ) stdlib.$(OBJ))
 RX286_OBJS := $(C_B)/lib/rx286/kcall.$(OBJ)
-OS_OBJS := $(addprefix $(C_B)/lib/os/,oscall.$(OBJ) today.$(OBJ))
+OS_OBJS := $(C_B)/lib/os/module.$(OBJ)
 POSIX_OBJS := $(addprefix $(C_B)/lib/posix/,posix.$(OBJ) fork.$(OBJ) stdio.$(OBJ) malloc.$(OBJ) \
     files.$(OBJ) dirent.$(OBJ) path.$(OBJ) errors.$(OBJ) signal.$(OBJ) sigtramp.$(OBJ) \
     time.$(OBJ) ps.$(OBJ) devices.$(OBJ) daemon.$(OBJ) pthread.$(OBJ) thread.$(OBJ))
@@ -163,7 +163,7 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 
 # The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
 # (start.asm), a thread a program, each on its part of the stacks
-SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) files.$(OBJ) fat.$(OBJ) \
+SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) \
     cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ) dev.$(OBJ))
 $(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))

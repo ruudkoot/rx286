@@ -1,27 +1,23 @@
 /* ============================================================================
  * rx286 - src/include/rx/oscall.h
- * Today's system calls for C (roadmap os-server.md P1): a struct of the
- * registers docs/syscalls.md names, and the calls the first C programs
- * make, until lib/os's POSIX calls replace them (P6-P14). The numbers are
- * syscalls.inc's (syscalls.h, by tools/inc2h).
+ * The calls of a program in C that the root builds (roadmap os-server.md
+ * P14; src/lib/os/module.c): the OS server answers such a program
+ * PX_WRITE, PX_READ (a key), PX_NANOSLEEP and PX_EXIT (docs/syscalls.md).
+ * A process has lib/posix instead.
  * ============================================================================ */
 
 #ifndef RX_OSCALL_H
 #define RX_OSCALL_H
 
 #include "rx/compiler.h"
-#include "syscalls.h"
 
-/* The registers of one system call, in and out: AH the function */
-struct os_regs {
-    rx_u16 ax, bx, cx, dx, si, di;
-};
-
-/* os_call_regs - a system call with r's registers: 0, or 1 if it failed (r->ax the error) */
-int os_call_regs(struct os_regs *r);
-/* os_write - SYS_WRITE of n bytes: the bytes written, or -1 */
+/* os_px - a call on the OS server (posix.h's PX_*), BX CX SI DI its
+ * arguments: its result, or -1 and the errno in *error */
+int os_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, int *error);
+/* os_write - n bytes to the standard output: the bytes written, or -1 */
 int os_write(const void *bytes, unsigned n);
-/* os_wait - SYS_WAIT for events (WAIT_*) or ticks at most: the events there */
-int os_wait(unsigned events, unsigned ticks);
+/* os_key - the next key, waited for: its ASCII in the low byte, its
+ * scancode in the high (the keyboard driver's) */
+unsigned os_key(void);
 
 #endif

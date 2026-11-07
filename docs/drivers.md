@@ -71,11 +71,10 @@ its bit comes.
 It drives a printer as IBM's BIOS does: for each byte, wait until the
 printer is not busy - looking once a tick, for 2 s at most - put the byte
 on the data lines, and pulse STROBE (*docs/storage.md*). The OS server asks
-it with `DRV_PRINT` for `SYS_PRINT`, after the kernel's checks of the
-printer and the count, in the kernel's order, passing the program's
-transfer segment, which the driver deletes once it has printed from it. A
-printer that stays busy is `E_PAPER` or `E_TIMEOUT`, with the bytes it took
-before.
+it with `DRV_PRINT` (BX the printer, below `PRINTERS`) for a process's write
+to `/dev/lpt1` or `/dev/lpt2`, passing the process's data segment, which the
+driver deletes once it has printed from it. A printer that stays busy is
+`E_PAPER` or `E_TIMEOUT`, with the bytes it took before.
 
 ## The mouse driver
 
@@ -85,10 +84,11 @@ interrupt it takes what COM1 has and acknowledges the line; every few
 ticks, on its timer, it looks for bytes whose interrupt was lost. In test
 builds, a key script's mouse bytes come from the kernel (`KCALL_TEST`,
 `TEST_MOUSE_BYTE`) with IRQ4's bits, as IRQ4 would bring them. The OS
-server asks it for `SYS_MOUSE` (`DRV_MOUSE_GET`), and, for a `SYS_WAIT`
-with `WAIT_MOUSE`, whether the mouse has news (`DRV_MOUSE_NEWS`), once a
-tick, while the OS server's thread for the program waits a tick at a time
-for the other events.
+server asks it for the state (`DRV_MOUSE_GET`: the buttons, `MOUSE_LEFT`
+and `MOUSE_RIGHT`; x and y, to `MOUSE_X_MAX` and `MOUSE_Y_MAX`;
+`MOUSE_PRESENT` if the mouse answered its reset) and whether the mouse has
+news (`DRV_MOUSE_NEWS`), for a process's read of `/dev/mouse` and its
+`poll`, once a tick while it waits.
 
 ## The console driver
 
@@ -114,9 +114,9 @@ page) shows a page: the CRTC's start address (`CRTC_START_HIGH`,
 `CRTC_START_LOW`) and the hardware cursor at its cursor; it answers with
 the pages there are (BH `CON_QUIET`: a `TEST_SCREEN` build does not log
 the page, as for the server's first call, which asks how many). Page 0 starts where the kernel's cursor stopped,
-below the banner. The OS server asks it with `DRV_CON_WRITE` for
-`SYS_WRITE` and the terminal's output, after the kernel's write has
-checked the buffer and written the log; the kernel's console writes the
+below the banner. The OS server asks it with `DRV_CON_WRITE` for the
+terminals' output and the writes of the programs the root builds, after
+the kernel's log has the first terminal's; the kernel's console writes the
 screen only until the threads start, and again for a panic, which shows
 page 0 whatever page the driver showed. In `TEST_SCREEN` builds the
 driver says how many pages there are, and puts the page `DRV_CON_SHOW`
@@ -129,8 +129,11 @@ It owns the 8042 and IRQ1 (roadmap l4.md L8): the modifiers, a ring of
 keys, Ctrl+Break, Ctrl+Alt+Del and Sys Req, as the kernel did. The OS
 server takes a key with `DRV_KBD_GET`, looks with `DRV_KBD_PEEK`, and drops
 the keys waiting with `DRV_KBD_CLEAR` when it starts the foreground program
-again. Alt+F1 to F8 come as the BIOS gives them, scancodes 68h to 6Fh
-without ASCII, which the OS server's terminal takes for its pages
+again. A key without ASCII has 0 there and its scancode (`SC_ESC`,
+`SC_UP`, `SC_DOWN`, `SC_LEFT`, `SC_RIGHT` among them, which the terminal
+makes ANSI's sequences). Alt+F1 to F8 come as the BIOS gives them,
+scancodes 68h to 6Fh without ASCII, which the OS server's terminal takes
+for its pages
 (os-server.md P11). While the foreground program waits for a key, the server's thread
 sleeps until the driver signals it (`DRV_SLOT_KEYS`), which the driver does
 after every byte the keyboard sends (roadmap os-server.md P5). Ctrl+Break is
@@ -145,12 +148,12 @@ and on MAME takes the script's keys from it (`TEST_KEY_BYTE`).
 
 They took the kernel's disk code as it was (roadmap l4.md L9), and wait as
 above (*docs/storage.md*). The OS server asks them with `DRV_DISK_READ` and
-`DRV_DISK_WRITE`: BX the unit (0 or 1 on the driver's controller), CX the
-sector, SI its offset in the segment passed, which is the program's
-transfer segment for `SYS_DISK_READ` and `SYS_DISK_WRITE`, or the
-program's files segment for the file calls. The reply's BX is 0 or the
-error. The server has checked the drive and the sector, as the kernel did;
-the driver checks them again. The diskette driver moves the sector through
+`DRV_DISK_WRITE` for its cache of sectors (*docs/processes.md*, *Files*):
+BX the unit (0 or 1 on the driver's controller, drives `DRIVE_A` and
+`DRIVE_B`, or `DRIVE_C` and `DRIVE_D`, of `DRIVES`), CX the sector, SI its
+offset in the segment passed, the cache's. The reply's BX is 0 or the
+error. The server has checked the drive and the sector; the driver checks
+them again. The diskette driver moves the sector through
 its DMA buffer, and stops the motor two seconds after its last transfer on
 its timer; the fixed disk driver moves the words straight to or from the
 segment passed.
@@ -165,24 +168,26 @@ was lost. The OS server asks it with `DRV_SERIAL_WRITE` (CX bytes from SI in
 the segment passed, each once the UART takes it, 2 s at most: `E_TIMEOUT`
 with the count so far), `DRV_SERIAL_READ` (up to CX bytes of the ring into
 the segment passed; it never waits) and `DRV_SERIAL_NEWS` (BX 1 if bytes
-wait), for SYS_WAIT once a tick. In debug and test builds COM2 is the
-kernel's log: the driver never touches it, and answers `E_BUSY`.
+wait), for a process's reads, writes and `poll` of `/dev/com2`, at most
+`SERIAL_MAX` bytes a call. In debug and test builds COM2 is the kernel's
+log: the driver never touches it, and answers `E_BUSY`.
 
 ## The sound driver
 
 The speaker and the game port, with the kernel's code for both as it was
 (*docs/devices.md*). `DRV_SOUND` (BX hertz, 0 a rest; CX ticks) checks
-them as `SYS_SOUND` always did (`E_INVAL`), sets timer channel 2 and opens
+them (`SOUND_MIN_HZ` to `SOUND_MAX_HZ`, `SOUND_MAX_TICKS` at most; else
+`E_INVAL`), sets timer channel 2 and opens
 the gate, sleeps on its timer for the ticks, and closes the gate before it
 answers; a stop the OS server signals (`DRV_STOP_BIT`, on Ctrl+Break) ends
 the sound at once, and a stop left over from before a sound is dropped
 when it starts. In `TEST_SOUND` builds it asks the kernel to measure the
 tone and the silence after it (`KCALL_TEST`). `DRV_JOYSTICK` times the
 game port's four axes with timer channel 0's latched count, interrupts off
-for 4 ms at most, and puts the buttons and the axes in the block of the
-transfer segment passed: five results, more than a reply's four words.
-With SI not 0 it writes them as five words at SI of the segment passed
-instead: a process's read of `/dev/joystick` (os-server.md P12).
+for `JOY_AXIS_MAX_US` (4 ms) at most, and writes the buttons and the axes,
+in microseconds or `JOY_ABSENT`, as five words at SI of the segment passed,
+more than a reply's four words: a process's read of `/dev/joystick`
+(os-server.md P12).
 
 ## The RTC driver
 
@@ -192,3 +197,24 @@ century and year, SI month and day, DI seconds. The kernel sets the clock
 to 24-hour BCD with its interrupts off at its start; the driver is its one
 reader.
 
+## Errors
+
+A driver's reply says how a call went in BX: 0, or one of these
+(`drivers.inc`), which the volumes' code and the root's services use too.
+The OS server makes them POSIX's for a process: `E_PROTECTED` is `EROFS`,
+the rest mostly `EIO` (*docs/processes.md*). Until roadmap os-server.md P14
+they were the old system calls' errors too.
+
+| Code | Constant | Meaning |
+|---|---|---|
+| 1 | `E_FAULT` | a segment passed that the driver may not use so, or that went while it waited |
+| 3 | `E_INVAL` | an argument out of range |
+| 4 | `E_IO` | the device reported an error, on every try |
+| 5 | `E_TIMEOUT` | the device did not answer in time: no diskette, no fixed disk, a printer that stays busy |
+| 6 | `E_PROTECTED` | the diskette is write-protected |
+| 7 | `E_PAPER` | the printer is out of paper, or not there |
+| 8 | `E_BUSY` | the device is the kernel's: COM2 carries the log |
+| 16 | `E_NOT_FAT12` | no FAT12 volume: no partition, or no such BPB |
+| 17 | `E_NOT_FOUND` | no such file, or no such code (`ROOT_FIND`) |
+| 20 | `E_BROKEN` | a cluster outside the volume, or a chain that loops |
+| 21 | `E_NOMEM` | no memory, or no room in a table (the root's services) |

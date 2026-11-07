@@ -54,7 +54,7 @@ says so in Out.
   `out 0x20, al`.
 - Routines and variables are `lower_case`, prefixed by their module:
   `con_putc`, `test_reader`, `pic_eoi`.
-- Selectors are `SEL_*`, vectors `VEC_*`, system calls `SYS_*`.
+- Selectors are `SEL_*`, vectors `VEC_*`, system calls `PX_*`, kernel calls `KCALL_*`.
 
 ## Comments
 
@@ -85,7 +85,7 @@ says so in Out.
   of `src/include/cabi.inc` (*docs/c.md*), with the header assembly routines
   have.
 - Lower-case names, a module's prefix on what it exports (`rx_ticks`,
-  `os_write`); constants from the include files, by `tools/inc2h`.
+  `os_write`, `vol_seconds`); constants from the include files, by `tools/inc2h`.
 - The layout rules of assembly: no tabs, no trailing spaces, at most 100
   characters a line (lint).
 

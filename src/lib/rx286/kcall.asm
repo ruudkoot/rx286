@@ -186,7 +186,7 @@ rx_log:
 ; ----------------------------------------------------------------------------
 ; rx_log_far - int rx_log_far(unsigned segment, unsigned offset, unsigned n):
 ; bytes of another segment to the kernel's log (KCALL_LOG): a server's,
-; from its client's transfer segment
+; from its client's data segment
 ;   In:       the stack: segment, offset, n
 ;   Out:      AX = the bytes written (fewer if the thread is to restart), or
 ;             -1

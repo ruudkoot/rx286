@@ -1,7 +1,7 @@
 ; ============================================================================
 ; rx286 - src/drivers/rtc.asm
 ; The RTC driver, "rtc" (roadmap l4.md L10, D20 B): the MC146818 real-time
-; clock, read for SYS_TIME, in ring 1 with IOPL 1.
+; clock, read for a process's time (PX_TIME), in ring 1 with IOPL 1.
 ;
 ; The kernel sets the clock to 24-hour BCD with its interrupts off at its
 ; start; the driver only reads it (src/lib/cmos.asm), and is its one reader.
@@ -11,7 +11,6 @@
 
 cpu 286
 bits 16
-%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"

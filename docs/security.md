@@ -10,7 +10,7 @@ No program can make the kernel:
 
 - fault, panic, reset or hang, whatever its devices do or fail to do;
 - read or write memory outside the program's own segments: its code, data
-  and stack, and the transfer segment it shares with the OS server;
+  and stack;
 - touch an I/O port;
 - disable interrupts;
 - keep the CPU from the kernel: the timer and keyboard interrupts always
@@ -36,16 +36,14 @@ kernel for a thread without a handler.
   instructions (`HLT`, `LGDT` and the others) fault as ring 3's do; neither
   can load the kernel's data, and no capability names the kernel's own
   interrupt lines (`tests/rings`).
-- **The OS server** (roadmap l4.md L6) shares with each program only that
-  program's transfer segment, and its thread for the program makes the
-  call with the program's buffer copied there. The stub checks a buffer
-  before it copies it, with the 286's own instructions at the program's
-  privilege: `ARPL` against the caller's CS, `VERR` or `VERW`, `LSL`, `LAR`
-  (no expand-down segment) and bounds (*docs/syscalls.md*). A buffer the
-  program may not use goes on as an offset past the transfer segment's end,
-  which the OS server refuses with `E_FAULT` after its other checks, as the
-  kernel did. A program that goes around the stub can name nothing but its
-  own transfer segment.
+- **The OS server** (roadmap l4.md L6; os-server.md D5 B, P14) holds a copy
+  of each caller's data segment, and a call names its buffers by their
+  offsets there, never by a selector: a program can name nothing but its
+  own data. The server checks each buffer against the segment's limit
+  before it uses it (`EFAULT`), and passes the segment itself to a driver
+  that reads or writes the bytes (*docs/syscalls.md*). Until P14 a program
+  shared a transfer segment with the server, and a stub checked its
+  buffers with the 286's own instructions before it copied them there.
 - **The way back.** Every segment register the kernel's POPs and `IRET`
   load is checked for its own use first (*docs/interrupts.md*), so a
   descriptor changed during a call is the program's fault, never the
@@ -63,7 +61,9 @@ kernel for a thread without a handler.
 - **The kernel's stack** is switched to on every interrupt from ring 3
   (SS0:SP0 in the TSS), so a broken program stack cannot hurt the kernel.
 - **The kernel's own buffer.** `KCALL_LOG`, the one kernel call that reads
-  memory, checks its buffer as the stub does, and checks it again after
+  memory, checks its buffer with the 286's own instructions at the caller's
+  privilege: `ARPL` against the caller's CS, `VERR`, `LAR` (no expand-down
+  segment), `LSL` and bounds; and checks it again after
   every window, since the segment may have gone meanwhile (roadmap l4.md
   X2). A program can only pass a selector it could load, which is one of
   its own or null; the checks hold even if that changes.
@@ -98,16 +98,15 @@ kernel for a thread without a handler.
 - **No device can hang the kernel.** Every wait for a disk, printer or
   modem has a limit in ticks (*docs/storage.md*, *docs/devices.md*); a
   diskette that is not there, a fixed disk that does not answer and a
-  printer that stays busy are errors. A `SYS_WAIT` or a wait for a key ends
-  when the program is to restart, so the fuzzer's watchdog ends them too: the
-  OS server's thread for the program is restarted with it. A sound runs on
-  for its ticks (`SOUND_MAX_TICKS` at most) unless Ctrl+Break ends it.
-- **Disk buffers** are checked like any other, before a device is touched;
-  a buffer to be filled must also pass `VERW`, so no read can land in the
-  program's code. The drivers check the transfer segment again after each
-  wait, since its program may have been killed meanwhile (roadmap l4.md
-  L12). The disks themselves are the program's: it may read and write any
-  sector of any drive, the boot diskette included.
+  printer that stays busy are errors. A program's sleep or wait for a key
+  ends when the program is to restart, so the fuzzer's watchdog ends them
+  too: the OS server's thread for the program is restarted with it. A
+  sound runs on for its ticks (`SOUND_MAX_TICKS` at most) unless Ctrl+Break
+  ends it.
+- **The disks** are the OS server's: a process reaches the drives only as
+  FAT12 files, through the server's cache (*docs/processes.md*). A driver
+  checks the segment passed again after each wait, since its process may
+  have gone meanwhile.
 - **The way back.** Before every `IRET` to ring 3 the kernel checks the return
   IP against the program's code limit, so a return past it is the program's
   fault, not the kernel's. A single-step trap or a 287 overrun (vector 9)
@@ -120,7 +119,7 @@ kernel for a thread without a handler.
 
 ### The attack suite (`tests/attack/attacks.test`)
 
-`tests/programs/attack.asm` runs 82 attacks, one per start of the program,
+`tests/programs/attack.asm` runs 74 attacks, one per start of the program,
 and the test checks the kernel's line for each, with the exact instruction
 that faulted:
 
@@ -129,7 +128,7 @@ that faulted:
 | `CLI`, `STI`, `IN`, `OUT`, `INSB`, `OUTSB`, `HLT`, `LGDT`, `LIDT`, `LMSW`, `CLTS`, `LTR`, `LLDT` | #GP(0000) |
 | the kernel's data, the kernel's stack, the screen (DS, SS, ES) | #GP(selector) |
 | a selector beyond the GDT; a selector past the LDT; an empty slot of the LDT; a null SS | #GP(2000), #GP(0084), #GP(007C), #GP(0000) |
-| every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments and its transfer segment as they are; its endpoint and every empty slot refused by all four |
+| every slot of the LDT, through `LAR`, `LSL`, `VERR`, `VERW` | the program's three segments as they are; its endpoint and every empty slot refused by all four |
 | the test probe (`KCALL_TEST`'s `TEST_PROBE`): the data's descriptor not present, or refilled with execute-only code | DS null on return: #GP(0000) at the next use |
 | the probe: the stack's descriptor not present; refilled with read-only data | #SS(0014); #GP(0014), at the return address |
 | the probe: the code's descriptor not present; refilled with data | #NP(0004); #GP(0004), at the return address |
@@ -147,12 +146,9 @@ that faulted:
 | a 287 error, unmasked | IRQ13: the owner's fault #MF on its way back to its ring, where it then is (os-server.md P12); a thread without a fault endpoint reported and restarted (MAME has no 287) |
 | a 287 operand across the data's limit | #GP(0000) on Bochs (a 286 with a 287: #MP, vector 9, which may even arrive in ring 0: the program is restarted) |
 | `INT 31h` as the code segment's last two bytes | #GP(0000) at 0007:2000: the return IP is past the limit |
-| `write` past the limit, from a null selector, past FFFFh | refused, `E_FAULT` |
-| `disk_read` into the code, through a null ES, across the data's limit, at FF00h; `disk_write` and `print` from a null selector | refused, `E_FAULT`, before any device is touched |
-| `disk_read` of drive 80h, of sector FFFFh | refused, `E_INVAL` |
-| `find` with a path through a null DS, or into the code; `getcwd` across the data's limit; `file_next` into the code | refused, `E_FAULT`, before the drive is touched |
-| `find` on drive 80h; `file_next` with nothing found | refused, `E_INVAL` |
-| `chdir` with a path whose end is past the 128 bytes the stub passes | refused, `E_BAD_NAME` |
+| `PX_WRITE` from bytes across the data's limit, or past FFFFh; `PX_READ` of a key into bytes across the limit | refused, `EFAULT` (14), the read before it waits |
+| `PX_WRITE` to a descriptor it has not | refused, `EBADF` (9) |
+| `PX_OPEN`, a process's call; a call past every call | refused, `ENOSYS` (38) |
 | `SGDT`, `SIDT`, `SMSW`, `STR`, `SLDT`, `LAR`, `LSL`, `VERR`, `VERW`, `ARPL` | allowed: they only read |
 | the kernel's calls with a GDT selector, its own data, an empty slot or a selector past its LDT as the untyped; its code as a space to copy into; its data as a thread to start | refused, `KE_CAP` (1) |
 | a kernel call that does not exist | refused, `KE_NOSYS` (7) |
@@ -179,8 +175,9 @@ calls' own refusals are in *docs/processes.md* and `tests/posix`.
 `tests/programs/fuzz.asm` runs 10,000 iterations of 256 random bytes as code
 in ring 3, with random registers and random DS and ES (one choice in eight a
 selector it may not load). One iteration in four starts with a call, so
-calls run with random arguments: a system call, through the stub to the OS
-server and its drivers (`INT 30h` until roadmap l4.md L10), or the kernel's
+calls run with random arguments: a call on the OS server, any `PX_*` or
+one past them (`INT 30h` until roadmap l4.md L10, the stub's DOS-like calls
+until os-server.md P14), or the kernel's
 `INT 31h` with selectors of the program's slots and others in DX, SI, DI
 and BP (deleting or revoking its own code or data, say, which the way back
 and the restart survive: roadmap l4.md L12). A watchdog restarts an iteration

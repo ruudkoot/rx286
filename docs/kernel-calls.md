@@ -105,8 +105,8 @@ are still as they were (`KE_STATE` if not).
   never otherwise (roadmap l4.md X14). An untyped's watermark gives no
   memory twice, so a segment never lies over an object.
 - **Untyped** from untyped, of so many paragraphs: memory of its own, which
-  a revoke of it gives back whole (roadmap l4.md L12). The root makes each
-  background program's of it, so that killing the program frees its memory.
+  a revoke of it gives back whole (roadmap l4.md L12). The root's
+  allocator carves the processes' memory of it (roadmap os-server.md P4).
 - **The new capability is a child** of the untyped it came from, so
   revoking the untyped deletes it.
 - **A space** has `SPACE_SLOTS_MIN` to `SPACE_SLOTS_MAX` slots, a power of
@@ -149,7 +149,7 @@ A thread made by retype is configured, then started:
   (*Faults*, below).
 - **Restart** (`THREAD_RESTART`) starts a started thread's program again
   at its entry, as Ctrl+Break does: the OS server's way to end a program
-  that calls `SYS_EXIT` (*docs/syscalls.md*). A thread waiting for the reply
+  the root builds that calls `PX_EXIT` (*docs/syscalls.md*). A thread waiting for the reply
   of a server's thread started with `START_SESSION` - one that serves it
   alone, from rings 1-2 only - takes that thread with it, so that a wait in
   the kernel on its behalf is given up too.
@@ -289,11 +289,13 @@ its program at its entry. A thread stopped already, or not started, is
 
 `KCALL_LOG` writes bytes to the kernel's log (roadmap l4.md L10, D15): COM2
 in debug and test builds (COM3 when COM2 is the modem), which every test
-reads; and the screen, until the threads start. The OS server writes a
-program's `SYS_WRITE` there, before the console driver writes the screen;
-the root, the drivers and the test programs' workers write their own lines.
-The buffer is checked as the stub checks a system call's
-(*docs/syscalls.md*), against the caller's CS, and again after every
+reads; and the screen, until the threads start. The OS server writes the
+first terminal's output and the writes of the programs the root builds
+there, before the console driver writes the screen; the root, the drivers
+and the test programs' workers write their own lines. The buffer is
+checked with the 286's own instructions at the caller's privilege: `ARPL`
+against the caller's CS, `VERR`, `LAR`'s present bit (no expand-down
+segment), `LSL` and bounds; and again after every
 interrupt window: interrupts come in after each byte, and a thread more
 urgent may run. One thread's line at a time: a thread that finds another
 writing waits its turn, so lines never mix. `KCALL_TICKS` gives the
@@ -400,8 +402,8 @@ has `ROOT_SLOTS` slots:
 | 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
 
 The rest are the root's own (*docs/root.md*): its fault endpoint (36), a
-scratch slot (37), a background program's own untyped from 38 on, the OS
-server's control notification (110), from 128 on eight slots for each
+scratch slot (37), the OS server's control notification (110), from 128 on
+eight slots for each
 module it builds (roadmap l4.md L10, L12), and from `ROOT_SLOT_DYNAMIC`
 (256) to 511 the slots its services make and give back (roadmap
 os-server.md P4).
@@ -411,15 +413,13 @@ space for every other module: the module's code copied in as slot 0; a
 data segment of its room, initialised from its data, as slot 1; a stack as
 slot 2. The OS server's module ("os") gets a space of 256 slots and a
 thread for each program, which serves it alone (`START_SESSION`), with the
-program's capabilities in slots 8n to 8n + 7 (*docs/syscalls.md*), among
-them a files segment of `FILES_SIZE` bytes that is the server's alone, and
+program's capabilities in slots 8n to 8n + 5 (*docs/os-server.md*), and
 in slot 128 + n a notification the thread sleeps on, a tick at a time or,
 the foreground program's, until the keyboard driver signals. A
 driver (`MF_DRIVER`) gets a space of `DRV_SLOTS` slots, a thread with
 IOPL, an endpoint, a notification and its interrupt line
-(*docs/drivers.md*). Every other module is a program: a thread, an
-endpoint to the OS server and a transfer segment, and its faults go to the
-OS server. The root starts each at the priority the table gives, the
+(*docs/drivers.md*). Every other module is a program: a thread and an
+endpoint to the OS server, and its faults go to the OS server. The root starts each at the priority the table gives, the
 program the keys are for with `START_FOREGROUND`. Then it handles the OS
 server's faults: it reports each as the kernel did ("rx286: os fault
 #GP(0000) at 0006:0123", the module's name for "program"), copies back any

@@ -108,7 +108,7 @@ static const char *const dev_names[] = {     /* from "speaker" on, dev.c's (P12)
 #define TTY_OWN 0xFF                    /* /dev/tty's unit: the opener's terminal */
 static const char punctuation[] = "!#$%&'()-@^_`{}~";
 
-/* errno_of - a volume's or a driver's error (E_*, syscalls.inc) as POSIX's */
+/* errno_of - a volume's or a driver's error (E_*, drivers.inc) as POSIX's */
 static int errno_of(rx_u16 e)
 {
     if (e == ENOENT || e == ENOSPC)
@@ -116,8 +116,9 @@ static int errno_of(rx_u16 e)
     return e == E_PROTECTED ? EROFS : EIO;
 }
 
-/* in_segment - may a buffer of a process's data segment be used? */
-static int in_segment(rx_u16 data, rx_u16 at, rx_u16 n)
+/* in_segment - may a buffer of a process's data segment be used, or of a
+ * program's the root builds? (server.h) */
+int in_segment(rx_u16 data, rx_u16 at, rx_u16 n)
 {
     struct rx_kregs r;
 

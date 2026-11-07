@@ -6,7 +6,8 @@
 ;
 ; In debug and test builds the log is COM2 (COM3 when COM2 is the modem),
 ; which every test reads; until the threads start, the screen too
-; (console.asm). The OS server writes a program's SYS_WRITE there, and the
+; (console.asm). The OS server writes a program's writes there (a process's
+; first terminal's, and the foreground program's the root builds), and the
 ; root and the drivers their own lines. The caller's buffer is checked with
 ; the 286's own instructions before the kernel reads it: ARPL against the
 ; caller's CS, VERR, LAR's present bit, LSL and bounds (docs/kernel-calls.md);
@@ -80,10 +81,6 @@ kc_log:
 .failed:
         call kc_done
         jmp call_leave
-
-%if LOG_MAX != WRITE_MAX
-  %error "log.asm: SYS_WRITE's limit is the log's"
-%endif
 
 ; ----------------------------------------------------------------------------
 ; kc_ticks - KCALL_TICKS: the ticks since the kernel started

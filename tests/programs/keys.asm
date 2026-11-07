@@ -31,8 +31,7 @@ entry:
 .first:
         mov byte [started], 1
 .next:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         push ax
         PRINT "key "
         pop ax

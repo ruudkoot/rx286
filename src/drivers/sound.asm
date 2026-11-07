@@ -24,19 +24,17 @@
 ; axis in microseconds. Interrupts stay off while it times, JOY_AXIS_MAX_US
 ; at most, well under a tick: an axis whose bit does not rise at once, or
 ; has not fallen by then, has no joystick behind it, and is JOY_ABSENT. Its
-; five results are more than a reply's four words: they go into the block
-; of the transfer segment the OS server passes (os.inc).
+; five results are more than a reply's four words: they go into the segment
+; the OS server passes, at the offset it names.
 ; ============================================================================
 
 cpu 286
 bits 16
-%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"
 %include "kcalls.inc"
 %include "drivers.inc"
-%include "os.inc"
 
 RING                equ 1
 %define SLOT(n) ((n) * 8 + 4 + RING)    ; a slot of the driver's, as a selector
@@ -178,18 +176,17 @@ speaker_off:
 
 ; ----------------------------------------------------------------------------
 ; joystick - the buttons pressed and the four axes, into the segment passed:
-; with SI 0 its transfer segment's block, AX the buttons (bit n set: button
-; n pressed), BX, CX, DX, SI axes 0-3 in microseconds, or JOY_ABSENT; else
-; five words at SI, the buttons and then the axes (a process's read of
-; /dev/joystick, os-server.md P12)
-;   In:       BP = the segment (0: none came); SI = 0, or an offset there
+; five words at SI, the buttons (bit n set: button n + 1 pressed), then axes
+; 0-3 in microseconds, or JOY_ABSENT (a process's read of /dev/joystick,
+; os-server.md P12)
+;   In:       BP = the segment (0: none came); SI = an offset there
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 joystick:
         test bp, bp
         jz .done
-        verw bp                         ; (a program killed meanwhile: l4.md L12)
+        verw bp                         ; (a process gone meanwhile)
         jnz .done
         push si
         push ds
@@ -204,19 +201,6 @@ joystick:
         shr al, GAME_PORT_BUTTON_SHIFT
         xor ah, ah
         mov es, bp
-        test di, di
-        jnz .words
-        mov [es:XFER_AX], ax
-        mov ax, [joy_times]
-        mov [es:XFER_BX], ax
-        mov ax, [joy_times + 2]
-        mov [es:XFER_CX], ax
-        mov ax, [joy_times + 4]
-        mov [es:XFER_DX], ax
-        mov ax, [joy_times + 6]
-        mov [es:XFER_SI], ax
-        jmp .done
-.words:
         stosw                           ; the buttons, then the axes
         mov si, joy_times
         mov cx, JOY_AXES

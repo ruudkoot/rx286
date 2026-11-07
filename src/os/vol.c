@@ -1,11 +1,11 @@
 /* ============================================================================
  * rx286 - src/os/vol.c
  * FAT12 volumes, read and written through the cache (roadmap os-server.md
- * P7, E9): mounted from their BPB as fat.c mounts them, the FAT's entries
- * read and set in every copy of the FAT, clusters taken and freed,
- * directories searched and grown. A FAT or directory sector that changes is
- * written at the end of the call (cache_meta); nothing else is. Every cluster number
- * is checked, and every chain against looping, as fat.c checks them.
+ * P7, E9): mounted from their BPB, the FAT's entries read and set in every
+ * copy of the FAT, clusters taken and freed, directories searched and
+ * grown. A FAT or directory sector that changes is written at the end of
+ * the call (cache_meta); nothing else is. Every cluster number is checked,
+ * and every chain against looping.
  * ============================================================================ */
 
 #include "fs.h"
@@ -39,8 +39,7 @@ static void bytes_out(rx_u8 RX_FAR *to, const rx_u8 *from, unsigned n)
 }
 
 /* vol_mount - a drive's FAT12 volume: on a fixed disk, the master boot
- * record's first FAT12 partition; its BPB checked as fat.c's fat_mount
- * checks it */
+ * record's first FAT12 partition; its BPB checked */
 rx_u16 vol_mount(struct vol *v, unsigned drive)
 {
     const rx_u8 RX_FAR *io;

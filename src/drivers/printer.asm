@@ -9,14 +9,13 @@
 ; timer, for LPT_BUSY_TICKS at most. The printer's interrupt (-ACK) stays
 ; off. A port with no printer reads busy and out of paper, as on the AT:
 ; the call fails with E_PAPER after LPT_BUSY_TICKS. A call that fails says
-; how many bytes the printer took first. The OS server asks it for
-; SYS_PRINT (DRV_PRINT, drivers.inc), passing the program's transfer
-; segment, which the driver deletes once it has printed from it.
+; how many bytes the printer took first. The OS server asks it for a write
+; to /dev/lpt1 or /dev/lpt2 (DRV_PRINT, drivers.inc), passing the process's
+; data segment, which the driver deletes once it has printed from it.
 ; ============================================================================
 
 cpu 286
 bits 16
-%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"
