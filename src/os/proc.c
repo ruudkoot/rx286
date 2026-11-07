@@ -64,14 +64,22 @@ struct proc {
     rx_u8 nice;                         /* 0 to 2 NZERO - 1: its priority (P12) */
     rx_u8 leader, tnum;                 /* a thread's: its process's entry, its number (P13) */
     rx_u8 futexing;                     /* waits in PX_FUTEX on the word futex_at (P13) */
+    rx_u8 lending;                      /* its call lends the data segment to a driver, the
+                                           lock given up: a brk waits (proc_lend, P15) */
     rx_u16 futex_at;
     pid_t pid, ppid;
     pid_t pgid, sid;                    /* its group and session (P11) */
     rx_u16 root, code;                  /* the root's numbers for it and its code */
     rx_u16 brk, brk_min, brk_max;
+    rx_u16 gen, badge;                  /* its endpoint's badge: the entry, and a count of
+                                           its images and threads (badge_new, P15) */
     int status;
     char name[AR_NAME_SIZE];
 };
+
+#if PROCS > 15
+#error "a badge holds an entry in 4 bits"
+#endif
 
 /* A new image, between exec's checks and the process it becomes */
 struct image {
@@ -161,6 +169,9 @@ static void signal_entry(unsigned i)
 /* sleep_on - until a notification is signalled; with a tick, at most one
  * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
  * a Ctrl+Break) */
+static rx_u8 break_seen;                /* a Ctrl+Break the control thread's lock wait
+                                           took (proc_break_seen, P15) */
+
 static void sleep_on(rx_u16 notify, int tick)
 {
     struct rx_kregs r;
@@ -175,7 +186,26 @@ static void sleep_on(rx_u16 notify, int tick)
     r.ax = KCALL_RECV << 8;
     r.dx = notify;
     r.bp = 0;
-    rx_kcall(&r);
+    if (rx_kcall(&r) == 0 && notify == OS_CONTROL && (r.bx & CONTROL_BREAK))
+        break_seen = 1;                 /* (the bits are the receive's: kept here) */
+}
+
+/* proc_lend - entry i's call lends its process's data segment to a driver,
+ * the lock given up (1), or no longer (0): a brk that would replace the
+ * segment waits (server.h; lock held; P15) */
+void proc_lend(int i, int on)
+{
+    procs[i].lending = (rx_u8)on;
+}
+
+/* proc_break_seen - did a wait of the control thread's for the lock take a
+ * Ctrl+Break, since it last asked? (server.h; P15) */
+int proc_break_seen(void)
+{
+    int seen = break_seen;
+
+    break_seen = 0;
+    return seen;
 }
 
 /* proc_alive - is entry i's process alive, or the thread it holds? (server.h) */
@@ -289,8 +319,11 @@ static int px_nice(int i, int increment)
 
     procs[i].nice = (rx_u8)(n < 0 ? 0 : n > 2 * NZERO - 1 ? 2 * NZERO - 1 : n);
     sig_renice(i);
-    for (k = proc_next_thread(i, -1); k >= 0; k = proc_next_thread(i, k))
-        sig_renice(k);                  /* its threads too (P13) */
+    proc_wake(i);                       /* (each server thread to take it now, the */
+    for (k = proc_next_thread(i, -1); k >= 0; k = proc_next_thread(i, k)) {
+        sig_renice(k);                  /*    caller's at its call's end: P15) */
+        proc_wake(k);                   /* its threads too (P13) */
+    }
     return procs[i].nice - NZERO;
 }
 
@@ -357,9 +390,14 @@ static int list_count(rx_u16 segment, rx_u16 list, int *error)
 
     if (list == 0)
         return 0;
-    for (n = 0; (rx_u32)list + 2 * n + 1 <= last; n++)
+    for (n = 0; (rx_u32)list + 2 * n + 1 <= last; n++) {
+        if (n > PX_ARG_MAX / 2) {
+            *error = E2BIG;             /* (more than the block holds: P15) */
+            return -1;
+        }
         if (*far_word(segment, (rx_u16)(list + 2 * n)) == 0)
             return n;
+    }
     *error = EFAULT;
     return -1;
 }
@@ -378,9 +416,9 @@ static int args_take(struct image *img, rx_u16 segment, rx_u16 argv, rx_u16 envp
     envc = list_count(segment, envp, &error);
     if (argc < 0 || envc < 0)
         return error;
+    if (2ul * ((rx_u32)argc + (rx_u32)envc + 2) > PX_ARG_MAX)
+        return E2BIG;                   /* (in 32 bits: P15) */
     used = 2 * (unsigned)(argc + 1 + envc + 1);
-    if (used > PX_ARG_MAX)
-        return E2BIG;
     lists[0] = argv;
     lists[1] = envp;
     counts[0] = (rx_u16)argc;
@@ -529,6 +567,17 @@ static int entry_new(void)
     return -1;
 }
 
+/* badge_new - entry c's badge for the endpoint of a new image or thread
+ * of its: the entry + 1 in bits 0-3, its generation in bits 4-14 (below
+ * FAULT_BADGE), so that a call received from an image or thread gone
+ * since is known by its badge (handle; P15) */
+static rx_u16 badge_new(int c)
+{
+    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x7FF);
+    procs[c].badge = (rx_u16)(procs[c].gen << 4 | (unsigned)(c + 1));
+    return procs[c].badge;
+}
+
 /* new_pid - a pid no process, group or session has: the next, wrapping
  * from 32,767 back to 2 (P15) */
 static pid_t new_pid(void)
@@ -539,7 +588,7 @@ static pid_t new_pid(void)
     do {
         pid = next_pid;
         next_pid = next_pid >= 32767 ? INIT_PID + 1 : next_pid + 1;
-        used = 0;
+        used = tty_holds(pid);          /* (a terminal's group or session: P15) */
         for (c = 0; c < PROCS; c++)
             if (procs[c].state != P_FREE && (procs[c].pid == pid
                     || (procs[c].state != P_THREAD
@@ -561,7 +610,7 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
 
     p->state = P_ALIVE;
     p->waiting = p->asleep = 0;
-    p->futexing = 0;
+    p->futexing = p->lending = 0;
     p->nice = parent >= 0 ? procs[parent].nice : NZERO;     /* a fork's, a spawn's */
     p->report = R_NONE;
     p->pid = p->pgid = p->sid = 0;      /* (its old ones are no one's now) */
@@ -594,7 +643,7 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
     *error = image_take(&img, parent, path, segment, argv, envp);
     if (*error)
         return -1;
-    *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
+    *error = image_make(&img, P_SLOT(i, PK_EP), badge_new(i), &n);
     image_done(&img);
     if (*error) {
         root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);    /* (a code it sealed, unused: P15) */
@@ -618,6 +667,7 @@ static void end(int i, int status, int revoke)
     int k, init = entry_of(INIT_PID, P_ALIVE), parent;
     char line[48];
 
+    dev_tone_stop(i);                   /* (a tone it waits for: ended, P15) */
     if (revoke)
         root(ROOT_EXIT, p->root, 0, 0, 0, 0);
     threads_end(i);                     /* its threads' entries (P13) */
@@ -634,7 +684,9 @@ static void end(int i, int status, int revoke)
             signal_entry((unsigned)init);
     }
     parent = entry_of(p->ppid, P_ALIVE);
-    if (parent >= 0)
+    if (parent >= 0 && sig_ignored(parent, SIGCHLD))
+        p->state = P_FREE;              /* no zombie: its parent ignores SIGCHLD (XSH */
+    if (parent >= 0)                    /*    2.4.3; P15) */
         waiters_wake(parent);
     if (parent >= 0)
         sig_send(parent, SIGCHLD);
@@ -691,7 +743,7 @@ static int px_fork(int i, rx_u16 ip, rx_u16 sp, int *error)
         *error = EAGAIN;
         return -1;
     }
-    if (root(ROOT_FORK, procs[i].root, 0, (rx_u16)c, P_SLOT(c, PK_EP), &n)) {
+    if (root(ROOT_FORK, procs[i].root, 0, badge_new(c), P_SLOT(c, PK_EP), &n)) {
         *error = EAGAIN;
         return -1;
     }
@@ -727,14 +779,15 @@ static int px_exec(int i, int t, const char *path, rx_u16 argv, rx_u16 envp, int
     same = img.code == procs[i].code;   /* its own file again: its code kept (P12) */
     root(ROOT_EXIT, procs[i].root, (rx_u16)same, 0, 0, 0);  /* its threads, in this call, too */
     threads_end(i);
+    procs[i].lending = 0;               /* (a driver's read of the old segment: done) */
     if (t != i) {
         serving[i] = -1;                /* (proc_still: the main thread's call dropped, */
         procs[i].futexing = 0;          /*    its server thread woken out of its wait, so */
         procs[i].waiting = 0;           /*    that it serves the new image: P15) */
         signal_entry((unsigned)i);
     }
-    *error = image_make(&img, P_SLOT(i, PK_EP), (unsigned)i + 1, &n);
-    image_done(&img);
+    *error = image_make(&img, P_SLOT(i, PK_EP), badge_new(i), &n);
+    image_done(&img);                   /* (the old image's calls still to serve: stale) */
     if (*error) {
         root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);    /* (the root keeps a code in use) */
         end(i, SIGKILL, 0);
@@ -760,6 +813,10 @@ static int px_wait(int i, pid_t pid, rx_u16 options, rx_u16 *status, int *error)
 {
     int c, any, p = LEADER(i);          /* (a thread's: its process's children, P13) */
 
+    if (options & ~(WNOHANG | WUNTRACED | WCONTINUED)) {
+        *error = EINVAL;                /* (XSH waitpid; P15) */
+        return -1;
+    }
     for (;;) {
         any = 0;
         for (c = 0; c < PROCS; c++) {
@@ -814,12 +871,13 @@ static int px_kill(int i, pid_t pid, int sig, int *error)
         *error = EINVAL;
         return -1;
     }
-    if (pid <= 0) {                     /* a group: the caller's (0), every one (-1) */
-        for (c = 0; c < PROCS; c++)
-            if (procs[c].state == P_ALIVE && procs[c].pid != INIT_PID
+    if (pid <= 0) {                     /* a group: the caller's (0), every one (-1); */
+        for (c = 0; c < PROCS; c++)     /*    a zombie is one of its processes (P15) */
+            if ((procs[c].state == P_ALIVE || procs[c].state == P_ZOMBIE)
+                    && procs[c].pid != INIT_PID
                     && (pid == -1 || procs[c].pgid == (pid ? -pid : procs[i].pgid))) {
                 n++;
-                if (sig)
+                if (sig && procs[c].state == P_ALIVE)
                     sig_send(c, sig);
             }
         if (n == 0) {
@@ -828,6 +886,8 @@ static int px_kill(int i, pid_t pid, int sig, int *error)
         }
         return proc_alive(i) ? 0 : NO_REPLY;
     }
+    if (t < 0 && entry_of(pid, P_ZOMBIE) >= 0)
+        return 0;                       /* a zombie: there, nothing to send it (P15) */
     if (t < 0) {
         *error = ESRCH;
         return -1;
@@ -842,11 +902,14 @@ static int px_kill(int i, pid_t pid, int sig, int *error)
     return t == i && !proc_alive(i) ? NO_REPLY : 0;
 }
 
-/* px_brk - PX_BRK: the data segment as long as the break, by the root (lock
- * held: the process waits in this call meanwhile) */
-static int px_brk(int i, rx_u16 end, int *error)
+/* px_brk - PX_BRK for process i from its entry t: the data segment as long
+ * as the break, by the root (lock held: the process waits in this call
+ * meanwhile; given up while a driver reads the segment for another thread
+ * of the process, P15) */
+static int px_brk(int t, int i, rx_u16 end, int *error)
 {
-    rx_u32 size = (rx_u32)proc_data_limit(i) + 1;
+    rx_u32 size;
+    int k;
 
     if (end == 0)
         return 0;                       /* (the break: SI, handle's) */
@@ -854,10 +917,23 @@ static int px_brk(int i, rx_u16 end, int *error)
         *error = EINVAL;
         return -1;
     }
-    if (end <= size && (end > procs[i].brk || proc_next_thread(i, -1) >= 0)) {
-        procs[i].brk = end;             /* within the segment: kept. A thread's call */
-        return 0;                       /*    may hold a buffer above a lower break, */
-    }                                   /*    which a smaller segment would cut (P15) */
+    for (;;) {
+        size = (rx_u32)proc_data_limit(i) + 1;
+        if (end <= size && (end > procs[i].brk || proc_next_thread(i, -1) >= 0)) {
+            procs[i].brk = end;         /* within the segment: kept. A thread's call */
+            return 0;                   /*    may hold a buffer above a lower break, */
+        }                               /*    which a smaller segment would cut (P15) */
+        for (k = 0; k < PROCS; k++)
+            if (k != t && proc_alive(k) && LEADER(k) == i && procs[k].lending)
+                break;
+        if (k == PROCS)
+            break;
+        lock_give();                    /* a driver reads the segment for a thread of */
+        proc_nap(t);                    /*    its: a new one only once it is done, as */
+        lock_take(PROC_NOTIFY(t));      /*    the old one goes (P15) */
+        if (!proc_still(t))
+            return NO_REPLY;
+    }
     if (end > procs[i].brk_max
             || root(ROOT_BRK, procs[i].root, end, 0, P_SLOT(i, PK_DATA), 0)) {
         *error = ENOMEM;
@@ -977,8 +1053,9 @@ static int px_setsid(int i, int *error)
 {
     int c;
 
-    for (c = 0; c < PROCS; c++)
-        if (procs[c].state == P_ALIVE && procs[c].pgid == procs[i].pid) {
+    for (c = 0; c < PROCS; c++)         /* (a zombie's group too: P15) */
+        if (procs[c].state != P_FREE && procs[c].state != P_THREAD
+                && procs[c].pgid == procs[i].pid) {
             *error = EPERM;
             return -1;
         }
@@ -991,6 +1068,8 @@ static int px_getsid(int i, pid_t pid, int *error)
 {
     int t = pid ? entry_of(pid, P_ALIVE) : i;
 
+    if (t < 0)
+        t = entry_of(pid, P_ZOMBIE);    /* (a zombie's session too: P15) */
     if (t < 0) {
         *error = ESRCH;
         return -1;
@@ -1084,7 +1163,7 @@ static int px_thread(int p, rx_u16 ip, rx_u16 sp, rx_u16 at, int *error)
         *error = EFAULT;
         return -1;
     }
-    if (c < 0 || root(ROOT_THREAD, procs[p].root, 0, (rx_u16)(c + 1), P_SLOT(c, PK_EP), &n))
+    if (c < 0 || root(ROOT_THREAD, procs[p].root, 0, badge_new(c), P_SLOT(c, PK_EP), &n))
         return -1;
     if (thread_op(P_SLOT(c, PK_THREAD), THREAD_CONFIGURE, P_SLOT(p, PK_SPACE), ip, sp)) {
         root(ROOT_UNTHREAD, procs[p].root, n, 0, 0, 0);
@@ -1092,6 +1171,7 @@ static int px_thread(int p, rx_u16 ip, rx_u16 sp, rx_u16 at, int *error)
     }
     *w = (rx_u16)(((OS_SLOT_EP + n) << 3) | 7);     /* its endpoint: slot 8 + n, RPL 3 */
     procs[c].state = P_THREAD;
+    procs[c].lending = 0;
     procs[c].leader = (rx_u8)p;
     procs[c].tnum = (rx_u8)n;
     procs[c].pid = procs[p].pid;
@@ -1099,6 +1179,7 @@ static int px_thread(int p, rx_u16 ip, rx_u16 sp, rx_u16 at, int *error)
     sig_start(c, -1, SIG_FROM_SPAWN);
     signal_entry((unsigned)c);          /* its server thread, asleep while the entry was free */
     thread_op(P_SLOT(c, PK_THREAD), THREAD_START, 0, 0, (rx_u16)proc_priority(p));
+    sig_thread_started(c);              /* (stopped with its process, if it is: P15) */
     return n;
 }
 
@@ -1182,9 +1263,9 @@ static int handle(int i, struct rx_kregs *r)
     rx_u16 data;
 
     take(notify);
-    if (!proc_alive(i)) {
-        give();
-        return 0;
+    if (!proc_alive(i) || (r->dx & ~FAULT_BADGE) != procs[i].badge) {
+        give();                         /* (a call of an image or thread gone since it was */
+        return 0;                       /*    received, another in the entry now: P15) */
     }
     p = LEADER(i);                      /* a thread's process (P13) */
     data = P_SLOT(p, PK_DATA);
@@ -1242,7 +1323,7 @@ static int handle(int i, struct rx_kregs *r)
         result = px_kill(p, (int)r->bx, (int)r->cx, &error);
         break;
     case PX_BRK:                        /* the break in SI: never a negative result (P15) */
-        result = px_brk(p, r->bx, &error);
+        result = px_brk(i, p, r->bx, &error);
         status = procs[p].brk;
         break;
     case PX_SETPGID:
@@ -1303,6 +1384,10 @@ static int handle(int i, struct rx_kregs *r)
     }
     if (result == VFS_INTR || result == VFS_EINTR) {    /* a wait a signal broke off */
         error = sig_interrupt(i, result == VFS_INTR);
+        result = -1;
+    }
+    if (result == VFS_TINTR) {          /* (a thread's: P15) */
+        error = EINTR;
         result = -1;
     }
     if (result == VFS_RESTART) {        /* a stop's: the call made again (P11) */

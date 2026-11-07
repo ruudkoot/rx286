@@ -7,6 +7,9 @@
 program: idle
 define: TEST_POSIX_EXEC
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 300
 emulators: bochs mame
@@ -36,4 +39,5 @@ exec: a file's name and a slash (-1, ENOTDIR 20): -1, 20
 exec: an empty name along PATH (-1, ENOENT 2): -1, 2
 exec: a file open for writing (-1, ETXTBSY 26): -1, 26
 exec: a PATH directory too long, never its tail (-1, ENOENT 2): -1, 2
+exec: three execs from a thread while the main one calls, each its own break (3): 3
 exec: done

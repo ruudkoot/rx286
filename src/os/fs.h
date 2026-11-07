@@ -89,6 +89,8 @@ void vfs_exit(int i);
 #define VFS_RESTART (-5)                /*    a stop's: ERESTART, made again (P11) */
 #define VFS_EIO (-6)                    /*    EIO (a background read, SIGTTIN not taken) */
 #define VFS_EINTR (-7)                  /*    as VFS_INTR, but never made again: poll's (P12) */
+#define VFS_TINTR (-8)                  /*    EINTR for a thread, whose process's handler
+                                           runs on the main thread (P15) */
 
 /* pipes_init - the pipes' segment, from the root (at boot) */
 int pipes_init(void);

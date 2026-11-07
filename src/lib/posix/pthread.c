@@ -38,6 +38,9 @@ void rx_thread_entry(void);
 void rx_inc(unsigned *word);
 
 static struct rx_tls *threads;          /* created, not yet joined or freed */
+static unsigned made, ended;            /* the threads made, and those that ended: the
+                                           main thread's pthread_exit waits for them all
+                                           without walking the list (P15) */
 static pthread_mutex_t list_lock = PTHREAD_MUTEX_INITIALIZER;
 static void (*destructors[RX_KEYS])(void *);
 static unsigned char keys_used[RX_KEYS];
@@ -114,6 +117,9 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
         free(raw);
         return EAGAIN;
     }
+    pthread_mutex_lock(&list_lock);
+    made++;
+    pthread_mutex_unlock(&list_lock);
     *thread = t;
     return 0;
 }
@@ -150,8 +156,9 @@ int pthread_detach(pthread_t thread)
  * ends the process (XSH pthread_exit: it lives while one does) */
 void pthread_exit(void *result)
 {
-    struct rx_tls *t = rx_tls(), *o;
+    struct rx_tls *t = rx_tls();
     struct rx_kregs r;
+    unsigned n;
     void *v;
     int k;
 
@@ -161,10 +168,13 @@ void pthread_exit(void *result)
             destructors[k](v);
         }
     t->result = result;
+    if (t != &rx_main_tls) {
+        rx_inc(&ended);                 /* (one instruction: no lock) */
+        rx_futex(FUTEX_WAKE, (void *)&ended, 0x7FFF);
+    }
     rx_px(PX_THREAD_EXIT, (rx_u16)(unsigned)&t->state, 0, 0, 0, &r);
-    for (o = threads; o; o = o->next)   /* the main thread: EINVAL, it waits */
-        while (o->state != THREAD_DONE)
-            rx_futex(FUTEX_WAIT, (void *)&o->state, THREAD_RUNNING);
+    while ((n = ended) != made)         /* the main thread: EINVAL, it waits */
+        rx_futex(FUTEX_WAIT, (void *)&ended, (int)n);
     exit(0);
 }
 

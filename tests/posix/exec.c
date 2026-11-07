@@ -14,6 +14,7 @@
 #include "fcntl.h"
 #include "signal.h"
 #include "spawn.h"
+#include "pthread.h"
 #include "unistd.h"
 #include "sys/stat.h"
 #include "sys/wait.h"
@@ -32,6 +33,20 @@ static int waited(pid_t pid)
 
 /* spawned - a program run with its arguments: its exit code, or the
  * error of the spawn as -1 */
+static char copy[16];                   /* a copy of child on B, a new one each time */
+static char junk[2048];
+
+/* execer - a thread's exec of the copy, which says whether its break is
+ * its own (P15) */
+static void *execer(void *arg)
+{
+    static char *av[] = { copy, "break", 0 };
+
+    (void)arg;
+    execv(av[0], av);
+    return 0;
+}
+
 static int spawned(const char *path, char **argv, int along_path)
 {
     pid_t pid;
@@ -59,7 +74,7 @@ int main(void)
     char *image, *again, *bad[2];
     struct stat st;
     pid_t a, b, pid;
-    int n, n2, k, fd, shared;
+    int n, n2, k, fd, shared, size;
     rx_u32 t0;
     rx_u16 *h;
 
@@ -94,6 +109,7 @@ int main(void)
     fd = open(child[0], O_RDONLY);
     n = read(fd, image, (size_t)st.st_size);
     close(fd);
+    size = n;                           /* (for copies on the diskette, below: P15) */
     bad[0] = "/b/bad";
     bad[1] = 0;
     for (k = 0; k < 9; k++) {
@@ -149,6 +165,33 @@ int main(void)
         printf("exec: a PATH directory too long, never its tail (-1, ENOENT 2): %d, %d\n", n2,
                errno);
     }
+    fd = open("/b/junk", O_WRONLY | O_CREAT | O_TRUNC);
+    for (k = 0; k < 10; k++)
+        write(fd, junk, sizeof junk);   /* (20 KB: read, it takes the cache's 32 sectors) */
+    close(fd);
+    for (k = 0, n = 0; k < 3; k++) {    /* the main thread's call while a thread execs */
+        snprintf(copy, sizeof copy, "/b/copy%d", k);    /*    a new copy from B, which */
+        fd = open(copy, O_WRONLY | O_CREAT | O_TRUNC);  /*    waits for the disk: */
+        write(fd, image, (size_t)size);                 /*    dropped, not served to */
+        close(fd);                                      /*    the new image (P15) */
+        fd = open("/b/junk", O_RDONLY);
+        while (read(fd, junk, sizeof junk) > 0)
+            ;
+        close(fd);
+        if ((pid = fork()) == 0) {
+            pthread_t t;
+            void *top;
+
+            alarm(20);
+            top = sbrk(0);
+            pthread_create(&t, 0, execer, 0);
+            for (;;)
+                brk(top);
+        }
+        n += waited(pid) == 0;
+    }
+    printf("exec: three execs from a thread while the main one calls, each its own break (3): "
+           "%d\n", n);
     printf("exec: done\n");
     return 0;
 }

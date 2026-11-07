@@ -44,9 +44,9 @@ no transfer segment (*docs/syscalls.md*).
 | `PX_FORK` | BX the child's IP, CX its SP | the root copies the process (`ROOT_FORK`); the child starts at libc's return path with the parent's SP (`src/lib/posix/fork.asm`) and returns 0 |
 | `PX_EXECVE` | SI the path, DI `argv`, BX `envp` | the file is checked and its arguments taken first (a file open for writing is `ETXTBSY`, "file/" `ENOTDIR`); then the old image goes and the new one takes its slots, the pid kept. Past that point a failure ends the process (`SIGKILL`) |
 | `PX_SPAWN` | SI the path, DI `argv`, BX `envp` | a new process of the file, without a copy (`posix_spawn` without file actions or attributes) |
-| `PX_WAITPID` | BX a pid, -1 (any), 0 (the caller's group) or below -1 (a group), CX the options (`WNOHANG`, `WUNTRACED`, `WCONTINUED`) | a zombie child taken: its pid, and its status in SI; or a stop or continue not yet said, if asked (before the end, if it came first); else a sleep until a child ends; `ECHILD` with none. init waits even with none |
+| `PX_WAITPID` | BX a pid, -1 (any), 0 (the caller's group) or below -1 (a group), CX the options (`WNOHANG`, `WUNTRACED`, `WCONTINUED`) | a zombie child taken: its pid, and its status in SI; or a stop or continue not yet said, if asked (before the end, if it came first); else a sleep until a child ends; `ECHILD` with none, `EINVAL` for an option it does not know. A parent whose `SIGCHLD` is `SIG_IGN` keeps no zombies: its children's ends free their entries (XSH 2.4.3). init waits even with none |
 | `PX_GETPID`, `PX_GETPPID` | | the pid, the parent's |
-| `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`) |
+| `PX_KILL` | BX a pid, CX a signal | the signal sent (*Signals* below); 0 only looks; init takes none (`EPERM`); a zombie is there, and takes nothing |
 | `PX_BRK` | BX the break, or 0 | the data segment as long as the break (`ROOT_BRK`), at most its file's `RXH_DGROUP_MAX`; 0 says where it is. The result is 0 and the break in SI, so that a break past 32 KB is no negative result. A break within the segment moves without a new one while the process has other threads (a lower one too: a thread's call may hold a buffer above it), or when it grows |
 | `PX_TIME` | | the seconds since 1970-01-01 00:00:00 in SI:DI: the real-time clock's (the RTC driver's), taken as UTC; `EIO` if it does not answer (P12) |
 | `PX_NICE` | BX an increment | the nice value moved by it, kept within 0 to 2 `NZERO` - 1 (any process may lower it as well as raise it: there are no users); returns it - `NZERO`. The thread's priority follows it: 3 up to `NZERO` (20), 2 up to `NZERO` + 10, else 1, above the idle loop alone. The server stops the thread once the call is answered and starts it again at that priority (`sig_renice`); a fork's and a spawn's child keep the value, and an exec (P12) |
@@ -110,22 +110,23 @@ its frame (`THREAD_FRAME`), and writes the signal's frame below its SP
 after it, and the registers ES, DS, `PUSHA`'s eight words, IP, CS and
 FLAGS. Its SS must be the process's data (0Fh, which crt0 takes) or its
 stack's copy (17h, a forked child's), with room below SP above the guard
-word (*docs/c.md*), or `SIGSEGV` ends it. Then the thread starts again at
-libc's trampoline (`src/lib/posix/sigtramp.asm`), with DS and ES the data
-and DF clear, and the signal blocked while its handler runs (`SA_NODEFER`
-aside). The trampoline calls the handler with the signal, 0 and the frame
-(where `SA_SIGINFO`'s arguments would be), gives the mask back
-(`PX_SIGRETURN`; a signal pending runs its handler first), and returns with
-the frame's `POPA` and `IRET`. At ring 3 `IRET` takes back IP, CS and FLAGS
-but not IOPL; a frame the handler spoilt faults there, and ends the process
-(`SIGSEGV`). NT set in the frame stays set, and does nothing until the
-program's own `IRET`, a task's return through a back link of 0, which
-faults (#TS, `SIGSEGV`): the kernel clears NT whenever it writes a frame. A
-signal due as a handler runs nests, on its stack. The 287 is saved around a
-handler (`SF_287`: `FSAVE`, which leaves it as `FNINIT` does, then
-`FRSTOR`) when the process's executable says it uses it (`RXF_287`,
-`tools/mkexe --287`; a fork's child inherits it); else a handler that uses
-the 287 leaves it as it left it.
+word (*docs/c.md*), for the 287's state too if the process uses it, or
+`SIGSEGV` ends it. Then the thread starts again at libc's trampoline
+(`src/lib/posix/sigtramp.asm`), with DS and ES the data and DF clear, and
+the signal blocked while its handler runs (`SA_NODEFER` aside). The
+trampoline calls the handler with the signal, 0 and the frame (where
+`SA_SIGINFO`'s arguments would be), gives the mask back (`PX_SIGRETURN`; a
+signal pending runs its handler first), and returns with the frame's `POPA`
+and `IRET`. At ring 3 `IRET` takes back IP, CS and FLAGS but not IOPL; a
+frame the handler spoilt faults there, and ends the process (`SIGSEGV`). NT
+set in the frame stays set, and does nothing until the program's own
+`IRET`, a task's return through a back link of 0, which faults (#TS,
+`SIGSEGV`): the kernel clears NT whenever it writes a frame. A signal due
+as a handler runs nests, on its stack. The 287 is saved around a handler
+(`SF_287`: `FSAVE`, which leaves it as `FNINIT` does, then `FRSTOR`) when
+the process's executable says it uses it (`RXF_287`, `tools/mkexe --287`; a
+fork's child inherits it); else a handler that uses the 287 leaves it as it
+left it.
 
 | `struct sigaction` | | The frame | |
 |---|---|---|---|
@@ -225,7 +226,7 @@ fails. `stat` of an open file gives its size as its descriptions have it
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk, or the error (`EROFS` for a diskette protected); a pipe, a terminal or a device is `EINVAL` |
 | `PX_PIPE` | | a pipe (P9): its read end's descriptor, and its write end's in SI |
 | `PX_IOCTL` | BX the descriptor, CX a request (`RXIO_*`), SI its argument | a device's request (*The devices* below); `ENOTTY` for any other descriptor or request, `EFAULT` for an argument past the data (P12) |
-| `PX_POLL` | SI the `struct pollfd`s (`PF_FD`, `PF_EVENTS`, `PF_REVENTS`; `PF_BYTES` each), CX how many (`OPEN_MAX` at most), BX the timeout in ms (-1: none; 0: at once) | how many have news, each one's `PF_REVENTS` set: `POLLIN` (bytes, or a pipe's end), `POLLOUT` (room: `PIPE_BUF` bytes in a pipe), `POLLERR` (a pipe without a reader), `POLLHUP` (without a writer), `POLLNVAL` (not open; `POLLPRI` never). It waits in the server thread: the terminals it asks about wake it, as their reader; the rest it looks at each tick. A signal's handler ends it with `EINTR`, `SA_RESTART` or not (XSH poll); a stop makes it again (P12) |
+| `PX_POLL` | SI the `struct pollfd`s (`PF_FD`, `PF_EVENTS`, `PF_REVENTS`; `PF_BYTES` each), CX how many (`OPEN_MAX` at most), BX the timeout in ms (-1: none; 0: at once) | how many have news, each one's `PF_REVENTS` set: `POLLIN` (bytes, or a pipe's end; a terminal where the processes have no keys, whose read is 0 at once), `POLLOUT` (room: `PIPE_BUF` bytes in a pipe), `POLLERR` (a pipe without a reader), `POLLHUP` (without a writer), `POLLNVAL` (not open; `POLLPRI` never). It waits in the server thread: the terminals it asks about wake it, as their reader; the rest it looks at each tick. A signal's handler ends it with `EINTR`, `SA_RESTART` or not (XSH poll); a stop makes it again (P12) |
 
 The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 `EMFILE` (no descriptor left), `ENOSPC`, `EFBIG`, `ESPIPE`, `EROFS` (`/`,
@@ -270,7 +271,7 @@ A wait for one gives up the server's lock.
 
 | Device | What |
 |---|---|
-| `/dev/speaker` | `ioctl` `RXIO_TONE`: a tone (`struct rx_tone`: `TONE_HZ`, `TONE_TICKS`; `TONE_BYTES`) of 19 to 20,000 Hz, or a rest (0), for up to 500 ticks; the call returns once it is over (`EINVAL` otherwise, as the sound driver says). A read or write is `EINVAL` |
+| `/dev/speaker` | `ioctl` `RXIO_TONE`: a tone (`struct rx_tone`: `TONE_HZ`, `TONE_TICKS`; `TONE_BYTES`) of 19 to 20,000 Hz, or a rest (0), for up to 500 ticks; the call returns once it is over (`EINVAL` otherwise, as the sound driver says), or once a handler's signal ends it early (`EINTR`); the process's end ends it too. A read or write is `EINVAL` |
 | `/dev/joystick` | a read of `JS_BYTES` or more: `struct rx_joystick`, the buttons down (`JS_BUTTONS`), then four axes in microseconds or `JOY_ABSENT` (`JS_AXES`), as the sound driver times them with its own `DRV_JOYSTICK`, which writes them at the offset given |
 | `/dev/mouse` | an open without a mouse that said who it is is `ENXIO`. A read of `MS_BYTES` or more waits until the mouse moves or a button changes, then gives `struct rx_mouse` (`MS_BUTTONS`, `MS_X` 0-639, `MS_Y` 0-199, as DOS's mouse driver keeps them in text mode); `ioctl` `RXIO_MOUSE` gives it at once |
 | `/dev/status` | a write: its first 20 bytes in a field of the status line, on every page, blanks after them; each description opened has a field of its own, from the right (`EBUSY` once all four are taken), blank again at its last close. In a `TEST_DEMO` or `TEST_DAEMONS` build the text goes to the log too, as "\1NAME: TEXT\2", which the runner makes "status, NAME: TEXT" |
@@ -359,17 +360,23 @@ a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
 walks over the processes pass over it, and its signal state is its
 process's. A new process's pid is the next after the last given, from 2
 again after 32,767, passing over any a process, a zombie, a group or a
-session still has (P15). Entry i has its slots of the server's,
-`PROC_SLOT0` (166) + 6i on: the process's endpoint, thread, space and data
-segment (as the root gives them), the server's thread for it and that
-thread's notification. The thread, thread `PROC_N0` + i of the server's
+session still has, or a terminal's session or foreground group (P15). An
+entry's endpoint is badged with the entry and a count of the images and
+threads it has held, so that a call that was received before an exec or the
+entry's reuse, and waited for the lock meanwhile, is dropped, not served to
+the new one (P15). Entry i has its slots of the server's, `PROC_SLOT0`
+(166) + 6i on: the process's endpoint, thread, space and data segment (as
+the root gives them), the server's thread for it and that thread's
+notification. The thread, thread `PROC_N0` + i of the server's
 (`ROOT_SERVE`), serves process i alone and sleeps while the entry is empty.
 One lock guards the table, taken with XCHG (`rx_xchg`), and given up before
 a wait for a child and before the console (but for `/dev/status`'s short
-writes to the status line, and its last close, which keep it). A wait that
-gives it up asks, once it has it again, whether its process is still the
-one whose call it serves: the process may have ended and a new one taken
-its entry meanwhile (`proc_still`).
+writes to the status line, and its last close, which keep it). While a call
+lends the process's data segment to a driver with the lock given up (a
+terminal's write, COM2's), a `brk` that would replace the segment waits for
+it. A wait that gives it up asks, once it has it again, whether its process
+is still the one whose call it serves: the process may have ended and a new
+one taken its entry meanwhile (`proc_still`).
 
 ## init
 

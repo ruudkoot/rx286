@@ -88,8 +88,8 @@ int rx_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs 
             return -1;
         }
     } while ((int)r->bx == -1 && r->cx == ERESTART);
-    if ((int)r->bx == -1)
-        errno = r->cx;
+    if ((int)r->bx == -1 && r->cx != 0)
+        errno = r->cx;                  /* (a -1 that is a result, nice's: errno kept, P15) */
     return (int)r->bx;
 }
 

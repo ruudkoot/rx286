@@ -191,6 +191,15 @@ static void cont(int i)
         resume(k);
 }
 
+/* sig_thread_started - a process's new thread (entry c) stopped as its
+ * process is, if it is: a stop meanwhile halted the others alone (server.h;
+ * P15) */
+void sig_thread_started(int c)
+{
+    if (sigs[proc_leader(c)].stopped)
+        halt(c);
+}
+
 /* sig_stopped - is process i stopped? (server.h) */
 int sig_stopped(int i)
 {
@@ -203,6 +212,12 @@ int sig_takes(int i, int sig)
 {
     i = proc_leader(i);
     return !(sigs[i].blocked & bit(sig)) && sigs[i].act[sig].handler != PX_SIG_IGN;
+}
+
+/* sig_ignored - does process i ignore a signal, SIG_IGN? (server.h; P15) */
+int sig_ignored(int i, int sig)
+{
+    return sigs[proc_leader(i)].act[sig].handler == PX_SIG_IGN;
 }
 
 /* sig_caught - has process i a handler for a signal? (server.h; a
@@ -304,8 +319,9 @@ void sig_send(int t, int sig)
         stop(t, sig);
         return;
     }
-    if (a->handler == PX_SIG_IGN || (a->handler == PX_SIG_DFL && ignores(sig)))
-        return;
+    if (a->handler == PX_SIG_IGN || (a->handler == PX_SIG_DFL && ignores(sig)
+                                       && !(sig == SIGCONT && (s->blocked & b))))
+        return;                         /* (SIGCONT blocked: pending, XSH 2.4.1; P15) */
     if (a->handler == PX_SIG_DFL && !(s->blocked & b)) {
         if (stops(sig))                 /* the default action, at once */
             stop(t, sig);
@@ -315,6 +331,8 @@ void sig_send(int t, int sig)
     }
     s->pending |= b;
     proc_wake(t);                       /* its server thread, waiting or receiving */
+    if (a->handler > PX_SIG_IGN && !(s->blocked & b))
+        dev_tone_stop(t);               /* (a tone it waits for: ended, P15) */
 }
 
 /* sig_fault - process i's fault as a signal (server.h; lock held) */
@@ -398,7 +416,8 @@ static int deliver(int i)
         return 0;
     }
     sp = kf[TFR_SP / 2];
-    if ((kf[TFR_SS / 2] != PROC_SS && kf[TFR_SS / 2] != PROC_DS) || sp < SF_SIZE + 2
+    if ((kf[TFR_SS / 2] != PROC_SS && kf[TFR_SS / 2] != PROC_DS)
+            || sp < SF_SIZE + 2 + (s->fpu ? SF_287_SIZE : 0)    /* (the 287's below: P15) */
             || (rx_u32)sp - 1 > proc_data_limit(i)) {
         proc_end(i, SIGSEGV);           /* no room for the frame: X4 */
         return 0;
@@ -545,6 +564,8 @@ int sig_call(int i, struct rx_kregs *r, int *error)
             s->tramp = r->cx;
             if (a.handler == PX_SIG_IGN || (a.handler == PX_SIG_DFL && ignores(sig)))
                 s->pending &= ~bit(sig);        /* discarded (XSH 2.4.1) */
+            if (i != p)
+                proc_wake(p);           /* (a thread's: the main one takes it, P15) */
         }
         return 0;
     case PX_SIGPROCMASK:
@@ -561,7 +582,9 @@ int sig_call(int i, struct rx_kregs *r, int *error)
             return -1;
         }
         s->blocked &= ~UNBLOCKABLE;
-        return 0;
+        if (i != p)
+            proc_wake(p);               /* (a signal a thread unblocks: the main thread */
+        return 0;                       /*    takes it, its wait ended: P15) */
     case PX_SIGPENDING:
         r->si = (rx_u16)s->pending;
         r->di = (rx_u16)(s->pending >> 16);
@@ -576,6 +599,10 @@ int sig_call(int i, struct rx_kregs *r, int *error)
         s->blocked = set & ~UNBLOCKABLE;
         for (;;) {                      /* a stop's default, taken here: the mask */
             sig = sig_ready(i);         /*    back, the call made again (P15) */
+            if (sig && s->act[sig].handler == PX_SIG_DFL && ignores(sig)) {
+                s->pending &= ~bit(sig);    /* (a SIGCONT that was blocked: none) */
+                continue;
+            }
             if (sig && s->act[sig].handler == PX_SIG_DFL && stops(sig)) {
                 s->pending &= ~bit(sig);
                 stop(i, sig);
@@ -601,6 +628,10 @@ int sig_call(int i, struct rx_kregs *r, int *error)
         return 0;
     case PX_ALARM:
         now = rx_ticks();
+        if (s->alarm_at && s->alarm_at <= now) {
+            s->alarm_at = 0;            /* due, not yet rung: rung now (P15) */
+            sig_send(p, SIGALRM);
+        }
         left = s->alarm_at > now ? (s->alarm_at - now + TICKS_HZ - 1) / TICKS_HZ : 0;
         s->alarm_at = r->bx ? now + (rx_u32)r->bx * TICKS_HZ : 0;
         timers_arm();
@@ -609,7 +640,8 @@ int sig_call(int i, struct rx_kregs *r, int *error)
         s = &sigs[i];                   /* the thread's own sleep */
         if (set == 0)
             return 0;
-        s->sleep_at = rx_ticks() + set;
+        now = rx_ticks();               /* (a deadline that would wrap: the last tick, P15) */
+        s->sleep_at = set > 0xFFFFFFFFul - now ? 0xFFFFFFFFul : now + set;
         timers_arm();
         for (;;) {
             now = rx_ticks();

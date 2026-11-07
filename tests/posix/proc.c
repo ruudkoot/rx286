@@ -14,11 +14,21 @@
 #include "errno.h"
 #include "signal.h"
 #include "spawn.h"
+#include "time.h"
 #include "unistd.h"
+#include "poll.h"
 #include "sys/wait.h"
 #include "rx/rx286.h"
 
 static char *child_env[] = { "TEST=proc", 0 };
+static volatile sig_atomic_t rang;
+
+/* on_alarm - SIGALRM's handler */
+static void on_alarm(int sig)
+{
+    (void)sig;
+    rang++;
+}
 
 /* waited - a child waited for: its status, said */
 static void waited(const char *what, pid_t pid)
@@ -108,6 +118,59 @@ int main(void)
     for (i = 0; wait(&status) > 0; i++)
         ;
     printf("proc: all %d reaped; then ECHILD (10): %d\n", i, errno);
+
+    errno = 5;                          /* P15's second review */
+    status = nice(-1);
+    i = errno;
+    nice(1);
+    printf("proc: nice to 19 (-1, errno 5 kept): %d, %d\n", status, i);
+    if ((pid = fork()) == 0)
+        _exit(0);
+    sleep(1);                           /* (a zombie by now) */
+    status = kill(pid, 0);
+    i = getsid(pid) == getsid(0);
+    printf("proc: kill(zombie, 0), its session (0 1): %d %d\n", status, i);
+    status = waitpid(pid, &i, 0x100);
+    i = errno;
+    printf("proc: waitpid with an option it does not know (-1, EINVAL 22): %d, %d\n", status,
+           i);
+    waitpid(pid, &status, 0);
+    signal(SIGCHLD, SIG_IGN);
+    if ((pid = fork()) == 0)
+        _exit(0);
+    status = waitpid(-1, &i, 0);
+    i = errno;
+    signal(SIGCHLD, SIG_DFL);
+    printf("proc: SIGCHLD ignored: no zombie, ECHILD (-1, 10): %d, %d\n", status, i);
+    {
+        struct pollfd f;
+        sigset_t set, pending;
+        struct timespec long_sleep;
+
+        f.fd = 0;                       /* (the idle program has the keys) */
+        f.events = POLLIN;
+        status = poll(&f, 1, 200);
+        printf("proc: poll of a terminal without keys, a read's 0 at once (1 POLLIN): %d %d\n",
+               status, (f.revents & POLLIN) != 0);
+        sigemptyset(&set);
+        sigaddset(&set, SIGCONT);
+        sigprocmask(SIG_BLOCK, &set, 0);
+        kill(getpid(), SIGCONT);
+        sigpending(&pending);
+        status = sigismember(&pending, SIGCONT);
+        sigprocmask(SIG_UNBLOCK, &set, 0);
+        sigpending(&pending);
+        printf("proc: SIGCONT blocked: pending, then none (1 0): %d %d\n", status,
+               sigismember(&pending, SIGCONT));
+        signal(SIGALRM, on_alarm);
+        alarm(1);
+        long_sleep.tv_sec = 85899346L;  /* (its ticks past 32 bits) */
+        long_sleep.tv_nsec = 0;
+        status = nanosleep(&long_sleep, 0);
+        i = errno;
+        printf("proc: a sleep past 2^32 ticks, then an alarm (-1, EINTR 4, 1): %d, %d, %d\n",
+               status, i, (int)rang);
+    }
 
     /* past 32 KB and 64 KB (P15); last, since a fork would copy all of it */
     big = malloc(0x7000);

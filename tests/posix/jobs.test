@@ -39,4 +39,5 @@ jobs: ... it went: exit 11
 jobs: setpgid into a group gone (-1, EPERM 1): -1, 1
 jobs: a stop pending for a sigsuspend: stopped 20
 jobs: ... continued, it waited on for a handler, its mask back: exit 12
+jobs: a thread's background read, SIGTTIN caught: EINTR: exit 13
 jobs: done

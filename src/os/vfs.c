@@ -67,6 +67,8 @@ struct pipe {
 /* An open file description */
 struct ofd {
     rx_u8 kind, drive, changed, exe;    /* exe: an exec's own, without a descriptor */
+    rx_u8 waits;                        /* the calls that wait in it: it stays while there
+                                           are any, though no descriptor names it (P15) */
     rx_u16 refs;                        /* (a word: 15 processes' 20 descriptors, P15) */
     rx_u16 flags;
     rx_u32 offset, size;                /* (a directory's offset: its next entry) */
@@ -594,14 +596,25 @@ static int pipe_wait(int i, rx_u16 *who)
     return sig_ready(i) ? -1 : 1;
 }
 
-/* ofd_drop - a reference to a description gone; at the last, a file's
- * entry and data written, a pipe's end closed and its other end woken */
+static rx_u16 ofd_unused(int k);
+
+/* ofd_drop - a reference to a description gone; at the last, once no call
+ * waits in it, a file's entry and data written, a pipe's end closed and
+ * its other end woken */
 static rx_u16 ofd_drop(int k)
+{
+    ofds[k].refs--;
+    return ofd_unused(k);
+}
+
+/* ofd_unused - a description that no descriptor names and no call waits
+ * in freed: a file's entry written, a pipe's end gone (P15) */
+static rx_u16 ofd_unused(int k)
 {
     struct pipe *p = &pipes[ofds[k].unit % PIPES];  /* (a pipe's end's alone) */
     rx_u16 error = 0;
 
-    if (--ofds[k].refs == 0) {
+    if (ofds[k].refs == 0 && ofds[k].waits == 0) {
         error = entry_back(&ofds[k]);
         if (ofds[k].kind == K_PIPE_R) {
             p->readers--;
@@ -674,6 +687,23 @@ static int px_pipe(int i, int *error, rx_u16 *write_fd)
     return fr;
 }
 
+/* pipe_hold - pipe_wait with the description held, so that a close of it
+ * by another thread meanwhile frees neither it nor its pipe; 2 if it was
+ * closed so (then freed) (P15) */
+static int pipe_hold(int i, struct ofd *o, rx_u16 *who)
+{
+    int w;
+
+    o->waits++;
+    w = pipe_wait(i, who);
+    o->waits--;
+    if (o->refs == 0) {
+        ofd_unused((int)(o - ofds));
+        return 2;
+    }
+    return w;
+}
+
 /* pipe_read - a pipe's bytes, as many as there are up to n; with none, a
  * wait for a writer, or 0 when there is no writer left */
 static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
@@ -687,8 +717,10 @@ static int pipe_read(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
     while (p->count == 0) {
         if (p->writers == 0)
             return 0;
-        if ((w = pipe_wait(i, &p->reading)) == 0)
+        if ((w = pipe_hold(i, o, &p->reading)) == 0)
             return VFS_GONE;
+        if (w == 2)
+            return 0;                   /* (its description closed under it: P15) */
         if (w < 0 && p->count == 0)
             return VFS_INTR;
     }
@@ -718,8 +750,10 @@ static int pipe_write(int i, struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
         room = (rx_u16)(PIPE_SIZE - p->count);
         if (room < (n <= PIPE_BUF && done == 0 ? n : 1)) {
             wake_all(p->reading);
-            if ((w = pipe_wait(i, &p->writing)) == 0)
+            if ((w = pipe_hold(i, o, &p->writing)) == 0)
                 return VFS_GONE;
+            if (w == 2)
+                return (int)done;       /* (its description closed under it: P15) */
             if (w < 0)
                 return done ? (int)done : VFS_INTR;
             continue;
@@ -1021,21 +1055,27 @@ static int file_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n, int write, i
 }
 
 /* tty_write - bytes to a terminal, through the log (the first terminal's)
- * and the console driver, the lock given up while they write */
+ * and the console driver, the lock given up while they write each chunk;
+ * between them the process asked about again: gone, or another image, no
+ * more of its bytes (P15) */
 static int tty_write(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n)
 {
     rx_u16 done = 0, chunk;
     unsigned written;
 
-    lock_give();
     while (done < n) {
         chunk = n - done > LOG_MAX ? LOG_MAX : (rx_u16)(n - done);
+        proc_lend(i, 1);                /* (the console reads its segment: a brk waits) */
+        lock_give();
         written = tty_output(unit, data, (rx_u16)(at + done), chunk);
+        lock_take(PROC_NOTIFY(i));
+        if (!proc_still(i))
+            return VFS_GONE;
+        proc_lend(i, 0);
         if (written == 0)
             break;
         done = (rx_u16)(done + written);
     }
-    lock_take(PROC_NOTIFY(i));
     return done;
 }
 

@@ -21,6 +21,7 @@
 #include "sys/wait.h"
 
 static volatile sig_atomic_t chld, conts, usr1;
+static volatile int piped_errno;
 
 /* on_chld, on_cont - handlers that count */
 static void on_chld(int sig)
@@ -59,6 +60,19 @@ static void ticks(long n)
     t.tv_sec = 0;
     t.tv_nsec = n * 20000000L;
     nanosleep(&t, 0);
+}
+
+/* bg_reader - a thread's read of the terminal, in the background, its
+ * process catching SIGTTIN: EINTR, not a call made again for ever (P15) */
+static void *bg_reader(void *arg)
+{
+    char c;
+    int n;
+
+    (void)arg;
+    n = (int)read(0, &c, 1);
+    piped_errno = n < 0 ? errno : 0;
+    return 0;
 }
 
 /* napper - a thread that waits a while */
@@ -300,6 +314,17 @@ int main(void)
     kill(a, SIGUSR1);
     waitpid(a, &st, 0);
     printf("jobs: ... continued, it waited on for a handler, its mask back: %s\n", how(st));
+
+    if ((a = fork()) == 0) {            /* a thread's background read, SIGTTIN caught */
+        setpgid(0, 0);
+        signal(SIGTTIN, on_usr1);
+        pthread_create(&th, 0, bg_reader, 0);
+        pthread_join(th, 0);
+        _exit(piped_errno == EINTR ? 13 : 1);
+    }
+    setpgid(a, a);
+    waitpid(a, &st, 0);
+    printf("jobs: a thread's background read, SIGTTIN caught: EINTR: %s\n", how(st));
     printf("jobs: done\n");
     read(0, &c, 1);                     /* (a reader again, no key left: the end) */
     return 0;

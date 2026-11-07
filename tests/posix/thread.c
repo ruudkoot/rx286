@@ -151,6 +151,30 @@ static void *faulter(void *arg)
     return 0;
 }
 
+/* closed_reader - a read from a pipe whose ends another thread closes
+ * meanwhile, and whose place a new pipe takes (P15) */
+static void *closed_reader(void *arg)
+{
+    char c[8];
+
+    (void)arg;
+    piped = (int)read(pfd[0], c, sizeof c);
+    return 0;
+}
+
+/* late - a thread that outlives the main one's pthread_exit (P15) */
+static void *late(void *arg)
+{
+    struct timespec t;
+
+    (void)arg;
+    t.tv_sec = 0;
+    t.tv_nsec = 300000000L;
+    nanosleep(&t, 0);
+    printf("thread: a thread after the main one's pthread_exit, then the end\n");
+    return 0;
+}
+
 /* high_reader - a read from a pipe into `high`, which waits (P15) */
 static void *high_reader(void *arg)
 {
@@ -262,6 +286,26 @@ int main(void)
     write(pfd[1], hundred, sizeof hundred);
     pthread_join(t[0], 0);
     printf("thread: a read into the heap a lower break left (100): %d\n", piped);
+
+    pipe(pfd);                          /* a pipe closed under a thread's read */
+    pthread_create(&t[0], 0, closed_reader, 0);
+    nanosleep(&nap, 0);
+    close(pfd[0]);
+    close(pfd[1]);
+    pipe(pfd);                          /* (the pipe's place, were it free) */
+    write(pfd[1], "new", 3);
+    pthread_join(t[0], 0);
+    printf("thread: a read whose pipe was closed under it, not the next pipe's (0): %d\n",
+           piped);
+    close(pfd[0]);
+    close(pfd[1]);
+    if ((pid = fork()) == 0) {          /* the main thread's pthread_exit: the others */
+        pthread_create(&t[0], 0, late, 0);  /*    first */
+        pthread_exit(0);
+    }
+    waitpid(pid, &status, 0);
+    printf("thread: the process's end after it (exit 0): %d\n",
+           WIFEXITED(status) ? WEXITSTATUS(status) : -1);
     printf("thread: done\n");
     return 0;
 }

@@ -29,6 +29,9 @@
 #include "archive.h"
 
 #define FIELDS (VIDEO_COLUMNS / CON_FIELD)     /* the status line's */
+
+static rx_u16 toning;                   /* the entries whose calls wait for a tone's end,
+                                           a bit each (dev_tone_stop, P15) */
 #define STATUS_START 0x01               /* around a status on a test's log */
 #define STATUS_END 0x02
 
@@ -238,11 +241,13 @@ int dev_write(int i, int unit, int who, rx_u16 data, rx_u16 at, rx_u16 n, int *e
         n = SERIAL_MAX;
     if (n == 0)
         return 0;
+    proc_lend(i, 1);                    /* (the driver reads its segment: a brk waits, P15) */
     lock_give();
     failed = call(OS_SERVICE(SERVICE_SERIAL), DRV_SERIAL_WRITE, 0, n, at, 0, data, &r);
     lock_take(PROC_NOTIFY(i));
     if (!proc_still(i))
         return VFS_GONE;
+    proc_lend(i, 0);
     if (failed || (r.bx && r.cx == 0)) {
         *error = failed || r.bx != E_BUSY ? EIO : EBUSY;
         return -1;
@@ -263,11 +268,15 @@ int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *erro
     if (unit == DEV_SPEAKER && request == RXIO_TONE) {
         hz = w[TONE_HZ / 2];
         ticks = w[TONE_TICKS / 2];
+        toning |= (rx_u16)(1u << i);
         lock_give();
         failed = call(OS_SERVICE(SERVICE_SOUND), DRV_SOUND, hz, ticks, 0, 0, 0, &r);
         lock_take(PROC_NOTIFY(i));
+        toning &= (rx_u16)~(1u << i);
         if (!proc_still(i))
             return VFS_GONE;
+        if (proc_leader(i) == i && sig_ready(i))
+            return VFS_EINTR;           /* (ended early for a handler: P15) */
         if (failed || r.bx) {
             *error = failed ? EIO : EINVAL;
             return -1;
@@ -281,6 +290,24 @@ int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *erro
     }
     *error = ENOTTY;
     return -1;
+}
+
+/* dev_tone_stop - a tone that a thread of process p waits for ended at
+ * once, as Ctrl+Break ends one: the process ends, or a handler's signal is
+ * due (server.h; lock held; P15) */
+void dev_tone_stop(int p)
+{
+    struct rx_kregs r;
+    int k;
+
+    for (k = 0; k < PROCS; k++)
+        if ((toning & (1u << k)) && proc_leader(k) == p) {
+            r.ax = KCALL_SIGNAL << 8;
+            r.dx = OS_SOUND_STOP;
+            r.bp = 0;
+            rx_kcall(&r);
+            return;
+        }
 }
 
 /* dev_ready - what a poll finds a device ready for (fs.h): POLLIN, POLLOUT */

@@ -427,7 +427,7 @@ int tty_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n)
  * poll's POLLIN, P12) */
 int tty_ready(int unit)
 {
-    return tty_keys() && enough(&ttys[unit], 1);
+    return !tty_keys() || enough(&ttys[unit], 1);   /* (no keys: a read's 0 at once, P15) */
 }
 
 /* tty_watch - process i waits in poll for a terminal's bytes, as a reader
@@ -507,9 +507,9 @@ void tty_open(int i, int unit)
 
 /* tty_access - may process i read, write or set a terminal (TTY_*)? 0;
  * else, for a background group of its session, SIGTTIN or SIGTTOU sent to
- * it and VFS_RESTART (a handler's: VFS_INTR, but a thread's VFS_RESTART,
- * the handler the main thread's); a read that ignores or blocks SIGTTIN,
- * VFS_EIO (server.h; lock held) */
+ * it and VFS_RESTART (a handler's: VFS_INTR, but a thread's VFS_TINTR,
+ * EINTR, the handler the main thread's); a read that ignores or blocks
+ * SIGTTIN, VFS_EIO (server.h; lock held) */
 int tty_access(int i, int unit, int what)
 {
     const struct tty *t = &ttys[unit];
@@ -522,7 +522,23 @@ int tty_access(int i, int unit, int what)
     if (!sig_takes(i, sig))
         return what == TTY_READ ? VFS_EIO : 0;
     proc_group(proc_pgid(i), sig);
-    return sig_caught(i, sig) && proc_leader(i) == i ? VFS_INTR : VFS_RESTART;
+    if (!sig_caught(i, sig))
+        return VFS_RESTART;
+    if (proc_leader(i) != i)
+        return VFS_TINTR;               /* a thread: EINTR, not the call made again at */
+    return VFS_INTR;                    /*    once while it is in the background (P15) */
+}
+
+/* tty_holds - is an id a terminal's session's or its foreground group's,
+ * which a new pid must not be? (server.h; P15) */
+int tty_holds(pid_t id)
+{
+    int u;
+
+    for (u = 0; u < terminals; u++)
+        if (ttys[u].session && (ttys[u].session == id || ttys[u].pgrp == id))
+            return 1;
+    return 0;
 }
 
 /* tty_pgrp - a terminal's foreground group, or 0 if no session has it

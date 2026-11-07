@@ -81,15 +81,17 @@ init's are its own.
 
 A terminal becomes a session's when that session's leader, which has none,
 opens it and no session has it; its foreground group is then the leader's.
-`/dev/tty` is the caller's session's terminal, or the first if it has
-none. INTR (^C, and Ctrl+Break), QUIT (^\) and SUSP (^Z) signal the shown
-terminal's foreground group. A process of the session in another group
-gets `SIGTTIN` as it reads, and `SIGTTOU` as it writes with `TOSTOP` set or
-sets termios or the foreground group; if it ignores or blocks the signal,
-its read is `EIO` and the rest goes on. When the leader ends, the terminal
-is hung up: `SIGHUP` and `SIGCONT` for its foreground group, and no session
-has it. `kill` takes a pid, 0 for the caller's group, -1 for every process
-(init aside), or a group as a negative number.
+`/dev/tty` is the caller's session's terminal, or the first if it has none.
+INTR (^C, and Ctrl+Break), QUIT (^\) and SUSP (^Z) signal the shown
+terminal's foreground group. A process of the session in another group gets
+`SIGTTIN` as it reads, and `SIGTTOU` as it writes with `TOSTOP` set or sets
+termios or the foreground group; if it ignores or blocks the signal, its
+read is `EIO` and the rest goes on. A thread's such call, the signal
+caught, is `EINTR`: the handler runs on the main thread (P15). When the
+leader ends, the terminal is hung up: `SIGHUP` and `SIGCONT` for its
+foreground group, and no session has it. `kill` takes a pid, 0 for the
+caller's group, -1 for every process (init aside), or a group as a negative
+number.
 
 A stop marks the process's threads to stop and holds them stopped. A call
 one waits in (the terminal, `waitpid`, `poll`, a device) ends with
@@ -99,10 +101,11 @@ thread, answered, stays stopped until the process continues. A `sigsuspend`
 takes a stop signal it unblocks there, gives the mask back and ends with
 `ERESTART`, so that it waits again once continued. `SIGCONT` continues it,
 as it is sent, whatever its action, and runs its handler first if it has
-one; a stop signal drops a `SIGCONT` pending, and `SIGCONT` the stop
-signals pending. The parent's `waitpid` sees a stop with `WUNTRACED`, a
-continue with `WCONTINUED`, and gets `SIGCHLD` for each unless its action
-has `SA_NOCLDSTOP`. Orphaned process groups are not yet told apart.
+one (blocked, it stays pending too, and its default action then drops it);
+a stop signal drops a `SIGCONT` pending, and `SIGCONT` the stop signals
+pending. The parent's `waitpid` sees a stop with `WUNTRACED`, a continue
+with `WCONTINUED`, and gets `SIGCHLD` for each unless its action has
+`SA_NOCLDSTOP`. Orphaned process groups are not yet told apart.
 
 The shell is the terminals' job control's user (*docs/shell.md*): each
 pipeline a group, made the foreground while it runs; a job stopped keeps

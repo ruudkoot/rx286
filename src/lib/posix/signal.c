@@ -170,8 +170,9 @@ int nanosleep(const struct timespec *req, struct timespec *rem)
         errno = EINVAL;
         return -1;
     }
-    ticks = (unsigned long)req->tv_sec * TICKS_HZ
-            + ((unsigned long)req->tv_nsec + NS_TICK - 1) / NS_TICK;
+    ticks = (unsigned long)req->tv_sec > 0xFFFFFFFFul / TICKS_HZ - 1 ? 0xFFFFFFFFul
+            : (unsigned long)req->tv_sec * TICKS_HZ     /* (saturated, not wrapped: P15) */
+              + ((unsigned long)req->tv_nsec + NS_TICK - 1) / NS_TICK;
     if (rx_px(PX_NANOSLEEP, 0, (rx_u16)ticks, (rx_u16)(ticks >> 16), 0, &r) == 0)
         return 0;
     if (errno == EINTR && rem) {

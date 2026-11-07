@@ -91,6 +91,13 @@ void test_reader(int how);
  * terminal's foreground group, its input dropped (proc.c; P11) */
 int proc_alive(int i);
 void proc_interrupt(void);
+/* proc_break_seen - a Ctrl+Break the control thread's wait for the lock
+ * took, since it last asked? (proc.c; P15) */
+int proc_break_seen(void);
+/* proc_lend - entry i's call lends its data segment to a driver, the lock
+ * given up (1), or no longer (0): a brk that would replace it waits
+ * (proc.c; lock held; P15) */
+void proc_lend(int i, int on);
 #define OS_KEYS SLOT(OS_SLOT_KEYS)      /* the processes' keys' notification (P9) */
 #define OS_TIMER SLOT(OS_SLOT_TIMER)    /* the control notification, CONTROL_TIMER (P10) */
 #define TTY_N 32                        /* the tty thread's number (P11) */
@@ -134,6 +141,12 @@ int tty_controlling(int i);
 void tty_open(int i, int unit);
 int tty_access(int i, int unit, int what);
 pid_t tty_pgrp(int unit);
+/* tty_holds - is an id a terminal's session's or its foreground group's?
+ * (tty.c; a new pid must not be, P15) */
+int tty_holds(pid_t id);
+/* dev_tone_stop - a tone a thread of process p waits for, ended (dev.c;
+ * lock held; P15) */
+void dev_tone_stop(int p);
 int tty_getpgrp(int i, int unit, int *error);
 int tty_setpgrp(int i, int unit, pid_t pgid, int *error);
 void tty_hangup(pid_t sid);
@@ -211,7 +224,9 @@ int proc_group_in(pid_t pgid, pid_t sid);
  * - why a call that waited ends for a signal: 0 if none is ready, EINTR, or
  * ERESTART (stopped: ERESTART); sig_stopped - is it stopped? sig_takes -
  * would it take a signal, neither ignored nor blocked? sig_caught - has it
- * a handler for one? sig_nocldstop - SA_NOCLDSTOP for its SIGCHLD? sig_step
+ * a handler for one? sig_ignored - SIG_IGN for one? sig_thread_started - a
+ * new thread stopped, if its process is (P15); sig_nocldstop - SA_NOCLDSTOP
+ * for its SIGCHLD? sig_step
  * - its server thread's turn at the signals: a handler's
  * frame, a default action; sig_renice - its thread started again at its
  * priority, once stopped for it (nice, P12); sig_call - PX_SIGACTION to PX_NANOSLEEP: the
@@ -229,6 +244,8 @@ int sig_ready(int i);
 int sig_interrupt(int i, int restartable);
 int sig_stopped(int i);
 int sig_takes(int i, int sig);
+int sig_ignored(int i, int sig);
+void sig_thread_started(int c);
 int sig_caught(int i, int sig);
 int sig_nocldstop(int i);
 void sig_step(int i);

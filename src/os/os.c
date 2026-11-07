@@ -400,11 +400,13 @@ static void control(void)
 
     for (;;) {
         proc_timers();                  /* the processes' (P10): at every wake */
-        r.ax = KCALL_RECV << 8;
-        r.dx = OS_CONTROL;
-        r.bp = 0;
-        if (rx_kcall(&r) || !(r.bx & CONTROL_BREAK))
-            continue;
+        if (!proc_break_seen()) {       /* (one its wait for the lock took: P15) */
+            r.ax = KCALL_RECV << 8;
+            r.dx = OS_CONTROL;
+            r.bp = 0;
+            if (rx_kcall(&r) || !(r.bx & CONTROL_BREAK))
+                continue;
+        }
         call(OS_SERVICE(SERVICE_KEYBOARD), DRV_KBD_CLEAR, 0, 0, 0, 0, 0, 0);
         r.ax = (KCALL_THREAD << 8) | THREAD_INFO;  /* a program the root builds: */
         r.dx = OS_FOREGROUND;                       /* restarted */
