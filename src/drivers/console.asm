@@ -44,6 +44,11 @@ ATTR_NORMAL         equ 0x07            ; light grey on black
 ATTR_STATUS         equ 0x70            ; black on light grey: the status line
 CHAR_TAB            equ 9
 CHUNK               equ 64              ; the bytes taken from a write at a time
+ESC_PARAMS          equ 4               ; an escape sequence's parameters kept (P15)
+ESC_SAVE            equ 8               ; a page's escape state: esc_state to esc_p's last
+%if ESC_SAVE != 4 + ESC_PARAMS
+  %error "console.asm: ESC_SAVE must hold esc_state to the last of esc_p"
+%endif
 PROBE_AT            equ VIDEO_PAGE - 2  ; a page's last word, past its text
 PROBE_MARK          equ 0xA5C0          ; and the mark written there, the page's added
 
@@ -55,11 +60,14 @@ con_base            dw 0                ;    its offset in the segment,
 con_pos             dw CON_FIRST        ;    its cursor's cell,
 con_attr            db ATTR_NORMAL      ;    its attribute,
 esc_state           db 0                ;    its escape's state (ESC_*),
-esc_n               db 0                ;    the parameter being given (0, 1),
-esc_p               db 0, 0             ;    and the parameters
+esc_n               db 0                ;    the parameter being given (ESC_PARAMS:
+                                        ;    past them, dropped),
+esc_private         db 0                ;    1 once a private or intermediate byte
+                    db 0                ;    came: the sequence is dropped (P15),
+esc_p               times ESC_PARAMS db 0   ;    and the parameters
 page_pos            times VIDEO_PAGES dw CON_FIRST      ; each page's, kept
 page_attr           times VIDEO_PAGES db ATTR_NORMAL
-page_esc            times VIDEO_PAGES * 4 db 0          ; state, n, p0, p1
+page_esc            times VIDEO_PAGES * ESC_SAVE db 0   ; esc_state to esc_p's last
 status_page         dw 0
 show_quiet          db 0                ; DRV_CON_SHOW's BH (CON_QUIET)
 chunk_buf           times CHUNK db 0
@@ -140,11 +148,15 @@ serve:
         cmp al, DRV_CON_WRITE
         jne .unknown
         test bp, bp
-        jz .written                     ; no segment came: nothing to write
+        jz .unknown                     ; no segment came: nothing written (P15)
         verr bp                         ; (gone already: a program killed, l4.md L12)
         jnz .unknown
+        call dw_fits                    ; its bytes within its limit (P15)
+        jc .unknown
         cmp bl, CON_STATUS
         je .status
+        cmp bl, CON_MAIN
+        jne .unknown
         call write_main
         jmp .written
 .status:
@@ -164,6 +176,12 @@ serve:
         jmp .message
 .show:
         call show
+        push bx
+        push cx
+        mov dx, RECV                    ; a segment passed for nothing: room for the
+        kcall KCALL_DELETE              ;    next (P15)
+        pop cx
+        pop bx
         jmp .reply
 
 ; ----------------------------------------------------------------------------
@@ -250,11 +268,15 @@ page_load:
         shl di, 1
         mov ax, [page_pos + di]
         mov [con_pos], ax
-        shl di, 1
+        shl di, 2                       ; DI = the page's ESC_SAVE bytes
         mov ax, [page_esc + di]
         mov [esc_state], ax             ; esc_state, esc_n
         mov ax, [page_esc + di + 2]
+        mov [esc_private], ax
+        mov ax, [page_esc + di + 4]
         mov [esc_p], ax
+        mov ax, [page_esc + di + 6]
+        mov [esc_p + 2], ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -270,11 +292,15 @@ page_save:
         shl di, 1
         mov ax, [con_pos]
         mov [page_pos + di], ax
-        shl di, 1
+        shl di, 2
         mov ax, [esc_state]
         mov [page_esc + di], ax
-        mov ax, [esc_p]
+        mov ax, [esc_private]
         mov [page_esc + di + 2], ax
+        mov ax, [esc_p]
+        mov [page_esc + di + 4], ax
+        mov ax, [esc_p + 2]
+        mov [page_esc + di + 6], ax
         ret
 
 ; ----------------------------------------------------------------------------
@@ -341,15 +367,15 @@ write_main:
 ; as spaces; the field's last CON_FIELD at most)
 ;   In:       BP:SI = the bytes; CX = how many; DI = the column past the
 ;             field's end (CON_FIELD to VIDEO_COLUMNS); DS = its data
-;   Out:      CX kept
+;   Out:      CX kept (0 for a column out of range)
 ;   Destroys: AX, BX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 write_status:
         push cx
         cmp di, CON_FIELD
-        jb .done_early
+        jb .refused
         cmp di, VIDEO_COLUMNS
-        ja .done_early
+        ja .refused
         cmp cx, CON_FIELD
         jbe .fits
         add si, cx
@@ -404,8 +430,11 @@ write_status:
         mov ax, [status_page]
         cmp ax, [con_pages]
         jb .page
-.done_early:
         pop cx
+        ret
+.refused:
+        pop cx
+        xor cx, cx                      ; no field there: nothing written (P15)
         ret
 
 ; ----------------------------------------------------------------------------
@@ -478,9 +507,12 @@ emit:
         ret
 
 ; ----------------------------------------------------------------------------
-; escape - a byte of an escape sequence: after ESC, '[' or the sequence
-; dropped; after ESC [, a digit or ';' of the two parameters at most, or the
-; final byte, which acts
+; escape - a byte of an escape sequence (ECMA-48 5.4): after ESC, '[' or the
+; sequence dropped; after ESC [, a digit or ';' of ESC_PARAMS parameters
+; (more dropped), a private or intermediate byte (20h-2Fh, 3Ah-3Fh), which
+; makes the sequence one to drop, or the final byte (40h-7Eh), which acts.
+; ESC begins a new sequence; CR, LF, BS, TAB and FF are carried out, the
+; sequence going on (P15)
 ;   In:       AL = the byte; BX = the cell; ES = the video; DS = its data
 ;   Out:      BX = the cell after
 ;   Destroys: AX, DX, DI
@@ -492,14 +524,51 @@ escape:
         cmp al, '['
         jne .done                       ; ESC and anything else: dropped
         mov byte [esc_state], ESC_CSI
-        mov byte [esc_n], 0
-        mov word [esc_p], 0
+        xor ax, ax
+        mov [esc_n], al
+        mov [esc_private], ax
+        mov [esc_p], ax
+        mov [esc_p + 2], ax
         ret
 .csi:
+        cmp al, CHAR_ESC
+        je .again
+        cmp al, ' '
+        jb .control
         cmp al, '0'
-        jb .not_digit
+        jb .private                     ; an intermediate byte
         cmp al, '9'
-        ja .not_digit
+        jbe .digit
+        cmp al, ';'
+        je .next
+        cmp al, '@'
+        jb .private                     ; ':', '<', '=', '>', '?'
+        jmp .final
+.again:
+        mov byte [esc_state], ESC_ESC   ; a new sequence
+        ret
+.control:
+        cmp al, CHAR_LF
+        je .carried
+        cmp al, CHAR_CR
+        je .carried
+        cmp al, CHAR_BS
+        je .carried
+        cmp al, CHAR_TAB
+        je .carried
+        cmp al, CHAR_FF
+        jne .done                       ; another control: none
+.carried:
+        mov byte [esc_state], ESC_NONE
+        call emit
+        mov byte [esc_state], ESC_CSI
+        ret
+.private:
+        mov byte [esc_private], 1
+        ret
+.digit:
+        cmp byte [esc_n], ESC_PARAMS
+        jae .done                       ; past the parameters kept: dropped
         push bx
         push cx
         mov bl, [esc_n]
@@ -519,15 +588,17 @@ escape:
         pop cx
         pop bx
         ret
-.not_digit:
-        cmp al, ';'
-        jne .final
-        cmp byte [esc_n], 1
-        jae .done                       ; past the second: dropped
-        inc byte [esc_n]
+.next:
+        cmp byte [esc_n], ESC_PARAMS
+        jae .done
+        inc byte [esc_n]                ; (ESC_PARAMS: the rest dropped)
         ret
 .final:
         mov byte [esc_state], ESC_NONE
+        cmp byte [esc_private], 0
+        jne .done                       ; a private sequence: dropped
+        cmp al, '~'
+        ja .done                        ; (DEL and past: no final byte)
         mov dl, [esc_p]                 ; DL = the first parameter
         cmp al, 'm'
         je attributes
@@ -649,32 +720,58 @@ move_to:
         jmp cell_of
 
 ; ----------------------------------------------------------------------------
-; erase_display - ESC [ J: the main area blank from the cursor (0) or all of
-; it (2); the cursor stays
+; erase_display - ESC [ J: the main area blank from the cursor (0), from its
+; start to the cursor (1, P15) or all of it (2); another parameter dropped;
+; the cursor stays
 ;   In:       BX = the cell; DL = the parameter; ES = the video; DS = its data
 ;   Out:      BX kept
 ;   Destroys: AX, DI
 ; ----------------------------------------------------------------------------
 erase_display:
         push cx
-        mov di, bx
+        cmp dl, 1
+        je .to_cursor
+        cmp dl, 2
+        je .all
+        test dl, dl
+        jnz erase_none
+        mov di, bx                      ; from the cursor
         mov cx, CON_CELLS
         sub cx, bx
-        cmp dl, 2
-        jne blank_cells
+        jmp blank_cells
+.to_cursor:
+        mov di, CON_FIRST
+        mov cx, bx
+        sub cx, CON_FIRST - 1
+        jmp blank_cells
+.all:
         mov di, CON_FIRST
         mov cx, CON_CELLS - CON_FIRST
         jmp blank_cells
 
 ; ----------------------------------------------------------------------------
-; erase_line - ESC [ K: the line blank from the cursor (0) or all of it (2);
-; the cursor stays
+; erase_none - an erase with a parameter it does not know: nothing (CX
+; pushed before)
+;   In:       the stack: the caller's CX
+;   Out:      CX as the caller had it
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+erase_none:
+        pop cx
+        ret
+
+; ----------------------------------------------------------------------------
+; erase_line - ESC [ K: the line blank from the cursor (0), from its start
+; to the cursor (1, P15) or all of it (2); another parameter dropped; the
+; cursor stays
 ;   In:       BX = the cell; DL = the parameter; ES = the video; DS = its data
 ;   Out:      BX kept
 ;   Destroys: AX, DI
 ; ----------------------------------------------------------------------------
 erase_line:
         push cx
+        cmp dl, 2
+        ja erase_none
         push bx
         call line_start
         mov di, bx                      ; DI = the line's first cell
@@ -682,9 +779,16 @@ erase_line:
         mov cx, VIDEO_COLUMNS
         cmp dl, 2
         je blank_cells                  ; all of it
+        cmp dl, 1
+        je .to_cursor
         add cx, di
         sub cx, bx                      ; from the cursor to the line's end
         mov di, bx
+        jmp blank_cells
+.to_cursor:
+        mov cx, bx
+        sub cx, di
+        inc cx                          ; from the line's start to the cursor
         ; falls through
 
 ; ----------------------------------------------------------------------------
@@ -703,21 +807,32 @@ blank_cells:
         ret
 
 ; ----------------------------------------------------------------------------
-; attributes - ESC [ ... m: each parameter given: 0 normal, 1 bright, 7
-; reversed, 30-37 a colour of the text, 40-47 of its background, 39 and
-; 49 their defaults
+; attributes - ESC [ ... m: each parameter given, ESC_PARAMS at most: 0
+; normal, 1 bright, 7 reversed (the colours swapped, bright and blink
+; kept), 30-37 a colour of the text, 40-47 of its background, 39 and 49
+; their defaults
 ;   In:       DS = its data
 ;   Out:      con_attr
 ;   Destroys: AX, DX
 ; ----------------------------------------------------------------------------
 attributes:
-        mov al, [esc_p]
+        push cx
+        push si
+        mov cl, [esc_n]                 ; each parameter given, ESC_PARAMS at most
+        cmp cl, ESC_PARAMS - 1
+        jbe .count
+        mov cl, ESC_PARAMS - 1
+.count:
+        xor ch, ch
+        inc cx
+        xor si, si
+.each:
+        mov al, [esc_p + si]
         call attribute
-        cmp byte [esc_n], 0
-        je .done
-        mov al, [esc_p + 1]
-        call attribute
-.done:
+        inc si
+        loop .each
+        pop si
+        pop cx
         ret
 
 ; ----------------------------------------------------------------------------
@@ -741,11 +856,16 @@ attribute:
         cmp al, 7
         jne .text
         mov dh, dl
-        and dl, 0x0F
-        shl dl, 4
-        shr dh, 4
-        and dh, 0x07
-        or dl, dh
+        and dh, 0x88                    ; bright and blink stay where they are: a
+        mov al, dl                      ;    bright one reversed would blink (P15)
+        and al, 0x07
+        shl al, 4
+        or dh, al                       ; the text's colour the background's
+        mov al, dl
+        shr al, 4
+        and al, 0x07
+        or dh, al                       ; and the background's the text's
+        mov dl, dh
         jmp .set
 .text:
         cmp al, 39
@@ -1049,3 +1169,5 @@ hex_digit:
 .done:
         ret
 %endif
+
+%include "dfits.asm"

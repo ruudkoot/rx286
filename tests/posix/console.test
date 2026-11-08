@@ -2,7 +2,10 @@
 # no program the root builds (program: none), init starts
 # tests/posix/console.c (TEST_POSIX_CONSOLE), which clears its page and
 # writes at places (ESC [ H), moves back, up, down (D, A, B), erases a
-# line's end (K), and colours (m); the console driver of this TEST_SCREEN
+# line's end (K), and colours (m); three parameters, bright reversed (not
+# blinking), an erase to the cursor (1 K), a private sequence (ESC [ ?),
+# ESC and CR inside a sequence, and K's unknown 5, each as ECMA-48 has it
+# (P15's review of the drivers); the console driver of this TEST_SCREEN
 # build puts the page Alt+F1 shows on the log: each line, its attributes
 # as <XX>. Alt+F3 shows the third page, blank but its status line; Alt+F1
 # the first again, where the test's process reads and the keys end.
@@ -23,5 +26,13 @@ screen 0 09:          y
 screen 0 10:          x
 screen 0 11:           z
 screen 0 12: done
+screen 0 13: <0C>three<07>
+screen 0 14: <78>rev<07>
+screen 0 15:     ef
+screen 0 16: hidden
+screen 0 17: threeparam
+screen 0 18: ab  cd
+screen 0 19: xyq
+screen 0 20: keep
 screen 2: shown
 screen 0: shown

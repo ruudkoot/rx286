@@ -76,6 +76,7 @@ fd_motor_running    db 0                ; a motor runs, and stops FD_MOTOR_OFF_T
 fd_last             dw 0                ; the tick of the last transfer's end
 fd_unit             db 0                ; the transfer's drive (0 or 1)
 fd_cylinder         db FD_UNKNOWN, FD_UNKNOWN   ; where each drive's heads are
+fd_moved            db 0                ; fd_seek's: the heads moved, to settle
 fd_tries            db 0
 fd_dma_mode         db 0
 fd_head             db 0                ; where the sector is
@@ -157,7 +158,8 @@ serve:
         push bx
         mov dx, RECV                    ; the segment, used: room for the next
         kcall KCALL_DELETE
-        pop bx
+        call fd_motor_timer             ; the motor's time: no wait's timer is left
+        pop bx                          ;    to make the driver look (P15)
         mov dx, EP
         mov bp, RECV
         kcall KCALL_REPLY_RECV
@@ -201,6 +203,9 @@ fd_transfer:
         jne .moved_in
         call dw_readable                ; (a program killed meanwhile: l4.md L12)
         jnz .fault
+        mov cx, SECTOR_SIZE
+        call dw_fits                    ; its bytes within its limit (P15)
+        jc .fault
         call buffer_in                  ; a write: its bytes into the DMA buffer
 .moved_in:
         push si                         ; (the controller's commands use SI)
@@ -213,6 +218,9 @@ fd_transfer:
         jne .out
         call dw_writable                ; gone while it waited?
         jnz .fault
+        mov cx, SECTOR_SIZE
+        call dw_fits                    ; or shorter? (P15)
+        jc .fault
         call buffer_out                 ; a read: its bytes to the segment passed
 .out:
         ret
@@ -363,7 +371,9 @@ fd_motor_timer:
         sub ax, [fd_last]
         mov cx, FD_MOTOR_OFF_TICKS + 1
         sub cx, ax
-        jbe .done                       ; (fd_motor_check stops it at the next bits)
+        ja .arm
+        mov cx, 1                       ; its time past: a look at once (P15)
+.arm:
         mov dx, NOTIFY
         kcall KCALL_TIMER
 .done:
@@ -448,17 +458,20 @@ fd_motor_check:
 ; ----------------------------------------------------------------------------
 ; fd_seek - the heads over the transfer's cylinder: recalibrate first if the
 ; drive's cylinder is not known, seek if it is another, then let the heads
-; settle
+; settle if they moved, by either (P15: a recalibrate to the cylinder of
+; the transfer, 0, settled not)
 ;   In:       fd_unit, fd_track_cylinder, fd_head
 ;   Out:      CF clear; or CF set and AX = E_IO or E_TIMEOUT
 ;   Destroys: AX, CX, DX, SI
 ; ----------------------------------------------------------------------------
 fd_seek:
+        mov byte [fd_moved], 0
         call fd_unit_cylinder
         cmp byte [si], FD_UNKNOWN
         jne .known
         call fd_recalibrate
         jc .out
+        mov byte [fd_moved], 1
 .known:
         call fd_unit_cylinder
         mov al, [fd_track_cylinder]
@@ -478,9 +491,13 @@ fd_seek:
         jne .error
         call fd_unit_cylinder
         mov [si], al
+        mov byte [fd_moved], 1
+.there:
+        cmp byte [fd_moved], 0
+        je .settled
         mov cx, FD_SETTLE_TICKS
         call dw_sleep
-.there:
+.settled:
         clc
 .out:
         ret
@@ -574,9 +591,17 @@ fd_reset:
         mov byte [fd_specified], 0
         mov byte [fd_cylinder], FD_UNKNOWN
         mov byte [fd_cylinder + 1], FD_UNKNOWN
+        push bx
+        mov dx, NOTIFY                  ; a late interrupt of the command before,
+        kcall KCALL_POLL                ;    taken now, not for the reset's (P15)
+        jc .drained
+        call dw_bits
+.drained:
+        pop bx
         mov byte [irq_seen], 0
-        mov dx, FDC_DOR
-        mov al, FDC_DOR_RESET
+        mov dx, FDC_DOR                 ; the motors and DMA and IRQ6 kept, as the
+        mov al, [fd_dor]                ;    BIOS does (P15)
+        and al, ~FDC_DOR_RUN & 0xFF
         out dx, al
         mov cx, FD_RESET_READS
         mov dx, FDC_MSR
@@ -702,3 +727,4 @@ driver_irq:
         ret
 
 %include "dwait.asm"
+%include "dfits.asm"

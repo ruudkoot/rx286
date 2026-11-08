@@ -7,9 +7,13 @@
 ; The 8042 translates the AT keyboard's codes to set 1 (its command byte,
 ; written here: roadmap D14). Each key pressed is put in a ring of
 ; KBD_RING_SIZE as its ASCII (src/lib/keymap.asm) and scancode; a full ring
-; drops the key. The E0h prefix of an enhanced keyboard is followed for the
-; right Ctrl and Alt, the arrows, Delete and Ctrl+Pause; the E1h sequence
-; (Pause) is skipped. The keyboard's LEDs are left alone.
+; drops the key, and counts it (DRV_KBD_PEEK's CX, P15). The E0h prefix of
+; an enhanced keyboard is followed for the right Ctrl and Alt (each its own
+; bit, so that letting one go keeps the other: P15), the grey arrows,
+; Home, End, Insert, Delete, Page Up and Page Down, the keypad's Enter and
+; '/', and Ctrl+Pause; the E1h sequence (Pause) is skipped. Caps Lock turns
+; over once a press, not with each of its repeats (P15). The keyboard's
+; LEDs are left alone.
 ;
 ; Whatever the keyboard sent - a key, a release, a modifier - is signalled
 ; on the notification of the OS server's thread for the foreground program
@@ -61,16 +65,28 @@ SC_CAPS_LOCK        equ 0x3A
 SC_SCROLL_LOCK      equ 0x46            ; Break, with Ctrl, on the AT keyboard
 SC_DELETE           equ 0x53            ; keypad . and Del
 SC_SYSRQ            equ 0x54            ; the AT keyboard's Sys Req
+SC_HOME             equ 0x47            ; the grey keys after E0h, as the keypad's
+SC_PGUP             equ 0x49
+SC_END              equ 0x4F
+SC_PGDN             equ 0x51
+SC_INSERT           equ 0x52
+SC_ENTER            equ 0x1C            ; the keypad's Enter after E0h
+SC_SLASH            equ 0x35            ; and its '/'
 KBC_FLUSH_LIMIT     equ 32              ; bytes read at most when emptying the 8042
+KBC_WAIT_READS      equ 0xFFFF          ; the 8042's status read at most, waiting for it
+                                        ;    to take a byte: 60 ms or so (P15)
 
 begin_udata
 kbd_ring            times KBD_RING_SIZE dw 0
 kbd_head            db 0                ; the next key to take
 kbd_tail            db 0                ; where the next key goes
-kbd_mods            db 0                ; KBD_* of keymap.asm
+kbd_mods            db 0                ; KBD_* of keymap.asm (the left Ctrl and Alt's)
+kbd_right           db 0                ; the right Ctrl and Alt's, KBD_CTRL and KBD_ALT
+kbd_caps_held       db 0                ; 1 from Caps Lock's press to its release
 kbd_e0              db 0                ; 1 after an E0h prefix
 kbd_e1_skip         db 0                ; bytes of Pause's sequence still to skip
-kbd_dropped         dw 0                ; keys lost to a full ring
+kbd_dropped         dw 0                ; keys lost to a full ring since the last
+                                        ;    DRV_KBD_PEEK; it stays at FFFFh
 msg_reset           db "rx286: Ctrl+Alt+Del: resetting", CHAR_LF
 msg_reset_end:
 end_udata
@@ -117,11 +133,16 @@ serve:
         cmp al, DRV_KBD_PEEK
         je .peek
         cmp al, DRV_KBD_CLEAR
-        jne .reply
+        jne .unknown
         mov al, [kbd_tail]
         mov [kbd_head], al
         jmp .reply
+.unknown:
+        mov bx, E_INVAL                 ; a call it does not know (P15)
+        jmp .reply
 .peek:
+        xor cx, cx                      ; CX = the keys dropped since (P15)
+        xchg cx, [kbd_dropped]
         mov al, [kbd_head]
         cmp al, [kbd_tail]
         je .reply
@@ -198,15 +219,27 @@ kbd_flush:
         ret
 
 ; ----------------------------------------------------------------------------
-; kbc_wait_input - wait until the 8042 can take a byte
+; kbc_wait_input - wait until the 8042 can take a byte, KBC_WAIT_READS
+; reads at most: a controller that never takes one is not waited for for
+; ever (P15)
 ;   In:       nothing
-;   Out:      nothing
+;   Out:      CF clear if it can; CF set if it never could
 ;   Destroys: AL
 ; ----------------------------------------------------------------------------
 kbc_wait_input:
+        push cx
+        mov cx, KBC_WAIT_READS
+.read:
         in al, KBC_STATUS
         test al, KBC_STATUS_IBF
-        jnz kbc_wait_input
+        jz .ready
+        loop .read
+        pop cx
+        stc
+        ret
+.ready:
+        pop cx
+        clc
         ret
 
 ; ----------------------------------------------------------------------------
@@ -238,13 +271,19 @@ kbd_byte:
         mov byte [kbd_e0], 0
         mov ah, al
         and ah, ~SC_RELEASE             ; AH = the key, AL = the byte
+        mov bl, KBD_CTRL
         cmp ah, SC_CTRL                 ; the right Ctrl
-        je kbd_scancode
+        je .right
+        mov bl, KBD_ALT
         cmp ah, SC_ALT                  ; the right Alt
-        je kbd_scancode
+        je .right
         cmp ah, SC_SCROLL_LOCK          ; Ctrl+Pause sends E0h 46h
         je kbd_scancode
         cmp ah, SC_DELETE
+        je kbd_scancode
+        cmp ah, SC_ENTER                ; the keypad's Enter and '/' (P15)
+        je kbd_scancode
+        cmp ah, SC_SLASH
         je kbd_scancode
         cmp ah, SC_UP
         je .navigation
@@ -254,7 +293,26 @@ kbd_byte:
         je .navigation
         cmp ah, SC_RIGHT
         je .navigation
+        cmp ah, SC_HOME                 ; the grey keys (P15)
+        je .navigation
+        cmp ah, SC_END
+        je .navigation
+        cmp ah, SC_INSERT
+        je .navigation
+        cmp ah, SC_PGUP
+        je .navigation
+        cmp ah, SC_PGDN
+        je .navigation
         ret                             ; the other extended keys: ignored
+.right:
+        test al, SC_RELEASE             ; the right Ctrl or Alt: a bit of its own
+        jnz .right_up
+        or [kbd_right], bl
+        ret
+.right_up:
+        not bl
+        and [kbd_right], bl
+        ret
 .navigation:
         test al, SC_RELEASE
         jnz .done
@@ -285,10 +343,10 @@ kbd_scancode:
         mov bl, KBD_ALT
         cmp ah, SC_ALT
         je .modifier
-        test al, SC_RELEASE
-        jnz .done                       ; a key released: nothing more
         cmp ah, SC_CAPS_LOCK
         je .caps
+        test al, SC_RELEASE
+        jnz .done                       ; a key released: nothing more
         cmp ah, SC_SCROLL_LOCK
         je .scroll_lock
         cmp ah, SC_DELETE
@@ -297,6 +355,7 @@ kbd_scancode:
         je .sysrq
 .translate:
         mov bl, [kbd_mods]
+        or bl, [kbd_right]              ; either side's Ctrl and Alt
         call kbd_translate              ; AL = ASCII, AH = scancode
         test bl, KBD_ALT
         jz .put
@@ -317,16 +376,27 @@ kbd_scancode:
         and [kbd_mods], bl
         ret
 .caps:
+        test al, SC_RELEASE
+        jnz .caps_up
+        cmp byte [kbd_caps_held], 0
+        jne .done                       ; a repeat of a key held: nothing (P15)
+        mov byte [kbd_caps_held], 1
         xor byte [kbd_mods], KBD_CAPS
         ret
+.caps_up:
+        mov byte [kbd_caps_held], 0
+        ret
 .scroll_lock:
-        test byte [kbd_mods], KBD_CTRL
+        mov bl, [kbd_mods]
+        or bl, [kbd_right]
+        test bl, KBD_CTRL
         jz .done
         mov dx, CONTROL                 ; Ctrl+Break: the OS server's
         kcall KCALL_SIGNAL
         ret
 .delete:
         mov bl, [kbd_mods]
+        or bl, [kbd_right]
         and bl, KBD_CTRL | KBD_ALT
         cmp bl, KBD_CTRL | KBD_ALT
         jne .translate
@@ -355,7 +425,10 @@ kbd_put:
         mov [kbd_ring + bx], ax
         ret
 .full:
-        inc word [kbd_dropped]
+        inc word [kbd_dropped]          ; (staying at FFFFh, not wrapping to none)
+        jnz .counted
+        dec word [kbd_dropped]
+.counted:
         ret
 
 ; ----------------------------------------------------------------------------
@@ -399,8 +472,12 @@ kbd_reset:
         mov dx, NOTIFY
         mov cx, KBD_RESET_TICKS
         kcall KCALL_TIMER
-        mov dx, NOTIFY
-        kcall KCALL_RECV
+.wait_log:
+        mov dx, NOTIFY                  ; until the timer's bit: the keys' (MAME's
+        kcall KCALL_RECV                ;    test builds) are not the time (P15)
+        jc .wait_log
+        test bx, DRV_TIMER_BIT
+        jz .wait_log
         cli
         mov al, CMOS_SHUTDOWN
         out CMOS_INDEX, al

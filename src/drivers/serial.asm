@@ -10,9 +10,11 @@
 ; counts it. Its timer looks once a tick too, for bytes whose interrupt was
 ; lost (on Bochs a UART's interrupt is lost when another UART on its line is
 ; touched). A 16450 holds one byte: at 9600 baud one comes every 1.04 ms,
-; and the longest stretches with interrupts off can lose some, which
-; `overruns` counts. A 16550's FIFO, turned on where there is one, holds 16.
-; A port that reads all ones has no UART.
+; and the longest stretches with interrupts off can lose some. Each byte
+; lost, to a full ring or by the UART, is counted in `lost`, which
+; DRV_SERIAL_NEWS answers (P15). A 16550's FIFO, turned on where there is
+; one, holds 16. A port that reads all ones has no UART: a write to it fails
+; at once (P15).
 ;
 ; The OS server takes what is in the ring for a read of /dev/com2
 ; (DRV_SERIAL_READ, which never waits), and asks whether bytes wait for a
@@ -47,8 +49,9 @@ begin_udata
 ring                times SERIAL_RING db 0
 ring_head           db 0                ; the next byte to take
 ring_tail           db 0                ; where the next byte goes
-dropped             dw 0                ; bytes lost to a full ring
-overruns            dw 0                ; bytes the UART lost before they were read
+lost                dw 0                ; bytes lost since the last news: to a full
+                                        ;    ring, or by the UART before they were read
+                                        ;    (DRV_SERIAL_NEWS's CX; it stays at FFFFh)
 irq_seen            db 0                ; set when IRQ3 came (dwait.asm)
 fifo_bytes          dw 1                ; bytes the UART takes when it is empty
 end_udata
@@ -138,7 +141,8 @@ request:
         je .none
         inc bx
 .none:
-        xor cx, cx
+        xor cx, cx                      ; CX = the bytes lost since the last news
+        xchg cx, [lost]                 ;    (P15)
         ret
 %else
         xor bx, bx                      ; COM2 is the log: no news, and every
@@ -201,11 +205,20 @@ serial_init:
 serial_write:
         xor bx, bx                      ; BX = bytes sent
         jcxz .done
+        cmp cx, SERIAL_MAX
+        ja .invalid                     ; (P15)
         test bp, bp
         jz .fault
+        call dw_readable
+        jnz .fault
+        call dw_fits                    ; its bytes within its limit (P15)
+        jc .fault
 .next:
-        push cx
         mov dx, COM2_BASE + UART_LSR
+        in al, dx
+        cmp al, UART_LSR_ABSENT
+        je .late                        ; no UART there: nothing takes them (P15)
+        push cx
         mov ah, UART_LSR_THRE
         mov al, UART_LSR_THRE
         mov cx, SERIAL_BYTE_TICKS
@@ -214,6 +227,8 @@ serial_write:
         jc .late
         call dw_readable                ; still there after the wait?
         jnz .gone
+        call dw_fits                    ; and as long?
+        jc .gone
         mov es, bp
         mov di, [fifo_bytes]
         mov dx, COM2_BASE + UART_THR
@@ -240,6 +255,10 @@ serial_write:
 .fault:
         mov bx, E_FAULT
         ret
+.invalid:
+        mov bx, E_INVAL
+        xor cx, cx
+        ret
 
 ; ----------------------------------------------------------------------------
 ; serial_read - what the ring holds, up to CX bytes, into the segment passed;
@@ -251,8 +270,14 @@ serial_write:
 serial_read:
         xor dx, dx                      ; DX = bytes read
         jcxz .read
+        cmp cx, SERIAL_MAX
+        ja .invalid                     ; (P15)
         test bp, bp
         jz .fault
+        call dw_writable                ; (P15)
+        jnz .fault
+        call dw_fits
+        jc .fault
         mov es, bp
         mov di, si
 .next:
@@ -271,6 +296,10 @@ serial_read:
         ret
 .fault:
         mov bx, E_FAULT
+        xor cx, cx
+        ret
+.invalid:
+        mov bx, E_INVAL
         xor cx, cx
         ret
 %endif
@@ -295,7 +324,7 @@ driver_irq:
         je .done                        ; no UART there
         test al, UART_LSR_OVERRUN
         jz .no_overrun
-        inc word [overruns]
+        call count_lost
 .no_overrun:
         test al, UART_LSR_DATA
         jz .done
@@ -312,7 +341,7 @@ driver_irq:
         loop .next
         jmp .done
 .full:
-        inc word [dropped]
+        call count_lost
         loop .next
 .done:
         pop dx
@@ -321,4 +350,19 @@ driver_irq:
 %endif
         ret
 
+; ----------------------------------------------------------------------------
+; count_lost - a byte lost, counted; the count stays at FFFFh, not wrapping
+; to none (P15)
+;   In:       nothing
+;   Out:      lost
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+count_lost:
+        inc word [lost]
+        jnz .counted
+        dec word [lost]
+.counted:
+        ret
+
 %include "dwait.asm"
+%include "dfits.asm"

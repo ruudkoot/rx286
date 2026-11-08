@@ -396,12 +396,14 @@ static unsigned bcd(rx_u16 b)
 }
 
 /* vol_clock - the RTC driver's date and time (fs.h): t the year, month,
- * day, hours, minutes and seconds; 0 if it does not answer */
+ * day, hours, minutes and seconds; 0 if it does not answer, or says the
+ * clock has no time to give (P15) */
 int vol_clock(unsigned *t)
 {
     struct rx_kregs r;
 
-    if (call(OS_SERVICE(SERVICE_CLOCK), DRV_CLOCK_TIME, 0, 0, 0, 0, 0, &r))
+    if (call(OS_SERVICE(SERVICE_CLOCK), DRV_CLOCK_TIME, 0, 0, 0, 0, 0, &r)
+            || (r.di >> 8) == DRV_CLOCK_INVALID)
         return 0;
     t[0] = bcd(r.cx >> 8) * 100 + bcd(r.cx & 0xFF);
     t[1] = bcd(r.si >> 8);

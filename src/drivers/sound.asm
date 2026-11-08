@@ -42,11 +42,13 @@ EP                  equ SLOT(DRV_SLOT_EP)
 NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
 RECV                equ SLOT(DRV_SLOT_RECV)
 JOY_AXES            equ 4
+JOY_BYTES           equ 2 + JOY_AXES * 2    ; the buttons' word and the axes'
 JOY_LIMIT_CLOCKS    equ JOY_AXIS_MAX_US * (PIT_INPUT_HZ / 1000) / 1000
 JOY_NS_PER_CLOCK    equ 1000000000 / PIT_INPUT_HZ      ; 838
 
 begin_udata
 joy_times           times JOY_AXES dw 0
+joy_buttons         dw 0                ; read before the axes start (P15)
 end_udata
 
 ; ----------------------------------------------------------------------------
@@ -78,12 +80,18 @@ serve:
         mov bx, E_INVAL                 ; a call it does not know
         cmp al, DRV_JOYSTICK
         jne .unknown
-        call joystick
+        call joystick                   ; BX the status
+        push bx
         mov dx, RECV                    ; the segment, used: room for the next
         kcall KCALL_DELETE
+        pop bx
         jmp .reply
 .sound:
         call sound                      ; BX the status
+        push bx
+        mov dx, RECV                    ; a segment passed for nothing: room for the
+        kcall KCALL_DELETE              ;    next (P15)
+        pop bx
         jmp .reply
 .unknown:
         mov dx, RECV
@@ -101,6 +109,12 @@ serve:
 ;   Destroys: AX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 sound:
+        push bx
+        push cx
+        mov dx, NOTIFY                  ; a stop left over from before: dropped first,
+        kcall KCALL_POLL                ;    so that a stop for this sound, the
+        pop cx                          ;    driver running above the server, comes
+        pop bx                          ;    after it (P15)
         cmp cx, SOUND_MAX_TICKS
         ja .invalid
         test bx, bx
@@ -119,10 +133,6 @@ sound:
 %endif
 .wait:
         jcxz .done
-        push cx
-        mov dx, NOTIFY                  ; a stop left over is no reason to stop
-        kcall KCALL_POLL
-        pop cx
         mov dx, NOTIFY
         kcall KCALL_TIMER
 .sleep:
@@ -178,33 +188,47 @@ speaker_off:
 ; joystick - the buttons pressed and the four axes, into the segment passed:
 ; five words at SI, the buttons (bit n set: button n + 1 pressed), then axes
 ; 0-3 in microseconds, or JOY_ABSENT (a process's read of /dev/joystick,
-; os-server.md P12)
+; os-server.md P12). The buttons are read before the axes' one-shots start
 ;   In:       BP = the segment (0: none came); SI = an offset there
-;   Out:      nothing
-;   Destroys: AX, BX, CX, DX, SI, DI, ES
+;   Out:      BX = 0, or E_FAULT if the segment cannot take the five words
+;             (P15)
+;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 joystick:
         test bp, bp
-        jz .done
+        jz .fault
         verw bp                         ; (a process gone meanwhile)
-        jnz .done
+        jnz .fault
+        mov cx, JOY_BYTES
+        call dw_fits
+        jc .fault
+        mov dx, GAME_PORT
+        in al, dx
+        not al
+        shr al, GAME_PORT_BUTTON_SHIFT
+        xor ah, ah
+        mov [joy_buttons], ax
         push si
         push ds
         pop es
         call joy_axes
         pop di
         verw bp
-        jnz .done
-        mov dx, GAME_PORT
-        in al, dx
-        not al
-        shr al, GAME_PORT_BUTTON_SHIFT
-        xor ah, ah
+        jnz .fault
+        mov cx, JOY_BYTES
+        mov si, di
+        call dw_fits                    ; (again after the axes' wait)
+        jc .fault
         mov es, bp
+        mov ax, [joy_buttons]
         stosw                           ; the buttons, then the axes
         mov si, joy_times
         mov cx, JOY_AXES
         rep movsw
+        xor bx, bx
+        jmp .done
+.fault:
+        mov bx, E_FAULT
 .done:
         push ds
         pop es
@@ -282,7 +306,8 @@ pit_count:
 ; pit_elapsed - the 8254's clocks since a count of channel 0. In mode 3 the
 ; count falls by two a clock from PIT_DIVISOR, twice a period; so for a span
 ; under half a period (10 ms), the clocks are half the counts between, with
-; PIT_DIVISOR added if the count reloaded meanwhile
+; PIT_DIVISOR added if the count reloaded meanwhile. TEST_STRETCH builds run
+; it in mode 2, by one a clock once a period: the counts themselves (P15)
 ;   In:       SI = the count then (pit_count); interrupts off
 ;   Out:      AX = the clocks since
 ;   Destroys: nothing else
@@ -295,7 +320,11 @@ pit_elapsed:
         jae .halve
         add dx, PIT_DIVISOR             ; it reloaded between
 .halve:
+%ifndef TEST_STRETCH
         shr dx, 1
+%endif
         mov ax, dx
         pop dx
         ret
+
+%include "dfits.asm"

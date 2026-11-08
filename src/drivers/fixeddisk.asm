@@ -5,24 +5,24 @@
 ; programmed I/O, in ring 1 with IOPL 1.
 ;
 ; One sector at a time, synchronous, every wait with a limit (dwait.asm).
-; Before a drive's first transfer, and after any failure, the controller is
-; reset (the fixed disk register's bit 2), told the drive's heads and
-; sectors a track (Set Parameters), and the heads are sent to cylinder 0
-; (Restore), as the BIOS does at start: a reset leaves the step rate at 7.5
-; ms, and Restore sets the rate implied seeks use (IBM, Fixed Disk and
-; Diskette Adapter, 7-8). A drive that is not there fails with E_TIMEOUT
-; then. The drive is selected before the reset as well as after: the AT's
-; controller keeps one drive/head register, but an IDE drive (MAME's AT)
-; takes it only while not busy, and a reset with a drive not there
-; selected would leave the other's status hidden. The controller seeks (an
-; implied seek) and retries by itself; the driver tries a sector HD_TRIES
-; times, a timeout ending it at once. A read interrupts when the sector
-; waits in the controller's buffer; a write
-; takes its sector first (data request, no interrupt) and interrupts when it
-; is on the disk. Reading the status register clears the interrupt. The
-; words go straight between the controller and the segment the OS server
-; passes (DRV_DISK_READ, DRV_DISK_WRITE; drivers.inc), which the driver
-; deletes once it is done.
+; Before the first transfer, and after any failure, the controller is reset
+; (the fixed disk register's bit 2); before a drive's first transfer the
+; controller is told its heads and sectors a track (Set Parameters), and its
+; heads are sent to cylinder 0 (Restore), as the BIOS does at start: a reset
+; leaves the step rate at 7.5 ms, and Restore sets the rate implied seeks
+; use (IBM, Fixed Disk and Diskette Adapter, 7-8). A drive that is not there
+; fails with E_TIMEOUT then. The drive is selected before the reset as well
+; as after: the AT's controller keeps one drive/head register, but an IDE
+; drive (MAME's AT) takes it only while not busy, and a reset with a drive
+; not there selected would leave the other's status hidden. The controller
+; seeks (an implied seek) and retries by itself; the driver tries a sector
+; HD_TRIES times, a timeout ending it at once. A read interrupts when the
+; sector waits in the controller's buffer; a write takes its sector first
+; (data request, no interrupt) and interrupts when it is on the disk.
+; Reading the status register clears the interrupt. The words go straight
+; between the controller and the segment the OS server passes
+; (DRV_DISK_READ, DRV_DISK_WRITE; drivers.inc), which the driver deletes
+; once it is done.
 ; ============================================================================
 
 cpu 286
@@ -191,6 +191,9 @@ hd_transfer:
         jz .error
         call dw_writable                ; gone while it waited?
         jnz .gone
+        mov cx, SECTOR_SIZE
+        call dw_fits                    ; or shorter? (P15)
+        jc .gone
         push di
         mov es, bp
         mov di, si
@@ -209,6 +212,9 @@ hd_transfer:
         jz .error
         call dw_readable
         jnz .gone
+        mov cx, SECTOR_SIZE
+        call dw_fits                    ; its bytes within its limit (P15)
+        jc .gone
         push si
         push ds
         mov ds, bp
@@ -384,3 +390,4 @@ driver_irq:
         ret
 
 %include "dwait.asm"
+%include "dfits.asm"

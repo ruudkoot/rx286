@@ -69,12 +69,15 @@ its bit comes.
 ## The printer driver
 
 It drives a printer as IBM's BIOS does: for each byte, wait until the
-printer is not busy - looking once a tick, for 2 s at most - put the byte
-on the data lines, and pulse STROBE (*docs/storage.md*). The OS server asks
+printer is not busy - a burst of reads, then once a tick, for 2 s at most -
+put the byte on the data lines, and pulse STROBE (*docs/storage.md*). A
+port that reads all ones has no adapter: `E_TIMEOUT` at once (roadmap
+os-server.md P15). The OS server asks
 it with `DRV_PRINT` (BX the printer, below `PRINTERS`) for a process's write
 to `/dev/lpt1` or `/dev/lpt2`, passing the process's data segment, which the
 driver deletes once it has printed from it. A printer that stays busy is
-`E_PAPER` or `E_TIMEOUT`, with the bytes it took before.
+`E_PAPER` or `E_TIMEOUT`, with the bytes it took before, which the OS
+server answers as a write of so many (P15).
 
 ## The mouse driver
 
@@ -87,8 +90,11 @@ builds, a key script's mouse bytes come from the kernel (`KCALL_TEST`,
 server asks it for the state (`DRV_MOUSE_GET`: the buttons, `MOUSE_LEFT`
 and `MOUSE_RIGHT`; x and y, to `MOUSE_X_MAX` and `MOUSE_Y_MAX`;
 `MOUSE_PRESENT` if the mouse answered its reset) and whether the mouse has
-news (`DRV_MOUSE_NEWS`), for a process's read of `/dev/mouse` and its
-`poll`, once a tick while it waits.
+news (`DRV_MOUSE_NEWS`: a packet that moved it or changed a button), for a
+process's read of `/dev/mouse` and its `poll`, once a tick while it waits.
+A Plug and Play identity is passed over only before the first packet, and
+`MOUSE_PNP_MAX` bytes at most: a '(' later is a packet's byte whose first
+was lost (P15).
 
 ## The console driver
 
@@ -104,11 +110,16 @@ gives each background program: `CON_FIELD` columns, right aligned, spaces
 before; roadmap l4.md L11). The 24 lines below are a page's main area
 (`CON_MAIN`, BH the page): the foreground program's, or a terminal's. CR,
 LF, BS, TAB and FF are control characters, as the kernel's console took
-them; ESC [ begins one of ANSI's sequences it knows: the cursor's moves
-(`A`, `B`, `C`, `D`, and `H` or `f` to a row and column of the main area),
-erasing (`J` 0 and 2, `K` 0 and 2) and attributes (`m`: 0, 1 bright, 7
-reversed, 30-37 and 40-47 the colours, 39 and 49 their defaults); every
-other byte is shown as its glyph, and a full page scrolls its 24 lines.
+them; ESC [ begins one of ANSI's sequences it knows (ECMA-48 5.4: up to
+four parameters, the final byte 40h-7Eh): the cursor's moves (`A`, `B`,
+`C`, `D`, and `H` or `f` to a row and column of the main area), erasing
+(`J` and `K`: 0 from the cursor, 1 to it, 2 all) and attributes (`m`, each
+parameter: 0, 1 bright, 7 reversed, the colours swapped, 30-37 and 40-47
+the colours, 39 and 49 their defaults). A sequence with a private or
+intermediate byte (`ESC [ ? 25 l`) is dropped whole, as is one it does not
+know; ESC in a sequence begins another, and CR, LF, BS, TAB and FF in one
+are carried out (P15). Every other byte is shown as its glyph, and a full
+page scrolls its 24 lines.
 Each page keeps its cursor, attribute and escape. `DRV_CON_SHOW` (BL a
 page) shows a page: the CRTC's start address (`CRTC_START_HIGH`,
 `CRTC_START_LOW`) and the hardware cursor at its cursor; it answers with
@@ -129,9 +140,14 @@ It owns the 8042 and IRQ1 (roadmap l4.md L8): the modifiers, a ring of
 keys, Ctrl+Break, Ctrl+Alt+Del and Sys Req, as the kernel did. The OS
 server takes a key with `DRV_KBD_GET`, looks with `DRV_KBD_PEEK`, and drops
 the keys waiting with `DRV_KBD_CLEAR` when it starts the foreground program
-again. A key without ASCII has 0 there and its scancode (`SC_ESC`,
+again; `DRV_KBD_PEEK` says too how many keys a full ring dropped since it
+was asked last. A key without ASCII has 0 there and its scancode (`SC_ESC`,
 `SC_UP`, `SC_DOWN`, `SC_LEFT`, `SC_RIGHT` among them, which the terminal
-makes ANSI's sequences). Alt+F1 to F8 come as the BIOS gives them,
+makes ANSI's sequences): the keypad's and an enhanced keyboard's grey keys
+after E0h alike, and the keypad's Enter and '/' are the keys they are. The
+right Ctrl and Alt are each a bit of their own, so that letting one go
+keeps the other's chord; Caps Lock turns over once a press, not with each
+repeat (roadmap os-server.md P15). Alt+F1 to F8 come as the BIOS gives them,
 scancodes 68h to 6Fh without ASCII, which the OS server's terminal takes
 for its pages
 (os-server.md P11). While the foreground program waits for a key, the server's thread
@@ -166,11 +182,13 @@ was (roadmap l4.md L10). In release builds, and test builds made with
 into a ring of 256, at IRQ3 and on a one-tick timer for an interrupt that
 was lost. The OS server asks it with `DRV_SERIAL_WRITE` (CX bytes from SI in
 the segment passed, each once the UART takes it, 2 s at most: `E_TIMEOUT`
-with the count so far), `DRV_SERIAL_READ` (up to CX bytes of the ring into
-the segment passed; it never waits) and `DRV_SERIAL_NEWS` (BX 1 if bytes
-wait), for a process's reads, writes and `poll` of `/dev/com2`, at most
-`SERIAL_MAX` bytes a call. In debug and test builds COM2 is the kernel's
-log: the driver never touches it, and answers `E_BUSY`.
+with the count so far; at once if no UART answers),
+`DRV_SERIAL_READ` (up to CX bytes of the ring into the segment passed; it
+never waits) and `DRV_SERIAL_NEWS` (BX 1 if bytes wait; CX the bytes lost
+since it was asked last), for a process's reads, writes and `poll` of
+`/dev/com2`, at most `SERIAL_MAX` bytes a call (more: `E_INVAL`, P15). In debug and test builds COM2 is the kernel's
+log: the driver never touches it, and answers `E_BUSY` (`DRV_SERIAL_NEWS`:
+BX 0, no news).
 
 ## The sound driver
 
@@ -181,26 +199,36 @@ them (`SOUND_MIN_HZ` to `SOUND_MAX_HZ`, `SOUND_MAX_TICKS` at most; else
 the gate, sleeps on its timer for the ticks, and closes the gate before it
 answers; a stop the OS server signals (`DRV_STOP_BIT`, on Ctrl+Break) ends
 the sound at once, and a stop left over from before a sound is dropped
-when it starts. In `TEST_SOUND` builds it asks the kernel to measure the
-tone and the silence after it (`KCALL_TEST`). `DRV_JOYSTICK` times the
+when it receives the call, before it sets anything: the driver runs above
+the server, so no stop for this sound comes before it looks (P15). In
+`TEST_SOUND` builds it asks the kernel to measure the tone and the silence
+after it (`KCALL_TEST`). `DRV_JOYSTICK` reads the buttons, then times the
 game port's four axes with timer channel 0's latched count, interrupts off
 for `JOY_AXIS_MAX_US` (4 ms) at most, and writes the buttons and the axes,
 in microseconds or `JOY_ABSENT`, as five words at SI of the segment passed,
 more than a reply's four words: a process's read of `/dev/joystick`
-(os-server.md P12).
+(os-server.md P12); BX 0, or `E_FAULT` if the segment cannot take them
+(P15).
 
 ## The RTC driver
 
 `DRV_CLOCK_TIME`: the RTC's date and time in BCD, read by polling
 (`src/lib/cmos.asm`), in the reply's four words: BX hours and minutes, CX
-century and year, SI month and day, DI seconds. The kernel sets the clock
-to 24-hour BCD with its interrupts off at its start; the driver is its one
-reader.
+century and year, SI month and day, DI seconds. DI's high byte is
+`DRV_CLOCK_INVALID` when the clock has no time to give: its battery failed
+(register D), or a field is no BCD, as a clock that is not there reads FFh
+(roadmap os-server.md P15); the OS server then takes the time as unknown.
+The kernel sets the clock to 24-hour BCD with its interrupts off at its
+start; the driver is its one reader.
 
 ## Errors
 
 A driver's reply says how a call went in BX: 0, or one of these
-(`drivers.inc`), which the volumes' code and the root's services use too.
+(`drivers.inc`), which the volumes' code and the root's services use too. A
+call a driver does not know is `E_INVAL`, from every driver (P15). Each
+checks the bytes a call moves against the segment's limit (`dw_fits`),
+before it uses them and again after each wait: `E_FAULT`, never a fault of
+the driver's own.
 The OS server makes them POSIX's for a process: `E_PROTECTED` is `EROFS`,
 the rest mostly `EIO` (*docs/processes.md*). Until roadmap os-server.md P14
 they were the old system calls' errors too.

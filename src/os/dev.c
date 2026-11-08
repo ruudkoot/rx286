@@ -135,8 +135,8 @@ int dev_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n, int *error)
             *error = EINVAL;
             return -1;
         }
-        if (call(OS_SERVICE(SERVICE_SOUND), DRV_JOYSTICK, 0, 0, at, 0, data, &r)) {
-            *error = EIO;
+        if (call(OS_SERVICE(SERVICE_SOUND), DRV_JOYSTICK, 0, 0, at, 0, data, &r) || r.bx) {
+            *error = r.bx == E_FAULT ? EFAULT : EIO;  /* (its words unwritten: P15) */
             return -1;
         }
         return JS_BYTES;

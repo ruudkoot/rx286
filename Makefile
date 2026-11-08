@@ -158,7 +158,7 @@ $(B)/user.bin: $(PROGRAM_SRC)
 include c.mk
 
 # The drivers outside the kernel (roadmap l4.md L7).
-$(B)/%.bin: src/drivers/%.asm src/drivers/dwait.asm $(wildcard src/userland/*.inc) $(COMMON_SRC)
+$(B)/%.bin: src/drivers/%.asm src/drivers/dwait.asm src/drivers/dfits.asm $(wildcard src/userland/*.inc) $(COMMON_SRC)
 	$(call assemble,$@,$<,-Isrc/userland/ -Isrc/lib/ -Isrc/drivers/)
 
 $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)

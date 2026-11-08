@@ -12,7 +12,9 @@
 ; X and Y are signed: right and down are positive. A Logitech mouse's fourth
 ; byte (its middle button) is passed over, and so is a Plug and Play mouse's
 ; identity, which follows its "M" between parentheses (its letters would
-; begin packets). The driver adds each packet's movement to a position it
+; begin packets): only before the first packet, and MOUSE_PNP_MAX bytes at
+; most, since a packet's second or third byte may be '(' too, if its first
+; was lost (P15). The driver adds each packet's movement to a position it
 ; keeps as DOS's mouse driver does in text mode, 0-MOUSE_X_MAX and
 ; 0-MOUSE_Y_MAX, eight to a character cell, starting in the middle; and
 ; keeps the buttons. A mouse that never says "M" is reported absent, but
@@ -54,6 +56,7 @@ MOUSE_PACKET_X_HIGH equ 0x03
 MOUSE_IRQ_BYTES     equ 16              ; bytes taken at most in one look
 MOUSE_PNP_BEGIN     equ '('             ; a Plug and Play identity's first byte
 MOUSE_PNP_END       equ ')'             ; and its last
+MOUSE_PNP_MAX       equ 255             ; its bytes at most (P15)
 
 begin_udata
 mouse_present       db 0                ; MOUSE_PRESENT once it said "M"
@@ -62,8 +65,11 @@ mouse_packet        times MOUSE_PACKET db 0
 mouse_x             dw (MOUSE_X_MAX + 1) / 2
 mouse_y             dw (MOUSE_Y_MAX + 1) / 2
 mouse_buttons       db 0
-mouse_changed       db 0                ; set by a packet, cleared by DRV_MOUSE_GET
-mouse_pnp           db 0                ; 1 inside a Plug and Play identity
+mouse_changed       db 0                ; set by a packet that changed the position or
+                                        ;    the buttons, cleared by DRV_MOUSE_GET
+mouse_pnp           db 0                ; inside a Plug and Play identity: the bytes
+                                        ;    it may still have
+mouse_packets       db 0                ; 1 once a packet has begun: no identity then
 end_udata
 
 ; ----------------------------------------------------------------------------
@@ -77,8 +83,22 @@ entry:
         call mouse_init
         mov cx, MOUSE_RESET_TICKS       ; the reset
         call timer
-        mov dx, NOTIFY
-        kcall KCALL_RECV
+.reset:
+        mov dx, NOTIFY                  ; until the timer's bit (P15): a stray
+        kcall KCALL_RECV                ;    interrupt meanwhile is no reason to end
+        jc .reset                       ;    it, and its line goes on again
+        test bx, DRV_IRQ_BIT
+        jz .no_irq
+        push bx
+        mov dx, COM1_BASE + UART_RBR
+        in al, dx
+        mov dx, IRQ
+        mov al, IRQ_ACK
+        kcall KCALL_IRQ
+        pop bx
+.no_irq:
+        test bx, DRV_TIMER_BIT
+        jz .reset
         mov dx, COM1_BASE + UART_RBR
         in al, dx                       ; nothing stale
         mov dx, COM1_BASE + UART_IER
@@ -107,9 +127,10 @@ serve:
         je .news
         cmp al, DRV_MOUSE_GET
         je .get
-        xor bx, bx
+        mov bx, E_INVAL                 ; a call it does not know (P15)
         cmp al, DRV_MOUSE_NEWS
         jne .reply
+        xor bx, bx
         mov bl, [mouse_changed]
         jmp .reply
 .get:
@@ -234,8 +255,10 @@ mouse_byte:
 .start:
         mov [mouse_packet], al
         mov byte [mouse_index], 1
+        mov byte [mouse_packets], 1
         ret
 .pnp:
+        dec byte [mouse_pnp]            ; (at MOUSE_PNP_MAX bytes: over)
         cmp al, MOUSE_PNP_END
         jne .done
         mov byte [mouse_pnp], 0
@@ -244,9 +267,11 @@ mouse_byte:
         mov bl, [mouse_index]
         cmp bl, MOUSE_PACKET
         jb .packet
-        cmp al, MOUSE_PNP_BEGIN         ; outside a packet: an identity begins?
-        jne .done                       ; else no packet begun, or a fourth byte
-        mov byte [mouse_pnp], 1
+        cmp al, MOUSE_PNP_BEGIN         ; outside a packet, before the first: an
+        jne .done                       ;    identity begins? Else no packet begun,
+        cmp byte [mouse_packets], 0     ;    or a fourth byte
+        jne .done
+        mov byte [mouse_pnp], MOUSE_PNP_MAX
         ret
 .packet:
         xor bh, bh
@@ -273,6 +298,10 @@ mouse_move:
         add ax, [mouse_x]
         mov bx, MOUSE_X_MAX
         call mouse_clamp
+        cmp ax, [mouse_x]
+        je .x_same
+        mov byte [mouse_changed], 1     ; (news only for a change: P15)
+.x_same:
         mov [mouse_x], ax
         mov al, [mouse_packet]
         and al, MOUSE_PACKET_Y_HIGH
@@ -282,6 +311,10 @@ mouse_move:
         add ax, [mouse_y]
         mov bx, MOUSE_Y_MAX
         call mouse_clamp
+        cmp ax, [mouse_y]
+        je .y_same
+        mov byte [mouse_changed], 1
+.y_same:
         mov [mouse_y], ax
         xor bl, bl
         test byte [mouse_packet], MOUSE_PACKET_LEFT
@@ -292,8 +325,11 @@ mouse_move:
         jz .buttons
         or bl, MOUSE_RIGHT
 .buttons:
-        mov [mouse_buttons], bl
+        cmp bl, [mouse_buttons]
+        je .buttons_same
         mov byte [mouse_changed], 1
+.buttons_same:
+        mov [mouse_buttons], bl
         ret
 
 ; ----------------------------------------------------------------------------

@@ -98,6 +98,7 @@ CMOS_REG_A          equ 0x0A
 CMOS_REG_B          equ 0x0B
 CMOS_REG_C          equ 0x0C
 CMOS_REG_D          equ 0x0D
+CMOS_REG_D_VRT      equ 0x80        ; register D: the battery is good, the time valid
 CMOS_SHUTDOWN       equ 0x0F        ; the BIOS's shutdown status byte; 0 = soft reset
 CMOS_CENTURY        equ 0x32
 CMOS_EXT_LOW        equ 0x30        ; the KB of extended memory the POST found
@@ -204,6 +205,7 @@ FDC_DIR             equ 0x3F7       ; read: digital input (bit 7: the diskette w
 FDC_CCR             equ 0x3F7       ; write: the data rate
 FDC_DOR_MOTORS_OFF  equ 0x0C        ; controller enabled, DMA/IRQ enabled, every motor off
 FDC_DOR_RESET       equ 0x00        ; controller in reset (IRQ6 on release)
+FDC_DOR_RUN         equ 0x04        ; the controller out of reset (its bit 2)
 FDC_DOR_MOTOR_A     equ 0x10        ; drive A's motor; drive B's is the next bit
 FDC_DOR_MOTORS      equ 0x30        ; both motors' bits
 FDC_MSR_RQM         equ 0x80        ; the data register is ready

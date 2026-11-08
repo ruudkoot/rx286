@@ -52,7 +52,7 @@ com2: enabled=1, @COM2@
 com3: enabled=1, @COM3@
 com4: enabled=1, mode=null
 parport1: enabled=1, file=@LPT1@
-parport2: enabled=1, file=@LPT2@
+parport2: enabled=@LPT2_ENABLED@, file=@LPT2@
 speaker: enabled=1, mode=gui
 
 # Debugging aids: magic breakpoints (xchg bx, bx), and the debugger's log.

@@ -25,6 +25,7 @@
 #   debugger: info gdt 0 11     ...and commands to run there; may repeat
 #   emulators: bochs dosbox-x   where the test applies (default: all)
 #   media: B ejected            change a drive: B ejected, B protected, D absent,
+#                               LPT2 absent (no adapter: Bochs),
 #                               B damaged (MANY's chain leaves the volume),
 #                               D blank (no partition), B deep (paths of 64
 #                               characters: rxlib.DEEP_PATH), B loop (MANY's

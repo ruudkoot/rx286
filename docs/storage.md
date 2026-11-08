@@ -98,12 +98,13 @@ before each wait for a call. The diskette change line is not read.
 ## The fixed disks
 
 The task file of IBM's adapter at 1F0h-1F7h, IRQ14, programmed I/O,
-driven by the fixed disk driver (`src/drivers/fixeddisk.asm`). Before a
-drive's first transfer, and after any failure, the driver resets the
-controller, tells it the drive's heads and sectors
-a track (Set Parameters) and sends the heads to cylinder 0 (Restore), as
-the BIOS does at start: a reset leaves the step rate at 7.5 ms, and Restore
-sets the one the controller's implied seeks use. Then, for each sector:
+driven by the fixed disk driver (`src/drivers/fixeddisk.asm`). Before the
+first transfer, and after any failure, the driver resets the controller;
+before a drive's first transfer it tells the controller the drive's heads
+and sectors a track (Set Parameters) and sends the heads to cylinder 0
+(Restore), as the BIOS does at start (a reset for the second drive would
+undo the first's set-up): a reset leaves the step rate at 7.5 ms, and
+Restore sets the one the controller's implied seeks use. Then, for each sector:
 the precompensation cylinder / 4, a count of 1, the sector, cylinder and
 head, and Read Sectors or Write Sectors with retries. A read interrupts
 when the sector is in the controller's buffer, and the driver reads its

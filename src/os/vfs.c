@@ -1160,11 +1160,12 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
     case K_NULL:
         return n;
     case K_LPT:
-        if (call(OS_SERVICE(SERVICE_PRINTER), DRV_PRINT, o->unit, n, at, 0, data, &r) || r.bx) {
+        if (call(OS_SERVICE(SERVICE_PRINTER), DRV_PRINT, o->unit, n, at, 0, data, &r)
+                || (r.bx && r.cx == 0)) {
             *error = EIO;
             return -1;
         }
-        return r.cx;
+        return r.cx;                    /* (a failure part way: the bytes taken, P15) */
     case K_FILE:
         return file_io(o, data, at, n, 1, error);
     case K_PIPE_W:

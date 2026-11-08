@@ -99,7 +99,9 @@ numbers below are the Technical Reference's.
   `CMOS_REG_A_UIP`, update in progress, and `CMOS_REG_A_RATE_1K` for the
   test probe), `CMOS_REG_B` (`CMOS_REG_B_24H_BCD`, which rx286 sets;
   `CMOS_REG_B_PIE`, the probe's periodic interrupt), `CMOS_REG_C` (reading
-  it acknowledges the clock's interrupt) and `CMOS_REG_D`; `CMOS_SHUTDOWN` is
+  it acknowledges the clock's interrupt) and `CMOS_REG_D`, whose
+  `CMOS_REG_D_VRT` says the battery is good and the time valid (the RTC
+  driver answers no time without it); `CMOS_SHUTDOWN` is
   the BIOS's shutdown status byte (1-49), 0 for a soft reset (the BIOS
   listing's table of shutdown codes). `CMOS_EXT_LOW` and `CMOS_EXT_HIGH`
   hold the KB of extended memory the POST found (1-45), which the kernel
@@ -120,7 +122,9 @@ numbers below are the Technical Reference's.
   controller enabled with DMA and IRQ6 on and every motor off;
   `FDC_DOR_MOTOR_A` is drive A's motor and the next bit drive B's
   (`FDC_DOR_MOTORS` both); bit 0 selects the drive. `FDC_DOR_RESET` holds the
-  controller in reset; releasing it raises IRQ6. In the main status,
+  controller in reset; releasing it raises IRQ6. `FDC_DOR_RUN` is its bit
+  2, the controller out of reset: the driver's reset clears it alone,
+  keeping the motors and DMA and IRQ6 on, as the BIOS does. In the main status,
   `FDC_MSR_RQM` says the data register is ready and `FDC_MSR_DIO` which way.
   `FDC_CCR` sets the data rate: `FDC_RATE_500K` for A's 1.2 MB, `FDC_RATE_250K`
   for B's 360 KB. The commands: `FDC_CMD_SPECIFY` with the BIOS's

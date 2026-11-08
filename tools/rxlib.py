@@ -160,11 +160,11 @@ BOCHSRC_TEMPLATE = os.path.join(ROOT, 'bochs', 'rx286.bochsrc.in')
 DISKS = os.path.join(ROOT, 'build', 'disks')
 
 
-# What a test may change of the drives (tools/run-test's `media:`): the
-# first three in the emulator, the others in the run's copies of the images
-# (damage_disks).
-MEDIA = ('B ejected', 'B protected', 'D absent', 'B damaged', 'D blank', 'B deep', 'B loop',
-         'B zerodir', 'B longnames')
+# What a test may change of the drives and printers (tools/run-test's
+# `media:`): the first four in the emulator (LPT2's adapter gone: Bochs
+# only), the others in the run's copies of the images (damage_disks).
+MEDIA = ('B ejected', 'B protected', 'D absent', 'LPT2 absent', 'B damaged', 'D blank',
+         'B deep', 'B loop', 'B zerodir', 'B longnames')
 # 'B deep': directories whose paths reach DOS's 64 characters (PATH_MAX).
 DEEP_PATH = '/'.join(c * 8 for c in 'ABCDEF')      # 54 characters as \AAAAAAAA...
 DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
@@ -195,6 +195,7 @@ def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=Fa
         '@HD1_TYPE@': 'none' if 'D absent' in media else 'disk',
         '@LPT1@': printers[0],
         '@LPT2@': printers[1],
+        '@LPT2_ENABLED@': '0' if 'LPT2 absent' in media else '1',
         '@COM2@': ('mode=file, dev=' + serial if log_port == 'com2' else
                    'mode=socket-client, dev=' + modem if modem else 'mode=null'),
         '@COM3@': 'mode=file, dev=' + serial if log_port == 'com3' else 'mode=null',
@@ -390,7 +391,9 @@ def compile_keys(script):
     {mouse DX DY B}: a Microsoft mouse's packet, DX right and DY down (-128
     to 127), B the buttons down (L, R, LR or -), and {mouse-bytes A B C}:
     three bytes from the mouse as they are, in hexadecimal; a packet, as a
-    key, while a reader waits (os-server.md P12)."""
+    key, while a reader waits (os-server.md P12); {grey K}, a named key K
+    as an enhanced keyboard's grey key or the keypad's Enter sends it, after
+    E0h ({grey home}, {grey enter}: os-server.md P15)."""
     out = []
     when = [OP_WHEN_WAITING]            # {now K}'s: OP_NOW for its key alone
 
@@ -398,6 +401,11 @@ def compile_keys(script):
         # A release gives no ASCII, so it is typed at once: the program may
         # not wait again (a key that starts a loop).
         out.extend([when[0], code, OP_NOW, code | 0x80])
+
+    def press_grey(code):
+        # E0h before the key's make and before its release, as an enhanced
+        # keyboard sends a grey key: the prefix and the key at once
+        out.extend([when[0], 0xE0, OP_NOW, code, OP_NOW, 0xE0, OP_NOW, code | 0x80])
 
     i = 0
     while i < len(script):
@@ -418,6 +426,8 @@ def compile_keys(script):
                 name = name[4:]
             if name in NAMED:
                 press(NAMED[name])
+            elif name.startswith('grey ') and name[5:] in NAMED:
+                press_grey(NAMED[name[5:]])
             elif name.startswith('mouse-bytes '):
                 raw = [int(b, 16) for b in name.split()[1:]]
                 if len(raw) != 3 or not all(0 <= b < 0x80 for b in raw):

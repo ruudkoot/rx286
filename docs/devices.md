@@ -55,9 +55,12 @@ A 16450 holds one byte, and at 9600 baud one comes every 1.04 ms. The
 longest stretches with interrupts off, the game port's timing (4 ms) and
 the kernel's work for a kernel call (3.5 ms at most on MAME's AT, 6.5 ms
 for a pass of a kill: roadmap realtime.md R0), can lose bytes there; the
-driver counts them (`overruns`). A 16550's FIFO rides them all out.
-Every tick the serial and mouse drivers also fetch what COM2 and COM1 hold,
-so an interrupt that was lost costs a tick at most: an emulator can lose
+driver counts them, with those a full ring drops, and `DRV_SERIAL_NEWS`
+answers how many since it was asked last (roadmap os-server.md P15). A
+16550's FIFO rides them all out. A port that reads all ones has no UART:
+a write fails at once. Every tick the serial driver also fetches what COM2
+holds, and every 5 ticks the mouse driver what COM1 holds, so an interrupt
+that was lost costs a tick at most, or 5: an emulator can lose
 one, as Bochs does when another UART on the same line is touched.
 
 ## The speaker
