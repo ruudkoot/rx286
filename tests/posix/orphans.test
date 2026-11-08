@@ -1,0 +1,13 @@
+# Two process groups orphaned at once, each with a stopped member (roadmap
+# memory.md M7's review; tests/posix/orphans.c): both are hung up, though
+# the first's SIGHUP ends a process within the end of the one that
+# orphaned them.
+program: idle
+define: TEST_POSIX_ORPHANS
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+---
+orphans: a session of its own: 1
+orphans: the orphaned stopped job B hung up: yes
+orphans: done

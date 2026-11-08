@@ -274,7 +274,8 @@ static void timers_arm(void)
     r.cx = next <= now ? 1 : next - now > 0x7FFF ? 0x7FFF : (rx_u16)(next - now);
     r.dx = OS_TIMER;
     r.bp = 0;
-    rx_kcall(&r);
+    if (rx_kcall(&r))                   /* (no kernel timer left: memory.md M1) */
+        rx_log("rx286: os: no kernel timer left for the processes' timers\n", 58);
 }
 
 /* sig_timers - the alarms that have come, SIGALRM; the sleeps that have,
@@ -421,7 +422,7 @@ static int deliver(int i)
             return 0;
         }
     }
-    if (thread_call(i, THREAD_FRAME, FRAME_READ, OS_DATA, (rx_u16)(unsigned)kf, &r)) {
+    if (thread_call(i, THREAD_FRAME, FRAME_READ, RX_SEG(kf), RX_OFF(kf), &r)) {
         proc_end(i, SIGKILL);
         return 0;
     }
@@ -451,7 +452,7 @@ static int deliver(int i)
     kf[TFR_DS / 2] = PROC_DS;
     kf[TFR_ES / 2] = PROC_DS;
     kf[TFR_FLAGS / 2] &= (rx_u16)~(FLAG_DF | FLAG_TF);      /* C's: DF clear */
-    if (thread_call(i, THREAD_FRAME, FRAME_WRITE, OS_DATA, (rx_u16)(unsigned)kf, &r)) {
+    if (thread_call(i, THREAD_FRAME, FRAME_WRITE, RX_SEG(kf), RX_OFF(kf), &r)) {
         proc_end(i, SIGSEGV);
         return 0;
     }

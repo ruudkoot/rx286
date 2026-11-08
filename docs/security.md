@@ -214,7 +214,7 @@ objects, and other spaces' memory, are not summed: they change.
 | a process's memory its own | an LDT a process; the root copies at a fork in its own ring, from its own capabilities; the server checks every buffer against the process's data segment, and again after every wait | `EFAULT` in `tests/posix/drives.test`, `poll.test`'s `ioctl`, the attack suite |
 | ids and descriptors unforgeable | pids, groups and descriptors are the server's tables' entries, checked on every call | `tests/posix/proc.test` (`kill` of no one, `ESRCH`; of init, `EPERM`), `files.test` (`EBADF`) |
 | a signal's frame cannot hurt the server | the server writes it through the process's own segment after a bounds check, and a frame the handler spoilt faults in ring 3 | `tests/posix/signal.test`: a spoilt frame, IOPL and NT asked for, its own `IRET` with NT: each `SIGSEGV` |
-| no exhaustion | the table (`PROCS`), the descriptors (`OPEN_MAX`), the pipes, the root's allocator: each refused past its end | `tests/posix/proc.test`: a fork bomb stops at 23 children, `EAGAIN`; `thread.test`: seven threads, then `EAGAIN` |
+| no exhaustion | the table (`PROCS`), the descriptors (`OPEN_MAX`), the pipes, the root's allocator: each refused past its end | `tests/posix/proc.test`: a fork bomb stops at 46 children (`CHILD_MAX` less init and itself), `EAGAIN`; `thread.test`: seven threads, then `EAGAIN` |
 | the server's own paths and devices | `/` and `/z` read-only; paths absolute and their `..` taken out before they are followed; 8.3 and `PX_PATH_MAX` enforced | `tests/posix/files.test` (`EROFS`, `EXDEV`, `ENAMETOOLONG`), `tests/sh/deep.test` |
 
 ### The console's long writes (`tests/posix/devices.test`)

@@ -237,7 +237,9 @@ more):
   bits of paragraphs), for objects and for the boot modules' segments; the
   processes' memory, the buddy allocator's, is the memory below 1 MB alone,
   and extended memory past the two pieces is never handed out
-  (roadmaps/memory.md, written at the close, plans the rest).
+  (roadmaps/memory.md, written at the close, plans the rest; its M3 and M4
+  did it, on the branch `memory`: every byte of extended memory to the
+  root, and the processes' memory from all of it; its *At the close*).
 - **P5.** No lock until P6: the server's threads shared no table while
   each served one program.
 - **P6.** init did not run the old shell; the shell stayed a program the

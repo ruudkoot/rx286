@@ -1,7 +1,8 @@
 ; ============================================================================
 ; rx286 - src/boot-loader/boot-loader.asm
 ; The loader: finds KERNEL.BIN, the boot image, on the FAT12 floppy, loads
-; it to 1000:0000h and hands the machine to it.
+; it to 1000:0000h and hands the machine to it, with what the BIOS says of
+; its memory (the boot information, memory.md M2).
 ;
 ; The boot sector loads this file from the reserved sectors 1-3 to
 ; 0000:7E00h and jumps here with the boot drive in DL. The loader reads the
@@ -10,10 +11,11 @@
 ; time (an INT 13h read never crosses a 64 KB boundary: roadmap X3), up to
 ; IMAGE_MAX bytes. It checks what arrived: the end mark at the image's last
 ; word, and a module table that matches the file, names the root first and
-; places every module inside the image (roadmap l4.md L5). Then, with the
-; BIOS's help for the last time (roadmap D14), it sets text mode 3,
+; places every module inside the image (roadmap l4.md L5). It asks the BIOS
+; for the memory and leaves the answer at BOOT_INFO_PHYS (layout.inc). Then,
+; with the BIOS's help for the last time (roadmap D14), it sets text mode 3,
 ; stops the floppy motor (X2), disables interrupts and NMI, and jumps to
-; 1000:0000h. It hands the kernel nothing else.
+; 1000:0000h.
 ; ============================================================================
 
 cpu 286
@@ -56,6 +58,7 @@ start:
         call find_kernel                ; SI = its directory entry
         call load_kernel
         call check_image
+        call boot_info
         mov si, msg_trace_loaded
         call trace
         ; The hand-over.
@@ -280,6 +283,55 @@ check_image:
         loop .module
         xor ax, ax
         mov es, ax
+        ret
+
+; ----------------------------------------------------------------------------
+; boot_info - what the BIOS says of the memory, at BOOT_INFO_PHYS for the
+; kernel (memory.md M2, E1, E2): INT 12h's base memory; INT 15h AH=88h's
+; extended memory, called with CF clear, since IBM's leaves CF as it was
+; (Technical Reference 5-155), else CMOS 30h-31h's; the EBDA's segment, if
+; 40:0Eh holds INT 12h's end (on IBM's AT that word is the fourth printer's
+; port: 5-29); the boot drive
+;   In:       DS = ES = 0
+;   Out:      the structure at BOOT_INFO_PHYS
+;   Destroys: AX, BX, CX, DI
+; ----------------------------------------------------------------------------
+boot_info:
+        mov di, BOOT_INFO_PHYS
+        mov cx, BOOT_INFO_SIZE / 2
+        xor ax, ax
+        rep stosw
+        mov word [BOOT_INFO_PHYS + BI_MAGIC], BOOT_INFO_MAGIC
+        mov byte [BOOT_INFO_PHYS + BI_SIZE], BOOT_INFO_SIZE
+        int 0x12                        ; INT 12h: AX = the base memory's KB
+        mov [BOOT_INFO_PHYS + BI_BASE_KB], ax
+        mov bx, ax
+        shl bx, 6                       ; its end, as a segment
+        clc
+        mov ah, 0x88                    ; INT 15h AH=88h: AX = the extended memory's KB
+        int 0x15
+        jnc .extended
+        or byte [BOOT_INFO_PHYS + BI_FLAGS], BIF_EXT_CMOS
+        mov al, CMOS_EXT_HIGH | CMOS_NMI_DISABLE
+        out CMOS_INDEX, al
+        in al, CMOS_DATA
+        mov ah, al
+        mov al, CMOS_EXT_LOW | CMOS_NMI_DISABLE
+        out CMOS_INDEX, al
+        in al, CMOS_DATA
+.extended:
+        mov [BOOT_INFO_PHYS + BI_EXT_KB], ax
+        push ds
+        mov ax, 0x40                    ; the BDA
+        mov ds, ax
+        mov ax, [0x0E]
+        pop ds
+        cmp ax, bx
+        jne .ebda                       ; (BI_EBDA stays 0)
+        mov [BOOT_INFO_PHYS + BI_EBDA], ax
+.ebda:
+        mov al, [drive]
+        mov [BOOT_INFO_PHYS + BI_DRIVE], al
         ret
 
 ; ----------------------------------------------------------------------------

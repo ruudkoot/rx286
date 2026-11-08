@@ -41,14 +41,25 @@ It reads the BPB the boot sector left at 7C00h and:
    word is `KERNEL_END_MARK`; its module table's magic and length match the
    file; its first module is the root; every module lies inside it, after
    the table;
-6. hands over, using the BIOS for the last time:
+6. asks the BIOS for the memory (roadmap memory.md M2) and leaves the answer,
+   the boot information, at `BOOT_INFO_PHYS` 600h (32 bytes, `layout.inc`'s
+   `BI_*`):
+   - the base memory from INT 12h, which leaves out an EBDA (Bochs' BIOS keeps
+     1 KB at 9FC00h: 639 KB);
+   - the extended memory from INT 15h AH=88h, called with CF clear, since
+     IBM's leaves CF as it found it; from CMOS 30h-31h if it fails
+     (`BIF_EXT_CMOS`);
+   - the EBDA's segment, if BDA 40:0Eh holds INT 12h's end (on IBM's AT that
+     word is the fourth printer's port);
+   - the boot drive;
+7. hands over, using the BIOS for the last time:
    - text mode 3, 80x25 colour (INT 10h AX=0003h);
    - the floppy motor off (DOR = `FDC_DOR_MOTORS_OFF`), since the BIOS's
      timer interrupt, which would switch it off, never runs again;
    - interrupts off (`cli`) and NMI off (port 70h bit 7);
    - a far jump to 1000:0000h.
 
-It hands the kernel nothing else: no registers, no tables. Every read is
+It hands the kernel nothing but the image and the boot information. Every read is
 retried `BOOT_TRIES` times. The errors are "this disk's format is not one I
 can read", "cannot read the disk", "no KERNEL.BIN on this disk",
 "KERNEL.BIN is larger than its room", "KERNEL.BIN's cluster chain is

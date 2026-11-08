@@ -6,9 +6,9 @@
 # so that tools/run-test, tools/map2sym and tools/sizes read it as they read
 # an assembled program's (rxlib.read_map, rxlib.map_sections).
 #
-#   tools/mkexe --wlink RAW WLINK_MAP OUT.rx    Open Watcom: wlink's
-#                                               `format raw bin`, its map
-#   tools/mkexe --elf ELF OUT.rx                gcc-ia16: ld's ELF output
+#   tools/mkexe [--ring N] [--dgroup-max BYTES] --wlink EXE WLINK_MAP OUT.rx
+#                                   Open Watcom: wlink's `format dos`, its map
+#   tools/mkexe --elf ELF OUT.rx    gcc-ia16: ld's ELF output
 #
 # --287 first marks a program that uses the 287 (RXF_287): the OS server
 # then has libc's trampoline save its state around a signal's handler
@@ -16,13 +16,26 @@
 #
 # Both link the code from offset 0 of its own segment and the data group
 # from offset 0 of its own: the stack (crt0's _STACKBOT or .stackbot), the
-# initialised data, then .bss. wlink puts the data 64 KB past the code in
-# its raw image (code at 1000:0, data at 2000:0). The map's sections are
-# rxtext and rxdata (the data from the segment's offset 0). wlink's map does
-# not say which segment a symbol is in: the objects and libraries its link
-# script (RAW's .lnk) names do, in their OMF records (PUBDEF, SEGDEF), so
-# C's public data (environ) goes in rxdata. A segment neither of the code
-# nor of DGROUP, a stack not at DGROUP's offset 0, or no entry stops it.
+# initialised data, then .bss. wlink puts the code at 1000:0 and the data at
+# 2000:0 (c.mk's c_link), so that its load module holds the data 64 KB past
+# the code. The map's sections are rxtext and rxdata (the data from the
+# segment's offset 0). wlink's map does not say which segment a symbol is
+# in: the objects and libraries its link script (EXE's .lnk) names do, in
+# their OMF records (PUBDEF, SEGDEF), so C's public data (environ) goes in
+# rxdata. A segment neither of the code nor of DGROUP, a stack not at
+# DGROUP's offset 0, or no entry stops it. A server in C's compact model
+# has no stack in DGROUP: its threads' are segments of their own
+# (src/lib/crt/server.asm; memory.md M6). --dgroup-max stops it when the
+# stack, the data and .bss together pass so many bytes, which the linker
+# says only at 64 KB.
+#
+# Segment relocations (roadmap memory.md M5): a far pointer in initialised
+# data (the compact model's tables of names), or a segment's name in code,
+# is a word the DOS executable lists, which holds the segment's paragraph,
+# 1000h or 2000h. Every program's code is its slot 0 and its data its slot
+# 1, so mkexe writes the selector itself: slot * 8 + 4 (the LDT) + the
+# program's ring, --ring's (3, a process's, unless it is given). A word that
+# holds another paragraph stops it.
 # ============================================================================
 
 import os
@@ -33,7 +46,8 @@ import sys
 import rxlib
 
 E = rxlib.include_constants('exe.inc')
-WLINK_DATA_AT = 0x10000         # 2000:0 against 1000:0 in wlink's raw image
+MZ_CODE_AT, MZ_DATA_AT = 0x1000, 0x2000     # c_link's paragraphs of the code and the data
+WLINK_DATA_AT = (MZ_DATA_AT - MZ_CODE_AT) * 16  # the data's offset in the load module
 OMF_LNAMES, OMF_SEGDEF, OMF_PUBDEF = 0x96, (0x98, 0x99), (0x90, 0x91)
 OMF_MODEND, OMF_LIBHEAD, OMF_LIBEND = (0x8A, 0x8B), 0xF0, 0xF1
 
@@ -100,10 +114,56 @@ def link_publics(lnk_path):
     return publics
 
 
-def wlink_parts(raw_path, map_path):
+def mz_image(path):
+    """A DOS executable's load module (from 1000:0) and its relocations, as
+    offsets in it. wlink writes each relocation's segment and the words it
+    names as the paragraphs c_link gives (1000h, 2000h), not from 0."""
+    blob = open(path, 'rb').read()
+    if blob[:2] != b'MZ':
+        sys.exit('mkexe: %s: not a DOS executable (wlink format dos)' % path)
+    last, pages, count, header = struct.unpack_from('<HHHH', blob, 2)
+    table, = struct.unpack_from('<H', blob, 0x18)
+    end = pages * 512 - (512 - last if last else 0)
+    module = blob[header * 16:end]
+    relocations = []
+    for n in range(count):
+        offset, segment = struct.unpack_from('<HH', blob, table + 4 * n)
+        relocations.append(segment * 16 + offset - MZ_CODE_AT * 16)
+    return module, relocations
+
+
+def map_address(text):
+    """An address of wlink's map, SSSS:OOOO, as an offset in its segment
+    (the code's from 1000:0, the data's from 2000:0)."""
+    segment, offset = (int(x, 16) for x in text.split(':'))
+    linear = segment * 16 + offset
+    for at in (MZ_DATA_AT, MZ_CODE_AT):
+        if linear >= at * 16:
+            return linear - at * 16
+    return linear
+
+
+def relocate(image, relocations, ring, path):
+    """The load module with each relocated word made its segment's selector:
+    the code's (slot 0) or the data's (slot 1), in the program's ring."""
+    image = bytearray(image)
+    selectors = {MZ_CODE_AT: 0 * 8 + 4 + ring, MZ_DATA_AT: 1 * 8 + 4 + ring}
+    for at in relocations:
+        if not 0 <= at <= len(image) - 2:
+            sys.exit('mkexe: %s: a relocation at %Xh, outside the program' % (path, at))
+        value, = struct.unpack_from('<H', image, at)
+        if value not in selectors:
+            sys.exit('mkexe: %s: a relocation at %Xh names paragraph %Xh, neither the '
+                     'code\'s nor the data\'s' % (path, at, value))
+        struct.pack_into('<H', image, at, selectors[value])
+    return bytes(image)
+
+
+def wlink_parts(exe_path, map_path, ring):
     """(code, data from offset 0 up to .bss, .bss bytes, stack bytes,
     entry, symbols as (section, offset, name))."""
-    raw = open(raw_path, 'rb').read()
+    image, relocations = mz_image(exe_path)
+    image = relocate(image, relocations, ring, exe_path)
     segments, symbols = [], []
     part = None
     for line in open(map_path, encoding='latin-1'):
@@ -114,34 +174,35 @@ def wlink_parts(raw_path, map_path):
         elif '|   Linker Statistics' in line:
             part = None
         elif part == 'segments':
-            m = re.match(r'^(\S+)\s+(\S+)\s+(\S+)\s+([0-9a-f]{8})\s+([0-9a-f]{8})\s*$', line)
+            m = re.match(r'^(\S+)\s+(\S+)\s+(\S+)\s+([0-9a-f]{4}:[0-9a-f]{4})\s+([0-9a-f]{8})\s*$',
+                         line)
             if m:
-                segments.append((m.group(1), m.group(2), m.group(3), int(m.group(4), 16),
+                segments.append((m.group(1), m.group(2), m.group(3), map_address(m.group(4)),
                                  int(m.group(5), 16)))
         elif part == 'symbols':
-            m = re.match(r'^([0-9a-f]{8})[*+ ]?\s+(\S+)\s*$', line)
+            m = re.match(r'^([0-9a-f]{4}:[0-9a-f]{4})[*+ ]?\s+(\S+)\s*$', line)
             if m:
-                symbols.append((int(m.group(1), 16), m.group(2)))
+                symbols.append((map_address(m.group(1)), m.group(2)))
     for name, cls, grp, _, _ in segments:
         if cls != 'CODE' and grp != 'DGROUP':
             sys.exit('mkexe: %s: segment %s (class %s, group %s) is neither code nor DGROUP'
                      % (map_path, name, cls, grp))
     stackbot = [a for name, _, _, a, _ in segments if name == '_STACKBOT']
-    if stackbot != [0]:
+    if stackbot not in ([0], []):
         sys.exit('mkexe: %s: the stack, _STACKBOT, is not at DGROUP\'s offset 0' % map_path)
     code_end = max(a + n for _, cls, _, a, n in segments if cls == 'CODE')
     data_end = max([a + n for _, cls, grp, a, n in segments if grp == 'DGROUP' and cls != 'BSS']
                    or [0])
     bss_end = max([a + n for _, _, grp, a, n in segments if grp == 'DGROUP'] or [0])
     stack = sum(n for name, _, _, _, n in segments if name == '_STACKBOT')
-    code = raw[:code_end]
-    data = raw[WLINK_DATA_AT:WLINK_DATA_AT + data_end]
+    code = image[:code_end]
+    data = image[WLINK_DATA_AT:WLINK_DATA_AT + data_end]
     data += bytes(data_end - len(data))
     # Which segment a symbol is in: its object's (link_publics); a symbol
     # of none of them (wlink's own) is the code's. Watcom's cdecl names begin
     # with an underscore, which C's do not: the map gives C's, as gcc-ia16's
     # does (_start for __start, rx_ud2 for _rx_ud2).
-    classes = link_publics(os.path.splitext(raw_path)[0] + '.lnk')
+    classes = link_publics(os.path.splitext(exe_path)[0] + '.lnk')
     out = [('rxdata' if classes.get(name) in ('DATA', 'BSS') else 'rxtext', addr,
             name[1:] if name.startswith('_') else name) for addr, name in symbols]
     entry = [a for a, n in symbols if n in ('__start', '_start')]
@@ -221,19 +282,34 @@ def write_map(path, code, data, symbols):
 
 def main(args):
     flags = 0
-    if args and args[0] == '--287':
-        flags = E['RXF_287']
-        args = args[1:]
+    ring = 3
+    dgroup_max = 0xFFFF
+    while args and args[0] in ('--287', '--ring', '--dgroup-max'):
+        if args[0] == '--287':
+            flags = E['RXF_287']
+            args = args[1:]
+        elif args[0] == '--ring' and len(args) > 1 and args[1] in ('1', '2', '3'):
+            ring = int(args[1])
+            args = args[2:]
+        elif args[0] == '--dgroup-max' and len(args) > 1 and args[1].isdigit():
+            dgroup_max = int(args[1])
+            args = args[2:]
+        else:
+            break
     if len(args) == 4 and args[0] == '--wlink':
-        code, data, bss, stack, entry, symbols = wlink_parts(args[1], args[2])
+        code, data, bss, stack, entry, symbols = wlink_parts(args[1], args[2], ring)
         out = args[3]
     elif len(args) == 3 and args[0] == '--elf':
         code, data, bss, stack, entry, symbols = elf_parts(args[1])
         out = args[2]
     else:
-        sys.exit('usage: mkexe [--287] --wlink RAW MAP OUT.rx | [--287] --elf ELF OUT.rx')
+        sys.exit('usage: mkexe [--287] [--ring N] [--dgroup-max BYTES] --wlink EXE MAP OUT.rx | '
+                 '[--287] --elf ELF OUT.rx')
     if len(code) > 0xFFFF or stack + len(data[stack:]) + bss > 0xFFFF:
         sys.exit('mkexe: %s: a segment past 64 KB' % out)
+    if stack + len(data[stack:]) + bss > dgroup_max:
+        sys.exit('mkexe: %s: DGROUP is %d bytes, past its most, %d (--dgroup-max)'
+                 % (out, stack + len(data[stack:]) + bss, dgroup_max))
     if any(data[:stack]):
         sys.exit('mkexe: %s: the stack (the data\'s first %d bytes) is not zeros' % (out, stack))
     initial = data[stack:]

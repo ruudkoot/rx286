@@ -16,6 +16,9 @@
 #if defined(__WATCOMC__)
 #  define RX_COMPILER "watcom"
 #  define RX_16BIT 1
+#  if defined(__COMPACT__) || defined(__LARGE__)
+#    define RX_FAR_DATA 1               /* C's compact model: every data pointer far (M5) */
+#  endif
 #  define RX_FAR __far
 #  define RX_NORETURN __declspec(noreturn)
 #  define RX_INLINE __inline
@@ -69,6 +72,17 @@ typedef unsigned int rx_size;
 /* A far pointer from a selector and an offset (the 16-bit compilers keep
  * one as the selector in its high word); the host has none */
 #define RX_MK_FP(seg, off) ((void RX_FAR *)(((rx_u32)(seg) << 16) | (rx_u16)(off)))
+
+/* A pointer's selector and offset, for a buffer passed to another segment's
+ * owner by both (roadmap memory.md M5): the pointer's own selector, in
+ * either model. In the small model a near pointer's is DS's, which is SS's;
+ * in the compact model a local's is SS's, which need not be DS's (a server
+ * thread's stack is a segment of its own), so "the data's selector and the
+ * offset" would name the wrong segment (tools/lint's selector rule) */
+#ifdef RX_16BIT
+#  define RX_SEG(p) ((rx_u16)((rx_u32)(const void RX_FAR *)(p) >> 16))
+#  define RX_OFF(p) ((rx_u16)(rx_u32)(const void RX_FAR *)(p))
+#endif
 
 #define RX_STATIC_ASSERT(cond, name) typedef char rx_static_assert_##name[(cond) ? 1 : -1]
 

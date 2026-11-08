@@ -21,25 +21,40 @@ PROGRAM_SLOTS       equ 16      ; a program's space: room for them
 FAULT_BADGE         equ 0x8000  ; a program's fault endpoint: its endpoint, badged so
 
 ; The OS server's threads (os-server.md P6, P15): each starts with SP
-; OS_STACK times its number in the server's stack segment, which is how it
-; knows which it is (src/os/start.asm): a program's, its module's number
-; (2 to 15), for OS_SESSIONS programs at most; the control thread; one for
-; each entry of the process table, OS_PROCS; the tty thread. Each has its
-; part of the stacks in the server's data, a program's by the programs
-; before it in the module table, so that no part waits for a module that
-; is a driver
+; OS_STACK times its number in the server's stack segment, which is only
+; the starts' room and how it knows which it is (src/lib/crt/server.asm): a
+; program's, its module's number (2 to 15), for OS_SESSIONS programs at
+; most; the control thread; one for each entry of the process table,
+; OS_PROCS; the tty thread. Each runs on a stack segment of its own,
+; OS_THREAD_STACK bytes (memory.md M6, D10 B), in a slot of the server's:
+; a program's thread's in the program's slots, 8n + OS_K_THREAD_STACK; the
+; control thread's and the tty thread's in OS_SLOT_CONTROL_STACK and
+; OS_SLOT_TTY_STACK; an entry's thread's among the entry's slots
 OS_STACK            equ 4
 OS_SESSIONS         equ 2
 OS_CONTROL_N        equ 16
 OS_PROC_N0          equ 17
-OS_PROCS            equ 25
+OS_PROCS            equ 48      ; (25 until memory.md M7)
 OS_TTY_N            equ OS_PROC_N0 + OS_PROCS
 OS_STACK_SIZE       equ (OS_TTY_N + 1) * OS_STACK  ; the server's stack segment at least
+OS_THREAD_STACK     equ 1024    ; each thread's stack segment
+OS_K_THREAD_STACK   equ 6       ; a program's slots of the server's, 8n + k: its thread's stack
+OS_SLOT_CONTROL_STACK equ 152   ; the control thread's stack
+OS_SLOT_TTY_STACK   equ 153     ; the tty thread's
+
+; Every server's threads (memory.md M6, *The model for multi-threaded
+; servers*): the root reports a fault of one, puts back the server's
+; segments and restarts it SERVE_FAULT_AT bytes past the server's entry,
+; where its start calls the server's policy; such a fault comes to the root
+; badged SERVE_BADGE with the server's module number
+SERVE_FAULT_AT      equ 2
+SERVE_BADGE         equ 0x2000
 
 ; The OS server's requests to the root (l4.md L11): calls on the root's
 ; fault endpoint, badged ROOT_BADGE_OS, from slot OS_SLOT_ROOT of the server's
 ROOT_BADGE_OS       equ 0x4000
 ROOT_BADGE_TEST     equ 0x4001  ; TEST_SERVICES: the test program's, whose copies go to it
+ROOT_BADGE_TWIN     equ 0x4002  ; TEST_TWIN: the test server's (tests/programs/twin.c, M6)
 OS_SLOT_ROOT        equ 160
 OS_SLOT_ARCHIVE     equ 161     ; the server's: /z, the archive module's bytes (os-server.md P6)
 OS_SLOT_KEYS        equ 162     ;    a notification the keyboard driver signals, when no
@@ -80,12 +95,20 @@ ROOT_EXIT           equ 11      ; BX a process: everything of it revoked, its me
                                 ;    its code's count lowered (the code gone at 0; with CX
                                 ;    1, kept, sealed, for an exec of the same file: P12)
 ROOT_UNLOAD         equ 12      ; BX a load, or a code no process runs: gone, its memory free
-ROOT_SERVE          equ 13      ; CX an SP; DI two slots -> a thread of the server's own, at
-                                ;    its entry with that SP and its priority, started, its
-                                ;    faults the root's; a notification; the server's copies
-                                ;    of the thread and the notification at DI, DI + 8 (P6)
+ROOT_SERVE          equ 13      ; BX a stack's bytes (even, 8 KB at most); CX an SP below the
+                                ;    server's stack segment's top; SI the stack's slot;
+                                ;    DI two slots -> a thread of the server's own, at its
+                                ;    entry with that SP and its priority, started, its faults
+                                ;    the root's (SERVE_BADGE); a notification; a stack segment
+                                ;    of the server's ring, from the blocks the root keeps for
+                                ;    the server's stacks (memory.md M6); the server's copies
+                                ;    of the thread and the notification at DI, DI + 8 (P6),
+                                ;    the stack moved to SI
 ROOT_UNTHREAD       equ 14      ; BX a process, CX a thread of ROOT_THREAD's: it and its
                                 ;    endpoint gone, every copy with them (os-server.md P13)
+ROOT_PANIC          equ 15      ; BX a thread's number: a thread of the server's faulted
+                                ;    where its policy cannot go on (memory.md M6): the root
+                                ;    says so, and stops the system with its own fault (D8)
 PROC_SLOTS          equ 16      ; a process's space
 PROC_THREADS        equ 7       ; the threads ROOT_THREAD adds to a process at most
 

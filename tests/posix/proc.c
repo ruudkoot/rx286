@@ -114,7 +114,8 @@ int main(void)
         ;
     if (pid == 0)
         _exit(0);
-    printf("proc: a fork bomb: %d children, then EAGAIN (11): %d\n", children, errno);
+    printf("proc: a fork bomb: %d children (CHILD_MAX - 2), then EAGAIN (11): %d\n", children,
+           errno);
     for (i = 0; wait(&status) > 0; i++)
         ;
     printf("proc: all %d reaped; then ECHILD (10): %d\n", i, errno);

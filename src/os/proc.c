@@ -8,10 +8,10 @@
  * A process is the root's (ROOT_SPAWN, ROOT_FORK): a space of PROC_SLOTS
  * with its code, its data segment (in slots 1 and 2) and its endpoint. The
  * server keeps a table of them, and for table entry i the server's copies
- * of its endpoint, thread, space and data in slots PROC_SLOT0 + 6i on, and
- * a thread of its own (ROOT_SERVE), started as thread PROC_N0 + i, which
- * serves process i alone and sleeps on its notification while the entry is
- * empty. A call is a message (D5 B; posix.inc): its buffers lie in the
+ * of its endpoint, thread, space and data in slots PROC_SLOT0 + 7i on, and
+ * a thread of its own (ROOT_SERVE) on a stack of its own, started as thread
+ * PROC_N0 + i, which serves process i alone and sleeps on its notification
+ * while the entry is empty. A call is a message (D5 B; posix.inc): its buffers lie in the
  * process's data segment, which the server reaches through its copy.
  *
  * A program of /z is an rx286 executable (exe.inc) in the archive the root
@@ -26,7 +26,9 @@
  *
  * The table is shared by every thread of the server: one lock guards it
  * (D17), taken with XCHG and given up before any wait for a child; a thread
- * that finds it taken sleeps a tick.
+ * that finds it taken sleeps a tick. The lock records its holder, so that
+ * after a thread's fault the server knows whether its tables are in doubt
+ * (server_fault; memory.md M6, D10's rule).
  * ============================================================================ */
 
 #include <stdio.h>
@@ -77,8 +79,8 @@ struct proc {
     char name[AR_NAME_SIZE];
 };
 
-#if PROCS > 31
-#error "a badge holds an entry in 5 bits"
+#if PROCS > 63
+#error "a badge holds an entry in 6 bits"
 #endif
 
 /* A new image, between exec's checks and the process it becomes */
@@ -97,7 +99,7 @@ static pid_t serving[PROCS];            /* the pid whose call entry i's thread s
 
 /* LEADER - entry i's process's entry: its own, or a thread's process's (P13) */
 #define LEADER(i) (procs[i].state == P_THREAD ? (int)procs[i].leader : (i))
-static int lock;
+static struct server_lock lock;
 static pid_t next_pid = INIT_PID;
 static rx_u8 args[PX_ARG_MAX];          /* an image's argv and environ, being built */
 
@@ -171,7 +173,8 @@ static rx_u8 break_seen;                /* a Ctrl+Break the control thread's loc
 
 /* sleep_on - until a notification is signalled; with a tick, at most one
  * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
- * a Ctrl+Break) */
+ * a Ctrl+Break). A tick needs one of the kernel's TIMER_MAX timers: with
+ * none left the log says so, since the wait may then never end */
 static void sleep_on(rx_u16 notify, int tick)
 {
     struct rx_kregs r;
@@ -181,7 +184,9 @@ static void sleep_on(rx_u16 notify, int tick)
         r.cx = 1;
         r.dx = notify == OS_CONTROL ? OS_TIMER : notify;
         r.bp = 0;
-        rx_kcall(&r);
+        if (rx_kcall(&r))               /* (none left: a wait that may be for ever;
+                                           TIMER_MAX is for every thread, memory.md M1) */
+            rx_log("rx286: os: no kernel timer left for a wait\n", 43);
     }
     r.ax = KCALL_RECV << 8;
     r.dx = notify;
@@ -333,17 +338,19 @@ rx_u16 proc_data_limit(int i)
     return limit(P_SLOT(LEADER(i), PK_DATA));
 }
 
-/* lock_take - the lock (server.h) */
+/* lock_take - the lock (server.h), held by the calling thread */
 void lock_take(rx_u16 notify)
 {
-    while (rx_xchg(&lock, 1))
+    unsigned self = server_self();
+
+    while (!server_lock_try(&lock, self))
         sleep_on(notify, 1);
 }
 
 /* lock_give - the lock given up */
 void lock_give(void)
 {
-    lock = 0;
+    server_lock_give(&lock);
 }
 
 #define take lock_take
@@ -460,7 +467,7 @@ static int image_take(struct image *img, int i, const char *path, rx_u16 segment
     if ((error = vfs_exe_open(i, path, &img->file)) != 0)
         return error;
     memcpy(img->name, img->file.name, AR_NAME_SIZE);
-    if (vfs_exe_read(&img->file, 0, OS_DATA, (rx_u16)(unsigned)head, RX_HEADER_SIZE))
+    if (vfs_exe_read(&img->file, 0, RX_SEG(head), RX_OFF(head), RX_HEADER_SIZE))
         goto noexec;
     img->code_bytes = head[RXH_CODE / 2];
     img->data = head[RXH_DATA / 2];
@@ -532,7 +539,7 @@ static int image_make(struct image *img, rx_u16 to, unsigned badge, rx_u16 *n)
         root(ROOT_EXIT, *n, 0, 0, 0, 0);
         return EIO;
     }
-    far_copy(data, img->args_at, OS_DATA, (rx_u16)(unsigned)args, img->args_size);
+    far_copy(data, img->args_at, RX_SEG(args), RX_OFF(args), img->args_size);
     envp = img->args_at + 2 * (img->argc + 1);
     at = (rx_u16)(img->stack - 6);      /* main's argc, argv, envp (crt0) */
     *far_word(data, at) = img->argc;
@@ -555,8 +562,10 @@ static int entry_new(void)
     for (i = 0; i < PROCS; i++) {
         if (procs[i].state != P_FREE)
             continue;
-        if (!procs[i].served) {
-            if (root(ROOT_SERVE, 0, (rx_u16)((PROC_N0 + i) * 4), 0, P_SLOT(i, PK_SERVER), 0))
+        if (!procs[i].served) {         /* its thread, on a stack of its own (M6) */
+            server_stacks[PROC_N0 + i] = P_SLOT(i, PK_STACK);
+            if (root(ROOT_SERVE, OS_THREAD_STACK, (rx_u16)((PROC_N0 + i) * OS_STACK),
+                     P_SLOT(i, PK_STACK), P_SLOT(i, PK_SERVER), 0))
                 return -1;
             /* its notification bound to it: a signal wakes it as it receives (P10) */
             thread_op(P_SLOT(i, PK_SERVER), THREAD_BIND, P_SLOT(i, PK_NOTIFY), 0, 0);
@@ -568,13 +577,13 @@ static int entry_new(void)
 }
 
 /* badge_new - entry c's badge for the endpoint of a new image or thread
- * of its: the entry + 1 in bits 0-4, its generation in bits 5-14 (below
+ * of its: the entry + 1 in bits 0-5, its generation in bits 6-14 (below
  * FAULT_BADGE), so that a call received from an image or thread gone
- * since is known by its badge (handle; P15) */
+ * since is known by its badge (handle; P15; 6 bits since memory.md M7) */
 static rx_u16 badge_new(int c)
 {
-    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x3FF);
-    procs[c].badge = (rx_u16)(procs[c].gen << 5 | (unsigned)(c + 1));
+    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x1FF);
+    procs[c].badge = (rx_u16)(procs[c].gen << 6 | (unsigned)(c + 1));
     return procs[c].badge;
 }
 
@@ -661,23 +670,36 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
 static int group_orphaned(pid_t pgid, pid_t sid);
 static int group_stopped(pid_t pgid);
 
+/* The groups end() looks at once a process has ended (its own, its
+ * children's), each with whether it was orphaned before: a queue, which the
+ * outermost end() works through, since the signals it sends end more
+ * processes, whose end() calls add theirs (static, off the thread's stack:
+ * the lock is held; memory.md M7 and its review). A process is in at most
+ * two entries, its own end's and its parent's */
+#define END_GROUPS (2 * (PROCS + 1))
+static pid_t end_pgids[END_GROUPS], end_sids[END_GROUPS];
+static rx_u8 end_was[END_GROUPS];
+static unsigned end_count, end_depth;
+
 /* end - process i ends with a wait status: everything of it revoked (unless
  * it is already), a zombie; its children init's; its parent woken if it
- * waits, and sent SIGCHLD (lock held) */
+ * waits, and sent SIGCHLD; a group orphaned now with a member stopped sent
+ * SIGHUP and SIGCONT, by the outermost end() (lock held) */
 static void end(int i, int status, int revoke)
 {
     struct proc *p = &procs[i];
-    int k, init = entry_of(INIT_PID, P_ALIVE), parent, groups = 0;
-    pid_t pgids[PROCS + 1], sids[PROCS + 1];
-    rx_u8 was[PROCS + 1];
+    int k, init = entry_of(INIT_PID, P_ALIVE), parent;
+    unsigned g;
     char line[48];
 
+    end_depth++;
     for (k = 0; k < PROCS; k++)         /* its group, its children's: orphaned */
-        if (k == i || (procs[k].state == P_ALIVE && procs[k].ppid == p->pid)) {
-            pgids[groups] = procs[k].pgid;  /*    before it ends? (P15) */
-            sids[groups] = procs[k].sid;
-            was[groups] = (rx_u8)group_orphaned(procs[k].pgid, procs[k].sid);
-            groups++;
+        if ((k == i || (procs[k].state == P_ALIVE && procs[k].ppid == p->pid))
+                && end_count < END_GROUPS) {    /*    before it ends? (P15) */
+            end_pgids[end_count] = procs[k].pgid;
+            end_sids[end_count] = procs[k].sid;
+            end_was[end_count] = (rx_u8)group_orphaned(procs[k].pgid, procs[k].sid);
+            end_count++;
         }
     dev_tone_stop(i);                   /* (a tone it waits for: ended, P15) */
     if (revoke)
@@ -702,13 +724,18 @@ static void end(int i, int status, int revoke)
         waiters_wake(parent);
     if (parent >= 0)
         sig_send(parent, SIGCHLD);
-    for (k = 0; k < groups; k++)        /* a group orphaned now, a member of it */
-        if (!was[k] && group_orphaned(pgids[k], sids[k]) && group_stopped(pgids[k])) {
-            proc_group(pgids[k], SIGHUP);   /*    stopped: SIGHUP, then SIGCONT */
-            proc_group(pgids[k], SIGCONT);  /*    (XSH _exit; P15) */
-        }
     if (p->pid == INIT_PID)             /* D8: nothing would wait for the orphans */
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: init ended\n"));
+    if (end_depth == 1) {               /* the outermost: the queue, as it grows */
+        for (g = 0; g < end_count; g++) /* a group orphaned now, a member of it */
+            if (!end_was[g] && group_orphaned(end_pgids[g], end_sids[g])
+                    && group_stopped(end_pgids[g])) {
+                proc_group(end_pgids[g], SIGHUP);   /* stopped: SIGHUP, then SIGCONT */
+                proc_group(end_pgids[g], SIGCONT);  /* (XSH _exit; P15) */
+            }
+        end_count = 0;
+    }
+    end_depth--;
 }
 
 /* group_orphaned - is a process group orphaned: no live member whose
@@ -1302,6 +1329,25 @@ static int path_in(int i, rx_u16 at, char *path, int *error)
     return string_in(P_SLOT(LEADER(i), PK_DATA), at, path, PX_PATH_MAX, error) < 0 ? -1 : 0;
 }
 
+#if defined(TEST_OS_OVERFLOW) || defined(TEST_OS_OVERFLOW_LOCKED)
+#define OVERFLOW_BX 0x5A5A              /* getpid's BX that asks for it */
+static volatile unsigned overflow_depth;
+
+/* overflow - TEST_OS_OVERFLOW builds: the thread's stack overflowed on
+ * purpose, a call of itself at a time, until a push meets the segment's
+ * limit (#SS; memory.md M6) */
+static unsigned overflow(unsigned k)
+{
+    volatile rx_u8 pad[64];
+
+    pad[0] = (rx_u8)k;
+    overflow_depth = k;
+    if (k < 0xFFFFu)                    /* (always: the stack ends first) */
+        return overflow(k + 1) + pad[0];
+    return pad[0];
+}
+#endif
+
 /* handle - a message on process i's endpoint: a call, its reply in r (BX
  * the result, CX the error, SI and DI more); or a fault. 0 if it ended the
  * process and there is no one to answer */
@@ -1315,6 +1361,10 @@ static int handle(int i, struct rx_kregs *r)
     rx_u32 seconds = 0;
     rx_u16 data;
 
+#ifdef TEST_OS_OVERFLOW
+    if ((r->ax & 0xFF) == PX_GETPID && r->bx == OVERFLOW_BX && !(r->dx & FAULT_BADGE))
+        overflow(0);                    /* the lock not held */
+#endif
     take(notify);
     if (!proc_alive(i) || (r->dx & ~FAULT_BADGE) != procs[i].badge) {
         give();                         /* (a call of an image or thread gone since it was */
@@ -1334,7 +1384,7 @@ static int handle(int i, struct rx_kregs *r)
         give();                         /* then the report: the console may wait */
         if (n) {
             rx_log(line, n);
-            console(OS_DATA, (rx_u16)(unsigned)line, n, CON_MAIN | (unit << 8), 0);
+            console(RX_SEG(line), RX_OFF(line), n, CON_MAIN | (unit << 8), 0);
         }
         return 0;
     }
@@ -1367,6 +1417,10 @@ static int handle(int i, struct rx_kregs *r)
         result = px_wait(i, (int)r->bx, r->cx, &status, &error);
         break;
     case PX_GETPID:
+#ifdef TEST_OS_OVERFLOW_LOCKED
+        if (r->bx == OVERFLOW_BX)
+            overflow(0);                /* the lock held */
+#endif
         result = procs[p].pid;
         break;
     case PX_GETPPID:
@@ -1460,7 +1514,7 @@ static int handle(int i, struct rx_kregs *r)
     return 1;
 }
 
-/* proc_thread - the server's thread for entry i (os_thread): its process's
+/* proc_thread - the server's thread for entry i (server_thread): its process's
  * calls and faults while there is one, else a sleep until there is. Its
  * notification, bound to it, wakes it as it receives (NOTIFY_LABEL); after
  * each call and each such wake it takes its turn at the process's signals
@@ -1484,8 +1538,8 @@ void proc_thread(unsigned i)
         r.bp = 0;
         while (rx_kcall(&r) == 0) {
             reply = (r.ax & 0xFF) != NOTIFY_LABEL && handle((int)i, &r);
-            if (!os_stack_ok(PROC_N0 + i))
-                overflowed(PROC_N0 + i, notify);
+            if (!server_stack_ok(PROC_N0 + i))
+                overflowed(PROC_N0 + i);
             take(notify);
             sig_step((int)i);
             give();
@@ -1495,6 +1549,37 @@ void proc_thread(unsigned i)
         }
         sleep_on(notify, 1);            /* its endpoint gone: it ended */
     }
+}
+
+/* server_fault - thread n faulted, and the root started it again at its
+ * entry after a fault, on a fresh stack (rx/server.h; memory.md M6, D10's
+ * rule). If it held the lock, or it serves no entry, the tables are in
+ * doubt, and the root stops the system; else the process its entry served
+ * is ended, as a kill would end it, and the thread serves the entry again */
+void server_fault(unsigned n)
+{
+    char line[80];
+    int i = (int)n - PROC_N0, held = server_lock_holder(&lock) == n;
+
+    if (held || i < 0 || i >= PROCS) {
+        rx_log(line, (unsigned)snprintf(line, sizeof line,
+                                        "rx286: os: thread %u faulted %s: the system stops\n", n,
+                                        held ? "holding the lock" : "serving no process"));
+        root(ROOT_PANIC, (rx_u16)n, 0, 0, 0, 0);
+        for (;;)
+            ;                           /* (the root stops the system) */
+    }
+    take(P_SLOT(i, PK_NOTIFY));
+    dev_forget(i);                      /* the marks of a wait it faulted around, the lock */
+    tty_forget(i);                      /*    given up (review of M7) */
+    vfs_forget(i);
+    if (proc_alive(i)) {
+        rx_log(line, (unsigned)snprintf(line, sizeof line,
+                                        "rx286: os: thread %u faulted serving process %d: it is "
+                                        "ended\n", n, (int)procs[LEADER(i)].pid));
+        proc_end(LEADER(i), SIGKILL);
+    }
+    give();
 }
 
 /* proc_timers - the processes' timers (server.h; the control thread) */
@@ -1528,19 +1613,23 @@ void proc_interrupt(void)
 void proc_boot(void)
 {
     static const char path[] = "/z/init";
-    static const char *const argv[] = { path, 0 };
-    static const char *const envp[] = { "PATH=/z:/c/bin", "HOME=/a", 0 };
-    int error;
+    static const char env_path[] = "PATH=/z:/c/bin", env_home[] = "HOME=/a";
+    static rx_u16 argv[2], envp[3];     /* offsets in the server's data, as spawn reads */
+    int error;                          /* them: a far pointer is two words (memory.md M5) */
 
+    argv[0] = RX_OFF(path);
+    envp[0] = RX_OFF(env_path);
+    envp[1] = RX_OFF(env_home);
     take(OS_CONTROL);
     cache_init();                       /* the files' cache (P7) */
     pipes_init();                       /* the pipes' buffers (P9) */
     if (cwds_init())                    /* the current directories (P15) */
         rx_log("os: no room for the current directories\n", 40);
-    if (tty_keys())                     /* the terminal's thread (P11) */
-        root(ROOT_SERVE, 0, TTY_N * 4, 0, TTY_THREAD, 0);
-    if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, -1,
-              &error) < 0) {
+    if (tty_keys()) {                   /* the terminal's thread (P11) */
+        server_stacks[TTY_N] = TTY_STACK;
+        root(ROOT_SERVE, OS_THREAD_STACK, TTY_N * OS_STACK, TTY_STACK, TTY_THREAD, 0);
+    }
+    if (spawn(path, RX_SEG(argv), RX_OFF(argv), RX_OFF(envp), 0, -1, &error) < 0) {
         char line[40];
 
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: no init: error %d\n",

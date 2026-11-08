@@ -1,0 +1,17 @@
+# A thread of the OS server overflows its stack on purpose while it holds
+# the server's lock (roadmap memory.md M6, D10's rule; tests/posix/
+# overflow.c): the tables may be half changed, so the server's policy asks
+# the root to stop the system (ROOT_PANIC), which it does with its own
+# fault (D8).
+program: idle
+define: TEST_POSIX_OVERFLOW
+define: TEST_OS_OVERFLOW_LOCKED
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
+# DOSBox-X checks no stack segment's limit (docs/emulators.md).
+emulators: bochs mame
+match: contains
+timeout: 60
+---
+rx286: os: thread 19 faulted holding the lock: the system stops
+rx286: root: thread 19 of os cannot go on: the system stops
+rx286 PANIC: the root faulted

@@ -59,6 +59,8 @@ program_main_keys := tests/programs/keys.asm
 program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
 program_main_services := tests/programs/services.c
+program_main_tables := tests/programs/tables.c
+program_main_twin := tests/programs/twin.c
 # PROGRAM=none: no program the root builds; the processes have the keys (P9);
 # PROGRAM=shell (sh too): no program the root builds either, and init runs
 # the shell in C on each terminal (os-server.md P9; the shell in assembly
@@ -85,17 +87,22 @@ PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
 # the OS server, the programs. The drivers run above the root (os-server.md
 # P4), whose copy of a fork's data must not keep a serial line's bytes
 # waiting.
-MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=256 \
+# The OS server's stack segment is its threads' starts' room alone,
+# os.inc's OS_STACK_SIZE (memory.md M6, M7): each thread runs on a stack
+# segment of its own
+OS_STACK_BYTES := $(shell $(PYTHON) -c "import sys; sys.path.insert(0, 'tools'); import rxlib; \
+    print(rxlib.include_constants('os.inc')['OS_STACK_SIZE'])")
+MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=$(OS_STACK_BYTES) \
     printer=$(B)/printer.bin:1:7:driver:service=1 mouse=$(B)/mouse.bin:1:7:driver:irq=4:service=2 \
     console=$(B)/console.bin:1:7:driver:service=3 kbd=$(B)/keyboard.bin:1:7:driver:irq=1:service=4 \
     fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \
     serial=$(B)/serial.bin:1:7:driver:irq=3:service=7 sound=$(B)/sound.bin:1:7:driver:service=8 \
     rtc=$(B)/rtc.bin:1:7:driver:service=9 \
-    $(if $(PROGRAM_BIN),program=$(PROGRAM_BIN):$(PROGRAM_RING)) \
+    $(if $(PROGRAM_BIN),program=$(PROGRAM_BIN):$(PROGRAM_RING)$(if $(filter twin,$(PROGRAM)),:stack=8)) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
     z=$(B)/z.arc:3:0:archive
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions or services, not '$(PROGRAM)')
+$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions, services, tables or twin, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed

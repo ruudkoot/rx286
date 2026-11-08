@@ -51,7 +51,15 @@ ext_untyped_a:
 ext_untyped_b:
         db CAP_UNTYPED, 0
         times SHADOW_SIZE - 2 db 0
+ext_untyped_c:                          ; each further piece in turn (boot_ext_run, M3)
+        db CAP_UNTYPED, 0
+        times SHADOW_SIZE - 2 db 0
+ext_rest            dw 0, 0             ; the paragraphs for segments past slot 3's piece
 ext_kb              dw 0                ; the extended memory found, in KB
+boot_info           times BOOT_INFO_SIZE db 0   ; the loader's (layout.inc; entry.asm), then
+                                        ;    the kernel's sizing: the root's to read (slot 102)
+msg_no_boot_info    db "the loader left no boot information: an older loader?", 0
+msg_too_little      db "too little memory for programs below 1 MB (UMEM_LEAST)", 0
 thread_list         times THREAD_MAX dw 0   ; every thread, in the order made
 thread_count        dw 0
 obj_free_count      dw 0                ; the GDT pool's free descriptors (OBJ_FREE_OFF)
@@ -726,9 +734,10 @@ slot_put_descriptor:
 
 ; ----------------------------------------------------------------------------
 ; boot_root - at start: the root's space and thread, from the image's first
-; module and the kernel's own untyped memory (roadmap l4.md L5), with the
-; capabilities the root starts with (kcalls.inc, ROOT_SLOT_*): its code,
-; its data (initialised from the module) and its stack; what is left of the
+; module: its space of ROOT_SLOTS from the memory for programs (memory.md
+; M4), its thread from the kernel's own untyped memory (roadmap l4.md L5),
+; with the capabilities the root starts with (kcalls.inc, ROOT_SLOT_*): its
+; code, its data (initialised from the module) and its stack; what is left of the
 ; memory for segments and of the arena, as untyped; the module table and
 ; each other module's code and data, read-only; its own space and thread;
 ; the screen's text page; every interrupt line the kernel does not keep
@@ -741,7 +750,7 @@ boot_root:
         call ext_detect
         push ds
         pop es
-        mov si, boot_untyped
+        mov si, memory_untyped          ; (its 32 KB: not the arena's, memory.md M4)
         mov cx, ROOT_SLOTS
         call space_make                 ; BX = the space
         ASSERT nc, "boot_root: no room for a space"
@@ -795,6 +804,7 @@ boot_root:
         mov ax, ROOT_SLOT_LOW_ARENA
         mov dx, boot_untyped
         call boot_slot_shadow
+        call boot_ext_run
         jmp .untyped
 .low:
         mov ax, ROOT_SLOT_UNTYPED
@@ -810,6 +820,15 @@ boot_root:
         mov cx, MODULE_TABLE_SIZE - 1
         call root_read_access
         mov bx, ROOT_SLOT_MODULES
+        call boot_slot_segment
+        ; slot 102: the boot information, read-only (memory.md M2)
+        mov ax, boot_info
+        xor dl, dl
+        add ax, KDATA_BASE & 0xFFFF
+        adc dl, KDATA_BASE >> 16
+        mov cx, BOOT_INFO_SIZE - 1
+        call root_read_access
+        mov bx, ROOT_SLOT_BOOT_INFO
         call boot_slot_segment
         ; slots 6, 7: its own space and thread
         mov bx, [boot_space]
@@ -884,44 +903,62 @@ boot_root:
 ; ----------------------------------------------------------------------------
 ; umem_size - the memory for programs' segments: from the image's end - the
 ; module table's length, which the loader checked against the file - on a
-; kilobyte, to the EGA's memory (os-server.md P15: the image may grow
-; without taking memory from programs until it does)
+; kilobyte (os-server.md P15: the image may grow without taking memory from
+; programs until it does), to the base memory's end as the BIOS said it to
+; the loader, at most the EGA's memory (memory.md M2); written into the boot
+; information for the root. Without the boot information, or with less than
+; UMEM_LEAST, the kernel stops: it does not guess (D4)
 ;   In:       DS = SEL_KDATA
-;   Out:      memory_untyped's base and size
-;   Destroys: AX
+;   Out:      memory_untyped's base and size; boot_info's BI_UMEM_*
+;   Destroys: AX, SI
 ; ----------------------------------------------------------------------------
 umem_size:
+        mov si, msg_no_boot_info
+        cmp word [boot_info + BI_MAGIC], BOOT_INFO_MAGIC
+        jne .stop
+        push bx
+        push cx
+        mov bx, [boot_info + BI_BASE_KB]    ; INT 12h's KB (memory.md M2), at most 640
+        cmp bx, UMEM_END >> 10
+        jbe .base
+        mov bx, UMEM_END >> 10
+.base:
+        shl bx, 6                       ; KB to paragraphs: the end
         mov ax, [MODULE_TABLE_VOFF + MH_PARAGRAPHS]
         add ax, KERNEL_SEG + (UMEM_ALIGN >> 4) - 1
-        and ax, ~((UMEM_ALIGN >> 4) - 1)
+        and ax, ~((UMEM_ALIGN >> 4) - 1)    ; the start
         mov [memory_untyped + SH_OBJECT], ax
-        neg ax
-        add ax, UMEM_END >> 4
-        mov [memory_untyped + SH_SIZE], ax
+        mov [boot_info + BI_UMEM_START], ax
+        mov [boot_info + BI_UMEM_END], bx
+        mov cx, bx
+        sub cx, ax
+        mov si, msg_too_little
+        jbe .stop                       ; (the image past the end)
+        cmp cx, UMEM_LEAST >> 4
+        jb .stop
+        mov [memory_untyped + SH_SIZE], cx
+        pop cx
+        pop bx
         ret
+.stop:
+        xor bp, bp
+        jmp panic
 
 ; ----------------------------------------------------------------------------
 ; ext_detect - extended memory (roadmap os-server.md P3, D18 B): its size
-; as the POST found it (CMOS 30h-31h), if A20 is on - the entry turned it
-; on, and a word written at 1 MB must not show at 0 - split in two untyped
-; under 1 MB each from 1 MB on: a quarter for objects (ext_untyped_b), the
-; rest for segments (ext_untyped_a)
+; as the BIOS said it to the loader (INT 15h AH=88h, which is the POST's
+; CMOS 30h-31h; memory.md M2), if A20 is on - the entry turned it
+; on, and a word written at 1 MB must not show at 0 - all of it handed out
+; (memory.md M3): the kernel objects' arena at the top, a quarter at most
+; and EXT_ARENA at most (ext_untyped_b, slot 4); the rest for segments from
+; 1 MB, in pieces of EXT_CHUNK, each on 256 KB: the first in slot 3
+; (ext_untyped_a), the others in ROOT_SLOT_EXTENDED on (boot_ext_run)
 ;   In:       DS = SEL_KDATA; interrupts and NMI off
-;   Out:      ext_kb; ext_untyped_a and _b (sizes 0 if none)
+;   Out:      ext_kb; ext_untyped_a and _b (sizes 0 if none); ext_rest
 ;   Destroys: AX, BX, CX, DX, DI, ES
 ; ----------------------------------------------------------------------------
 ext_detect:
-        mov al, CMOS_EXT_HIGH | CMOS_NMI_DISABLE
-        out CMOS_INDEX, al
-        in al, CMOS_DATA
-        mov ah, al
-        mov al, CMOS_EXT_LOW | CMOS_NMI_DISABLE
-        out CMOS_INDEX, al
-        in al, CMOS_DATA
-        push ax
-        mov al, CMOS_REG_D              ; NMI on again, as pm_start left it (P15)
-        out CMOS_INDEX, al
-        pop ax
+        mov ax, [boot_info + BI_EXT_KB]     ; the BIOS's, from the loader (memory.md M2)
         cmp ax, EXT_KB_MAX
         jbe .sized
         mov ax, EXT_KB_MAX
@@ -964,25 +1001,38 @@ ext_detect:
         mul dx                          ; DX:AX = all of it
         mov bx, ax
         mov cx, dx                      ; CX:BX = all of it
-        shr dx, 1                       ; a quarter for objects...
+        shr dx, 1                       ; the objects' arena: a quarter at most...
         rcr ax, 1
         shr dx, 1
         rcr ax, 1
         test dx, dx
-        jz .objects
-        mov ax, 0xFFFF                  ; (under 1 MB)
+        jnz .big
+        cmp ax, EXT_ARENA               ; ... and EXT_ARENA at most (D6 B)
+        jbe .objects
+.big:
+        mov ax, EXT_ARENA
 .objects:
         mov [ext_untyped_b + SH_SIZE], ax
-        sub bx, ax                      ; ... the rest for segments
-        sbb cx, 0
-        jz .segments
-        mov bx, 0xFFFF
-.segments:
-        mov [ext_untyped_a + SH_SIZE], bx
+        sub bx, ax
+        sbb cx, 0                       ; CX:BX = the segments'
+        mov [ext_untyped_b + SH_OBJECT], bx         ; the arena: at the top, past them
+        mov dl, cl
+        inc dl                          ; (from 1 MB: paragraph 10000h)
+        mov [ext_untyped_b + SH_HIGH], dl
+        mov ax, EXT_CHUNK               ; slot 3's piece: the first EXT_CHUNK, or less
+        test cx, cx
+        jnz .first
+        cmp bx, ax
+        jae .first
+        mov ax, bx
+.first:
+        mov [ext_untyped_a + SH_SIZE], ax
         mov word [ext_untyped_a + SH_OBJECT], 0     ; from 1 MB
         mov byte [ext_untyped_a + SH_HIGH], 1
-        mov [ext_untyped_b + SH_OBJECT], bx         ; then the objects'
-        mov byte [ext_untyped_b + SH_HIGH], 1
+        sub bx, ax
+        sbb cx, 0
+        mov [ext_rest], bx              ; the rest: boot_ext_run's
+        mov [ext_rest + 2], cx
         TRACE "kernel: extended memory for the root"
         ret
 .wraps:
@@ -1153,6 +1203,50 @@ boot_slot_segment:
         push ds
         pop es
         pop si
+        ret
+
+; ----------------------------------------------------------------------------
+; boot_ext_run - the extended memory for segments past slot 3's piece, in
+; pieces of EXT_CHUNK (the last perhaps less), into the root's slots from
+; ROOT_SLOT_EXTENDED on (memory.md M3, D5 A); ROOT_SLOTS_EXTENDED of them
+; hold EXT_KB_MAX
+;   In:       ext_rest; DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
+; ----------------------------------------------------------------------------
+boot_ext_run:
+        mov word [ext_untyped_c + SH_OBJECT], EXT_CHUNK     ; from 1 MB + EXT_CHUNK
+        mov byte [ext_untyped_c + SH_HIGH], 1
+        mov ax, ROOT_SLOT_EXTENDED
+.next:
+        mov bx, [ext_rest]
+        mov cx, [ext_rest + 2]
+        mov dx, bx
+        or dx, cx
+        jz .done
+        cmp ax, ROOT_SLOT_EXTENDED + ROOT_SLOTS_EXTENDED
+        ASSERT c, "boot_ext_run: more pieces than slots for them"
+        mov dx, EXT_CHUNK
+        test cx, cx
+        jnz .size
+        cmp bx, dx
+        jae .size
+        mov dx, bx
+.size:
+        mov [ext_untyped_c + SH_SIZE], dx
+        sub bx, dx
+        sbb cx, 0
+        mov [ext_rest], bx
+        mov [ext_rest + 2], cx
+        push ax
+        mov dx, ext_untyped_c
+        call boot_slot_shadow
+        pop ax
+        inc ax
+        add word [ext_untyped_c + SH_OBJECT], EXT_CHUNK
+        adc byte [ext_untyped_c + SH_HIGH], 0
+        jmp .next
+.done:
         ret
 
 ; ----------------------------------------------------------------------------
@@ -2243,17 +2337,19 @@ kc_test:
 
 ; ----------------------------------------------------------------------------
 ; kc_segment - KCALL_SEGMENT: a segment capability's physical base and
-; limit, which a driver needs for DMA (l4.md L9)
-;   In:       BP = the frame (DX the segment)
-;   Out:      the frame's DL:AX = the base, CX = the limit; CF if not a
-;             segment capability
-;   Destroys: AX, CX, SI, DI
+; limit, which a driver needs for DMA (l4.md L9); or an untyped's base, its
+; paragraphs and those retyped so far, which the root needs to know what it
+; holds (memory.md M3)
+;   In:       BP = the frame (DX the segment or the untyped)
+;   Out:      the frame's DL:AX = the base; CX = the limit, or the untyped's
+;             paragraphs and SI those retyped; CF if neither
+;   Destroys: AX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 kc_segment:
         mov ax, [bp + FRAME_DX]
         mov cl, CAP_SEGMENT
         call cap_get
-        jc .refuse
+        jc .untyped
         mov ax, [es:di + 2]
         mov [bp + FRAME_AX], ax
         mov al, [es:di + 4]
@@ -2261,6 +2357,23 @@ kc_segment:
         mov byte [bp + FRAME_DX + 1], 0
         mov ax, [es:di]
         mov [bp + FRAME_CX], ax
+        and word [bp + FRAME_FLAGS], ~FLAGS_CF
+        ret
+.untyped:                               ; an untyped's memory (memory.md M3)
+        mov ax, [bp + FRAME_DX]
+        mov cl, CAP_UNTYPED
+        call cap_get
+        jc .refuse
+        mov ax, [es:si + SH_OBJECT]
+        mov dl, [es:si + SH_HIGH]
+        call para_phys                  ; DL:AX = its physical base
+        mov [bp + FRAME_AX], ax
+        mov [bp + FRAME_DX], dl
+        mov byte [bp + FRAME_DX + 1], 0
+        mov ax, [es:si + SH_SIZE]
+        mov [bp + FRAME_CX], ax         ; its paragraphs
+        mov ax, [es:si + SH_WATERMARK]
+        mov [bp + FRAME_SI], ax         ; those retyped so far
         and word [bp + FRAME_FLAGS], ~FLAGS_CF
         ret
 .refuse:

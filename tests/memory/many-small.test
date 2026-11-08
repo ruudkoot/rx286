@@ -1,0 +1,12 @@
+# The processes' memory without extended memory (roadmap memory.md M4, E3):
+# a 512 KB AT with none. The root keeps 128 KB of the memory below 1 MB for
+# processes (MEMORY_WITHOUT_EXTENDED), so one of tests/posix/many.c's 16
+# children of 60 KB fits, and the others are told there is no memory.
+program: idle
+define: TEST_POSIX_MANY
+memory: 512K 0K
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+---
+many: 16 children of 60 KB: forked 16, refused 0, sound 1, no memory 15, other 0

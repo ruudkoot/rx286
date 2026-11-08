@@ -1,0 +1,14 @@
+# As many processes as the table holds (roadmap memory.md M4): init starts
+# tests/posix/held.c (TEST_POSIX_HELD), which forks children, each waiting
+# on a pipe, until a fork is refused. With 256 slots of its own to give
+# out, the root refused the 22nd child (E6), the table not yet full; with
+# 768 (D8) the table fills first: CHILD_MAX less init and held itself.
+program: idle
+define: TEST_POSIX_HELD
+emulators: bochs mame
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+---
+held: the table full, not the root (CHILD_MAX - 2): yes
+held: all reaped

@@ -83,6 +83,8 @@ void vfs_spawned(int i, int parent);
 void vfs_forked(int child, int parent);
 void vfs_exec(int i);
 void vfs_exit(int i);
+/* vfs_forget - entry i waits at no pipe (server_fault; lock held) */
+void vfs_forget(int i);
 #define VFS_GONE (-2)                   /* vfs_call: the process ended as it waited */
 #define VFS_SIGPIPE (-3)                /*    a write to a pipe with no reader: SIGPIPE */
 #define VFS_INTR (-4)                   /*    a wait a signal broke off (sig_interrupt) */

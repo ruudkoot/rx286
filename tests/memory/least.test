@@ -1,0 +1,8 @@
+# Too little memory (roadmap memory.md M2, D4): a 320 KB machine, whose
+# memory for programs below 1 MB is under UMEM_LEAST once the image is
+# loaded. The kernel says so and stops, where it once handed out what was
+# not there or left the root unable to build (E3).
+memory: 320K 0K
+---
+rx286, test build
+rx286 PANIC: too little memory for programs below 1 MB (UMEM_LEAST)

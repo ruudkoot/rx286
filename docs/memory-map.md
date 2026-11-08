@@ -11,6 +11,7 @@ D7). This document explains each one.
 | 00400h-004FFh | BIOS data area | | never read |
 | 00500h-07BFFh | the boot code's stack, down from 7C00h | `LOADER_STACK_TOP` | boot sector and loader |
 | 00500h-006FFh | the double-fault task's stack, once the kernel runs | `DFSTACK_PHYS`, `DFSTACK_SIZE` | the kernel (`SEL_DFSTACK`) |
+| 00600h-0061Fh | the boot information, until the kernel's entry copies it into its data (roadmap memory.md M2) | `BOOT_INFO_PHYS`, `BOOT_INFO_SIZE` | the loader writes, the kernel copies |
 | 00700h-0BFFFh | the arena, once the kernel runs: untyped memory, the root's | `ARENA_PHYS`, `ARENA_SIZE` | the root, and what it gives |
 | 0C000h | where the kernel's data segment starts | `KDATA_BASE` | the kernel (`SEL_KDATA`) |
 | 0C100h-0C4FFh | the kernel's one stack (roadmap os-server.md P3) | `KSTACK_PHYS`, `KSTACK_SIZE`; its offsets in `SEL_KDATA`, `KSTACK_BOTTOM` to `KSTACK_TOP` | the kernel (`SEL_KSTACK`, expand-down over `SEL_KDATA`'s memory) |
@@ -21,13 +22,13 @@ D7). This document explains each one.
 | 08400h-097FFh | the loader's FAT buffer | `LOADER_FAT_BUF` | the loader |
 | 09800h-0FFFFh | the loader's root-directory buffer | `LOADER_ROOT_BUF`, `LOADER_BUF_END` | the loader |
 | 10000h on | the boot image, `KERNEL.BIN`: up to `IMAGE_MAX` bytes, 192 KB (to 3FFFFh at most) | `KERNEL_PHYS` | the loader loads, the kernel and the modules run |
-| from the image's end, on a KB, to 9FFFFh | memory for programs' segments, as untyped: at least `UMEM_LEAST`, 384 KB (roadmap os-server.md P15) | `UMEM_ALIGN`, `UMEM_END` | the root, and what it gives |
+| from the image's end, on a KB, to the base memory's end | memory for programs' segments, as untyped: to where INT 12h says the base memory ends (9FC00h on Bochs, its BIOS's EBDA past it), at most 9FFFFh; the kernel stops if it is less than `UMEM_LEAST`, 192 KB (roadmap os-server.md P15, memory.md M2) | `UMEM_ALIGN`, `UMEM_END` | the root, and what it gives |
 | A0000h-AFFFFh | EGA graphics memory | | nobody |
 | B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the kernel's console |
 | B8000h-BFFFFh | colour text, `VIDEO_PAGES` pages of `VIDEO_PAGE` bytes (`VIDEO_PAGE_SHIFT`) | | the console driver (os-server.md P11) |
 | C0000h-C3FFFh | EGA BIOS ROM | | the BIOS |
 | F0000h-FFFFFh | system BIOS ROM | | the BIOS |
-| 100000h and up | extended memory, if fitted: the root's untyped (roadmap os-server.md P3), up to 1 MB for segments and the rest, up to 1 MB, for objects; A20 on from the kernel's entry | CMOS `CMOS_EXT_LOW`, `CMOS_EXT_HIGH` | the root, and what it gives |
+| 100000h and up | extended memory, if fitted, all of it the root's untyped (roadmap os-server.md P3, memory.md M3): from 1 MB, for segments, pieces of 768 KB (`EXT_CHUNK`), each on 256 KB, the first in slot 3, the others in slots 64-95; at the top, for the kernel's objects, a quarter at most and 128 KB at most (`EXT_ARENA`); A20 on from the kernel's entry | INT 15h AH=88h in the boot information (`BI_EXT_KB`) | the root, and what it gives |
 
 The kernel's stacks, its GDT and the arena lie in the boot code's memory,
 which is free once the loader has jumped to the kernel (roadmap l4.md L5):
@@ -41,6 +42,34 @@ with up to `BOOT_TRIES` attempts, and runs it only if the word at
 instruction jumps over.
 
 The console is `VIDEO_COLUMNS` by `VIDEO_ROWS` characters of two bytes each.
+
+## The boot information
+
+The loader asks the BIOS for the memory and leaves the answer at
+`BOOT_INFO_PHYS` 600h, past the BIOS's own byte at 500h (its print-screen
+status), in the double fault's stack, which nothing uses until the kernel
+runs (roadmap memory.md M2). The kernel's entry, in real mode and before
+anything else touches low memory, copies as much as `BI_SIZE` says into
+`boot_info` in its data, the rest zero; its start stops if `BI_MAGIC` is not
+`BOOT_INFO_MAGIC` ("BI"). The root reads the copy, read-only, in slot 102.
+The structure is `BOOT_INFO_SIZE`, 32 bytes, words unless said:
+
+| Offset | Field | What |
+|---|---|---|
+| 0 | `BI_MAGIC` | `BOOT_INFO_MAGIC`, "BI" |
+| 2 | `BI_SIZE` | the bytes the loader gave: 32 |
+| 4 | `BI_FLAGS` | `BIF_EXT_CMOS`: INT 15h AH=88h failed, and `BI_EXT_KB` is CMOS 30h-31h's |
+| 6 | `BI_BASE_KB` | INT 12h: the base memory in KB, an EBDA left out |
+| 8 | `BI_EXT_KB` | INT 15h AH=88h: the extended memory in KB |
+| 10 | `BI_EBDA` | the EBDA's segment, if BDA 40:0Eh holds INT 12h's end; else 0 |
+| 12 | `BI_DRIVE` | the boot drive (a byte) |
+| 16 | `BI_UMEM_START` | the kernel's: where the memory for programs below 1 MB starts (a paragraph) |
+| 18 | `BI_UMEM_END` | and where it ends: the base memory's end, at most A000h |
+
+A later roadmap adds what else the loader finds of the hardware: 0 is "not
+given" in every field. The memory for programs below 1 MB must hold at
+least `UMEM_LEAST`, or the kernel stops; the build checks that a machine of
+`BASE_LEAST`, 512 KB, leaves that much with the image at its most.
 
 ## The boot image
 
@@ -57,9 +86,9 @@ instead of corrupting the next segment.
 |---|---|---|---|---|
 | real-mode entry | `ENTRY_OFF` 0000h | `ENTRY_ROOM` 256 B | 10000h | none: real mode |
 | kernel code | `KTEXT_OFF` 0100h | `KTEXT_ROOM` 16 KB | `KTEXT_PHYS` 10100h | `SEL_KCODE`, limit = size |
-| kernel data | `KDATA_OFF` 4100h | `KDATA_ROOM` 6 KB | `KDATA_PHYS` 14100h | within `SEL_KDATA` |
-| the module table | `MODULE_TABLE_OFF` 5900h | `MODULE_TABLE_SIZE` 512 B | `MODULE_TABLE_PHYS` 15900h | within `SEL_KDATA`; the root's, read-only |
-| the modules | `MODULES_OFF` 5B00h | to `IMAGE_MAX` 192 KB | 15B00h on | each module's code its own segment |
+| kernel data | `KDATA_OFF` 4100h | `KDATA_ROOM` 7 KB | `KDATA_PHYS` 14100h | within `SEL_KDATA` |
+| the module table | `MODULE_TABLE_OFF` 5D00h | `MODULE_TABLE_SIZE` 512 B | `MODULE_TABLE_PHYS` 15D00h | within `SEL_KDATA`; the root's, read-only |
+| the modules | `MODULES_OFF` 5F00h | to `IMAGE_MAX` 192 KB | 15F00h on | each module's code its own segment |
 
 The code room was 16 KB and the data room 8 KB while the old system calls
 and the new kernel lived side by side (roadmap l4.md, *Constraints*); with
@@ -134,6 +163,16 @@ by every process of the file; its space, thread and endpoint, a block of
 1 KB. *docs/root.md* says which memory the allocator has, with extended
 memory and without.
 
+**The OS server's memory** (roadmap memory.md M6, M7): its data segment
+holds its tables alone, 35 KB at 48 entries, since it is built in C's
+compact model; each of its threads runs on a stack segment of its own, 1
+KB, from blocks the root keeps for good for the server's stacks: one at
+boot for the threads it starts then, then blocks of 8 KB of the
+allocator's as `ROOT_SERVE` asks. Its stack segment proper is only its
+threads' starts' room, `OS_STACK_SIZE` bytes. Its files' cache, its pipes'
+buffers and its current directories are segments of the allocator's too
+(*docs/processes.md*).
+
 ## The kernel's objects, the arena, and memory for programs
 
 The kernel allocates nothing after its start (roadmap l4.md D7, L3). Its
@@ -156,7 +195,7 @@ fixed room taking memory from programs before it does.
 | Object | Bytes | What |
 |---|---|---|
 | a thread | 256 | its control block (220), whose bytes 184 to 217 keep its frame while it does not run; the running thread's is at the top of the kernel's one stack, where SP0 puts every interrupt's from rings 1-3 (roadmap os-server.md P3) |
-| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its first child and to its next and previous in its parent's ring of children, the first's to the parent too: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's and the root's of 512 16,400 |
+| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its first child and to its next and previous in its parent's ring of children, the first's to the parent too: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's of 512 16,400, the root's of 1,024 32,784 (memory.md M4) |
 | an endpoint, a notification | 16 | |
 
 An object lies at a paragraph, zeroed: every retype is aligned to a
@@ -175,7 +214,8 @@ takes another if one crosses a 64 KB boundary (*docs/storage.md*).
 `make sizes` prints how full each room is, for the release build
 (roadmap os-server.md P14): the boot sector and loader, the kernel's entry,
 code and data, each driver's code and data, the root's and the OS server's
-code and data segments (64 KB each, the data with its stacks), `/z` against
+code and data segments (64 KB each; the root's data with its stack, the
+OS server's with its tables alone), `/z` against
 the 64 KB a module's data holds and each of its programs, each program of
 C's `/BIN`, and the boot image against `IMAGE_MAX`. A program's sizes come
 from its executable's header (`exe.inc`). It warns at 90%.

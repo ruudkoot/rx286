@@ -1,0 +1,17 @@
+# The tones waited for in the process table's late entries (roadmap
+# memory.md M1): tests/posix/late.c with LATE_TONE has the process at entry
+# 16, then 22, play a tone of 400 ticks and be killed after half a second;
+# the kill cuts the tone short (dev_tone_stop, os-server.md P15), so a tone
+# of a tick then takes one. The server kept the tones waited for as a 16-bit
+# mask, a bit an entry: past entry 15 the killed tone went on (E8: 376 ticks
+# more).
+program: none
+define: TEST_POSIX_LATE
+define: LATE_TONE
+match: contains
+timeout: 120
+---
+late: the tone of entry 16, killed, cut short: yes
+late: the tone of entry 22, killed, cut short: yes
+late: the tone of the table's last entry, killed, cut short: yes
+late: done

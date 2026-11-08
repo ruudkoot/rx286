@@ -50,7 +50,8 @@ struct tty {
     rx_u16 head, count, lines, edit;
     rx_u16 iflag, oflag, cflag, lflag;
     rx_u8 cc[NCCS];
-    rx_u16 readers;                     /* the entries waiting to read, a bit each */
+    rx_u8 readers[(PROCS + 7) / 8];     /* the entries waiting to read, a bit each: bytes,
+                                           as vfs.c's waiters (memory.md M1) */
     pid_t session, pgrp;                /* its session (0: none), its foreground group */
 };
 
@@ -149,7 +150,7 @@ static void echo(const char *s, unsigned n)
 static void echo_flush(void)
 {
     if (echoed) {
-        tty_output(echo_unit, OS_DATA, (rx_u16)(unsigned)echoes, echoed);
+        tty_output(echo_unit, RX_SEG(echoes), RX_OFF(echoes), echoed);
         echoed = 0;
     }
 }
@@ -312,7 +313,7 @@ static void wake_readers(int unit)
     int i;
 
     for (i = 0; i < PROCS; i++)
-        if (ttys[unit].readers & (1u << i))
+        if (ttys[unit].readers[i >> 3] & (1u << (i & 7)))
             proc_wake(i);
 }
 
@@ -323,13 +324,17 @@ static void wake_readers(int unit)
 static void reader_flag(void)
 {
     const struct tty *t = &ttys[shown];
-    int waits = t->readers ? ((t->lflag & ICANON) ? t->lines == 0 : t->count == 0)
+    int any = 0, k, waits;
+
+    for (k = 0; k < (PROCS + 7) / 8; k++)
+        any |= t->readers[k];
+    waits = any ? ((t->lflag & ICANON) ? t->lines == 0 : t->count == 0)
                 : !vfs_tty_open(shown);
 
     test_reader(waits ? TEST_READER_FOREVER : TEST_READER_NONE);
 }
 
-/* tty_thread - the tty thread (os_thread): each key through the shown
+/* tty_thread - the tty thread (server_thread): each key through the shown
  * terminal's discipline, its readers woken, a terminal shown */
 void tty_thread(void)
 {
@@ -390,12 +395,12 @@ int tty_read(int i, int unit, rx_u16 data, rx_u16 at, rx_u16 n)
             return access;              /* a background group's: SIGTTIN, or EIO */
         if (enough(t, n))
             break;
-        t->readers |= (rx_u16)(1u << i);
+        t->readers[i >> 3] |= (rx_u8)(1u << (i & 7));
         reader_flag();                  /* test builds type now */
         lock_give();
         proc_sleep(i);
         lock_take(PROC_NOTIFY(i));
-        t->readers &= (rx_u16)~(1u << i);
+        t->readers[i >> 3] &= (rx_u8)~(1u << (i & 7));
         reader_flag();
         if (!proc_still(i))
             return VFS_GONE;
@@ -436,9 +441,9 @@ int tty_ready(int unit)
 void tty_watch(int i, int unit, int on)
 {
     if (on)
-        ttys[unit].readers |= (rx_u16)(1u << i);
+        ttys[unit].readers[i >> 3] |= (rx_u8)(1u << (i & 7));
     else
-        ttys[unit].readers &= (rx_u16)~(1u << i);
+        ttys[unit].readers[i >> 3] &= (rx_u8)~(1u << (i & 7));
     reader_flag();
 }
 
@@ -581,6 +586,20 @@ int tty_setpgrp(int i, int unit, pid_t pgid, int *error)
         return access;
     t->pgrp = pgid;
     return 0;
+}
+
+/* tty_forget - entry i reads no terminal (server.h): said to test builds
+ * only if it was a reader, as a read's end says it */
+void tty_forget(int i)
+{
+    int u, was = 0;
+
+    for (u = 0; u < TTYS; u++) {
+        was |= ttys[u].readers[i >> 3] & (1u << (i & 7));
+        ttys[u].readers[i >> 3] &= (rx_u8)~(1u << (i & 7));
+    }
+    if (was)
+        reader_flag();
 }
 
 /* tty_hangup - a session's leader ended: the terminal its session has

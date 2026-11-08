@@ -1,15 +1,15 @@
 # The processes (roadmap os-server.md P6): init, process 1, starts
 # tests/posix/proc.c from /z (TEST_POSIX_PROC), which forks, execs, spawns
 # and waits, takes a child's fault and a kill as their signals, uses the
-# heap, and is refused a fork once the table is full (25 entries: init,
-# this, 23 children). The idle program waits for a key meanwhile; the test
+# heap, and is refused a fork once the table is full (CHILD_MAX, 48
+# entries since memory.md M7: init, this, 46 children). The idle program waits for a key meanwhile; the test
 # ends when the wait is over. A data segment grows in place while its
 # block has room (ROOT_BRK, P15), so its 6 KB more past 33 KB need no second
 # 64 KB block, which DOSBox-X's 1 MB would not have free; nor do the
-# server's threads for the 23 children, from the arena, split its memory.
+# server's threads for the 46 children split its memory.
 program: idle
 define: TEST_POSIX_PROC
-keys: {wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 180
 ---
@@ -33,8 +33,8 @@ proc: the killed (SIGTERM 15): ended by signal 15
 proc: kill init (-1, EPERM 1): -1, 1
 proc: kill no one (-1, ESRCH 3): -1, 3
 proc: 3000 bytes of heap: yes; the break moved: yes
-proc: a fork bomb: 23 children, then EAGAIN (11): 11
-proc: all 23 reaped; then ECHILD (10): 10
+proc: a fork bomb: 46 children (CHILD_MAX - 2), then EAGAIN (11): 11
+proc: all 46 reaped; then ECHILD (10): 10
 proc: nice to 19 (-1, errno 5 kept): -1, 5
 proc: kill(zombie, 0), its session (0 1): 0 1
 proc: waitpid with an option it does not know (-1, EINVAL 22): -1, 22

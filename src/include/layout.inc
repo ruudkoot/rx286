@@ -24,6 +24,26 @@ LOADER_FAT_BUF      equ 0x8400      ; the loader's buffer for one FAT (10 sector
 LOADER_ROOT_BUF     equ 0x9800      ; the loader's buffer for the root directory (26 sectors)
 LOADER_BUF_END      equ 0x10000
 
+; The boot information (roadmap memory.md M2): what the loader found of
+; the machine, left at BOOT_INFO_PHYS; the kernel's entry copies as much as
+; BI_SIZE says into its data (boot_info) before anything else uses that
+; memory, and the root reads the copy (ROOT_SLOT_BOOT_INFO). The loader's
+; part comes first, then the kernel's sizing (BI_UMEM_*). A later roadmap
+; adds to it: 0 is "not given" in every field.
+BOOT_INFO_PHYS      equ 0x00600     ; past the BIOS's byte at 500h (its print-screen status)
+BOOT_INFO_SIZE      equ 32
+BOOT_INFO_MAGIC     equ 'BI'
+BI_MAGIC            equ 0           ; BOOT_INFO_MAGIC
+BI_SIZE             equ 2           ; the bytes the loader gave
+BI_FLAGS            equ 4
+BIF_EXT_CMOS        equ 1           ; INT 15h AH=88h failed: BI_EXT_KB is CMOS 30h-31h's
+BI_BASE_KB          equ 6           ; INT 12h: the base memory in KB, an EBDA left out
+BI_EXT_KB           equ 8           ; INT 15h AH=88h: the extended memory in KB
+BI_EBDA             equ 10          ; the EBDA's segment, if 40:0Eh holds INT 12h's end; else 0
+BI_DRIVE            equ 12          ; the boot drive (a byte)
+BI_UMEM_START       equ 16          ; the kernel's: the memory for programs below 1 MB,
+BI_UMEM_END         equ 18          ;    from and to (paragraphs)
+
 ; ---------------------------------------------------------------- the boot image
 KERNEL_PHYS         equ 0x10000     ; KERNEL.BIN, the boot image, is loaded here (64 KB aligned)
 KERNEL_SEG          equ KERNEL_PHYS >> 4    ; the same place as a real-mode segment
@@ -38,10 +58,10 @@ ENTRY_ROOM          equ 0x0100
 KTEXT_OFF           equ 0x0100      ; kernel code (16 KB: the arena's room, os-server.md
 KTEXT_ROOM          equ 0x4000      ; P3; 12 KB from l4.md L10 until then)
 KDATA_OFF           equ 0x4100      ; kernel data: the boot GDT, IDT, TSSs, variables, messages
-KDATA_ROOM          equ 0x1800
-MODULE_TABLE_OFF    equ 0x5900      ; the table of the image's modules
+KDATA_ROOM          equ 0x1C00      ; 7 KB (6 KB until memory.md M1)
+MODULE_TABLE_OFF    equ 0x5D00      ; the table of the image's modules
 MODULE_TABLE_SIZE   equ 0x0200
-MODULES_OFF         equ 0x5B00      ; the modules, each on a paragraph
+MODULES_OFF         equ 0x5F00      ; the modules, each on a paragraph
 KERNEL_END_MARK     equ 0x286E      ; the image's last word: the loader checks it arrived
 
 ; The module table: a header, then an entry a module, the root's first.
@@ -100,11 +120,13 @@ GDT_PHYS            equ 0x0C800
 GDT_ENTRIES         equ 1024
 OBJ_FREE_PHYS       equ GDT_PHYS + GDT_ENTRIES * 8
 ; Memory for programs' segments, given out as untyped (l4.md L3): from the
-; image's end, on a kilobyte, to the EGA's memory (os-server.md P15;
-; umem_size)
+; image's end, on a kilobyte, to the base memory's end as the BIOS says it,
+; at most the EGA's memory (os-server.md P15; memory.md M2; umem_size)
 UMEM_ALIGN          equ 0x400
 UMEM_END            equ 0xA0000
-UMEM_LEAST          equ 0x60000     ; what is left with the image at its most
+UMEM_LEAST          equ 0x30000     ; the least the kernel runs with: what the root needs to
+                                    ;    build the boot modules (memory.md D4, E3)
+BASE_LEAST          equ 0x80000     ; the least base memory of the machines rx286 is for
 SPACE_MAX           equ 128         ; spaces (space_list)
 THREAD_MAX          equ 192         ; threads (thread_list)
 
@@ -117,8 +139,11 @@ MODULE_TABLE_VOFF   equ MODULE_TABLE_PHYS - KDATA_BASE  ; the module table
 GDT_OFF             equ GDT_PHYS - KDATA_BASE           ; the GDT
 OBJ_FREE_OFF        equ OBJ_FREE_PHYS - KDATA_BASE      ; its pool's free descriptors
 
-%if KERNEL_PHYS + IMAGE_MAX + UMEM_LEAST > UMEM_END
-  %error "layout.inc: the image's room leaves too little memory for programs"
+%if KERNEL_PHYS + IMAGE_MAX + UMEM_LEAST > BASE_LEAST
+  %error "layout.inc: the image's room leaves a 512 KB machine too little for programs"
+%endif
+%if BOOT_INFO_PHYS < 0x510 || BOOT_INFO_PHYS + BOOT_INFO_SIZE > DFSTACK_PHYS + DFSTACK_SIZE
+  %error "layout.inc: the boot information must lie past 50Fh, in the double fault's stack"
 %endif
 %if DFSTACK_PHYS + DFSTACK_SIZE > ARENA_PHYS || ARENA_PHYS + ARENA_SIZE > KDATA_BASE
   %error "layout.inc: the double fault's stack, the arena and the kernel's data overlap"

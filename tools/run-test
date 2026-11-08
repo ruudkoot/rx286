@@ -59,6 +59,13 @@
 #   forbid: {...} fault #{...}  a line the transcript must not hold, as an
 #                               expected line is matched ({...}); may repeat:
 #                               what contains mode would pass over
+#   memory: 512K 15M            a machine of so much base and extended memory
+#                               (K or M); may repeat: the test runs on each
+#                               machine the emulator can be (rxlib.machine_can),
+#                               each run in run-EMULATOR-BASEK-EXTK/ and said
+#                               on a line of its own, and is refused where it
+#                               can be none (memory.md M2). Without it, each
+#                               emulator's own (rxlib.MACHINES_DEFAULT)
 #   ---
 # A header's value is taken without the spaces around it; a key script, an
 # lpt1: line or a file: text writes \s for a space at its ends. A test that
@@ -69,7 +76,10 @@
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
 #   {c:name} the counter's, {r:name} the root's, {o:name} the OS server's,
 #   {z:program.name} a program of
-#   /z's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   /z's (four hex digits); {mem_base}, {mem_ext} the run's machine's base and
+#   extended memory in KB, {mem_end} where its memory for programs below 1 MB
+#   ends, as five hex digits, {mem_extended} yes if it has extended memory,
+#   else no (memory.md M2, M4); {x:name}, {kx:name} the same as eight lower-case digits;
 #   {{ and }} a brace itself;
 #   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
 #   {m:module.codesum}, {m:module.datasum} sums of its code and data;
@@ -100,6 +110,7 @@
 
 import argparse
 import concurrent.futures
+import copy
 import fcntl
 import glob
 import os
@@ -173,6 +184,8 @@ class Test:
         self.installs = []                  # (drive, path, a file the build made)
         self.expected = []
         self.forbidden = []                 # lines the transcript must not hold
+        self.machines = []                  # (base, extended) KB: memory: lines
+        self.machine = None                 # the run's, of machines (None: the default)
         self.parse(open(path, encoding='utf-8').read())
 
     def parse(self, text):
@@ -236,6 +249,12 @@ class Test:
                 if not value:
                     raise ValueError('%s: an empty forbid line' % self.path)
                 self.forbidden.append(value)
+            elif key == 'memory':
+                sizes = value.split()
+                if len(sizes) != 2 or not all(re.fullmatch(r'\d+[KM]', x) for x in sizes):
+                    raise ValueError('%s: bad memory line %r' % (self.path, line))
+                self.machines.append(tuple(int(x[:-1]) * (1024 if x[-1] == 'M' else 1)
+                                           for x in sizes))
             elif key == 'file':
                 drive, path, text = (value.split(None, 2) + [''])[:3]
                 if drive not in DRIVE_IMAGES or not path.startswith('/'):
@@ -293,7 +312,27 @@ class Test:
         """A run's own files, each emulator's apart: the floppy it boots,
         drives B, C and D, the transcript, the printers' and debugger's
         output. Made afresh for each run."""
-        return os.path.join(self.build_dir, 'run-' + EMULATOR)
+        suffix = '-%dK-%dK' % self.machine if self.machine else ''
+        return os.path.join(self.build_dir, 'run-' + EMULATOR + suffix)
+
+    @property
+    def label(self):
+        """How a run is named in the report: the test, and its machine."""
+        if not self.machine:
+            return self.path
+        return '%s [%dK %dK]' % ((self.path,) + self.machine)
+
+    def runs(self):
+        """The runs of this test on EMULATOR: one, or one a machine it can be."""
+        if not self.machines:
+            return [self]
+        out = []
+        for m in self.machines:
+            if rxlib.machine_can(EMULATOR, *m):
+                run = copy.copy(self)
+                run.machine = m
+                out.append(run)
+        return out
 
 
 class HayesPeer(threading.Thread):
@@ -498,6 +537,13 @@ def substitute(test, line):
         if name in ('image_size', 'image_size8'):   # KERNEL.BIN's bytes, as dir lists
             size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))   # them, or ls -l
             return ('%8d' if name == 'image_size8' else '%d') % size
+        if name in ('mem_base', 'mem_ext', 'mem_end', 'mem_extended'):     # the run's
+            base, ext = test.machine or rxlib.MACHINES_DEFAULT[EMULATOR]  # machine (M2)
+            if name == 'mem_end':
+                return '%05X' % (min(base, 640) * 1024)
+            if name == 'mem_extended':
+                return 'yes' if ext else 'no'
+            return '%d' % (base if name == 'mem_base' else ext)
         if name == 'image_free':    # the boot floppy's free bytes, beside KERNEL.BIN
             size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
             return '%d' % (FLOPPY_DATA_BYTES - (size + 511) // 512 * 512)
@@ -757,7 +803,8 @@ def run_one(test):
                         log=os.path.join(r, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
                         disks=disks, printers=printers, media=test.media,
-                        log_port='com3' if test.modem else 'com2', modem=modem)
+                        log_port='com3' if test.modem else 'com2', modem=modem,
+                        machine=test.machine)
     rc = []
     if test.breakpoint:
         rc.append('ldsym global "%s"' % os.path.join(b, 'rx286.sym'))
@@ -782,10 +829,11 @@ def run_one(test):
     elif EMULATOR == 'dosbox-x':
         status, _ = rxlib.run_dosbox(r, os.path.join(r, 'run.img'), serial, timeout, until,
                                      printers=printers, modem=modem,
-                                     log_port='com3' if test.modem else 'com2')
+                                     log_port='com3' if test.modem else 'com2',
+                                     machine=test.machine)
     else:
         status, _ = rxlib.run_mame(r, os.path.join(r, 'run.img'), serial, timeout, until,
-                                   disks=disks, media=test.media)
+                                   disks=disks, media=test.media, machine=test.machine)
     if peer:
         peer.close()
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
@@ -826,11 +874,14 @@ def main():
     tests = [t for t in tests if EMULATOR in t.emulators]
     for t in skipped:
         print('SKIP  %-40s (not on %s)' % (t.path, EMULATOR))
+    for t in [t for t in tests if not t.runs()]:
+        print('SKIP  %-40s (no machine of its memory: lines on %s)' % (t.path, EMULATOR))
+    tests = [r for t in tests for r in t.runs()]
     failures = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         for test, error, seconds in pool.map(run, tests):
             status = 'PASS' if error is None else 'FAIL'
-            print('%s  %-40s %5.1f s' % (status, test.path, seconds))
+            print('%s  %-40s %5.1f s' % (status, test.label, seconds))
             if error:
                 failures += 1
                 print('      ' + error.replace('\n', '\n      '))

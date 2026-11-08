@@ -199,6 +199,9 @@ PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
 EXT_KB_MAX          equ 15360       ; the extended memory a 286 addresses: 15 MB
 EXT_PROBE           equ 0x5AA5      ; ext_detect's word at 1 MB
+EXT_CHUNK           equ 0xC000      ; paragraphs of a piece of extended memory: 768 KB, so
+                                    ;    that each starts on 256 KB (memory.md M3)
+EXT_ARENA           equ 0x2000      ; the kernel objects' arena at its top: 128 KB at most
 STACK_FILL          equ 0xA5A5  ; debug builds: an unused word of a kernel stack
 
 ; ---------------------------------------------------------------- the CPU

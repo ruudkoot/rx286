@@ -39,14 +39,40 @@ C_DEFINES := $(patsubst -d%,-D%,$(FLAVOUR_DEFINE) $(TEST_DEFINES)) \
 NASM_C_FLAGS := -w+all -w+error -Isrc/include/ -Isrc/userland/ -Isrc/lib/ $(FLAVOUR_DEFINE) \
     $(TEST_DEFINES)
 
-ifeq ($(CC_KIND),watcom)
-OBJ := obj
+# Open Watcom in every build: the far libraries, and the programs built in
+# the compact model, are Watcom's alone, gcc-ia16 having no such model
+# (roadmap memory.md D11 B)
 WCC := $(WATCOM)/binl64/wcc
 WLINK := $(WATCOM)/binl64/wlink
 WLIB := $(WATCOM)/binl64/wlib
 WDIS := $(WATCOM)/binl64/wdis
 WCC_FLAGS := -q -2 -ms -zl -zls -zld -s -ecc -os -zastd=c99 -wx -we -x -fr= \
     -i=src/include/c -i=src/include -i=$(INC_H) $(subst -D,-d,$(C_DEFINES))
+
+# wlink_exe NAME OBJECTS [MKEXE_FLAGS]: an rx286 executable of wlink's, code
+# at 1000:0, data at 2000:0. A DOS executable, for its relocations, which
+# mkexe makes selectors (memory.md M5): MKEXE_FLAGS gives a module's ring
+# if it is not 3.
+define wlink_exe
+	@mkdir -p $(C_B)
+	printf '%s\n' 'option quiet, nodefaultlibs, start=__start' 'option map=$(C_B)/$(1).wmap' \
+	    'disable 1014' 'format dos' 'name $(C_B)/$(1).exe' \
+	    $(foreach o,$(filter %.obj,$(2)),'file $(o)') \
+	    $(foreach l,$(filter %.lib,$(2)),'library $(l)') \
+	    'order clname CODE segaddr=0x1000 offset=0 clname DATA segaddr=0x2000 offset=0 segment _STACKBOT segment CONST segment CONST2 segment _DATA clname BSS noemit' \
+	    > $(C_B)/$(1).lnk
+	$(WLINK) @$(C_B)/$(1).lnk
+	$(PYTHON) tools/mkexe $(3) --wlink $(C_B)/$(1).exe $(C_B)/$(1).wmap $(B)/$(1).rx
+endef
+
+# (each made in a directory of its own, then moved into place: two wlibs at
+# once in one directory, under make -j, spoil each other's work file)
+make_wlib = rm -f $(1) && rm -rf $(1).dir && mkdir $(1).dir && \
+    $(WLIB) -q -n -b $(1).dir/$(notdir $(1)) $(addprefix +,$(2)) && \
+    mv $(1).dir/$(notdir $(1)) $(1) && rm -rf $(1).dir
+
+ifeq ($(CC_KIND),watcom)
+OBJ := obj
 
 $(C_B)/%.$(OBJ): src/%.c $(C_HEADERS) c.mk
 	@mkdir -p $(dir $@)
@@ -70,19 +96,8 @@ $(C_B)/tests/%.$(OBJ): tests/%.asm $(COMMON_SRC) src/include/cabi.inc
 	@mkdir -p $(dir $@)
 	$(NASM) -f obj --gprefix _ $(NASM_C_FLAGS) -l $(@:.$(OBJ)=.lst) -o $@ $<
 
-# c_link NAME OBJECTS [MKEXE_FLAGS]: an rx286 executable, code at 1000:0,
-# data at 2000:0
-define c_link
-	@mkdir -p $(C_B)
-	printf '%s\n' 'option quiet, nodefaultlibs, start=__start' 'option map=$(C_B)/$(1).wmap' \
-	    'disable 1014' 'format raw bin' 'name $(C_B)/$(1).raw' \
-	    $(foreach o,$(filter %.$(OBJ),$(2)),'file $(o)') \
-	    $(foreach l,$(filter %.lib,$(2)),'library $(l)') \
-	    'order clname CODE segaddr=0x1000 offset=0 clname DATA segaddr=0x2000 offset=0 segment _STACKBOT segment CONST segment CONST2 segment _DATA clname BSS noemit' \
-	    > $(C_B)/$(1).lnk
-	$(WLINK) @$(C_B)/$(1).lnk
-	$(PYTHON) tools/mkexe $(3) --wlink $(C_B)/$(1).raw $(C_B)/$(1).wmap $(B)/$(1).rx
-endef
+# c_link NAME OBJECTS [MKEXE_FLAGS]: an rx286 executable (wlink_exe)
+c_link = $(call wlink_exe,$(1),$(2),$(3))
 else ifeq ($(CC_KIND),ia16)
 OBJ := o
 IA16_GCC := $(IA16)/bin/ia16-elf-gcc
@@ -138,11 +153,7 @@ C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 PROCESS_LIBS := $(START_OBJS) $(addprefix $(C_B)/,crt.lib c.lib rx286.lib posix.lib)
 
 ifeq ($(CC_KIND),watcom)
-# (each made in a directory of its own, then moved into place: two wlibs at
-# once in one directory, under make -j, spoil each other's work file)
-make_lib = rm -f $(1) && rm -rf $(1).dir && mkdir $(1).dir && \
-    $(WLIB) -q -n -b $(1).dir/$(notdir $(1)) $(addprefix +,$(2)) && \
-    mv $(1).dir/$(notdir $(1)) $(1) && rm -rf $(1).dir
+make_lib = $(make_wlib)
 else
 make_lib = rm -f $(1) && $(IA16)/bin/ia16-elf-ar rcs $(1) $(2)
 endif
@@ -157,22 +168,69 @@ $(C_B)/os.lib: $(OS_OBJS)
 $(C_B)/posix.lib: $(POSIX_OBJS)
 	$(call make_lib,$@,$^)
 
+# The far libraries (roadmap memory.md M5): the C libraries again, in
+# Watcom's compact model: every data pointer far, SS not taken for DS (-zu),
+# DS pegged to DGROUP (-zdp) so that the code needs no segment relocations;
+# their assembly with FAR_DATA (memory-far.asm, kcall.asm's far branches).
+# In every build, gcc-ia16's too (D11 B). setjmp is not among them: no
+# program in the compact model uses it. The start (crt0, start.c) is a
+# module program's: a process's arguments are offsets (spawn), not far.
+FAR_B := $(C_B)/far
+WCC_FAR_FLAGS := $(subst -ms,-mc -zu -zdp,$(WCC_FLAGS))
+FAR_START_OBJS := $(addprefix $(FAR_B)/lib/crt/,crt0.obj start.obj)
+FAR_LIBS := $(addprefix $(FAR_B)/,crt.lib c.lib rx286.lib os.lib)
+
+$(FAR_B)/%.obj: src/%.c $(C_HEADERS) c.mk
+	@mkdir -p $(dir $@)
+	$(WCC) $(WCC_FAR_FLAGS) -fo=$@ $<
+	$(WDIS) -l=$(@:.obj=.dis) $@
+
+$(FAR_B)/tests/%.obj: tests/%.c $(C_HEADERS) c.mk
+	@mkdir -p $(dir $@)
+	$(WCC) $(WCC_FAR_FLAGS) -fo=$@ $<
+	$(WDIS) -l=$(@:.obj=.dis) $@
+
+$(FAR_B)/lib/crt/helpers.obj: src/lib/crt/helpers.asm $(COMMON_SRC) src/include/cabi.inc
+	@mkdir -p $(dir $@)
+	$(NASM) -f obj -dFAR_DATA $(NASM_C_FLAGS) -l $(@:.obj=.lst) -o $@ $<
+
+$(FAR_B)/%.obj: src/%.asm $(COMMON_SRC) src/include/cabi.inc
+	@mkdir -p $(dir $@)
+	$(NASM) -f obj --gprefix _ -dFAR_DATA $(NASM_C_FLAGS) -l $(@:.obj=.lst) -o $@ $<
+
+$(FAR_B)/crt.lib: $(addprefix $(FAR_B)/lib/crt/,memory-far.obj helpers.obj)
+	$(call make_wlib,$@,$^)
+$(FAR_B)/c.lib: $(addprefix $(FAR_B)/lib/c/,string.obj printf.obj stdlib.obj)
+	$(call make_wlib,$@,$^)
+$(FAR_B)/rx286.lib: $(FAR_B)/lib/rx286/kcall.obj
+	$(call make_wlib,$@,$^)
+$(FAR_B)/os.lib: $(FAR_B)/lib/os/module.obj
+	$(call make_wlib,$@,$^)
+image: $(FAR_START_OBJS) $(FAR_LIBS)
+
 # The C modules of the boot image: the root task, the first module
 # (roadmap l4.md L5; in C since os-server.md P4), the clock and the counter
 ROOT_OBJS := $(addprefix $(C_B)/root/,root.$(OBJ) services.$(OBJ) buddy.$(OBJ))
 $(B)/root.rx: $(C_LIB_OBJS) $(ROOT_OBJS) tools/mkexe tools/rxlib.py
-	$(call c_link,root,$(C_LIB_OBJS) $(ROOT_OBJS))
+	$(call c_link,root,$(C_LIB_OBJS) $(ROOT_OBJS),--ring 2)
 
 $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 
-# The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
-# (start.asm), a thread a program, each on its part of the stacks
-SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) \
-    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ) dev.$(OBJ))
-$(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe tools/rxlib.py
-	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
+# The OS server (roadmap l4.md L6; in C since os-server.md P5): in C's
+# compact model on the far libraries, Watcom's in every build (memory.md
+# M6, D10 B, D11 B), with a server's start (lib/crt/server.asm): each
+# thread on a stack segment of its own. Its DGROUP holds its tables alone:
+# the build stops past SERVER_DGROUP_MAX (40 KB: 35 KB at 48 entries, M7),
+# which the linker would say only at 64 KB
+SERVER_START := $(FAR_B)/lib/crt/server.obj
+SERVER_OBJS := $(addprefix $(FAR_B)/os/,os.obj proc.obj cache.obj vol.obj vfs.obj signal.obj \
+    tty.obj dev.obj)
+SERVER_DGROUP_MAX := 40960
+$(B)/os.rx: $(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.py
+	$(call wlink_exe,os,$(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS), \
+	    --ring 2 --dgroup-max $(SERVER_DGROUP_MAX))
 
-$(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
+$(FAR_B)/os/%.obj: $(wildcard src/os/*.h)
 
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)
@@ -187,7 +245,10 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     console=$(C_B)/tests/posix/console.$(OBJ) poll=$(C_B)/tests/posix/poll.$(OBJ) \
     thread=$(C_B)/tests/posix/thread.$(OBJ) drives=$(C_B)/tests/posix/drives.$(OBJ) \
     devices=$(C_B)/tests/posix/devices.$(OBJ) fsrand=$(C_B)/tests/posix/fsrand.$(OBJ) \
-    pxrand=$(C_B)/tests/posix/pxrand.$(OBJ) edges=$(C_B)/tests/posix/edges.$(OBJ)
+    pxrand=$(C_B)/tests/posix/pxrand.$(OBJ) edges=$(C_B)/tests/posix/edges.$(OBJ) \
+    late=$(C_B)/tests/posix/late.$(OBJ) many=$(C_B)/tests/posix/many.$(OBJ) \
+    held=$(C_B)/tests/posix/held.$(OBJ) overflow=$(C_B)/tests/posix/overflow.$(OBJ) \
+    orphans=$(C_B)/tests/posix/orphans.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -210,6 +271,11 @@ Z_FOR_DEVICES := devices
 Z_FOR_FSRAND := fsrand
 Z_FOR_PXRAND := pxrand
 Z_FOR_EDGES := edges
+Z_FOR_LATE := late
+Z_FOR_MANY := many
+Z_FOR_HELD := held
+Z_FOR_OVERFLOW := overflow
+Z_FOR_ORPHANS := orphans
 Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))
@@ -243,9 +309,22 @@ $(foreach p,$(Z_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
 $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 	$(PYTHON) tools/mkarchive $@ $(foreach n,$(Z_NAMES),$(n)=$(B)/z-$(n).rx)
 
-# A test program in C (tests/programs/*.c), the program module of its build
+# A test program in C (tests/programs/*.c), the program module of its
+# build; those of FAR_PROGRAMS in the compact model, on the far libraries
+# (memory.md M5), a server of them on a server's start (M6)
+FAR_PROGRAMS := tables twin
+FAR_SERVERS := twin
+FAR_PROGRAM_START := $(if $(filter $(PROGRAM),$(FAR_SERVERS)),$(SERVER_START),$(FAR_START_OBJS))
+ifeq ($(filter $(PROGRAM),$(FAR_PROGRAMS)),)
 $(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe tools/rxlib.py
-	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ))
+	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ), \
+	    --ring $(firstword $(subst :, ,$(PROGRAM_RING))))
+else
+$(B)/user.rx: $(FAR_PROGRAM_START) $(FAR_LIBS) $(FAR_B)/tests/programs/$(PROGRAM).obj tools/mkexe \
+    tools/rxlib.py
+	$(call wlink_exe,user,$(FAR_PROGRAM_START) $(FAR_LIBS) $(FAR_B)/tests/programs/$(PROGRAM).obj, \
+	    --ring $(firstword $(subst :, ,$(PROGRAM_RING))))
+endif
 
 $(B)/counter.rx: $(C_LIB_OBJS) $(C_B)/userland/counter.$(OBJ) \
     $(C_B)/userland/counter-fpu.$(OBJ) tools/mkexe tools/rxlib.py

@@ -30,8 +30,9 @@
 
 #define FIELDS (VIDEO_COLUMNS / CON_FIELD)     /* the status line's */
 
-static rx_u16 toning;                   /* the entries whose calls wait for a tone's end,
-                                           a bit each (dev_tone_stop, P15) */
+static rx_u8 toning[(PROCS + 7) / 8];   /* the entries whose calls wait for a tone's end,
+                                           a bit each (dev_tone_stop, P15): bytes, as
+                                           vfs.c's waiters (memory.md M1) */
 #define STATUS_START 0x01               /* around a status on a test's log */
 #define STATUS_END 0x02
 
@@ -54,7 +55,7 @@ static void field_put(int f, unsigned n)
 {
     while (n < CON_FIELD)
         text[n++] = ' ';
-    console(OS_DATA, (rx_u16)(unsigned)text, CON_FIELD, CON_STATUS,
+    console(RX_SEG(text), RX_OFF(text), CON_FIELD, CON_STATUS,
             (rx_u16)(VIDEO_COLUMNS - f * CON_FIELD));
 }
 
@@ -268,11 +269,11 @@ int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *erro
     if (unit == DEV_SPEAKER && request == RXIO_TONE) {
         hz = w[TONE_HZ / 2];
         ticks = w[TONE_TICKS / 2];
-        toning |= (rx_u16)(1u << i);
+        toning[i >> 3] |= (rx_u8)(1u << (i & 7));
         lock_give();
         failed = call(OS_SERVICE(SERVICE_SOUND), DRV_SOUND, hz, ticks, 0, 0, 0, &r);
         lock_take(PROC_NOTIFY(i));
-        toning &= (rx_u16)~(1u << i);
+        toning[i >> 3] &= (rx_u8)~(1u << (i & 7));
         if (!proc_still(i))
             return VFS_GONE;
         if (proc_leader(i) == i && sig_ready(i))
@@ -292,6 +293,12 @@ int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *erro
     return -1;
 }
 
+/* dev_forget - entry i waits for no tone (server.h) */
+void dev_forget(int i)
+{
+    toning[i >> 3] &= (rx_u8)~(1u << (i & 7));
+}
+
 /* dev_tone_stop - a tone that a thread of process p waits for ended at
  * once, as Ctrl+Break ends one: the process ends, or a handler's signal is
  * due (server.h; lock held; P15) */
@@ -301,7 +308,7 @@ void dev_tone_stop(int p)
     int k;
 
     for (k = 0; k < PROCS; k++)
-        if ((toning & (1u << k)) && proc_leader(k) == p) {
+        if ((toning[k >> 3] & (1u << (k & 7))) && proc_leader(k) == p) {
             r.ax = KCALL_SIGNAL << 8;
             r.dx = OS_SOUND_STOP;
             r.bp = 0;

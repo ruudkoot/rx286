@@ -35,17 +35,34 @@ void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes);
 /* say - a line on the kernel's log */
 void say(const char *text);
 
-/* serve_thread - a thread of the root's made a thread of the OS server's
- * own, at its entry with SP sp and its priority, its faults the root's:
- * 0 or KE_* (root.c; ROOT_SERVE) */
-int serve_thread(rx_u16 thread, rx_u16 sp);
+/* serve_thread - a thread of the root's made a thread of a server's own (a
+ * module's), in its space, at its entry with SP sp and its priority, its
+ * faults the root's, badged SERVE_BADGE: 0 or KE_* (root.c; ROOT_SERVE) */
+int serve_thread(unsigned module, rx_u16 thread, rx_u16 sp);
+/* server_ring, server_room - a module's ring, and its stack segment's
+ * bytes, where its threads start (root.c) */
+int server_ring(unsigned module);
+rx_u16 server_room(unsigned module);
+/* server_panic - ROOT_PANIC: a server's thread n cannot go on: said, and
+ * the root's own fault stops the system (root.c; memory.md M6) */
+void server_panic(unsigned module, rx_u16 n);
 /* the OS server's space, of the root's (root.c) */
 extern rx_u16 server_space;
 
 /* services.c: the space the services copy into (the OS server's; the test
- * program's for its own requests, in TEST_SERVICES builds); a request, its
- * answer in r's BX and CX */
+ * program's for its own requests, in TEST_SERVICES builds), and the module
+ * that asks if it is a server (the OS server, TEST_TWIN's test server), else
+ * 0; a request, its answer in r's BX and CX */
 extern rx_u16 services_space;
+extern unsigned services_module;
 void service(int what, struct rx_kregs *r);
+/* server_stack - a stack segment of so many bytes for a thread of a server
+ * (a module) of a ring, moved into its space's slot: 0 or the error
+ * (services.c; memory.md M6) */
+int server_stack(unsigned module, int ring, rx_u16 space, rx_u16 bytes, rx_u16 to);
+/* server_stacks_keep - a block of so many paragraphs for a server's stacks,
+ * from the memory for segments, while the root builds the modules, before
+ * the blocks of the allocator's: 0 or the error (services.c; memory.md M7) */
+int server_stacks_keep(unsigned module, rx_u16 paragraphs);
 
 #endif

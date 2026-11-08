@@ -356,21 +356,26 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 
 ## The table
 
-The server has room for `PROCS` (25, `OS_PROCS`) processes and threads at once; a fork,
-a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
+The server has room for `PROCS` (48, `OS_PROCS`; 25 until memory.md M7)
+processes and threads at once; a fork, a spawn or a `pthread_create` past
+that is `EAGAIN`. What holds a mark for each entry is a byte array, a bit
+an entry (`bits[i >> 3]`, `1u << (i & 7)`): a 16-bit mask held 16 entries
+and lost the rest (memory.md M1), and `tools/lint`'s `entry-bit` rule finds
+such a mask in the server's and the root's C. A thread's entry
 (`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and the
 walks over the processes pass over it, and its signal state is its
 process's. A new process's pid is the next after the last given, from 2
 again after 32,767, passing over any a process, a zombie, a group or a
 session still has, or a terminal's session or foreground group (P15). An
-entry's endpoint is badged with the entry and a count of the images and
+entry's endpoint is badged with the entry (bits 0-5, since M7) and a count of the images and
 threads it has held, so that a call that was received before an exec or the
 entry's reuse, and waited for the lock meanwhile, is dropped, not served to
 the new one (P15). Entry i has its slots of the server's, `PROC_SLOT0`
-(166) + 6i on: the process's endpoint, thread, space and data segment (as
-the root gives them), the server's thread for it and that thread's
-notification. The thread, thread `PROC_N0` + i of the server's
-(`ROOT_SERVE`), serves process i alone and sleeps while the entry is empty.
+(166) + 7i on: the process's endpoint, thread, space and data segment (as
+the root gives them), the server's thread for it, that thread's
+notification and its stack, a segment of its own (memory.md M6). The
+thread, thread `PROC_N0` + i of the server's (`ROOT_SERVE`), serves process
+i alone and sleeps while the entry is empty.
 One lock guards the table, taken with XCHG (`rx_xchg`), and given up before
 a wait for a child and before the console (but for `/dev/status`'s short
 writes to the status line, and its last close, which keep it). While a call

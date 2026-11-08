@@ -6,7 +6,11 @@
  * below a slot and puts its watermark back to 0. A random workload of
  * allocations, each with a segment made of its block, and frees, each
  * after its block's revoke; no two used blocks overlap, no block holds
- * more than its memory, and at the end everything is as it began.
+ * more than its memory, and at the end everything is as it began. Then the
+ * reserves (roadmap memory.md M4): untypeds on 256 KB carved only as
+ * blocks are needed, each block aligned to its size, every paragraph of
+ * them given out, and a reserve that said more room than it has passed
+ * over.
  * ============================================================================ */
 
 #include <stdio.h>
@@ -16,6 +20,10 @@
 #define SLOTS 600
 #define SOURCE_A 1                      /* the root's two untyped of memory */
 #define SOURCE_B 2
+#define RESERVE_1 3                     /* extended memory's pieces (memory.md M4) */
+#define RESERVE_2 4
+#define RESERVE_3 5
+#define RESERVE_SHORT 6                 /* one that says more room than it has */
 
 /* The kernel's side: what each slot holds */
 static struct {
@@ -97,8 +105,58 @@ static unsigned rnd(void)
 }
 
 #define LIVE 64
+#define BLOCK_64K 0x1000                /* paragraphs */
 
-/* main - the workload, then everything given back */
+/* reserves - blocks of 64 KB from reserves alone, until none is left: each
+ * aligned to its size, apart, every paragraph given out; then all back */
+static void reserves(void)
+{
+    static const struct { int slot; unsigned long base, size, said; } r[] = {
+        { RESERVE_1, 0x10000, 0xC000, 0xC000 },     /* 1 MB on, 768 KB */
+        { RESERVE_SHORT, 0x1C000, 0x4000, 0x8000 }, /* 256 KB, said 512 */
+        { RESERVE_2, 0x20000, 0xC000, 0xC000 },
+        { RESERVE_3, 0x2C000, 0x8000, 0x8000 },     /* the last piece: 512 KB */
+    };
+    int got[64], n = 0, i, j, k;
+    unsigned long total = 0;
+
+    for (i = 0; i < (int)(sizeof r / sizeof r[0]); i++) {
+        slot[r[i].slot].used = 1;
+        slot[r[i].slot].base = r[i].base;
+        slot[r[i].slot].size = r[i].size;
+        slot[r[i].slot].watermark = 0;
+        total += r[i].size;
+    }
+    buddy_init();
+    for (i = 0; i < (int)(sizeof r / sizeof r[0]); i++)
+        CHECK(buddy_reserve((rx_u16)r[i].slot, (rx_u16)r[i].said), "reserve %d refused", i);
+    CHECK(buddy_free_paras() == 0, "blocks before any request");
+    while (n < 64 && (k = buddy_alloc(BLOCK_64K)) >= 0)
+        got[n++] = k;
+    CHECK((unsigned long)n * BLOCK_64K == total, "64 KB blocks: %d, of %lu paragraphs", n,
+          total);
+    for (i = 0; i < n; i++) {
+        unsigned long a = slot[buddy_slot(got[i])].base;
+        CHECK(a % BLOCK_64K == 0, "block %d at %lx: not on 64 KB", got[i], a);
+        for (j = i + 1; j < n; j++) {
+            unsigned long b = slot[buddy_slot(got[j])].base;
+            CHECK(a + BLOCK_64K <= b || b + BLOCK_64K <= a, "blocks %d, %d overlap", i, j);
+        }
+    }
+    CHECK(buddy_reserved() == 0, "reserves left: %lu", (unsigned long)buddy_reserved());
+    while (n > 0) {
+        buddy_revoke(buddy_slot(got[--n]));
+        buddy_free(got[n]);
+    }
+    CHECK((unsigned long)buddy_free_paras() == total, "free at the end %lu of %lu",
+          (unsigned long)buddy_free_paras(), total);
+    k = buddy_alloc(64);                /* a small one, from a block made of a reserve */
+    CHECK(k >= 0, "no 1 KB block after the reserves came back");
+    if (k >= 0)
+        buddy_free(k);
+}
+
+/* main - the workload, then everything given back; then the reserves */
 int main(void)
 {
     int live[LIVE], seg[LIVE], n = 0, i, j, b, round, records;
@@ -155,6 +213,7 @@ int main(void)
           "free at the end %lu, at the start %lu", (unsigned long)buddy_free_paras(), free_start);
     CHECK(buddy_records() == records, "records at the end %d, at the start %d",
           buddy_records(), records);
+    reserves();
     printf("buddy: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

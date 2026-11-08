@@ -11,9 +11,11 @@
 # make debugger); the tests run without a window, on textconfig and rfb.
 config_interface: @CONFIG_INTERFACE@
 
-# 640 KB of base memory and 3 MB above 1 MB: the kernel's objects and
-# programs' segments live there (roadmap os-server.md P3, D18 B).
-megs: 4
+# 639 KB of base memory (the BIOS keeps a 1 KB EBDA) and @MEGS@ MB in all,
+# all but the first above 1 MB: the kernel's objects and programs' segments
+# live there (roadmap os-server.md P3, D18 B; a test's memory: line chooses,
+# memory.md M2).
+megs: @MEGS@
 cpu: model=bx_generic, count=1, ips=4000000, reset_on_triple_fault=1
 romimage: file=/usr/share/bochs/BIOS-bochs-legacy
 vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest

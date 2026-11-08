@@ -18,6 +18,16 @@
 #             stdcall, fastcall, inline...; __declspec, __attribute__,
 #             __builtin_*, __extension__, __typeof__, asm, _Pragma, any
 #             #pragma) outside src/include/rx/compiler.h
+#   selector  no buffer passed as a data segment's selector (OS_DATA,
+#             SLOT(1)) and an offset made by a cast: a local is in the stack
+#             segment, which need not be the data's in the compact model
+#             (roadmap memory.md M5); RX_SEG(p) and RX_OFF(p) name its own
+#   entry-bit in the OS server's and the root's C (src/os, src/root), no
+#             bit of a mask by an entry's index but within a byte (1u << i,
+#             1u << (i % 16), with i, j, k, c, p, t, n, e or entry): a 16-bit
+#             mask holds 16 entries, not the table's 48, and folds the rest
+#             on them (roadmap memory.md M1, M7, X2, X3); a byte array,
+#             bits[i >> 3] and 1u << (i & 7) or (i % 8), holds every one
 #   layout    as for assembly
 # Rules for assembly:
 #   header    the file starts with the banner and "; rx286 - <its path>"
@@ -51,6 +61,11 @@ COMPILER_WORDS = re.compile(
     r'\b_{1,2}inline\b|\b__(declspec|attribute__|extension__|typeof__|typeof|asm__|asm|'
     r'builtin_\w+|restrict__|volatile__|const__|signed__)\b|\b_asm\b|\basm\b|\b_Pragma\b|'
     r'^\s*#\s*pragma\b', re.M)
+DATA_SELECTOR_CAST = re.compile(
+    r'\b(?:OS_DATA|SLOT\s*\(\s*1\s*\))\s*,\s*\(\s*(?:rx_u16|rx_u32|unsigned'
+    r'(?:\s+(?:int|short|long))?)\s*\)')
+ENTRY_BIT = re.compile(r'\b1[uUlL]{0,2}\s*<<\s*\(?\s*(?:i|j|k|c|p|t|n|e|entry)\b'
+                       r'(?!\s*(?:&\s*7|%\s*8)\s*\))')
 CPU_LINE = re.compile(r'^\s*\[?\s*cpu\s+(\w+)', re.I | re.M)
 SECTION_LINE = re.compile(r'^\s*\[?\s*(?:section|segment)\s+([^\s\]]+)', re.I)
 
@@ -154,6 +169,15 @@ def lint_c(path):
         code = code_lines[n - 1]
         if path != COMPILER_H and COMPILER_WORDS.search(code):
             report(n, 'compiler', 'a compiler\'s own word outside compiler.h: ' + line.strip())
+    for m in DATA_SELECTOR_CAST.finditer(code_text):
+        n = code_text.count('\n', 0, m.start()) + 1
+        report(n, 'selector', 'a buffer as the data\'s selector and a cast offset: '
+               'RX_SEG(p), RX_OFF(p) name its own (memory.md M5): ' + lines[n - 1].strip())
+    tables = rel.startswith(('src/os/', 'src/root/'))
+    for m in ENTRY_BIT.finditer(code_text if tables else ''):
+        n = code_text.count('\n', 0, m.start()) + 1
+        report(n, 'entry-bit', 'a mask\'s bit by an entry alone: a byte array holds every '
+               'entry, bits[i >> 3] & (1u << (i & 7)) (memory.md M7): ' + lines[n - 1].strip())
     for at, name in c_definitions(code_text):
         n = code_text.count('\n', 0, at) + 1          # the name's line
         # the definition starts at the first line of its declaration: back

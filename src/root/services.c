@@ -2,11 +2,14 @@
  * rx286 - src/root/services.c
  * The root's services for processes (roadmap os-server.md P4; os.inc's
  * ROOT_LOAD to ROOT_EXIT), for the OS server alone, and the memory they
- * allocate from.
+ * allocate from; and ROOT_SERVE and ROOT_PANIC for any server (memory.md
+ * M6), whose threads' stacks come from blocks kept for that server.
  *
  * Memory for segments is the buddy allocator's (buddy.c), from the first
- * request on: the memory below 1 MB when there is extended memory (the
- * kernel's ROOT_SLOT_LOW_UNTYPED), else 128 KB of the memory for segments.
+ * request on: when there is extended memory, the memory below 1 MB (the
+ * kernel's ROOT_SLOT_LOW_UNTYPED) and every byte of the extended memory, as
+ * reserves carved as blocks are needed (memory.md M4); else what the boot
+ * modules left of the memory for segments, all of it (128 KB until M7).
  * A process's kernel objects - its space, thread and endpoint, 800 bytes -
  * are a block of 1 KB of their own, since any untyped makes objects (P3):
  * its exit revokes the block, and they die with it; each more thread is a
@@ -21,17 +24,17 @@
 #include "kcalls.h"
 #include "drivers.h"
 #include "os.h"
+#include "layout.h"
 #include "root.h"
 #include "buddy.h"
 
-#define PROCS_MAX 32                    /* processes at once */
-#define CODES_MAX 32                    /* codes in the table at once: the server's loads,
+#define PROCS_MAX 64                    /* processes at once (32 until memory.md M7) */
+#define CODES_MAX 64                    /* codes in the table at once: the server's loads,
                                            and a code for each process at most (P15) */
 #define OBJECT_PARAS 64                 /* a process's objects: 528 + 256 + 16 bytes */
 #define LOW_UNTYPED SLOT(ROOT_SLOT_LOW_UNTYPED)
 #define UNTYPED SLOT(ROOT_SLOT_UNTYPED)
 #define ARENA SLOT(ROOT_SLOT_ARENA)     /* the arena: the server's own threads (serve) */
-#define MEMORY_WITHOUT_EXTENDED 0x2000  /* paragraphs of the memory for segments: 128 KB */
 #define SCRATCH SLOT(ROOT_SLOT_DYNAMIC - 1)     /* a badged copy on its way */
 
 /* A process's slots in its space, as selectors */
@@ -41,6 +44,8 @@
 #define P_EP(n) ((OS_SLOT_EP + (n)) * 8 + 4)    /* its threads' endpoints */
 
 #define ACC_DATA3 0xF2                  /* present, DPL 3, data, writable */
+#define ACC_DATA 0x92                   /* present, data, writable: DPL to add */
+#define STACK_BLOCK_PARAS 0x200         /* a server's stacks come from blocks of 8 KB (M7) */
 
 enum { NONE, LOADING, SEALED };
 
@@ -71,17 +76,45 @@ struct process {
 };
 
 rx_u16 services_space;
+unsigned services_module;
 static int ready;                       /* the allocator has its memory */
+static rx_u16 stack_blocks[MODULE_MAX]; /* the untyped each server's stacks come from now */
 static struct code codes[CODES_MAX];
 static struct process procs[PROCS_MAX];
 
-/* memory - the allocator's memory, at the first request: below 1 MB if
- * there is extended memory, else a part of the memory for segments */
+/* free_paras - an untyped's paragraphs not yet retyped, as the kernel says
+ * (KCALL_SEGMENT, memory.md M3); 0 for a slot that holds none */
+static rx_u16 free_paras(rx_u16 untyped)
+{
+    struct rx_kregs r;
+
+    r.ax = KCALL_SEGMENT << 8;
+    r.dx = untyped;
+    r.bp = 0;
+    if (rx_kcall(&r) || r.si > r.cx)
+        return 0;
+    return (rx_u16)(r.cx - r.si);
+}
+
+/* memory - the allocator's memory, at the first request: with extended
+ * memory, the memory below 1 MB as blocks, and every piece of the extended
+ * memory, then what the boot modules left of slot 3's, as reserves carved
+ * as blocks are needed (memory.md M4); without, what the boot modules left
+ * of the memory for segments, as blocks: nothing else retypes it after the
+ * boot (128 KB until M7, which left no 64 KB block for a brk once the
+ * server's segments grew with its 48 entries) */
 static void memory(void)
 {
+    unsigned n;
+
     buddy_init();
-    if (buddy_add(LOW_UNTYPED, 0xFFFF) == 0)
-        buddy_add(UNTYPED, MEMORY_WITHOUT_EXTENDED);
+    if (buddy_add(LOW_UNTYPED, 0xFFFF) == 0) {
+        buddy_add(UNTYPED, 0xFFFF);
+    } else {
+        for (n = 0; n < ROOT_SLOTS_EXTENDED; n++)
+            buddy_reserve(SLOT(ROOT_SLOT_EXTENDED + n), free_paras(SLOT(ROOT_SLOT_EXTENDED + n)));
+        buddy_reserve(UNTYPED, free_paras(UNTYPED));
+    }
     ready = 1;
 }
 
@@ -406,19 +439,106 @@ static void slot_drop(rx_u16 slot)
     slot_give(slot);
 }
 
-/* serve - ROOT_SERVE: a thread of the OS server's own and its notification,
+/* stack_block - an untyped of the root's for a server's stacks, 8 KB:
+ * from the memory for segments while the root builds the modules, from the
+ * allocator after; a slot of the root's, or 0 */
+static rx_u16 stack_block(void)
+{
+    rx_u16 slot;
+    int block;
+
+    if (ready) {
+        block = buddy_alloc(STACK_BLOCK_PARAS);
+        return block < 0 ? 0 : buddy_slot(block);
+    }
+    slot = slot_take();
+    if (slot && retype(UNTYPED, CAP_UNTYPED, slot, STACK_BLOCK_PARAS, 0)) {
+        slot_give(slot);
+        slot = 0;
+    }
+    return slot;
+}
+
+/* server_stacks_keep - a block for a server's stacks, of so many
+ * paragraphs, from the memory for segments, while the root builds the
+ * modules: the OS server's, for the threads the root starts then (root.h;
+ * M7) */
+int server_stacks_keep(unsigned module, rx_u16 paragraphs)
+{
+    rx_u16 slot;
+
+    if (ready || module >= MODULE_MAX || stack_blocks[module])
+        return E_INVAL;
+    slot = slot_take();
+    if (slot == 0)
+        return E_NOMEM;
+    if (retype(UNTYPED, CAP_UNTYPED, slot, paragraphs, 0)) {
+        slot_give(slot);
+        return E_NOMEM;
+    }
+    stack_blocks[module] = slot;
+    return 0;
+}
+
+/* stack_new - a stack segment of so many bytes (2 to 8 KB, even) for a
+ * thread of a server (a module) of a ring, in a slot of the root's: from
+ * the block kept for that server's stacks, or a new one when it is full,
+ * kept for good as its threads are; its slot, or 0 */
+static rx_u16 stack_new(unsigned module, int ring, rx_u16 bytes)
+{
+    rx_u16 slot;
+    int access = (ring << 5) | ACC_DATA;
+
+    if (module >= MODULE_MAX || bytes < 2 || bytes & 1 || bytes > STACK_BLOCK_PARAS * 16)
+        return 0;                       /* (a larger one would fit no block: review of M7) */
+    slot = slot_take();
+    if (slot == 0)
+        return 0;
+    if (stack_blocks[module] == 0
+            || retype(stack_blocks[module], CAP_SEGMENT, slot, bytes, access)) {
+        stack_blocks[module] = stack_block();       /* none yet, or the last one full */
+        if (stack_blocks[module] == 0
+                || retype(stack_blocks[module], CAP_SEGMENT, slot, bytes, access)) {
+            slot_give(slot);
+            return 0;
+        }
+    }
+    return slot;
+}
+
+/* server_stack - a stack segment as stack_new makes one, moved into a
+ * space's slot (root.h; memory.md M6): 0, or the error */
+int server_stack(unsigned module, int ring, rx_u16 space, rx_u16 bytes, rx_u16 to)
+{
+    rx_u16 slot = stack_new(module, ring, bytes);
+    int status;
+
+    if (slot == 0)
+        return E_NOMEM;
+    status = copy(space, slot, to, COPY_MOVE, 0, 0) ? E_IO : 0;
+    if (status)
+        kcall(KCALL_DELETE, 0, 0, 0, slot, 0, 0);
+    slot_give(slot);
+    return status;
+}
+
+/* serve - ROOT_SERVE: a thread of a server's own and its notification,
  * which the server keeps for its life, the thread started at the server's
- * entry with SP sp (os-server.md P6). They come from the arena while it has
- * room - made once each, never given back - and from a block after: blocks
- * of 1 KB kept for good, spread through the memory for segments, would
- * leave no large block for a process (P15) */
-static int serve(rx_u16 sp, rx_u16 to)
+ * entry with SP sp (os-server.md P6), and its stack (memory.md M6). They
+ * come from the arena while it has room - made once each, never given back
+ * - and from a block after: blocks of 1 KB kept for good, spread through
+ * the memory for segments, would leave no large block for a process (P15).
+ * The stack is the server's copy of the root's until the thread has
+ * started, so that a failure takes it back (review of M7) */
+static int serve(rx_u16 bytes, rx_u16 sp, rx_u16 stack_to, rx_u16 to)
 {
     int block = -1, status = E_NOMEM;
-    rx_u16 thread, notify;
+    rx_u16 thread, notify, stack;
 
-    if (services_space != server_space)
-        return E_INVAL;                 /* the server's alone */
+    if (services_module == 0 || sp < 2 || sp & 1 || sp >= server_room(services_module)
+            || bytes < 2 || bytes & 1 || bytes > STACK_BLOCK_PARAS * 16)
+        return E_INVAL;                 /* a server's alone, its SP among its starts (each */
+                                        /*    thread's below the room's top), its stack 8 KB */
     thread = slot_take();
     notify = slot_take();
     if (thread && notify && (retype(ARENA, CAP_THREAD, thread, 0, 0)
@@ -432,9 +552,19 @@ static int serve(rx_u16 sp, rx_u16 to)
     }
     if (thread && notify) {
         status = E_IO;
-        if (give(thread, to) == 0 && give(notify, (rx_u16)(to + 8)) == 0
-                && serve_thread(thread, sp) == 0)
-            return 0;
+        if (give(thread, to) == 0 && give(notify, (rx_u16)(to + 8)) == 0) {
+            stack = stack_new(services_module, server_ring(services_module), bytes);
+            if (stack == 0) {
+                status = E_NOMEM;
+            } else if (give(stack, stack_to) == 0
+                       && serve_thread(services_module, thread, sp) == 0) {
+                kcall(KCALL_DELETE, 0, 0, 0, stack, 0, 0);  /* the server's copy stays */
+                slot_give(stack);
+                return 0;
+            } else {
+                slot_drop(stack);       /* the server's copy too */
+            }
+        }
     }
 failed:
     if (block >= 0) {
@@ -509,7 +639,12 @@ void service(int what, struct rx_kregs *r)
         status = unthread(r->bx, r->cx);
         break;
     case ROOT_SERVE:
-        status = serve(r->cx, r->di);
+        status = serve(r->bx, r->cx, r->si, r->di);
+        break;
+    case ROOT_PANIC:
+        status = E_INVAL;               /* a server's alone: */
+        if (services_module)
+            server_panic(services_module, r->bx);   /* does not return */
         break;
     default:
         status = E_INVAL;

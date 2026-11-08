@@ -9,8 +9,8 @@
  * initialised from the module's data as assembled; a stack. The OS server's
  * module ("os") gets a space of OS_SLOTS and, for each program, a thread
  * that serves that program alone (START_SESSION), started with SP = 4n,
- * which tells it its program (src/os/start.asm), with the program's
- * capabilities in its slots (src/os/os.c).
+ * which tells it its program (src/lib/crt/server.asm), on a stack segment
+ * of its own, with the program's capabilities in its slots (src/os/os.c).
  * Every other module is a program: it gets a thread and an endpoint to the
  * OS server badged with its module's number (OS_SLOT_EP), on which it makes
  * its calls (docs/syscalls.md); and its faults go to the OS server, on the
@@ -20,8 +20,9 @@
  * (and a program's, if there is no OS server): it reports each as the
  * kernel did ("rx286: os fault #GP(0000) at 0006:0123"), puts back any of
  * the module's three segments that is gone from its slot, and restarts it
- * at its entry; and it answers the OS server's requests for processes
- * (services.c), on the same endpoint.
+ * at its entry, a server's thread SERVE_FAULT_AT past it, where the
+ * server's policy runs (memory.md M6); and it answers the OS server's
+ * requests for processes (services.c), on the same endpoint.
  *
  * Ring 2 gives it nothing that ring 3 lacks (l4.md D12): its capabilities
  * are its power. In TEST_CAPS builds it gives the program, in slots 10-13 of
@@ -75,10 +76,10 @@ RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, progra
 #define W_CONTROL (14 * 8 + 4)                  /* its control notification, */
 #define W_FOREGROUND (15 * 8 + 4)               /* the foreground program's thread */
 #define OS_SLOTS 512                            /* the OS server's space: 8n + k for program
-                                                   n, */
+                                                   n, (its 48 entries take 502, M7) */
 #define OS_SLOT_SLEEP 128                       /* and n's thread's notification at 128 + n;
                                                    its threads' SP at a start: OS_STACK n
-                                                   (os.inc, src/os/start.asm) */
+                                                   (os.inc, src/lib/crt/server.asm) */
 #ifdef TEST_CAPS
 #define CAPS_SLOTS 64                           /* the program's, with what TEST_CAPS gives: */
 #define CAPS_UNTYPED (10 * 8 + 4)               /* the memory for segments */
@@ -87,6 +88,12 @@ RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, progra
 #define CAPS_THREAD (13 * 8 + 4)                /* its own thread */
 #define CAPS_ROOT (14 * 8 + 4)                  /* TEST_SERVICES: the root's services */
 #endif
+#ifdef TEST_TWIN
+#define TWIN_STACK (10 * 8 + 4)                 /* the test server's (tests/programs/twin.c): */
+#define TWIN_ROOT (14 * 8 + 4)                  /* its first thread's stack, the root's services */
+#endif
+/* the OS server's slot for program n's thread's stack (os.inc) */
+#define W_THREAD_STACK(n) ((rx_u16)(((n) * 8 + OS_K_THREAD_STACK) * 8 + 4))
 
 #define ACC_DATA 0x92                           /* present, data, writable: DPL to add */
 
@@ -107,15 +114,68 @@ rx_u16 server_space;                    /* its space, of the root's */
 #ifdef TEST_SERVICES
 static rx_u16 test_space;               /* the test program's, its requests' (give_caps) */
 #endif
+#ifdef TEST_TWIN
+static rx_u16 twin_space;               /* the test server's (give_twin) */
+#endif
 static struct slots s;                  /* the module being built's */
 static rx_u16 m_entry, m_stack;         /* the OS server's, for its threads */
-static rx_u8 m_priority;
+static rx_u8 m_priority, m_ring;
 
 /* say - a line on the kernel's log */
 void say(const char *text)
 {
     rx_log(text, (unsigned)strlen(text));
 }
+
+#ifdef TEST_MEMORY
+/* extended_report - TEST_MEMORY builds: the extended memory the root holds
+ * as untyped, in slots 3, 4 and ROOT_SLOT_EXTENDED on, as the kernel says
+ * each is (KCALL_SEGMENT; memory.md M3) */
+static void extended_report(void)
+{
+    struct rx_kregs r;
+    rx_u32 paras = 0;
+    unsigned n, pieces = 0;
+    char line[64];
+
+    for (n = ROOT_SLOT_UNTYPED; n < ROOT_SLOT_EXTENDED + ROOT_SLOTS_EXTENDED; n++) {
+        if (n > ROOT_SLOT_ARENA && n < ROOT_SLOT_EXTENDED)
+            continue;
+        r.ax = KCALL_SEGMENT << 8;
+        r.dx = SLOT(n);
+        r.bp = 0;
+        if (rx_kcall(&r) || (r.dx & 0xFF) < 0x10)
+            continue;                   /* not an untyped, or below 1 MB */
+        paras += r.cx;
+        pieces++;
+    }
+    snprintf(line, sizeof line, "root: extended memory held: %lu KB in %u pieces\n",
+             (unsigned long)(paras / 64), pieces);
+    say(line);
+}
+
+/* memory_report - TEST_MEMORY builds (tests/memory): what the loader found
+ * of the memory and how the kernel sized it, from the boot information
+ * (slot 102; layout.inc's BI_*; memory.md M2) */
+static void memory_report(void)
+{
+    const rx_u16 RX_FAR *w = (const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
+    char line[96];
+
+    snprintf(line, sizeof line, "root: memory: base %u KB, extended %u KB%s\n",
+             w[BI_BASE_KB / 2], w[BI_EXT_KB / 2],
+             (w[BI_FLAGS / 2] & BIF_EXT_CMOS) ? ", the CMOS's" : "");
+    say(line);
+    if (w[BI_EBDA / 2]) {
+        snprintf(line, sizeof line, "root: an EBDA at %04X0h\n", w[BI_EBDA / 2]);
+        say(line);
+    }
+    snprintf(line, sizeof line, "root: memory for programs below 1 MB: %04X0h to %04X0h\n",
+             w[BI_UMEM_START / 2], w[BI_UMEM_END / 2]);
+    say(line);
+    extended_report();
+}
+#endif
 
 /* failed - a kernel call the root needs failed: say so, and stop */
 static void failed(int status)
@@ -317,6 +377,22 @@ void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes)
     far_copy_at(to, 0, from, bytes);
 }
 
+#ifdef TEST_DMA_HIGH
+/* dma_high - tests/memory/dma.test: the diskette's DMA buffer from the
+ * highest piece of extended memory there is (memory.md M4, E4), so that its
+ * sectors cross the page register's bits 20-23 */
+static void dma_high(rx_u16 slot)
+{
+    int n;
+
+    for (n = ROOT_SLOTS_EXTENDED - 1; n >= 0; n--)
+        if (retype(SLOT(ROOT_SLOT_EXTENDED + n), CAP_SEGMENT, slot, SECTOR_SIZE,
+                   (1 << 5) | ACC_DATA) == 0)
+            return;
+    new_segment(slot, SECTOR_SIZE, 1);
+}
+#endif
+
 /* driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
  * the console's, the screen's text page; the keyboard's, the OS server's
  * control notification to signal Ctrl+Break with; the diskette's, a DMA
@@ -331,7 +407,11 @@ static void driver_device(int service)
         must(copy(s.space, CONTROL, W_DRV_DEVICE, COPY_MINT, CONTROL_BREAK, RIGHT_SEND));
     } else if (service == SERVICE_DISKETTE) {
         for (;;) {                      /* (a driver has no OS thread: the slot is free) */
+#ifdef TEST_DMA_HIGH
+            dma_high(s.server);         /* tests/memory/dma.test: near the top (M4) */
+#else
             new_segment(s.server, SECTOR_SIZE, 1);
+#endif
             r.ax = KCALL_SEGMENT << 8;  /* DL:AX = its physical address */
             r.dx = s.server;
             r.bp = 0;
@@ -340,6 +420,17 @@ static void driver_device(int service)
                 break;                  /* the 8237 does not carry past 64 KB */
             kcall(KCALL_DELETE, 0, 0, 0, s.server, 0, 0);  /* its memory stays */
         }
+#ifdef TEST_MEMORY
+        {                               /* where DMA runs (memory.md M4, E4) */
+            char line[64];
+            snprintf(line, sizeof line, "root: the diskette's DMA buffer above 1 MB: %s\n",
+                     (r.dx & 0xFF) >= 0x10 ? "yes" : "no");
+            say(line);
+            snprintf(line, sizeof line, "root: the diskette's DMA buffer at %02X%04Xh\n",
+                     r.dx & 0xFF, r.ax);
+            say(line);
+        }
+#endif
         give(s.server, W_DRV_DEVICE);
     }
 }
@@ -365,6 +456,19 @@ static void build_driver(int irq, int service)
     must(kcall(KCALL_IRQ, IRQ_BIND, 0, 0, line, SCRATCH, 0));
     must(kcall(KCALL_DELETE, 0, 0, 0, SCRATCH, 0, 0));
 }
+
+#ifdef TEST_TWIN
+/* give_twin - TEST_TWIN: the test server (tests/programs/twin.c), the
+ * program the keys are for, before it starts: its first thread's stack,
+ * and the root's ROOT_SERVE on the fault endpoint, badged ROOT_BADGE_TWIN
+ * (memory.md M6) */
+static void give_twin(unsigned module, int ring)
+{
+    twin_space = s.space;
+    must(server_stack(module, ring, s.space, OS_THREAD_STACK, TWIN_STACK));
+    must(copy(s.space, FAULT_EP, TWIN_ROOT, COPY_MINT, ROOT_BADGE_TWIN, RIGHT_SEND));
+}
+#endif
 
 /* build - a module's space; and for a program, its thread, configured and
  * started */
@@ -428,6 +532,10 @@ static void build(unsigned module)
         badge = (rx_u16)(module | FAULT_BADGE);
     }
     fault_to(s.thread, fault_ep, badge);
+#ifdef TEST_TWIN
+    if (flags & MF_FOREGROUND)
+        give_twin(module, ring);
+#endif
     /* configured, and started */
     must(thread_call(s.thread, THREAD_CONFIGURE, s.space, entry, stack));
     start = priority;
@@ -452,6 +560,7 @@ static void server_params(void)
     m_entry = ENTRY_W(e, M_ENTRY);
     m_stack = ENTRY_W(e, M_STACK);
     m_priority = ENTRY_B(e, M_PRIORITY);
+    m_ring = ENTRY_B(e, M_RING);
 }
 
 /* keyboard_space - the keyboard driver's space, of the root's, or 0 */
@@ -473,13 +582,13 @@ static rx_u16 keyboard_space(void)
  * keyboard driver gets its thread's notification to signal each key on */
 static void serve_program(unsigned module)
 {
-    static unsigned sessions;           /* the programs before it: its part of the
-                                           server's stacks (src/os/start.asm) */
+    static unsigned sessions;           /* the programs before it: OS_SESSIONS of them
+                                           have a thread of the server's */
     rx_u16 top = (rx_u16)(module * OS_STACK);   /* its SP at a start */
     rx_u16 to = (rx_u16)(module * 64 + 4);      /* the server's slots 8n + k */
 
     if (top > m_stack || sessions++ >= OS_SESSIONS)
-        return;                         /* past the server's stack or its parts: unserved */
+        return;                         /* past the server's starts or its sessions */
     program_slots(module);
     give_server(s.ep, to);
     give_server(s.thread, (rx_u16)(to + 8));
@@ -495,9 +604,10 @@ static void serve_program(unsigned module)
                   RIGHT_SEND));
     must(copy(server_space, SCRATCH, (rx_u16)((OS_SLOT_SLEEP + module) * 8 + 4), COPY_MOVE,
               0, 0));
-    /* its thread */
+    /* its thread, on a stack of its own (memory.md M6) */
+    must(server_stack(server, m_ring, server_space, OS_THREAD_STACK, W_THREAD_STACK(module)));
     must(retype(ARENA, CAP_THREAD, s.server, 0, 0));
-    fault_to(s.server, FAULT_EP, (rx_u16)server);
+    fault_to(s.server, FAULT_EP, (rx_u16)(SERVE_BADGE | server));
     must(thread_call(s.server, THREAD_CONFIGURE, server_space, m_entry, top));
     must(thread_call(s.server, THREAD_START, 0, 0,
                      (rx_u16)(m_priority | (START_SESSION << 8))));
@@ -518,30 +628,53 @@ static void server_control(void)
     if (OS_CONTROL_N * OS_STACK > m_stack)
         return;                         /* past its stack */
     program_slots(server);              /* its thread: the server module's slot */
+    must(server_stack(server, m_ring, server_space, OS_THREAD_STACK,
+                      OS_SLOT_CONTROL_STACK * 8 + 4));
     must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
-    fault_to(s.thread, FAULT_EP, (rx_u16)server);
+    fault_to(s.thread, FAULT_EP, (rx_u16)(SERVE_BADGE | server));
     must(thread_call(s.thread, THREAD_CONFIGURE, server_space, m_entry,
                      OS_CONTROL_N * OS_STACK));
     must(thread_call(s.thread, THREAD_START, 0, 0, m_priority));
 }
 
-/* serve_thread - ROOT_SERVE's thread made the OS server's, as its threads
- * for the programs are (serve_program), but for no session */
-int serve_thread(rx_u16 thread, rx_u16 sp)
+/* space_of - a module's space, of the root's */
+static rx_u16 space_of(unsigned module)
 {
+    return module == server ? server_space : (rx_u16)(SLOT(PROGRAM_SLOT) + (module - 1) * 64);
+}
+
+/* serve_thread - ROOT_SERVE's thread made a server's (root.h), as the OS
+ * server's threads for the programs are (serve_program), but for no
+ * session: its faults the root's, badged SERVE_BADGE */
+int serve_thread(unsigned module, rx_u16 thread, rx_u16 sp)
+{
+    entry_ptr e;
     int status;
 
-    if (server == 0)
+    if (module == 0 || module > programs)
         return KE_CAP;
-    status = copy(MY_SPACE, FAULT_EP, SCRATCH, COPY_MINT, (rx_u16)server, 0);
+    e = entry_of(module);
+    status = copy(MY_SPACE, FAULT_EP, SCRATCH, COPY_MINT, (rx_u16)(SERVE_BADGE | module), 0);
     if (status == 0)
         status = thread_call(thread, THREAD_FAULT, SCRATCH, 0, 0);
     kcall(KCALL_DELETE, 0, 0, 0, SCRATCH, 0, 0);
     if (status == 0)
-        status = thread_call(thread, THREAD_CONFIGURE, server_space, m_entry, sp);
+        status = thread_call(thread, THREAD_CONFIGURE, space_of(module), ENTRY_W(e, M_ENTRY), sp);
     if (status == 0)
-        status = thread_call(thread, THREAD_START, 0, 0, m_priority);
+        status = thread_call(thread, THREAD_START, 0, 0, ENTRY_B(e, M_PRIORITY));
     return status;
+}
+
+/* server_ring - a module's ring (root.h) */
+int server_ring(unsigned module)
+{
+    return ENTRY_B(entry_of(module), M_RING);
+}
+
+/* server_room - a module's stack segment's bytes (root.h) */
+rx_u16 server_room(unsigned module)
+{
+    return ENTRY_W(entry_of(module), M_STACK);
 }
 
 /* give_service - a driver's endpoint to the OS server, in the slot its
@@ -570,6 +703,10 @@ static void build_server(void)
     program_slots(server);
     server_space = s.space;
     server_params();
+    /* a block for the stacks of the threads it starts now, the programs'
+     * and the control thread's; ROOT_SERVE's come from blocks of the
+     * allocator's as the server asks (memory.md M7) */
+    must(server_stacks_keep(server, (rx_u16)((OS_SESSIONS + 1) * (OS_THREAD_STACK / 16))));
     give_server(MODULES, W_MODULES);    /* the module table */
     server_control();
     /* its requests for processes, on the fault endpoint, badged so */
@@ -616,6 +753,17 @@ static rx_u16 restore(unsigned module)
     return ENTRY_W(entry_of(module), M_ENTRY);
 }
 
+/* module_name - a module's name, from the module table */
+static void module_name(unsigned module, char *name)
+{
+    entry_ptr e = entry_of(module);
+    int i;
+
+    for (i = 0; i < M_NAME_SIZE - 1 && e[M_NAME + i]; i++)
+        name[i] = (char)e[M_NAME + i];
+    name[i] = 0;
+}
+
 /* report - a fault, as the kernel reported one: "rx286: NAME fault
  * #GP(0000) at 0007:0123", in one line */
 static void report(int vector, rx_u16 error, rx_u16 cs, rx_u16 ip, unsigned module)
@@ -624,12 +772,9 @@ static void report(int vector, rx_u16 error, rx_u16 cs, rx_u16 ip, unsigned modu
         "#DE #DB NMI #BP #OF #BR #UD #NM #DF #MP #TS #NP #SS #GP #14 #15 "
         "#MF #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 ";
     char name[M_NAME_SIZE], vec[5], code[8], line[80];
-    entry_ptr e = entry_of(module);
     int i;
 
-    for (i = 0; i < M_NAME_SIZE - 1 && e[M_NAME + i]; i++)
-        name[i] = (char)e[M_NAME + i];
-    name[i] = 0;
+    module_name(module, name);
     for (i = 0; i < 4 && names[(vector & 31) * 4 + i] != ' '; i++)
         vec[i] = names[(vector & 31) * 4 + i];
     vec[i] = 0;
@@ -638,6 +783,21 @@ static void report(int vector, rx_u16 error, rx_u16 cs, rx_u16 ip, unsigned modu
         snprintf(code, sizeof code, "(%04X)", error);
     snprintf(line, sizeof line, "rx286: %s fault %s%s at %04X:%04X\n", name, vec, code, cs, ip);
     say(line);
+}
+
+/* server_panic - ROOT_PANIC (root.h): a server's thread cannot go on, its
+ * tables in doubt (memory.md M6): said, then the root's own fault stops
+ * the system, as any fault of the root's does (D8) */
+void server_panic(unsigned module, rx_u16 n)
+{
+    char name[M_NAME_SIZE], line[80];
+
+    module_name(module, name);
+    snprintf(line, sizeof line, "rx286: root: thread %u of %s cannot go on: the system stops\n",
+             n, name);
+    say(line);
+    for (;;)
+        rx_ud2();                       /* (the kernel stops at the root's fault) */
 }
 
 #ifdef TEST_CAPS
@@ -717,6 +877,9 @@ int RX_MAIN_CALL main(void)
     struct rx_kregs r;
     entry_ptr e;
 
+#ifdef TEST_MEMORY
+    memory_report();
+#endif
     must(retype(ARENA, CAP_ENDPOINT, FAULT_EP, 0, 0));
     /* the OS server's control notification, which the keyboard driver signals */
     must(retype(ARENA, CAP_NOTIFY, CONTROL, 0, 0));
@@ -756,13 +919,27 @@ int RX_MAIN_CALL main(void)
             r.bp = 0;
             continue;
         }
-        if (r.dx == ROOT_BADGE_OS || r.dx == ROOT_BADGE_TEST) {
+        if (r.dx == ROOT_BADGE_OS || r.dx == ROOT_BADGE_TEST || r.dx == ROOT_BADGE_TWIN) {
             services_space = server_space;  /* where the copies go: the OS server's, */
+            services_module = server;       /*    a server's */
 #ifdef TEST_SERVICES
-            if (r.dx == ROOT_BADGE_TEST)    /* or the test program's */
+            if (r.dx == ROOT_BADGE_TEST) {  /* or the test program's, no server's */
                 services_space = test_space;
+                services_module = 0;
+            }
+#endif
+#ifdef TEST_TWIN
+            if (r.dx == ROOT_BADGE_TWIN) {  /* or the test server's */
+                services_space = twin_space;
+                services_module = foreground;
+            }
 #endif
             service(r.ax & 0xFF, &r);
+        } else if (r.dx & SERVE_BADGE) {    /* a server's thread: its policy runs at */
+            module = r.dx & 0xFF;           /*    its entry after a fault (M6) */
+            if (!(r.di & FAULT_COUNTED))
+                report(r.ax & 0xFF, r.bx, r.cx, r.si, module);
+            r.bx = (rx_u16)(restore(module) + SERVE_FAULT_AT);
         } else {
             module = r.dx;              /* the badge: the module's number */
             if (!(r.di & FAULT_COUNTED))
