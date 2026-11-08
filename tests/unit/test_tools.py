@@ -131,6 +131,22 @@ def test_what_an_emulator_has_is_taken(tmp_path):
     a_test(tmp_path, 'emulators: bochs dosbox-x\nmodem: hayes\nlpt1: x\n---\nx\n', 'b.test')
 
 
+def test_forbidden_lines_fail_a_test(tmp_path):
+    t = a_test(tmp_path, 'match: contains\nforbid: rx286: {...} fault #{...}\n---\nx\n')
+    assert RUN_TEST.compare(t, ['x', 'TEST END'], []) is None
+    assert RUN_TEST.compare(t, ['x', 'rx286: os fault #UD at 0006:9AFA', 'TEST END'], []) \
+        is not None
+
+
+def test_a_second_boot_fails_a_test(tmp_path):
+    t = a_test(tmp_path, 'match: contains\n---\nfuzz: done\n')
+    boot = ['rx286, test build', 'fuzz: starting']
+    assert RUN_TEST.compare(t, boot + ['fuzz: done', 'TEST END'], []) is None
+    assert RUN_TEST.compare(t, boot + boot + ['fuzz: done', 'TEST END'], []) is not None
+    twice = a_test(tmp_path, '---\nrx286, test build\nrx286, test build\n', 'r.test')
+    assert RUN_TEST.compare(twice, ['rx286, test build'] * 2 + ['TEST END'], []) is None
+
+
 def test_runs_apart(tmp_path):
     t = a_test(tmp_path, '---\nx\n')
     dirs = set()

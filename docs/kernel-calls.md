@@ -482,6 +482,10 @@ answer `KE_NOSYS`:
 | 6 | `TEST_SILENCE_PROBE` | `TEST_SOUND` builds: the speaker silent over a tick? |
 | 7 | `TEST_PROBE` | `TEST_ATTACK` builds: BL `PROBE_*`, below |
 | 8 | `TEST_GIVE_WAY` | test builds: the next CX interrupt windows of any kernel call give way, a more urgent thread ready or not, so that the calls resume (roadmap os-server.md P3); CX back: the windows that were still to |
+| 9 | `TEST_OVERRUN` | `TEST_ATTACK` builds: `INT 9` in ring 0, as the 287's overrun of a segment after the CPU had moved on (Intel 9.6.3) arrives: the caller is restarted as the program whose 287 it is (*docs/security.md*); no emulator the suites run raises vector 9 itself (roadmap os-server.md P15) |
+
+In `TEST_FUZZ` builds the fuzz program's own `KCALL_TEST` is `KE_NOSYS`, as
+in a release build: its random calls reach only what a release kernel has.
 
 The test probe changes one of the caller's own descriptors during the
 call, as a revocation would, so that the way back to its ring can be

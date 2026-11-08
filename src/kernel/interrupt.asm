@@ -132,7 +132,19 @@ isr_exit:
         mov ax, [bp + FRAME_CS]
         lsl dx, ax
         cmp [bp + FRAME_IP], dx
+%ifdef TEST_ATTACK
+  %define TEST_WAY_BACK
+%elifdef TEST_FUZZ
+  %define TEST_WAY_BACK
+%endif
+%ifdef TEST_WAY_BACK
+        ja .past_limit
+        call test_way_back              ; a 386's FS and GS null (test.asm)
+        jmp .restore
+.past_limit:
+%else
         jbe .restore
+%endif
         mov word [bp + FRAME_VECTOR], VEC_GP
         mov word [bp + FRAME_ERROR], 0
         mov al, CONT_FAULT_WAY

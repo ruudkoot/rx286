@@ -2173,6 +2173,11 @@ kc_irq:
 ; ----------------------------------------------------------------------------
 kc_test:
         mov al, [bp + FRAME_AX]
+%ifdef TEST_FUZZ
+        mov bx, [cur_thread]            ; the fuzz program's random calls reach
+        cmp bx, [fg_thread]             ; what a release kernel has, no test hook
+        je kc_done.nosys                ; (os-server.md P15)
+%endif
 %ifdef WITH_CHECKS
         cmp al, TEST_DUMP
         jne .hooks
@@ -2197,6 +2202,11 @@ kc_test:
 %ifdef TEST_ATTACK
         cmp al, TEST_PROBE
         je test_probe
+        cmp al, TEST_OVERRUN
+        jne .not_overrun
+        int VEC_MP                      ; vector 9, in ring 0 (fault.asm's rule)
+        jmp kc_done.ok
+.not_overrun:
 %endif
         cmp al, TEST_READER
         je .reader

@@ -172,10 +172,16 @@ root, the OS server, `/z`), and check-286 over its objects (*docs/c.md*).
 ## 5. The attack suite and the fuzzer
 
 `tests/attack/` runs `tests/programs/attack.asm`, a program that tries one
-forbidden thing per restart, and checks each fault line at its exact
-instruction; the kernel checks its own code and tables at every restart. `tests/fuzz/` runs
-random bytes as code in ring 3 for thousands of iterations; the kernel checks
-a checksum of its code and tables after each one.
+forbidden thing per restart (80 of them), and checks every line of the run,
+each fault at its exact instruction; the kernel checks its own code and
+tables, the GDT's invariants and its queues at every restart. `tests/fuzz/`
+runs random bytes as code in ring 3 for 10,000 iterations; the kernel
+checks itself at the first, every 16th and the last, counts the fuzz
+program's faults, and says whether random code ran in most iterations and
+whether the watchdog ended few, which the test holds to; its `forbid:`
+lines fail it on any other thread's fault or the kernel's complaints.
+*docs/security.md* says what each shows, and the bugs seeded to show that
+they can fail.
 
 ## 6. On a real 286 core
 

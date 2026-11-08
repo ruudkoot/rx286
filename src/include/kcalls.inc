@@ -81,6 +81,9 @@ TEST_GIVE_WAY       equ 8   ;    CX: the next CX interrupt windows of any kernel
                             ;    way, a more urgent thread ready or not, so that the
                             ;    calls resume (os-server.md P3) -> CX the windows that
                             ;    were still to
+TEST_OVERRUN        equ 9   ;    TEST_ATTACK builds: INT 9 in ring 0, as the 287's
+                            ;    overrun of a segment after the CPU moved on: the
+                            ;    caller restarted, as the program's (fault.asm; P15)
 PROBE_DS_ABSENT     equ 1   ; the data segment's descriptor not present
 PROBE_DS_EXEC       equ 2   ; the data segment's slot refilled with execute-only code
 PROBE_SS_ABSENT     equ 3   ; the stack's descriptor not present

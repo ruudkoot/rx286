@@ -56,6 +56,9 @@
 #                               before the run, a file the build made put on
 #                               the run's copy of drive C (B, D) at that path,
 #                               its directories made; may repeat
+#   forbid: {...} fault #{...}  a line the transcript must not hold, as an
+#                               expected line is matched ({...}); may repeat:
+#                               what contains mode would pass over
 #   ---
 # A header's value is taken without the spaces around it; a key script, an
 # lpt1: line or a file: text writes \s for a space at its ends. A test that
@@ -87,7 +90,9 @@
 #           and the debugger's lines, and the test ends (TEST END; with
 #           debugger:, its breakpoint met and its script's quit reached).
 # A timeout always fails, and so does a test that expects no line on its
-# emulator, unless it is full (TEST END alone).
+# emulator, unless it is full (TEST END alone), and a run in which the
+# machine started more often than the test expects the banner (one at
+# least): a reset, which MAME's AT and a real one boot again from.
 # Lines the kernel marks `[trace]`, register lines (`regs:`) and blank lines
 # are ignored. docs/testing.md
 # explains the layers of tests.
@@ -111,6 +116,7 @@ import rxlib
 
 ROOT = rxlib.ROOT
 IGNORED_PREFIXES = ('[trace]', 'regs:')
+BANNER = 'rx286, test build'            # a test build's first line: once a boot
 # The image of each drive in a run's directory (Test.run_dir).
 DRIVE_IMAGES = {'A': 'run.img', 'B': 'disks/fdb.img', 'C': 'disks/hd0.img',
                 'D': 'disks/hd1.img'}
@@ -164,6 +170,7 @@ class Test:
         self.files = []                     # (drive, path, text)
         self.installs = []                  # (drive, path, a file the build made)
         self.expected = []
+        self.forbidden = []                 # lines the transcript must not hold
         self.parse(open(path, encoding='utf-8').read())
 
     def parse(self, text):
@@ -223,6 +230,10 @@ class Test:
                 if drive not in ('B', 'C', 'D') or not path.startswith('/') or not name:
                     raise ValueError('%s: bad install line %r' % (self.path, line))
                 self.installs.append((drive, path, name))
+            elif key == 'forbid':
+                if not value:
+                    raise ValueError('%s: an empty forbid line' % self.path)
+                self.forbidden.append(value)
             elif key == 'file':
                 drive, path, text = (value.split(None, 2) + [''])[:3]
                 if drive not in DRIVE_IMAGES or not path.startswith('/'):
@@ -592,6 +603,14 @@ def compare(test, transcript, debugger_lines):
         return 'the kernel panicked'
     if not expected and test.match != 'full':
         return 'no expected line on %s' % EMULATOR
+    boots = got.count(BANNER)
+    if boots > max(1, expected.count(BANNER)):
+        return 'the machine started %d times: a reset' % boots
+    for pattern in test.forbidden:
+        wanted = substitute(test, pattern)
+        bad = [l for l in got if line_matches(wanted, l)]
+        if bad:
+            return 'a line it must not hold (forbid: %s): %r' % (pattern, bad[0])
     if test.match == 'full':
         if not got or got[-1] != 'TEST END':
             return 'no TEST END'

@@ -30,10 +30,28 @@
 ;                       IRQ1's bits): MAME runs IBM's own 8042 firmware,
 ;                       which has no command D2h (M9)
 ;   TEST_ATTACK         the attack program runs: check the kernel's code and
-;                       tables before every restart (M8)
-;   TEST_FUZZ           the fuzzer runs: the same checks, faults counted
-;                       instead of reported, a watchdog, and the end after
-;                       FUZZ_ITERATIONS starts (M8)
+;                       tables before every restart (M8): a Fletcher sum of
+;                       the code, the GDT's fixed part, the IDT, the dispatch
+;                       tables and the TSSs, and the GDT's invariants (no
+;                       descriptor above DPL 0, every space's LDT exactly its
+;                       slots: test_gdt_check; os-server.md P15); its queues
+;                       well formed (test_queue_check); on a 386 (Bochs), FS
+;                       and GS null on every way back, which a 286 has not
+;                       (test_way_back); KCALL_TEST's TEST_PROBE and
+;                       TEST_OVERRUN
+;   TEST_FUZZ           the fuzzer runs: the same checks at its first start,
+;                       every FUZZ_CHECK_EVERY starts and its last (with
+;                       interrupts off, each a few ms on an AT); the fuzz
+;                       program's own faults counted instead of reported (no
+;                       other thread's); a watchdog; the end after
+;                       FUZZ_ITERATIONS starts. What it does that a release
+;                       kernel does not: the code alias of the program's data
+;                       in slot 3, a copy of slot 1 made code (test_fuzz_alias:
+;                       no program can make code, l4.md X14); its faults' report
+;                       not written (FAULT_COUNTED). KCALL_TEST is KE_NOSYS to
+;                       the fuzz program, as in a release build
+;   TEST_FUZZ_SEED=n    the fuzz program's first seed n, to replay a failing
+;                       one (tests/programs/fuzz.asm)
 ;   TEST_COUNTER_SAME   the counter at the program's priority (thread.asm;
 ;   TEST_COUNTER_ABOVE  roadmap l4.md L2), or above it; either also starts
 ;                       the counter beside a test program (Makefile)
@@ -68,10 +86,17 @@ TEST_CLOCK_SECONDS  equ 3
 TEST_FPU_CW_ZM      equ 0x037B          ; every exception masked but zero-divide
 FUZZ_ITERATIONS     equ 10000           ; starts of the fuzz program before the end
 FUZZ_WATCHDOG       equ 5               ; ticks a fuzz iteration may run
+FUZZ_CHECK_EVERY    equ 16              ; starts between the kernel's checks (a power of 2)
+FUZZ_WATCHDOG_MOST  equ FUZZ_ITERATIONS / 20    ; the summary: under 5% of the iterations
 %ifdef TEST_ATTACK
   %define TEST_KERNEL_CHECKS
 %elifdef TEST_FUZZ
   %define TEST_KERNEL_CHECKS
+%endif
+%ifdef TEST_KERNEL_CHECKS
+  %ifndef TEST_TYPE_DIRECT
+    %define TEST_386_SEGMENTS           ; Bochs' builds: a 386's FS and GS (MAME's a 286)
+  %endif
 %endif
 
 begin_kdata
@@ -100,6 +125,9 @@ msg_ticks_ok        db "timer: 50 ticks a second, by the clock", CHAR_LF, 0
 msg_ticks_bad       db "timer: ticks in 3 seconds of the clock: ", 0
 msg_fpu_done        db "fpu: the kernel's test raised its error", CHAR_LF, 0
 msg_kernel_changed  db "the kernel's code or tables changed", 0
+msg_gdt_dpl         db "a descriptor of the GDT above DPL 0", 0
+msg_ldt_changed     db "a space's LDT descriptor is not its LDT", 0
+msg_queue_bad       db "a ready queue, or a thread's wait, is not well formed", 0
 msg_stack_leak      db "a frame from ring 3 is not at the kernel stack's top", 0
 %ifdef TEST_PANIC_PAGE
 msg_page_start      db "test: the screen starts at ", 0
@@ -108,15 +136,19 @@ msg_yes             db "yes", CHAR_LF, 0
 msg_no              db "no", CHAR_LF, 0
 %endif
 %ifdef TEST_KERNEL_CHECKS
-test_sum            dw 0
+test_sum            dw 0, 0             ; Fletcher's two sums (test_kernel_sum)
 test_sum_known      db 0
+%endif
+%ifdef TEST_386_SEGMENTS
+test_386            db 0                ; a 386 or later: FS and GS (test_cpu)
 %endif
 %ifdef TEST_FUZZ
 fuzz_starts         dw 0
 fuzz_ticks          dw 0
 fuzz_faults         times VEC_CPU_LAST + 1 dw 0
 fuzz_watchdogs      dw 0
-fuzz_fpu_errors     dw 0
+fuzz_watchdog_server dw 0               ; of them, the program waiting on the server
+fuzz_fpu_errors     dw 0                ; the fuzz program's 287 errors (IRQ13)
 fuzz_in_random      dw 0                ; faults inside the random bytes (CS = UFUZZ)
 msg_fuzz_done       db "fuzz: ", 0
 msg_fuzz_done2      db " iterations; the kernel's code and tables unchanged", CHAR_LF, 0
@@ -124,7 +156,14 @@ msg_fuzz_faults     db "fuzz: faults", 0
 msg_fuzz_watchdog   db " watchdog ", 0
 msg_fuzz_fpu        db " IRQ13 ", 0
 msg_fuzz_random     db "fuzz: faults inside the random bytes: ", 0
+msg_fuzz_most       db ", most of the iterations: ", 0
+msg_fuzz_restarts   db "fuzz: watchdog restarts ", 0
+msg_fuzz_restarts2  db ", ", 0
+msg_fuzz_restarts3  db " of them in a wait on the server; under 5%: ", 0
+msg_fuzz_yes        db "yes", CHAR_LF, 0
+msg_fuzz_no         db "no", CHAR_LF, 0
 msg_fuzz_seed       db "fuzz: the program's seed was ", 0
+msg_fuzz_unknown    db "unknown (the panic came in another thread's time)", 0
 %endif
 end_kdata
 
@@ -180,6 +219,9 @@ test_start:
 %endif
 %ifdef TEST_TICKS
         call test_ticks
+%endif
+%ifdef TEST_386_SEGMENTS
+        call test_cpu
 %endif
         ret
 
@@ -261,6 +303,13 @@ test_tick:
         mov word [fuzz_ticks], 0
         inc word [fuzz_watchdogs]
         mov bx, [fg_thread]             ; the fuzz program's thread, whichever runs:
+        push es
+        mov es, bx
+        cmp byte [es:T_STATE], TS_REPLY ; (waiting on the server's reply: counted)
+        pop es
+        jne .restart
+        inc word [fuzz_watchdog_server]
+.restart:
         call thread_restart             ; in the kernel, on the way back
         cmp bx, [cur_thread]
         jne .keys
@@ -652,28 +701,229 @@ test_ring_pop:
 test_program_started:
 %ifdef TEST_KERNEL_CHECKS
         pusha
-        call test_kernel_sum
-        cmp byte [test_sum_known], 0
-        jne .compare
-        mov [test_sum], ax
-        mov byte [test_sum_known], 1
-        jmp .checked
-.compare:
-        cmp ax, [test_sum]
-        je .checked
-        mov si, msg_kernel_changed
-        xor bp, bp
-        jmp panic
-.checked:
   %ifdef TEST_FUZZ
         mov word [fuzz_ticks], 0
         inc word [fuzz_starts]
         cmp word [fuzz_starts], FUZZ_ITERATIONS
-        ja test_fuzz_end
+        ja .last
+        cmp word [fuzz_starts], 1
+        je .check                       ; the first start: the sums to keep
+        test word [fuzz_starts], FUZZ_CHECK_EVERY - 1
+        jnz .checked
   %endif
+.check:
+        call test_kernel_check
+.checked:
         popa
 %endif
         ret
+%ifdef TEST_FUZZ
+.last:
+        call test_kernel_check          ; as the last iteration left them
+        jmp test_fuzz_end
+%endif
+
+%ifdef TEST_KERNEL_CHECKS
+; ----------------------------------------------------------------------------
+; test_kernel_check - the kernel's code and tables as at the first check,
+; and the GDT's invariants
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      nothing (or never: a panic)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+test_kernel_check:
+        call test_kernel_sum
+        cmp byte [test_sum_known], 0
+        jne .compare
+        mov [test_sum], ax
+        mov [test_sum + 2], dx
+        mov byte [test_sum_known], 1
+        jmp .invariants
+.compare:
+        cmp ax, [test_sum]
+        jne .changed
+        cmp dx, [test_sum + 2]
+        jne .changed
+.invariants:
+        call test_gdt_check
+        jmp test_queue_check
+.changed:
+        mov si, msg_kernel_changed
+        xor bp, bp
+        jmp panic
+
+; ----------------------------------------------------------------------------
+; test_queue_check - the queues well formed (l4.md's arena invariant; P15):
+; each ready queue holds threads ready at its priority alone, ends at its
+; tail, and agrees with ready_mask; every ready thread is in one; a thread
+; that sends or receives is in its endpoint's queue, of that kind; one that
+; waits on a notification is its waiter. A walk longer than the threads
+; are many is a loop.
+;   In:       DS = SEL_KDATA
+;   Out:      nothing (or never: a panic)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+test_queue_check:
+        push es
+        xor dx, dx                      ; the threads the queues hold
+        xor si, si                      ; the priority, times two
+.queue:
+        mov bx, [rq_head + si]
+        xor di, di                      ; the last one walked
+        mov cx, [thread_count]
+        inc cx                          ; steps at most: one more is a loop
+.walk:
+        test bx, bx
+        jz .walked
+        mov es, bx
+        cmp byte [es:T_STATE], TS_READY
+        jne .bad
+        mov ax, si
+        shr ax, 1
+        cmp [es:T_PRIO], al
+        jne .bad
+        inc dx
+        mov di, bx
+        mov bx, [es:T_NEXT]
+        loop .walk
+        jmp .bad
+.walked:
+        cmp [rq_tail + si], di
+        jne .bad
+        mov cx, si
+        shr cx, 1
+        mov al, 1
+        shl al, cl
+        test [ready_mask], al           ; its bit: set if and only if not empty
+        jz .no_bit
+        test di, di
+        jz .bad
+        jmp .next_queue
+.no_bit:
+        test di, di
+        jnz .bad
+.next_queue:
+        add si, 2
+        cmp si, PRIORITIES * 2
+        jb .queue
+        xor di, di                      ; every thread: its wait where it says
+.thread:
+        cmp di, [thread_count]
+        jae .threads_done
+        push di
+        shl di, 1
+        mov bx, [thread_list + di]
+        pop di
+        inc di
+        mov es, bx
+        mov al, [es:T_STATE]
+        cmp al, TS_READY
+        jne .not_ready
+        dec dx                          ; each ready thread once in the queues
+        jmp .thread
+.not_ready:
+        mov si, [es:T_WAIT_OBJ]
+        cmp al, TS_NOTIFY
+        je .notify
+        mov ah, EK_SEND
+        cmp al, TS_SEND
+        je .endpoint
+        mov ah, EK_RECV
+        cmp al, TS_RECV
+        jne .thread
+.endpoint:
+        mov es, si
+        cmp [es:E_KIND], ah
+        jne .bad
+        mov ax, [es:E_HEAD]
+        mov cx, [thread_count]
+.find:
+        test ax, ax
+        jz .bad                         ; not in its endpoint's queue
+        cmp ax, bx
+        je .thread
+        mov es, ax
+        mov ax, [es:T_NEXT]
+        loop .find
+        jmp .bad
+.notify:
+        mov es, si
+        cmp [es:N_WAITER], bx
+        jne .bad
+        jmp .thread
+.threads_done:
+        test dx, dx
+        jnz .bad
+        pop es
+        ret
+.bad:
+        pop es
+        mov si, msg_queue_bad
+        xor bp, bp
+        jmp panic
+
+; ----------------------------------------------------------------------------
+; test_gdt_check - what the sum cannot cover of the GDT, since its pool and
+; windows change: no present descriptor above DPL 0 (security.md), and every
+; listed space's LDT descriptor an LDT exactly its slots long, at its own
+; SP_LDT (l4.md's arena invariant; os-server.md P15)
+;   In:       DS = SEL_KDATA
+;   Out:      nothing (or never: a panic)
+;   Destroys: AX, BX, CX, DX, SI, DI
+; ----------------------------------------------------------------------------
+test_gdt_check:
+        push es
+        mov si, GDT_OFF + 8
+        mov cx, GDT_ENTRIES - 1
+.descriptor:
+        mov al, [si + 5]
+        test al, ACC_PRESENT
+        jz .next
+        test al, ACC_DPL_MASK
+        jnz .dpl
+.next:
+        add si, 8
+        loop .descriptor
+        xor di, di
+.space:
+        cmp di, [space_bytes]
+        jae .done
+        mov bx, [space_list + di]       ; the space's own selector (RPL 0, the GDT)
+        mov es, bx
+        mov si, [es:SP_GDT_SELECTOR]
+        test si, si
+        jz .ldt                         ; listed, its LDT released
+        add si, GDT_OFF
+        cmp byte [si + 5], ACC_LDT
+        jne .ldt
+        mov ax, [es:SP_SLOTS]
+        shl ax, 3
+        dec ax
+        cmp [si], ax                    ; the limit: its slots, not one more
+        jne .ldt
+        mov ax, [GDT_OFF + bx + 2]      ; the base: the space's, plus SP_LDT
+        mov dl, [GDT_OFF + bx + 4]
+        add ax, SP_LDT
+        adc dl, 0
+        cmp [si + 2], ax
+        jne .ldt
+        cmp [si + 4], dl
+        jne .ldt
+        add di, 2
+        jmp .space
+.done:
+        pop es
+        ret
+.dpl:
+        mov si, msg_gdt_dpl
+        jmp .panic
+.ldt:
+        mov si, msg_ldt_changed
+.panic:
+        pop es
+        xor bp, bp
+        jmp panic
+%endif
 
 ; ----------------------------------------------------------------------------
 ; test_restart_check - a frame from ring 3 must be the running thread's, at
@@ -693,14 +943,18 @@ test_restart_check:
         ret
 
 ; ----------------------------------------------------------------------------
-; test_fault_quiet - should this fault of the program go unreported?
+; test_fault_quiet - should this fault go unreported?
 ;   In:       BP = the frame; DS = SEL_KDATA
-;   Out:      CF set to keep quiet: the fuzzer counts its faults instead
+;   Out:      CF set to keep quiet: the fuzzer counts the fuzz program's
+;             faults instead (any other thread's is reported)
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 test_fault_quiet:
 %ifdef TEST_FUZZ
         push bx
+        mov bx, [cur_thread]
+        cmp bx, [fg_thread]
+        jne .reported                   ; another thread's fault: reported (P15)
         mov bx, [bp + FRAME_VECTOR]
         shl bx, 1
         inc word [fuzz_faults + bx]
@@ -710,27 +964,33 @@ test_fault_quiet:
 .counted:
         pop bx
         stc
-%else
-        clc
+        ret
+.reported:
+        pop bx
 %endif
+        clc
         ret
 
 %ifdef TEST_KERNEL_CHECKS
 ; ----------------------------------------------------------------------------
-; test_kernel_sum - the sum of the words of the kernel's code, its GDT,
-; IDT, dispatch tables and both TSSs (accessed bits are preset; the TSS's
-; busy bit was set before the first start, and nothing else may change)
+; test_kernel_sum - Fletcher's sums of the words of the kernel's code, its
+; GDT's fixed part, IDT, dispatch tables and both TSSs (accessed bits are
+; preset; the TSS's busy bit was set before the first start, and nothing
+; else may change): the running total sees two words exchanged, which a
+; plain sum would not (os-server.md P15)
 ;   In:       DS = SEL_KDATA
-;   Out:      AX = the sum
+;   Out:      AX = the sum of the words, DX = the sum of the running sums
 ;   Destroys: BX, CX, SI
 ; ----------------------------------------------------------------------------
 test_kernel_sum:
         xor ax, ax
+        xor dx, dx
         xor si, si
         mov cx, ktext_end
         shr cx, 1                       ; words of code
 .code:
         add ax, [cs:si]
+        add dx, ax
         add si, 2
         loop .code
         mov si, GDT_OFF                 ; the GDT's fixed part, before the windows
@@ -752,6 +1012,7 @@ test_kernel_sum:
         mov cx, TSS286_SIZE                ; words: both TSSs, one after the other
 .data:
         add ax, [si]
+        add dx, ax
         add si, 2
         loop .data
         ret
@@ -765,6 +1026,8 @@ test_kernel_sum:
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 test_fuzz_end:
+        mov al, CHAR_LF                 ; a line of its own: the random code's bytes
+        call kputc                      ; on the log (KCALL_LOG, PX_WRITE) end no line
         mov si, msg_fuzz_faults
         call kputs
         xor bx, bx
@@ -801,8 +1064,25 @@ test_fuzz_end:
         call kputs
         mov ax, [fuzz_in_random]
         call kput_dec32
-        mov al, CHAR_LF
-        call kputc
+        mov si, msg_fuzz_most           ; random code ran: a floor the test expects
+        call kputs
+        mov ax, [fuzz_in_random]
+        shl ax, 1
+        cmp ax, FUZZ_ITERATIONS
+        call .yes_no                    ; (CF: fewer than half)
+        mov si, msg_fuzz_restarts
+        call kputs
+        mov ax, [fuzz_watchdogs]
+        call kput_dec32
+        mov si, msg_fuzz_restarts2
+        call kputs
+        mov ax, [fuzz_watchdog_server]
+        call kput_dec32
+        mov si, msg_fuzz_restarts3
+        call kputs
+        mov ax, FUZZ_WATCHDOG_MOST
+        cmp ax, [fuzz_watchdogs]        ; (CF: more than FUZZ_WATCHDOG_MOST)
+        call .yes_no
         mov si, msg_fuzz_done
         call kputs
         mov ax, FUZZ_ITERATIONS
@@ -811,10 +1091,18 @@ test_fuzz_end:
         mov si, msg_fuzz_done2
         call kputs
         jmp test_end
+.yes_no:
+        mov si, msg_fuzz_no
+        jc .say
+        mov si, msg_fuzz_yes
+.say:
+        jmp kputs
 
 ; ----------------------------------------------------------------------------
 ; test_fuzz_seed - on a panic: the seed the fuzz program had (the first word
-; of its data), to replay the failing iteration
+; of its data), to replay the failing iteration (TEST_FUZZ_SEED); read
+; only if the LDT loaded is the fuzz program's, and its data still there:
+; a panic in another thread's time would fault again here
 ;   In:       DS = SEL_KDATA
 ;   Out:      nothing
 ;   Destroys: AX, SI, ES
@@ -822,12 +1110,80 @@ test_fuzz_end:
 test_fuzz_seed:
         mov si, msg_fuzz_seed
         call kputs
+        mov ax, [fg_thread]
+        test ax, ax
+        jz .unknown
+        mov es, ax
+        mov ax, [es:T_SPACE]
+        test ax, ax
+        jz .unknown
+        mov es, ax
+        sldt ax
+        cmp ax, [es:SP_GDT_SELECTOR]
+        jne .unknown
         mov ax, SEL_UDATA
+        verr ax
+        jnz .unknown
         mov es, ax
         mov ax, [es:0]
         call kput_hex16
+        jmp .line
+.unknown:
+        mov si, msg_fuzz_unknown
+        call kputs
+.line:
         mov al, CHAR_LF
         jmp kputc
+
+%endif
+
+%ifdef TEST_386_SEGMENTS
+; ----------------------------------------------------------------------------
+; test_cpu - a 386 or later? A 286's SGDT stores FFh as the base's fourth
+; byte, which a 386 has (Intel, 80386 Programmer's Reference, 14.7: the
+; 286's SGDT): Bochs' attack and fuzz builds then null FS and GS
+; (test_way_back)
+;   In:       DS = SEL_KDATA
+;   Out:      test_386
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+test_cpu:
+        push bp
+        sub sp, 6
+        mov bp, sp
+        sgdt [bp]
+        mov al, [bp + 5]
+        add sp, 6
+        pop bp
+        cmp al, 0xFF
+        je .done                        ; a 286
+        mov byte [test_386], 1
+.done:
+        ret
+%endif
+
+%ifdef TEST_KERNEL_CHECKS
+; ----------------------------------------------------------------------------
+; test_way_back - on a 386, FS and GS null on every way back to a ring above
+; 0: the kernel, a 286's, never saves, checks or nulls them, so a segment
+; the program loaded there would outlive its descriptor and its restart, a
+; state no 286 can be in (docs/emulators.md; P15)
+;   In:       DS = SEL_KDATA
+;   Out:      nothing
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+test_way_back:
+  %ifdef TEST_386_SEGMENTS
+        cmp byte [test_386], 0
+        je .done
+        xor ax, ax
+        db 0x8E, 0xE0                   ; mov fs, ax (a 386's: no 286 has FS)
+        db 0x8E, 0xE8                   ; mov gs, ax
+.done:
+  %endif
+        ret
+%endif
+%ifdef TEST_FUZZ
 %endif
 
 %ifdef TEST_ATTACK
@@ -915,10 +1271,12 @@ test_probe_undo:
 
 %ifdef TEST_FUZZ
 ; ----------------------------------------------------------------------------
-; test_fuzz_alias - the fuzzer's code alias of its data, SEL_UFUZZ: slot 1's
-; descriptor as code in slot 3 of the program's space, at its every start
-; (the random code may have deleted it). No program can make code (l4.md
-; X14), so the test build's kernel does.
+; test_fuzz_alias - the fuzzer's code alias of its data, SEL_UFUZZ: a copy
+; of slot 1, made code, in slot 3 of the program's space, at its every
+; start (the random code may have deleted it, or put another capability
+; there, which is deleted first). No program can make code (l4.md X14), so
+; the test build's kernel does; the alias is slot 1's child, as a copy is,
+; so that a revoke of the data takes it too (os-server.md P15).
 ;   In:       BX = the thread; DS = SEL_KDATA
 ;   Out:      nothing (for a thread not the program's, nothing done)
 ;   Destroys: nothing
@@ -937,7 +1295,14 @@ test_fuzz_alias:
         test byte [es:SP_LDT + (SEL_UDATA & ~7) + 5], ACC_PRESENT
         jz .done                        ; no data: nothing to alias
         mov ax, SEL_UFUZZ >> 3
-        call slot_at                    ; ES:SI, ES:DI = slot 3
+        call slot_at                    ; ES:SI, ES:DI = slot 3 (AX destroyed)
+        cmp byte [es:si + SH_TYPE], CAP_EMPTY
+        je .empty
+        mov ax, SEL_UFUZZ >> 3
+        call cap_delete_at              ; (BX, AX: the space and slot 3)
+        mov ax, SEL_UFUZZ >> 3
+        call slot_at
+.empty:
         push ds
         push es
         pop ds
@@ -947,6 +1312,14 @@ test_fuzz_alias:
         pop bx
         pop ds
         mov byte [es:di + 5], ACC_UCODE
+        push cx
+        push dx
+        mov dx, bx                      ; the child: slot 3 of the space
+        mov cx, SEL_UFUZZ >> 3
+        mov ax, SEL_UDATA >> 3          ; the parent: slot 1
+        call child_link
+        pop dx
+        pop cx
 .done:
         pop di
         pop si

@@ -38,6 +38,9 @@ Bochs is told everything about the machine it can be told. What it cannot be:
 | A 287 error | IRQ13 when the faulting instruction ends | IRQ13 at the next waiting FPU instruction |
 | 8042 command D2h | not in the AT's controller (IBM 1-40) | puts a byte in the output buffer, IRQ1 |
 | An I/O APIC | none | at FEC00000h, beyond any 286 address |
+| FS, GS and 386 opcodes from ring 3 | #UD | run: the fuzzer's random code loads FS and GS and runs 0Fh-prefixed 386 opcodes, so its #UD count on Bochs is a 386's. The kernel, a 286's, never saves or checks FS and GS, so a segment there would outlive its descriptor and the program's restart: Bochs' attack and fuzz builds null them on every way back to rings 1-3 (`test_way_back`, roadmap os-server.md P15) |
+| A 287 overrun of a segment (vector 9) | possible, and may arrive in ring 0 after the CPU has moved on | never raised (Bochs' 387-class FPU reports the operand as #GP at the instruction; MAME has no 287). The kernel's rule for it in ring 0 is tested through `KCALL_TEST`'s `TEST_OVERRUN`, which raises vector 9 in ring 0 |
+| A reset (a triple fault, the 286's shutdown) | the BIOS boots again | ends the run (its debugger quits): no `TEST END`. On MAME the machine boots again, so the runner fails a run whose banner (`rx286, test build`) comes more often than its test expects |
 
 The single-step row was a real bug of rx286, found by the fuzzer on both 286
 emulators in M9: the kernel took the carried trap for a kernel fault and

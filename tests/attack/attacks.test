@@ -1,5 +1,7 @@
-# Every attack of the program tests/programs/attack.asm, and what the kernel
-# makes of it (on Bochs: docs/emulators.md lists where a 286 differs).
+# Every attack of the program tests/programs/attack.asm, and what comes of
+# it: a fault's report (the OS server's, in the kernel's form), a refusal,
+# or what the program found (on Bochs: docs/emulators.md lists where a 286
+# differs). Full match: any other line fails it.
 program: attack
 # DOSBox-X stops itself at the jump to the TSS (docs/emulators.md).
 emulators: bochs mame
@@ -44,6 +46,8 @@ attack: jump to the TSS
 rx286: program fault #GP(0020) at 0007:{attacks.tss}
 attack: call the double-fault TSS
 rx286: program fault #GP(0028) at 0007:{attacks.dftss}
+attack: every selector of the GDT
+attack: every selector of the GDT refused
 attack: int 32h
 rx286: program fault #GP(0192) at 0007:{attacks.int32}
 attack: int 30h, the system call that was
@@ -102,14 +106,22 @@ rx286: program fault #SS(0000) at 0007:{attacks.pop_f}
 attack: a 287 operand across the limit
 @bochs rx286: program fault #GP(0000) at 0007:{attacks.fpuop}
 @mame attack: the 287 read across the limit (no 287 emulated?)
+attack: a 287 overrun in the kernel (vector 9)
+rx286: the 287 overran a segment (vector 9)
 attack: write past FFFFh
 attack: refused, errno 14
+attack: log bytes across the data's limit
+attack: refused, error 1
+attack: log bytes across the stack's limit
+attack: refused, error 1
+attack: log bytes past FFFFh
+attack: refused, error 1
 attack: unprivileged reads
-attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed
+attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed; the IDT's limit 018F
 attack: int 31h at the end of the code
 rx286: program fault #GP(0000) at 0007:2000
 attack: sgdt
-attack: sgdt allowed
+attack: sgdt allowed; the GDT's limit 1FFF
 attack: smsw
 attack: smsw allowed
 attack: read a key past the limit
@@ -173,4 +185,21 @@ attack: seal its code
 attack: refused, error 2
 attack: seal a GDT selector
 attack: refused, error 1
+attack: every slot of the LDT, after the kernel's calls
+attack: slot 0007 lar FB00 lsl 1FFF r-
+attack: slot 000F lar F300 lsl 1FFF rw
+attack: slot 0017 lar F300 lsl 07FF rw
+attack: slot 001F lar FFFF lsl FFFF --
+attack: slot 0027 lar FFFF lsl FFFF --
+attack: slot 002F lar FFFF lsl FFFF --
+attack: slot 0037 lar FFFF lsl FFFF --
+attack: slot 003F lar FFFF lsl FFFF --
+attack: slot 0047 lar FFFF lsl FFFF --
+attack: slot 004F lar FFFF lsl FFFF --
+attack: slot 0057 lar FFFF lsl FFFF --
+attack: slot 005F lar FFFF lsl FFFF --
+attack: slot 0067 lar FFFF lsl FFFF --
+attack: slot 006F lar FFFF lsl FFFF --
+attack: slot 0077 lar FFFF lsl FFFF --
+attack: slot 007F lar FFFF lsl FFFF --
 attack: done

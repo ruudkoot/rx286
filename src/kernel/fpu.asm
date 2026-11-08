@@ -185,6 +185,12 @@ fpu_irq:
         jnz .owner
         mov bx, [cur_thread]            ; no owner: the kernel's own test
 .owner:
+%ifdef TEST_FUZZ
+        cmp bx, [fg_thread]             ; the fuzz program's 287 errors, whichever
+        jne .counted                    ; way they go: #MF through its fault endpoint
+        inc word [fuzz_fpu_errors]
+.counted:
+%endif
         push es
         mov es, bx
         cmp word [es:T_FAULT], 0
@@ -194,12 +200,8 @@ fpu_irq:
         jmp .stale
 .restart:
         pop es
-%ifdef TEST_FUZZ
-        inc word [fuzz_fpu_errors]      ; the fuzzer counts, quietly
-%else
         mov si, msg_fpu_error
         call klog
-%endif
         call thread_restart
 .stale:
         pop ax
