@@ -57,9 +57,9 @@ instead of corrupting the next segment.
 |---|---|---|---|---|
 | real-mode entry | `ENTRY_OFF` 0000h | `ENTRY_ROOM` 256 B | 10000h | none: real mode |
 | kernel code | `KTEXT_OFF` 0100h | `KTEXT_ROOM` 16 KB | `KTEXT_PHYS` 10100h | `SEL_KCODE`, limit = size |
-| kernel data | `KDATA_OFF` 4100h | `KDATA_ROOM` 6 KB | `KDATA_PHYS` 14100h | within `SEL_KDATA` |
-| the module table | `MODULE_TABLE_OFF` 5900h | `MODULE_TABLE_SIZE` 512 B | `MODULE_TABLE_PHYS` 15900h | within `SEL_KDATA`; the root's, read-only |
-| the modules | `MODULES_OFF` 5B00h | to `IMAGE_MAX` 192 KB | 15B00h on | each module's code its own segment |
+| kernel data | `KDATA_OFF` 4100h | `KDATA_ROOM` 7 KB | `KDATA_PHYS` 14100h | within `SEL_KDATA` |
+| the module table | `MODULE_TABLE_OFF` 5D00h | `MODULE_TABLE_SIZE` 512 B | `MODULE_TABLE_PHYS` 15D00h | within `SEL_KDATA`; the root's, read-only |
+| the modules | `MODULES_OFF` 5F00h | to `IMAGE_MAX` 192 KB | 15F00h on | each module's code its own segment |
 
 The code room was 16 KB and the data room 8 KB while the old system calls
 and the new kernel lived side by side (roadmap l4.md, *Constraints*); with

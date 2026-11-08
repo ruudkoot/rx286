@@ -71,7 +71,7 @@ DOSBox-X; none of their code is in the repository.
 | D10 | decided (2026-11-08): B, a stack segment for each thread, with the fault rule |
 | D11 | decided (2026-11-08): B, servers Watcom's alone; gcc-ia16 builds the rest |
 | D1-D9, D12, D13 | decided (2026-11-08): as recommended |
-| M1: the masks of entries past entry 15 | not started |
+| M1: the masks of entries past entry 15 | done (2026-11-08): with a third bug, the kernel's timers |
 | M2: the boot information, and the base memory from the BIOS | not started |
 | M3: every byte of extended memory to the root | not started |
 | M4: the processes' memory from all of it, and the root's room | not started |
@@ -1275,6 +1275,22 @@ less, M a few, L a week.
   the highest entry the root lets a fork reach today (22, M4), and fail on today's code (E8 ran
   both ways).
 - **Decisions:** none. They are bugs today (X2), and M7's 48 entries make them likelier.
+- **Done** (2026-11-08). Both masks are byte arrays; `late.test` and `tone.test` pass on all
+  three emulators and fail on today's code (the reader waits for ever, both killed tones play
+  on). Not as planned:
+  - **A third bug, found by `late.test`:** with 23 processes and 20 children ending at once,
+    more than 16 of the OS server's threads waited for its lock together, each on a kernel
+    timer (`lock_take` polls a tick at a time), and the kernel has `TIMER_MAX` 16: the
+    threads that found none slept for ever (`sleep_on` ignored `KE_POOL`), and their
+    processes never became zombies. `TIMER_MAX` is 48, enough for every thread of the
+    server's and the drivers at 25 entries; `sleep_on` and `timers_arm` say on the log when
+    no timer is left. M7 raises it with the entries.
+  - **A lock that wakes its waiters,** with no timer, was tried first and dropped: it passed
+    on Bochs and DOSBox-X but lost a process's end on MAME (the kill of a process in a tone),
+    for a reason not found.
+  - **The kernel's data room** grew from 6 to 7 KB (`KDATA_ROOM`; the module table at 5D00h,
+    the modules at 5F00h), M2's change brought forward: 32 timers more did not fit the test
+    image of `tests/sh/syntax`, whose key script lies in the kernel's data.
 
 ### M2. The boot information, and the base memory from the BIOS (M)
 

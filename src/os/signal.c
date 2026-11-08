@@ -274,7 +274,8 @@ static void timers_arm(void)
     r.cx = next <= now ? 1 : next - now > 0x7FFF ? 0x7FFF : (rx_u16)(next - now);
     r.dx = OS_TIMER;
     r.bp = 0;
-    rx_kcall(&r);
+    if (rx_kcall(&r))                   /* (no kernel timer left: memory.md M1) */
+        rx_log("rx286: os: no kernel timer left for the processes' timers\n", 58);
 }
 
 /* sig_timers - the alarms that have come, SIGALRM; the sleeps that have,

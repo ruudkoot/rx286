@@ -38,10 +38,10 @@ ENTRY_ROOM          equ 0x0100
 KTEXT_OFF           equ 0x0100      ; kernel code (16 KB: the arena's room, os-server.md
 KTEXT_ROOM          equ 0x4000      ; P3; 12 KB from l4.md L10 until then)
 KDATA_OFF           equ 0x4100      ; kernel data: the boot GDT, IDT, TSSs, variables, messages
-KDATA_ROOM          equ 0x1800
-MODULE_TABLE_OFF    equ 0x5900      ; the table of the image's modules
+KDATA_ROOM          equ 0x1C00      ; 7 KB (6 KB until memory.md M1)
+MODULE_TABLE_OFF    equ 0x5D00      ; the table of the image's modules
 MODULE_TABLE_SIZE   equ 0x0200
-MODULES_OFF         equ 0x5B00      ; the modules, each on a paragraph
+MODULES_OFF         equ 0x5F00      ; the modules, each on a paragraph
 KERNEL_END_MARK     equ 0x286E      ; the image's last word: the loader checks it arrived
 
 ; The module table: a header, then an entry a module, the root's first.

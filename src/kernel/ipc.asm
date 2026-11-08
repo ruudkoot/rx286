@@ -22,7 +22,10 @@
 ; selectors, which ES holds while the kernel works on one (os-server.md P3).
 ; ============================================================================
 
-TIMER_MAX           equ 16              ; timers armed at once: one a notification
+TIMER_MAX           equ 48              ; timers armed at once: one a notification; enough for
+                                        ;    every thread of the OS server's, each waiting
+                                        ;    for its lock a tick at a time, and the drivers
+                                        ;    (memory.md M1: 16 ran out at 23 processes)
 TIMER_TICKS_MAX     equ 0x7FFF          ; ten minutes and more
 TIMER_SIZE          equ 6
 TM_NOTIFY           equ 0               ; the notification, or 0: free

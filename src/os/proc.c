@@ -171,7 +171,8 @@ static rx_u8 break_seen;                /* a Ctrl+Break the control thread's loc
 
 /* sleep_on - until a notification is signalled; with a tick, at most one
  * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
- * a Ctrl+Break) */
+ * a Ctrl+Break). A tick needs one of the kernel's TIMER_MAX timers: with
+ * none left the log says so, since the wait may then never end */
 static void sleep_on(rx_u16 notify, int tick)
 {
     struct rx_kregs r;
@@ -181,7 +182,9 @@ static void sleep_on(rx_u16 notify, int tick)
         r.cx = 1;
         r.dx = notify == OS_CONTROL ? OS_TIMER : notify;
         r.bp = 0;
-        rx_kcall(&r);
+        if (rx_kcall(&r))               /* (none left: a wait that may be for ever;
+                                           TIMER_MAX is for every thread, memory.md M1) */
+            rx_log("rx286: os: no kernel timer left for a wait\n", 43);
     }
     r.ax = KCALL_RECV << 8;
     r.dx = notify;
