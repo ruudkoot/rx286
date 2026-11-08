@@ -19,10 +19,20 @@
 # instruction it fails on:
 #   - a 66h, 67h, 64h or 65h byte anywhere among its prefixes
 #     (operand size, address size, FS, GS);
-#   - 8Ch or 8Eh with FS or GS in the ModRM byte;
+#   - 8Ch or 8Eh with FS, GS or no segment register (6, 7) in the ModRM
+#     byte, and 8Eh with CS (#UD on a 286);
 #   - a 0Fh opcode outside the 286's: 00h-03h, 05h (LOADALL), 06h (CLTS);
-#   - the 387's own opcodes (FUCOM..., FPREM1, FSIN, FCOS, FSINCOS);
+#     of 0F 00, /0-/5 alone (SLDT to VERW); of 0F 01, the memory forms of
+#     /0-/3 (SGDT to LIDT) and /4, /6 (SMSW, LMSW): its register forms are
+#     the 486's and later's (INVLPG, MONITOR, RDTSCP...);
+#   - an ESC (D8h-DFh) that is not the 287's: its register forms as Intel's
+#     287 lists them (FPU_287), its memory forms less the reserved ones and
+#     SSE3's FISTTP (D9 /1, DB /1, /4, /6, DD /1, /5, DF /1); so the 387's
+#     (FUCOM..., FPREM1, FSIN, FCOS, FSINCOS), the P6's (FCMOVcc, FCOMI...)
+#     and FFREEP;
 #   - F1h (the 386's ICEBP).
+# Nor does it pass a listing that hides lines from it ([list -]), and it
+# reads the bytes of `align N, instruction`, which are that instruction's.
 # ============================================================================
 
 import os
@@ -37,6 +47,32 @@ FORBIDDEN_PREFIXES = {0x64: 'FS override', 0x65: 'GS override',
 OPCODES_0F_286 = {0x00, 0x01, 0x02, 0x03, 0x05, 0x06}
 FPU_387 = {(0xD9, 0xF5): 'FPREM1', (0xD9, 0xFB): 'FSINCOS', (0xD9, 0xFE): 'FSIN',
            (0xD9, 0xFF): 'FCOS', (0xDA, 0xE9): 'FUCOMPP'}
+
+
+def spans(*ranges):
+    out = set()
+    for r in ranges:
+        lo, hi = r if isinstance(r, tuple) else (r, r)
+        out.update(range(lo, hi + 1))
+    return out
+
+
+# The 287's register forms (mod 3), by ESC opcode: Intel, 80287 data sheet
+# and iAPX 286 Programmer's Reference, the 287's instruction set. FENI and
+# FDISI (DB E0, E1) are the 8087's, which a 287 takes as no operation.
+FPU_287 = {0xD8: spans((0xC0, 0xFF)),
+           0xD9: spans((0xC0, 0xD0), 0xE0, 0xE1, 0xE4, 0xE5, (0xE8, 0xEE), (0xF0, 0xF4),
+                       (0xF6, 0xFA), 0xFC, 0xFD),
+           0xDA: set(),
+           0xDB: spans((0xE0, 0xE4)),
+           0xDC: spans((0xC0, 0xCF), (0xE0, 0xFF)),
+           0xDD: spans((0xC0, 0xC7), (0xD0, 0xDF)),
+           0xDE: spans((0xC0, 0xCF), 0xD9, (0xE0, 0xFF)),
+           0xDF: {0xE0}}
+# Its memory forms: all but these (ESC, reg), reserved or SSE3's FISTTP
+FPU_MEMORY_NOT_287 = {(0xD9, 1), (0xDB, 1), (0xDB, 4), (0xDB, 6), (0xDD, 1), (0xDD, 5),
+                      (0xDF, 1)}
+LIST_OFF = re.compile(r'^\s*\d+\s+\[\s*list\s+-\s*\]', re.I)
 DATA = {'db', 'dw', 'dd', 'dq', 'dt', 'do', 'incbin', 'resb', 'resw', 'resd', 'align',
         'alignb', 'equ', 'section', 'segment', 'org', 'bits', 'cpu', 'istruc', 'iend',
         'at', 'struc', 'endstruc'}
@@ -79,21 +115,41 @@ def check_instruction(code):
     if op == 0x0F:
         if nxt is None or nxt not in OPCODES_0F_286:
             return 'opcode 0F %s' % ('%02X' % nxt if nxt is not None else '??')
+        if nxt in (0x00, 0x01):
+            modrm = code[i + 2] if i + 2 < len(code) else None
+            if modrm is None:
+                return 'opcode 0F %02X without its ModRM byte' % nxt
+            mod, reg = modrm >> 6, (modrm >> 3) & 7
+            if nxt == 0x00 and reg > 5 or \
+                    nxt == 0x01 and (reg in (5, 7) or reg < 4 and mod == 3):
+                return 'opcode 0F %02X %02X' % (nxt, modrm)
     elif op in (0x8C, 0x8E) and nxt is not None and ((nxt >> 3) & 7) in (4, 5):
         return 'FS or GS'
+    elif op in (0x8C, 0x8E) and nxt is not None and ((nxt >> 3) & 7) in (6, 7):
+        return 'no such segment register'
+    elif op == 0x8E and nxt is not None and ((nxt >> 3) & 7) == 1:
+        return 'MOV CS'
     elif op == 0xF1:
         return 'ICEBP'
     elif (op, nxt) in FPU_387:
         return FPU_387[(op, nxt)]
     elif op == 0xDD and nxt is not None and 0xE0 <= nxt <= 0xEF:
         return 'FUCOM/FUCOMP'
+    elif 0xD8 <= op <= 0xDF and nxt is not None:
+        if nxt >= 0xC0 and nxt not in FPU_287[op]:
+            return 'ESC %02X %02X: no 287 instruction' % (op, nxt)
+        if nxt < 0xC0 and (op, (nxt >> 3) & 7) in FPU_MEMORY_NOT_287:
+            return 'ESC %02X /%d: no 287 instruction' % (op, (nxt >> 3) & 7)
     return None
 
 
 def check_listing(path):
     problems = []
     continued = False
-    for raw in open(path, encoding='latin-1'):
+    for n, raw in enumerate(open(path, encoding='latin-1'), 1):
+        if LIST_OFF.match(raw):
+            problems.append((path, int(raw.split()[0]), '--------', '[list -] hides lines',
+                             raw.split(None, 1)[1].strip()))
         m = LINE.match(raw.rstrip('\n'))
         if not m:
             continued = False
@@ -106,7 +162,12 @@ def check_listing(path):
         if was_continued:
             continue
         word = mnemonic(source)
-        if word is None or word in DATA or word.startswith('%'):
+        if word == 'align':
+            # align N, fill: the fill's bytes, an instruction's unless data
+            fill = source.split(';', 1)[0].partition(',')[2].split()
+            if fill and fill[0].lower() in DATA:
+                continue
+        elif word is None or word in DATA or word.startswith('%'):
             continue
         hexbytes = re.sub(r'[()\[\]]', '', hexbytes)
         reason = check_instruction(instruction_bytes(hexbytes))
@@ -157,6 +218,9 @@ Segment: CONST WORD USE16 00000010 bytes
 0000  66 65 64 20 75 70 00                            fed up.
 Segment: _TEXT BYTE USE16 00000002 bytes
 0000  66 50             push            eax
+0002  DA C1             fcmovb          st,st(1)
+0004  0F 01 F9          rdtscp
+0007  DF E0             fstsw           ax
 '''
 
 
@@ -177,9 +241,9 @@ def self_test():
         with open(dis, 'w') as f:
             f.write(DIS_SELF_TEST)
         found = sorted(line for _, line, _, _, _ in check_disassembly(dis))
-    if found != [2, 3, 4, 7, 11]:
-        print('check-286 self-test FAILED: the C checks flagged lines %s, not 2, 3, 4, 7, 11'
-              % found)
+    if found != [2, 3, 4, 7, 11, 12, 13]:
+        print('check-286 self-test FAILED: the C checks flagged lines %s, not 2, 3, 4, 7, 11, '
+              '12, 13' % found)
         return 1
     print('check-286 self-test: all %d slips found, nothing else; the C checks too'
           % len(wanted))
@@ -189,6 +253,9 @@ def self_test():
 def main(args):
     if args == ['--self-test']:
         return self_test()
+    if not args:
+        print('check-286: no listing given')
+        return 1
     problems = []
     for path in args:
         problems += check_disassembly(path) if path.endswith('.dis') else check_listing(path)

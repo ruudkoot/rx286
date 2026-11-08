@@ -17,6 +17,51 @@ in Bochs (Intel, figures 6-3, 6-4 and 8-3).
 The accessed bit of every segment descriptor is preset, so the CPU never
 writes the GDT except for the TSS's busy bit.
 
+`src/include/descriptors.inc` names the access bytes, their bits, and the
+fields of a 286 TSS (Intel, figures 6-3, 7-1 and 8-2):
+
+| Constant | Value | What |
+|---|---|---|
+| `ACC_PRESENT` | 80h | present |
+| `ACC_DPL3` | 60h | DPL 3 |
+| `ACC_DPL_MASK` | 60h | the DPL's bits |
+| `ACC_DPL_SHIFT` | 5 | and where they start |
+| `ACC_SEGMENT` | 10h | a code or data segment, not a system descriptor |
+| `ACC_CODE` | 08h | of a segment: code, not data |
+| `ACC_EXPAND_DOWN` | 04h | data: expand-down (code: conforming) |
+| `ACC_RW` | 02h | data: writable; code: readable |
+| `ACC_ACCESSED` | 01h | set by the CPU on a load; rx286 presets it |
+| `ACC_KCODE` | 9Bh | present, DPL 0, code, readable, accessed |
+| `ACC_KDATA` | 93h | present, DPL 0, data, writable, accessed |
+| `ACC_UCODE` | 0FBh | present, DPL 3, code, readable, accessed |
+| `ACC_UDATA` | 0F3h | present, DPL 3, data, writable, accessed |
+| `ACC_TSS` | 81h | present, DPL 0, an available 286 TSS |
+| `ACC_TSS_BUSY_BIT` | 02h | a TSS's busy bit, set by `LTR` and a task switch |
+| `ACC_LDT` | 82h | present, DPL 0, an LDT |
+| `ACC_TASK_GATE` | 85h | present, DPL 0, a task gate |
+| `ACC_INT_GATE` | 86h | present, DPL 0, a 286 interrupt gate |
+| `ACC_INT_GATE_USER` | 0E6h | present, DPL 3, a 286 interrupt gate (`INT 31h`) |
+| `TSS286_SIZE` | 44 | a 286 TSS's bytes (its limit at least 43: Intel 8.2.1) |
+| `TSS286_LIMIT` | 43 | its limit |
+| `TSS286_BACK_LINK` | 0 | the TSS's fields: the back link |
+| `TSS286_SP0` | 2 | ring 0's SP |
+| `TSS286_SS0` | 4 | ring 0's SS (rings 1 and 2's follow, unused) |
+| `TSS286_IP` | 14 | IP |
+| `TSS286_FLAGS` | 16 | FLAGS |
+| `TSS286_AX` | 18 | AX |
+| `TSS286_CX` | 20 | CX |
+| `TSS286_DX` | 22 | DX |
+| `TSS286_BX` | 24 | BX |
+| `TSS286_SP` | 26 | SP |
+| `TSS286_BP` | 28 | BP |
+| `TSS286_SI` | 30 | SI |
+| `TSS286_DI` | 32 | DI |
+| `TSS286_ES` | 34 | ES |
+| `TSS286_CS` | 36 | CS |
+| `TSS286_SS` | 38 | SS |
+| `TSS286_DS` | 40 | DS |
+| `TSS286_LDT` | 42 | the LDT's selector |
+
 ## The GDT
 
 | Selector | Constant | Base | Limit | Access | What |

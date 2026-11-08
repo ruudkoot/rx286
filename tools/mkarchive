@@ -6,14 +6,21 @@
 # tools/mkimage puts in the boot image as an archive module's data.
 #
 #   tools/mkarchive OUT NAME=FILE.rx ...
+#
+# A name once; an executable's header checked as mkimage does (its magic,
+# version and length); the whole under 64 KB, as an even number of bytes a
+# module's data holds (M_DATA_ROOM); written through OUT.tmp.
 # ============================================================================
 
+import os
 import struct
 import sys
 
 import rxlib
 
 A = rxlib.include_constants('archive.inc')
+E = rxlib.include_constants('exe.inc')
+ARCHIVE_MAX = 0xFFFE                # mkimage pads it to a word: M_DATA_ROOM's most
 
 
 def main(args):
@@ -26,9 +33,15 @@ def main(args):
         if not name or len(name) >= A['AR_NAME_SIZE'] or '/' in name:
             sys.exit('mkarchive: %s: a name of 1 to %d characters, without /'
                      % (name, A['AR_NAME_SIZE'] - 1))
+        if any(name == n for n, _ in files):
+            sys.exit('mkarchive: %s: a name twice' % name)
         blob = open(path, 'rb').read()
-        if blob[0:2] != b'RX':
+        if blob[0:2] != b'RX' or len(blob) < E['RX_HEADER_SIZE'] or \
+                struct.unpack_from('<H', blob, E['RXH_VERSION'])[0] != E['RX_VERSION']:
             sys.exit('mkarchive: %s: not an rx286 executable' % path)
+        code, data = struct.unpack_from('<HH', blob, E['RXH_CODE'])
+        if len(blob) != E['RX_HEADER_SIZE'] + code + data:
+            sys.exit('mkarchive: %s: %d bytes, not what its header says' % (path, len(blob)))
         files.append((name, blob))
     at = A['AR_HEADER_SIZE'] + A['AR_ENTRY_SIZE'] * len(files)
     head = bytearray(b'RZ' + struct.pack('<H', len(files)) + bytes(A['AR_HEADER_SIZE'] - 4))
@@ -44,10 +57,11 @@ def main(args):
         at += len(blob)
     head += bytes(-len(head) % 16)
     archive = bytes(head + body)
-    if len(archive) > 0xFFFF:
+    if len(archive) > ARCHIVE_MAX:
         sys.exit('mkarchive: %d bytes, more than a module\'s data holds' % len(archive))
-    with open(out, 'wb') as f:
+    with open(out + '.tmp', 'wb') as f:
         f.write(archive)
+    os.replace(out + '.tmp', out)
 
 
 if __name__ == '__main__':

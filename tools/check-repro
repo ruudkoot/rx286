@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/check-repro
+# `make check-repro`: do the builds repeat byte for byte (roadmap E5)?
+#
+# Builds each flavour (release, debug, test) twice, into build/repro-a-* and
+# build/repro-b-*, and makes the disks twice (tools/mkdisks). The second
+# builds run in another time zone, locale and umask, and start after the
+# FAT's grain of time (2 s), so that a time stamp, the host's zone or a
+# file's mode that crept into the output shows. Then every binary,
+# executable, archive, image and symbol file of the one must be the other's,
+# and neither may have a file the other has not. (Listings and maps name the
+# build's directory, so they differ, and are not compared.)
+# ============================================================================
+
+import fnmatch
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+import rxlib
+
+ROOT = rxlib.ROOT
+FLAVOURS = ('release', 'debug', 'test')
+COMPARED = ('*.bin', '*.rx', '*.arc', '*.img', '*.sym')
+OTHER_HOST = {'TZ': 'Pacific/Kiritimati', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'}
+
+
+def build(side, env, umask):
+    """One side's builds and disks, in build/repro-SIDE-*."""
+    def preexec():
+        os.umask(umask)
+    for flavour in FLAVOURS:
+        out = os.path.join('build', 'repro-%s-%s' % (side, flavour))
+        subprocess.run(['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=' + flavour,
+                        'B=' + out, 'image', 'symbols'], check=True, env=env,
+                       preexec_fn=preexec, stdout=subprocess.DEVNULL)
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'mkdisks'),
+                    os.path.join(ROOT, 'build', 'repro-%s-disks' % side)], check=True,
+                   env=env, preexec_fn=preexec)
+
+
+def outputs(directory):
+    """The compared files under a directory, by their paths in it."""
+    found = set()
+    for dirpath, _, names in os.walk(directory):
+        for name in names:
+            if any(fnmatch.fnmatch(name, p) for p in COMPARED):
+                found.add(os.path.relpath(os.path.join(dirpath, name), directory))
+    return found
+
+
+def main():
+    for side in 'ab':
+        for part in FLAVOURS + ('disks',):
+            shutil.rmtree(os.path.join(ROOT, 'build', 'repro-%s-%s' % (side, part)),
+                          ignore_errors=True)
+    build('a', dict(os.environ), 0o022)
+    time.sleep(3)
+    build('b', dict(os.environ, **OTHER_HOST), 0o077)
+    problems = []
+    count = 0
+    for part in FLAVOURS + ('disks',):
+        a = os.path.join(ROOT, 'build', 'repro-a-' + part)
+        b = os.path.join(ROOT, 'build', 'repro-b-' + part)
+        files_a, files_b = outputs(a), outputs(b)
+        for name in sorted(files_a ^ files_b):
+            problems.append('%s: %s in one build only' % (part, name))
+        for name in sorted(files_a & files_b):
+            count += 1
+            with open(os.path.join(a, name), 'rb') as fa, open(os.path.join(b, name), 'rb') as fb:
+                if fa.read() != fb.read():
+                    problems.append('%s: %s differs' % (part, name))
+    for p in problems:
+        print('check-repro: ' + p)
+    if problems or not count:
+        print('check-repro: the builds do not repeat')
+        return 1
+    print('check-repro: the release, debug and test builds and the disks repeat byte for '
+          'byte (%d files)' % count)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

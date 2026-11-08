@@ -11,11 +11,11 @@ match: contains
 keys: uptime\ndate\ndate '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'\ndate x\nclear\n
 ---
 /a$ uptime
-up 0:00:
+up 0:00:{...}
 /a$ date
-@bochs Sun Jan  1 00:00:
+@bochs Sun Jan  1 00:00:{...} UTC 1989
 /a$ date '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'
-@bochs 1989-01-01 Sunday January 001 19 89 7 0 AM 12 UTC % 00:00:
+@bochs 1989-01-01 Sunday January 001 19 89 7 0 AM 12 UTC % 00:00:{...}
 /a$ date x
 usage: date [-u] [+FORMAT]
 /a$ clear

@@ -129,6 +129,7 @@ never stay busy.
 `make disks` builds drives B, C and D in `build/disks/` with `tools/mkdisks`,
 the same bytes each time; `disks/README.md` lists the files. C and D each
 have a master boot record and one FAT12 partition from sector 17 (cylinder
-0, head 1), as FDISK lays them out. `make run` uses these images, puts the
-shell's commands in C's `/BIN`, and the shell may write to them; the tests
-use copies.
+0, head 1), as FDISK lays them out. `make run` uses copies of these images
+(`build/run-disks/`), puts the shell's commands in C's `/BIN`, and the
+shell may write to them; each test uses copies of its own, so that what one
+session or test wrote never reaches another.

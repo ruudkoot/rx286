@@ -31,8 +31,6 @@ static int waited(pid_t pid)
     return WIFEXITED(status) ? WEXITSTATUS(status) : 100 + WTERMSIG(status);
 }
 
-/* spawned - a program run with its arguments: its exit code, or the
- * error of the spawn as -1 */
 static char copy[16];                   /* a copy of child on B, a new one each time */
 static char junk[2048];
 
@@ -47,6 +45,8 @@ static void *execer(void *arg)
     return 0;
 }
 
+/* spawned - a program run with its arguments: its exit code, or the
+ * error of the spawn as -1 */
 static int spawned(const char *path, char **argv, int along_path)
 {
     pid_t pid;

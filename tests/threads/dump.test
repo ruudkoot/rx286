@@ -12,7 +12,7 @@ define: TEST_COUNTER
 keys: {sysrq}
 match: contains
 ---
-rx286: thread root receiving priority 6
+{...}rx286: thread root receiving priority 6
 rx286: thread printer receiving priority 7
 rx286: thread console receiving priority 7
 rx286: thread kbd running priority 7
@@ -24,4 +24,4 @@ rx286: thread rtc receiving priority 7
 rx286: thread counter ready priority 1
 rx286: thread os awaiting a notification priority 5
 rx286: thread thread awaiting its reply priority 3
-rx286: the kernel's stack used
+rx286: the kernel's stack used {...}

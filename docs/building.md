@@ -88,8 +88,12 @@ E5):
 3. `dd` the loader into sectors 1-3.
 4. `mcopy image.bin ::KERNEL.BIN`.
 
-`SOURCE_DATE_EPOCH` is set for all of it, so every time stamp is 1989-01-01.
-`make check-repro` builds the release image twice and compares the bytes.
+`SOURCE_DATE_EPOCH` is set for all of it, and `TZ` is UTC (mtools makes the
+time stamp local time), so every time stamp is 1989-01-01 00:00 wherever the
+build runs. `make check-repro` (`tools/check-repro`) builds the release,
+debug and test flavours and the disks twice, the second time in another time
+zone, locale and umask and after the FAT's 2 s grain, and compares every
+binary, executable, archive, image and symbol file.
 
 ## Running
 
@@ -105,8 +109,9 @@ E5):
   `tools/mkdisks`: a 360 KB diskette and the two fixed disks, each with a
   FAT12 partition, holding the sample files of `disks/`
   (*docs/storage.md*). `run`, `debugger` and the tests make them when
-  needed; `make run` lets the shell write to them, and a change of `disks/`
-  or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
+  needed. Only `tools/mkdisks` writes them: each test runs on copies, and
+  `make run` on copies of its own in `build/run-disks/`, which the shell
+  may write to; a change of `disks/` or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
   goes to `build/debug/lpt1.txt` and `lpt2.txt`, the log to
   `build/debug/com2.log`. Bochs' window gives COM1 a serial mouse: Ctrl+F10
   captures the host's mouse for it (and lets it go). `make run-release`
@@ -118,12 +123,12 @@ E5):
 | Target | What |
 |---|---|
 | `make test` | every boot test in Bochs (*docs/testing.md*) |
-| `make test-286` | the same on DOSBox-X's 286 and MAME's IBM PC/AT (*docs/emulators.md*) |
+| `make test-286` | the same on DOSBox-X's 286 and MAME's IBM PC/AT (*docs/emulators.md*); either one missing fails, unless `SKIP_DOSBOX=1` or `SKIP_MAME=1` says to go without it |
 | `make unit` | the host tests of pure routines |
 | `make check-286` | no 386 instruction in any listing |
 | `make check-image` | the floppies are what the boot code expects |
-| `make check-repro` | two builds give the same image |
+| `make check-repro` | two builds of each flavour, and of the disks, give the same bytes |
 | `make lint` | the sources follow *docs/style.md* |
-| `make check-docs` | the documents name every constant; the bochsrc matches |
-| `make check` | all of the above (about 75 s) |
+| `make check-docs` | the documents name every constant, and their tables give its value; the bochsrc matches |
+| `make check` | all of the above, the tests first and then the static checks (*docs/testing.md* says what it costs); its last line names any suite skipped |
 | `make sizes` | each segment of the release build against its room: the boot code, the kernel, the drivers, the root, the OS server, `/z` and every program |

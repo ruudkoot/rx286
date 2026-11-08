@@ -11,7 +11,7 @@
 # TEXT"); this TEST_SCREEN build's console driver puts each page Alt+Fn
 # shows on the log, its status line (00) the daemons' fields: the
 # counter's "idle NNk/s" ends at column 59, the clock's time fills the
-# line's last eight, so "k/s" and nine blanks is a line with both. DOSBox-X
+# line's last eight. DOSBox-X
 # has no drive for rx286's drivers (docs/emulators.md). (MAME's AT counts
 # some 22,000 a second: its first report, after 65,536 counts, takes three
 # seconds.)
@@ -34,23 +34,23 @@ file: B /DOCS.TXT HELLO.TXT\nPRINTME.TXT\n
 ---
 rx286, test build
 /a$ ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt
-status, clock:
-status, counter: idle
+status, clock: {...}
+status, counter: idle {...}k/s
 2
 HELLO.TXT
 PRINTME.TXT
 screen 1: shown
-k/s         
+screen 1 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 1 01: rx286 terminal 2: press Enter for a shell
 screen 2: shown
-k/s         
+screen 2 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 2 01: rx286 terminal 3: press Enter for a shell
-rx286: crash[
+rx286: crash[{...}] fault #GP(0000) at 0007:{...}
 screen 3: shown
-k/s         
+screen 3 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 3 01: rx286 terminal 4: press Enter for a shell
 screen 1: shown
-k/s         
+screen 1 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 1 17: --More--
 screen 1 18: [1] Stopped  cat b:/frag.txt | more
 screen 1 19: /a$ jobs
@@ -59,13 +59,13 @@ screen 1 21: /a$ fg
 screen 1 22: cat b:/frag.txt | more
 screen 1 24: /a$
 screen 2: shown
-k/s         
+screen 2 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 2 03: /a$ crash gp
 screen 2 04: crash: jump past the end of my code
-screen 2 05: rx286: crash[
+screen 2 05: rx286: crash[{...}] fault #GP(0000) at 0007:{...}
 screen 2 06: /a$
 screen 3: shown
-k/s         
+screen 3 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 3 03: /a$ ps -e
 screen 3 04:   PID  PPID  PGID   SID TTY  S NI COMMAND
 screen 3 05:     1     0     1     1 -    S 20 init
@@ -73,14 +73,14 @@ screen 3 06:     2     1     2     2 tty1 S 20 sh
 screen 3 07:     3     1     3     3 tty2 S 20 sh
 screen 3 08:     4     1     4     4 tty3 S 20 sh
 screen 3 09:     5     1     5     5 tty4 S 20 sh
- 20 clock
- 39 counter
+screen 3 {...} 20 clock
+screen 3 {...} 39 counter
 screen 0: shown
-k/s         
+screen 0 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 0 01: /a$ ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt
 spin
 Spinning; ^C ends it.
-status, clock:
-status, clock:
-echo done
+status, clock: {...}
+status, clock: {...}
+/a$ echo done
 done

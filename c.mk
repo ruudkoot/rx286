@@ -28,7 +28,7 @@ INC_HEADERS := $(addprefix $(INC_H)/,$(addsuffix .h,$(INC_NAMES)))
 C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h src/os/*.h src/root/*.h) \
     $(INC_HEADERS)
 
-$(INC_H)/%.h: src/include/%.inc tools/inc2h
+$(INC_H)/%.h: src/include/%.inc tools/inc2h tools/rxlib.py
 	@mkdir -p $(dir $@)
 	$(PYTHON) tools/inc2h $< $@
 
@@ -156,7 +156,7 @@ $(C_B)/posix.lib: $(POSIX_OBJS)
 # The C modules of the boot image: the root task, the first module
 # (roadmap l4.md L5; in C since os-server.md P4), the clock and the counter
 ROOT_OBJS := $(addprefix $(C_B)/root/,root.$(OBJ) services.$(OBJ) buddy.$(OBJ))
-$(B)/root.rx: $(C_LIB_OBJS) $(ROOT_OBJS) tools/mkexe
+$(B)/root.rx: $(C_LIB_OBJS) $(ROOT_OBJS) tools/mkexe tools/rxlib.py
 	$(call c_link,root,$(C_LIB_OBJS) $(ROOT_OBJS))
 
 $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
@@ -165,7 +165,7 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 # (start.asm), a thread a program, each on its part of the stacks
 SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) \
     cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ) dev.$(OBJ))
-$(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe
+$(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe tools/rxlib.py
 	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS))
 
 $(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
@@ -231,7 +231,7 @@ Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
 Z_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(Z_NAMES)))
 # A program of /z or the disks: NAME=OBJECT, or NAME=OBJECT+OBJECT...
 define z_program
-$(B)/z-$(1).rx: $(PROCESS_LIBS) $(subst +, ,$(2)) tools/mkexe
+$(B)/z-$(1).rx: $(PROCESS_LIBS) $(subst +, ,$(2)) tools/mkexe tools/rxlib.py
 	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(subst +, ,$(2)),$(if $(filter $(1),$(Z_287)),--287))
 endef
 $(foreach p,$(Z_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
@@ -240,10 +240,10 @@ $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 	$(PYTHON) tools/mkarchive $@ $(foreach n,$(Z_NAMES),$(n)=$(B)/z-$(n).rx)
 
 # A test program in C (tests/programs/*.c), the program module of its build
-$(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe
+$(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe tools/rxlib.py
 	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ))
 
 $(B)/counter.rx: $(C_LIB_OBJS) $(C_B)/userland/counter.$(OBJ) \
-    $(C_B)/userland/counter-fpu.$(OBJ) tools/mkexe
+    $(C_B)/userland/counter-fpu.$(OBJ) tools/mkexe tools/rxlib.py
 	$(call c_link,counter,$(C_LIB_OBJS) $(C_B)/userland/counter.$(OBJ) \
 	    $(C_B)/userland/counter-fpu.$(OBJ))

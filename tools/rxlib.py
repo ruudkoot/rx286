@@ -15,23 +15,289 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Every tool that imports this runs in UTC, and so does everything it starts:
+# mtools turns SOURCE_DATE_EPOCH into a FAT time stamp in local time, and
+# Bochs its time0 into the CMOS clock likewise, so the host's time zone would
+# be in the disks' bytes and the guest's date (roadmap os-server.md P15).
+os.environ['TZ'] = 'UTC'
+time.tzset()
 
-def include_constants(name):
-    """The `NAME equ value` constants of src/include/<name>, evaluated where
-    they are plain numbers or simple expressions of earlier constants."""
-    values = {}
+
+# ---------------------------------------------------------------- expressions
+# NASM's and C's integer expressions, each by its own rules (roadmap
+# os-server.md P15): NASM's numbers are 64 bits, its / and % unsigned (// and
+# %% signed), its >> logical, and its comparisons bind more loosely than &, ^
+# and |; C's int is 16 bits here (Open Watcom's and gcc-ia16's small model),
+# its long 32, and a signed overflow or a shift past the width is undefined.
+# tools/inc2h checks with them that a header means what its include file
+# does; include_constants reads the include files by NASM's.
+
+class ExpressionError(ValueError):
+    pass
+
+
+NASM_BINARY = {'||': 1, '^^': 2, '&&': 3, '=': 4, '==': 4, '!=': 4, '<>': 4, '<': 4, '<=': 4,
+               '>': 4, '>=': 4, '|': 5, '^': 6, '&': 7, '<<': 8, '>>': 8, '<<<': 8, '>>>': 8,
+               '+': 9, '-': 9, '*': 10, '/': 10, '//': 10, '%': 10, '%%': 10}
+C_BINARY = {'||': 1, '&&': 2, '|': 3, '^': 4, '&': 5, '==': 6, '!=': 6, '<': 7, '<=': 7,
+            '>': 7, '>=': 7, '<<': 8, '>>': 8, '+': 9, '-': 9, '*': 10, '/': 10, '%': 10}
+OPERATORS = sorted(set(NASM_BINARY) | set(C_BINARY) | {'~', '!', '(', ')'}, key=len,
+                   reverse=True)
+NASM_NUMBER = re.compile(r'0[xX][0-9A-Fa-f]+|[0-9][0-9A-Fa-f]*[hH]|[01]+[bB]|[0-9]+(?![\w.$])')
+C_NUMBER = re.compile(r'(0[xX][0-9A-Fa-f]+|0[0-7]*|[1-9][0-9]*)([uU]?[lL]?|[lL][uU])(?![\w.$])')
+NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+
+
+def tokens(expr, c):
+    """An expression's tokens: ('num', text), ('name', text), ('op', text).
+    Anything else (strings, $, a number of another base) is refused."""
+    out, i = [], 0
+    while i < len(expr):
+        if expr[i].isspace():
+            i += 1
+            continue
+        m = (C_NUMBER if c else NASM_NUMBER).match(expr, i)
+        if m and m.end() > i:
+            out.append(('num', m.group(0)))
+            i = m.end()
+            continue
+        m = NAME.match(expr, i)
+        if m:
+            out.append(('name', m.group(0)))
+            i = m.end()
+            continue
+        op = next((o for o in OPERATORS if expr.startswith(o, i)), None)
+        if op is None or not c and op not in NASM_BINARY and op not in '~!()' or \
+                c and op not in C_BINARY and op not in '~!()':
+            raise ExpressionError('not understood at %r' % expr[i:])
+        out.append(('op', op))
+        i += len(op)
+    return out
+
+
+def parse(toks, binary):
+    """A list of tokens to a tree: ('num', text), ('name', text), (op, a)
+    for a unary operator, (op, a, b) for a binary one."""
+    pos = [0]
+
+    def peek():
+        return toks[pos[0]] if pos[0] < len(toks) else (None, None)
+
+    def take():
+        pos[0] += 1
+        return toks[pos[0] - 1]
+
+    def unary():
+        kind, text = peek()
+        if kind == 'op' and text in ('-', '+', '~', '!'):
+            take()
+            return ('u' + text, unary())
+        if kind == 'op' and text == '(':
+            take()
+            tree = climb(1)
+            if take() != ('op', ')'):
+                raise ExpressionError('a ( without its )')
+            return tree
+        if kind in ('num', 'name'):
+            return take()
+        raise ExpressionError('an operand missing')
+
+    def climb(least):
+        tree = unary()
+        while True:
+            kind, text = peek()
+            if kind != 'op' or text not in binary or binary[text] < least:
+                return tree
+            take()
+            tree = (text, tree, climb(binary[text] + 1))
+    tree = climb(1)
+    if pos[0] != len(toks):
+        raise ExpressionError('more after the expression: %r' % (toks[pos[0]],))
+    return tree
+
+
+def nasm_number(text):
+    if text[:2] in ('0x', '0X'):
+        return int(text[2:], 16)
+    if text[-1] in 'hH':
+        return int(text[:-1], 16)
+    if text[-1] in 'bB':
+        return int(text[:-1], 2)
+    return int(text, 10)                    # NASM: a leading 0 is no octal
+
+
+def nasm_value(expr, names):
+    """An expression's value as NASM computes it (a signed 64-bit int);
+    `names` maps the names it may use to their values."""
+    def wrap(v):
+        return (v + (1 << 63)) % (1 << 64) - (1 << 63)
+
+    def u(v):
+        return v % (1 << 64)
+
+    def trunc_div(a, b):
+        q = abs(a) // abs(b)
+        return q if (a < 0) == (b < 0) else -q
+
+    def ev(t):
+        if t[0] == 'num':
+            return wrap(nasm_number(t[1]))
+        if t[0] == 'name':
+            if t[1] not in names:
+                raise ExpressionError('no value for %s' % t[1])
+            return names[t[1]]
+        if len(t) == 2:
+            a = ev(t[1])
+            return {'u-': lambda: wrap(-a), 'u+': lambda: a, 'u~': lambda: wrap(~a),
+                    'u!': lambda: int(a == 0)}[t[0]]()
+        op, a, b = t[0], ev(t[1]), ev(t[2])
+        if op in ('/', '//', '%', '%%') and b == 0:
+            raise ExpressionError('division by zero')
+        if op in ('<<', '<<<', '>>', '>>>') and not 0 <= b < 64:
+            return 0 if op != '>>>' or a >= 0 else -1
+        return wrap({'+': lambda: a + b, '-': lambda: a - b, '*': lambda: a * b,
+                     '/': lambda: u(a) // u(b), '//': lambda: trunc_div(a, b),
+                     '%': lambda: u(a) % u(b), '%%': lambda: a - trunc_div(a, b) * b,
+                     '<<': lambda: a << b, '<<<': lambda: a << b,
+                     '>>': lambda: u(a) >> b, '>>>': lambda: a >> b,
+                     '&': lambda: a & b, '|': lambda: a | b, '^': lambda: a ^ b,
+                     '=': lambda: int(a == b), '==': lambda: int(a == b),
+                     '!=': lambda: int(a != b), '<>': lambda: int(a != b),
+                     '<': lambda: int(a < b), '<=': lambda: int(a <= b),
+                     '>': lambda: int(a > b), '>=': lambda: int(a >= b),
+                     '&&': lambda: int(bool(a) and bool(b)),
+                     '||': lambda: int(bool(a) or bool(b)),
+                     '^^': lambda: int(bool(a) != bool(b))}[op]())
+    return ev(parse(tokens(expr, False), NASM_BINARY))
+
+
+def c_value(expr, names, int_bits=16, long_bits=32):
+    """An expression's value and type as C computes it: (value, bits,
+    signed). `names` maps a name to its (value, bits, signed), as a #define
+    of a parenthesised expression has its type. int_bits=long_bits=64 is the
+    preprocessor's #if. Undefined behaviour (a signed overflow, a shift past
+    the width) is refused."""
+    INT, UINT, LONG, ULONG = (int_bits, True), (int_bits, False), (long_bits, True), \
+        (long_bits, False)
+
+    def fits(v, kind):
+        bits, signed = kind
+        return -(1 << bits - 1) <= v < (1 << bits - 1) if signed else 0 <= v < (1 << bits)
+
+    def literal(text):
+        m = C_NUMBER.fullmatch(text)
+        digits, suffix = m.group(1), m.group(2).lower()
+        v = int(digits, 16) if digits[:2].lower() == '0x' else \
+            int(digits, 8) if digits.startswith('0') else int(digits)
+        decimal = not digits.startswith('0') or digits == '0'
+        if 'u' in suffix:
+            kinds = [ULONG] if 'l' in suffix else [UINT, ULONG]
+        elif 'l' in suffix:
+            kinds = [LONG, ULONG]
+        else:                                   # C89's: a decimal is never unsigned int
+            kinds = [INT, LONG, ULONG] if decimal else [INT, UINT, LONG, ULONG]
+        for kind in kinds:
+            if fits(v, kind):
+                return v, kind
+        raise ExpressionError('%s fits no C type' % text)
+
+    def common(ka, kb):
+        # The usual arithmetic conversions: the wider type, which holds every
+        # value of the narrower here (long 32 bits, int 16); of one width,
+        # unsigned if either is
+        if ka[0] != kb[0]:
+            return ka if ka[0] > kb[0] else kb
+        return ka if ka == kb else (ka[0], False)
+
+    def convert(v, kind):
+        bits, signed = kind
+        if signed:
+            if not fits(v, kind):
+                raise ExpressionError('%d does not fit a signed %d-bit int' % (v, bits))
+            return v
+        return v % (1 << bits)
+
+    def result(v, kind):
+        if kind[1] and not fits(v, kind):
+            raise ExpressionError('a signed %d-bit overflow (%d)' % (kind[0], v))
+        return convert(v, kind), kind
+
+    def ev(t):
+        if t[0] == 'num':
+            return literal(t[1])
+        if t[0] == 'name':
+            if t[1] not in names:
+                raise ExpressionError('no value for %s' % t[1])
+            v, bits, signed = names[t[1]]
+            return v, (bits, signed)
+        if len(t) == 2:
+            a, ka = ev(t[1])
+            if t[0] == 'u!':
+                return int(a == 0), INT
+            if t[0] == 'u+':
+                return a, ka
+            if t[0] == 'u-':
+                return result(-a, ka)
+            return result(~a if ka[1] else ~a % (1 << ka[0]), ka)
+        op = t[0]
+        (a, ka), (b, kb) = ev(t[1]), ev(t[2])
+        if op in ('&&', '||'):
+            return int(bool(a) and bool(b) if op == '&&' else bool(a) or bool(b)), INT
+        if op in ('<<', '>>'):
+            if not 0 <= b < ka[0]:
+                raise ExpressionError('a shift by %d of a %d-bit value' % (b, ka[0]))
+            if op == '<<':
+                if ka[1] and (a < 0 or not fits(a << b, ka)):
+                    raise ExpressionError('a signed shift out of range: %d << %d' % (a, b))
+                return convert(a << b, ka), ka
+            return a >> b, ka
+        kind = common(ka, kb)
+        a, b = convert(a, kind), convert(b, kind)
+        if op in ('==', '!=', '<', '<=', '>', '>='):
+            return int({'==': a == b, '!=': a != b, '<': a < b, '<=': a <= b, '>': a > b,
+                        '>=': a >= b}[op]), INT
+        if op in ('/', '%'):
+            if b == 0:
+                raise ExpressionError('division by zero')
+            q = abs(a) // abs(b) * (1 if (a < 0) == (b < 0) else -1)
+            return result(q if op == '/' else a - q * b, kind)
+        return result({'+': a + b, '-': a - b, '*': a * b, '&': a & b, '|': a | b,
+                       '^': a ^ b}[op], kind)
+    v, (bits, signed) = ev(parse(tokens(expr, True), C_BINARY))
+    return v, bits, signed
+
+
+def same_value(nasm, c):
+    """Whether C's (value, bits, signed) holds NASM's value: the same, or
+    the same bits of a value that fits them (-1 as an unsigned 0FFFFh)."""
+    v, bits, signed = c
+    if nasm == v:
+        return True
+    return -(1 << bits - 1) <= nasm < (1 << bits) and (nasm - v) % (1 << bits) == 0
+
+
+def include_constants(name, names=None):
+    """The `NAME equ value` constants of src/include/<name>, as NASM
+    evaluates them (nasm_value), and those of the files it includes. A
+    constant that cannot be evaluated stops it: a tool must not read a
+    number wrong, nor miss one, in silence."""
+    values = dict(names or {})
     path = os.path.join(ROOT, 'src', 'include', name)
-    for line in open(path, encoding='utf-8'):
+    for n, line in enumerate(open(path, encoding='utf-8'), 1):
         line = line.split(';', 1)[0].strip()
-        m = re.match(r'^([A-Z_][A-Z0-9_]*)\s+equ\s+(.+)$', line)
+        inc = re.match(r'^%include\s+"([^"]+)"', line)
+        if inc:
+            values.update(include_constants(inc.group(1), values))
+            continue
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\s+equ\s+(.+)$', line)
         if not m:
             continue
-        expr = m.group(2)
-        expr = re.sub(r'\b([0-9][0-9A-Fa-f]*)h\b', r'0x\1', expr)
+        expr = re.sub(r"'([^']{1,8})'", lambda q: str(int.from_bytes(
+            q.group(1).encode('latin-1'), 'little')), m.group(2))
         try:
-            values[m.group(1)] = eval(expr, {'__builtins__': {}}, dict(values))
-        except Exception:
-            pass
+            values[m.group(1)] = nasm_value(expr, values)
+        except ExpressionError as e:
+            raise ExpressionError('%s:%d: %s: %s' % (path, n, m.group(1), e))
     return values
 
 
@@ -94,6 +360,8 @@ def image_modules(image):
             'data_room': word(L['M_DATA_ROOM']), 'stack': word(L['M_STACK']),
             'entry': word(L['M_ENTRY']), 'ring': image[e + L['M_RING']],
             'priority': image[e + L['M_PRIORITY']], 'flags': image[e + L['M_FLAGS']],
+            'data_at': word(L['M_DATA_AT']), 'irq': image[e + L['M_IRQ']],
+            'service': image[e + L['M_SERVICE']],
         })
     return modules
 
@@ -141,15 +409,23 @@ def binary_bases(build_dir):
     return bases
 
 
+# A module's data sections: copied to a segment of its own at its start,
+# so its symbols have no linear address a symbol file could give
+MODULE_DATA_SECTIONS = ('udata', 'rxdata')
+
+
 def bochs_symbols(build_dir):
-    """Lines of a Bochs symbol file: every symbol at its linear address."""
+    """Lines of a Bochs symbol file: every symbol at its linear address;
+    a module's data symbols, which have none, are left out."""
     lines = []
     for binary, (base, prefix) in binary_bases(build_dir).items():
         path = os.path.join(build_dir, binary + '.map')
         if not os.path.exists(path):
             continue
-        for _, real, _, name in read_map(path):
-            lines.append((base + real, prefix + name))
+        module = binary not in ('boot-sector', 'boot-loader', 'kernel')
+        for section, real, _, name in read_map(path):
+            if not (module and section in MODULE_DATA_SECTIONS):
+                lines.append((base + real, prefix + name))
     lines.sort()
     return ['%08x %s' % (addr, name) for addr, name in lines]
 
@@ -157,7 +433,8 @@ def bochs_symbols(build_dir):
 # ---------------------------------------------------------------- Bochs
 
 BOCHSRC_TEMPLATE = os.path.join(ROOT, 'bochs', 'rx286.bochsrc.in')
-DISKS = os.path.join(ROOT, 'build', 'disks')
+DISKS = os.path.join(ROOT, 'build', 'disks')     # as tools/mkdisks made them, for copies
+RUN_DISKS = os.path.join(ROOT, 'build', 'run-disks')    # make run's, which it writes to
 
 
 # What a test may change of the drives and printers (tools/run-test's
@@ -171,11 +448,12 @@ DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
 DEEP_TOO_LONG = 'ABCDEFGH.XY'    # 66
 
 
-def write_bochsrc(path, image, serial, log, display, debugger_log=None, magic=False,
-                  disks=DISKS, printers=('/dev/null', '/dev/null'), media=(),
+def write_bochsrc(path, image, serial, log, display, disks, debugger_log=None, magic=False,
+                  printers=('/dev/null', '/dev/null'), media=(),
                   log_port='com2', modem=None):
     """Write a bochsrc for one run from bochs/rx286.bochsrc.in. Bochs locks
-    the hard-disk images, so runs at the same time need their own `disks`.
+    the hard-disk images, so runs at the same time need their own `disks`,
+    and writes to them: never DISKS, which the runs copy.
     `serial` is the file the log goes to, from `log_port`: 'com2' (debug and
     test builds), 'com3' (a test build whose COM2 is the modem, MODEM_COM2),
     or None (a release build, whose COM2 is the modem); `modem` the host:port
@@ -230,7 +508,13 @@ def damage_disks(directory, media):
     'B loop' to itself, its 32 entries all used (os-server.md P15);
     'B zerodir' zeroes the first cluster of MANY's entry; 'B longnames'
     adds two files with long names (VFAT's entries before their 8.3 ones);
-    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG."""
+    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG. Two
+    changes of MANY at once ('B zerodir', 'B damaged', 'B loop') are
+    refused, and so is a change of MANY when B has none: a test must never
+    run on a drive it believes damaged and is not."""
+    of_many = [m for m in media if m in ('B zerodir', 'B damaged', 'B loop')]
+    if len(of_many) > 1:
+        raise ValueError('media: %s change the same directory, MANY' % ' and '.join(of_many))
     if 'B deep' in media:
         path = os.path.join(directory, 'fdb.img')
         env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
@@ -257,10 +541,11 @@ def damage_disks(directory, media):
             at = (reserved + fats * per_fat) * 512
             f.seek(at)
             root = f.read(roots * 32)
-            for k in range(roots):
-                if root[k * 32:k * 32 + 11] == b'MANY       ':
-                    f.seek(at + k * 32 + 0x1A)
-                    f.write(b'\0\0')
+            found = [k for k in range(roots) if root[k * 32:k * 32 + 11] == b'MANY       ']
+            if len(found) != 1:
+                raise ValueError("media: B zerodir: B's root holds %d MANY" % len(found))
+            f.seek(at + found[0] * 32 + 0x1A)
+            f.write(b'\0\0')
     if 'B longnames' in media:
         path = os.path.join(directory, 'fdb.img')
         env = dict(os.environ, MTOOLS_SKIP_CHECK='1', SOURCE_DATE_EPOCH='599616000')
@@ -275,8 +560,11 @@ def damage_disks(directory, media):
         path = os.path.join(directory, 'fdb.img')
         env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
         chain = subprocess.run(['mshowfat', '-i', path, '::MANY'], capture_output=True,
-                               text=True, env=env, check=True).stdout
-        cluster = int(re.search(r'<(\d+)', chain).group(1))
+                               text=True, env=env).stdout
+        first = re.search(r'<(\d+)', chain)
+        if not first:
+            raise ValueError("media: B damaged or B loop: B has no MANY with a cluster")
+        cluster = int(first.group(1))
         with open(path, 'r+b') as f:
             boot = f.read(512)
             reserved = int.from_bytes(boot[0x0E:0x10], 'little')
@@ -374,13 +662,16 @@ NAMED = {'up': 0x48, 'down': 0x50, 'left': 0x4B, 'right': 0x4D,
          'scroll-lock': 0x46, 'del': 0x53, 'sysrq': 0x54, 'home': 0x47, 'end': 0x4F,
          'pgup': 0x49, 'pgdn': 0x51, 'ins': 0x52}
 NAMED.update({'f%d' % n: 0x3A + n for n in range(1, 11)})   # F1 3Bh to F10 44h
+# The named keys an enhanced keyboard has a grey twin of (E0h before it)
+GREY = ('ins', 'del', 'home', 'end', 'pgup', 'pgdn', 'up', 'down', 'left', 'right', 'enter')
 
 
 def compile_keys(script):
     """A key script to the kernel's byte stream (see above).
 
     Plain characters are typed as the US keyboard types them; escapes are
-    \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc). Braces name others:
+    \\n (Enter), \\b (Backspace), \\t (Tab), \\e (Esc), \\s (a space: one at a
+    keys: line's ends, which run-test would take off). Braces name others:
     {up}, {down}, {left}, {right}, {home}, {end}, {pgup}, {pgdn}, {ins},
     {del}, {esc}, {f1} to {f10}, {caps}, {scroll-lock}, {sysrq} (the
     kernel's thread dump, in debug and test builds; {dump} the same at
@@ -393,7 +684,9 @@ def compile_keys(script):
     three bytes from the mouse as they are, in hexadecimal; a packet, as a
     key, while a reader waits (os-server.md P12); {grey K}, a named key K
     as an enhanced keyboard's grey key or the keypad's Enter sends it, after
-    E0h ({grey home}, {grey enter}: os-server.md P15)."""
+    E0h ({grey home}, {grey enter}: os-server.md P15), for the keys of GREY
+    alone. {ctrl-X} and {alt-X} take an unshifted X, {wait N} an N of 1 or
+    more: anything else is refused, never typed as something else."""
     out = []
     when = [OP_WHEN_WAITING]            # {now K}'s: OP_NOW for its key alone
 
@@ -411,7 +704,8 @@ def compile_keys(script):
     while i < len(script):
         ch = script[i]
         if ch == '\\' and i + 1 < len(script):
-            esc = {'n': '\n', 'b': '\b', 't': '\t', 'e': '\x1b', '\\': '\\', '{': '{'}
+            esc = {'n': '\n', 'b': '\b', 't': '\t', 'e': '\x1b', 's': ' ', '\\': '\\',
+                   '{': '{'}
             ch = esc.get(script[i + 1])
             if ch is None:
                 raise ValueError('key script: unknown escape \\%s' % script[i + 1])
@@ -426,7 +720,7 @@ def compile_keys(script):
                 name = name[4:]
             if name in NAMED:
                 press(NAMED[name])
-            elif name.startswith('grey ') and name[5:] in NAMED:
+            elif name.startswith('grey ') and name[5:] in GREY:
                 press_grey(NAMED[name[5:]])
             elif name.startswith('mouse-bytes '):
                 raw = [int(b, 16) for b in name.split()[1:]]
@@ -439,6 +733,8 @@ def compile_keys(script):
                 out.extend(mouse_packet(name))
             elif name.startswith('wait '):
                 n = int(name[5:])
+                if n < 1:
+                    raise ValueError('key script: {%s}: a wait of 1 tick or more' % name)
                 while n > 0:
                     out.extend([OP_WAIT, min(n, 255)])
                     n -= 255
@@ -453,6 +749,9 @@ def compile_keys(script):
                             OP_NOW, SC_CTRL | 0x80])
             elif (name.startswith('ctrl-') and len(name) == 6 or
                   name.startswith('alt-') and len(name) == 5) and name[-1] in KEYS:
+                if KEYS[name[-1]][1]:       # its shift would be lost: Ctrl+a for {ctrl-A}
+                    raise ValueError('key script: {%s}: a shifted key under Ctrl or Alt'
+                                     % name)
                 modifier = SC_CTRL if name.startswith('ctrl-') else SC_ALT
                 out.extend([when[0], modifier])
                 press(KEYS[name[-1]][0])
@@ -511,14 +810,15 @@ STATUS_START, STATUS_END = '\x01', '\x02'
 
 
 def normalise_transcript(raw):
-    """COM1's bytes as the lines a person would read: CR dropped, a form
+    """The log's bytes (COM2's, or COM3's with a modem on COM2) as the lines
+    a person would read: CR dropped, a form
     feed (or a run of them) as a line of its own, FORM_FEED, backspaces
     applied, trailing spaces trimmed. A background program's status, which
     a TEST_DEMO build puts between STATUS_START and STATUS_END wherever the
     log is (roadmap l4.md L11), comes out as a line of its own, "status,
     NAME: TEXT", after the line it fell in."""
     text = raw.decode('latin-1')
-    # Test builds write trace lines straight to COM1, even in the middle of
+    # Test builds write trace lines straight to the log, even in the middle of
     # a line of the console's: cut them out, so the console's line joins up.
     text = re.sub(r'\[trace\][^\n]*\n', '', text)
     text = re.sub(r'\f+', '\n' + FORM_FEED + '\n', text.replace('\r', ''))
@@ -626,7 +926,9 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     four slots hold the EGA, the diskette controller, the serial card and
     the IDE card, which the diskettes need too (docs/emulators.md). MAME
     writes a diskette back to its file only when it stops, so it is asked
-    to stop (SIGTERM) before it is killed. SDL's dummy drivers keep MAME
+    to stop (SIGTERM) before it is killed. Returns (status, seconds, saved):
+    saved false if it had to be killed, its diskettes then as they were
+    before the run. SDL's dummy drivers keep MAME
     from opening any window: `-video none` alone still opens one under
     WSLg."""
     nvram = os.path.join(directory, 'mame-nvram')
@@ -669,15 +971,17 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
             status = 'until'
             break
         time.sleep(0.05)
+    saved = True
     if proc.poll() is None:
         proc.terminate()
         try:
             proc.wait(MAME_STOP_SECONDS)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            proc.kill()                 # its diskettes not written back
             proc.wait()
+            saved = False
     log.close()
-    return status, time.monotonic() - started
+    return status, time.monotonic() - started, saved
 
 
 # Bochs' rfb display takes the first free port from 5900 up, but two Bochs

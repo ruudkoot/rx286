@@ -4,9 +4,10 @@
  * init starts it (TEST_POSIX_THREAD) from /z as "thread". Eight threads,
  * the main one too, on a shared counter under a mutex; joins and their
  * results; a condition between a producer and a consumer; each thread's
- * errno; a mutex waited for in the server; trylock; keys and once; the most a process may have; a fork from
- * a thread; a thread's fault, which ends its process; and a break raised
- * in place while a thread waits (P15).
+ * errno; a mutex waited for in the server; trylock; keys and once; the
+ * most a process may have; a fork from a thread; a thread's fault, which
+ * ends its process; and a break raised in place while a thread waits
+ * (P15).
  * ============================================================================ */
 
 #include <stdio.h>
@@ -64,19 +65,21 @@ static void add(void)
     }
 }
 
-/* inner_routine, once_routine, destructor - pthread_once's, the second
- * inside the first (P15), and a key's */
+/* inner_routine - the pthread_once routine once_routine calls, within its
+ * own once (P15) */
 static void inner_routine(void)
 {
     inners++;
 }
 
+/* once_routine - pthread_once's routine, which calls another's */
 static void once_routine(void)
 {
     onces++;
     pthread_once(&inner, inner_routine);
 }
 
+/* destructor - a key's: adds the value it was given */
 static void destructor(void *v)
 {
     destroyed += (int)(unsigned)v;

@@ -211,8 +211,8 @@ void slot_give(rx_u16 slot)
     dynamic[n / 8] &= (rx_u8)~(1 << (n % 8));
 }
 
-/* The buddy allocator's calls (buddy.h). buddy_carve - an untyped from an
- * untyped */
+/* buddy_carve - an untyped from an untyped: the first of the buddy
+ * allocator's calls (buddy.h) */
 int buddy_carve(rx_u16 from, rx_u16 to, rx_u16 paragraphs)
 {
     return retype(from, CAP_UNTYPED, to, paragraphs, 0);

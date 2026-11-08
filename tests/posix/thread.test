@@ -24,7 +24,7 @@ thread: trylock of a mutex held (16): 16; then (0): 0
 thread: self (1), join of itself (35): 1 35
 thread: the most beside the main one (7): 7, then EAGAIN
 thread: a fork from a thread, its child's status (5): 5
-rx286: thread[
+rx286: thread[{...}] fault #UD at 0007:{...}
 thread: a thread's fault ends its process (SIGILL 4): 4
 thread: a read into the heap a lower break left (100): 100
 thread: a write while a read waits on an end closed under it (1, then 0): 1, 0

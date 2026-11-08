@@ -22,7 +22,8 @@ pci: enabled=0
 
 # A fixed start time (1989-01-01 00:00:00) and emulated time, so runs repeat;
 # real time when a test talks to a modem on the host, so that its answers
-# come in the ticks they would.
+# come in the ticks they would. Bochs reads time0 in the local time zone:
+# the tools that start it run in UTC (tools/rxlib.py).
 clock: sync=@CLOCK_SYNC@, time0=599616000
 
 # Drive A: 1.2 MB 5.25", the boot disk; drive B: 360 KB 5.25" (roadmap D2).

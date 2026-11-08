@@ -99,9 +99,11 @@ $(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, i
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
-# serial and media byte, and every time stamp from SOURCE_DATE_EPOCH.
+# serial and media byte, and every time stamp from SOURCE_DATE_EPOCH, in UTC
+# (mtools makes it local time: the host's zone would be in the FAT's dates).
 export SOURCE_DATE_EPOCH := 599616000
 export MTOOLS_SKIP_CHECK := 1
+export TZ := UTC
 FLOPPY_SECTORS := 2400
 FLOPPY_SERIAL := 52583836
 
@@ -182,17 +184,24 @@ $(IMAGE): $(BINARIES)
 	mcopy -i $@.tmp $(B)/image.bin ::KERNEL.BIN
 	mv $@.tmp $@
 
-$(B)/rx286.sym: $(BINARIES) tools/map2sym
+$(B)/rx286.sym: $(BINARIES) tools/map2sym tools/rxlib.py
 	$(PYTHON) tools/map2sym $(B) > $@
 
 
 # ---------------------------------------------------------------- the other drives
 # Drive B, a 360 KB diskette, and the fixed disks C and D (AT drive types 2
 # and 1), each with one FAT12 partition: the sample files of disks/, built
-# by tools/mkdisks (disks/README.md). `make run` lets the shell write to
-# them; `make clean` or a change of disks/ makes them afresh.
+# by tools/mkdisks (disks/README.md), which alone writes them: the tests
+# copy them. `make run` has copies of its own, build/run-disks, which the
+# shell may write to; `make clean` or a change of disks/ makes them afresh.
 DISKS := build/disks
-DISK_SOURCES := $(shell find disks -type f) tools/mkdisks
+RUN_DISKS := build/run-disks
+# (the list of disks/'s files a prerequisite too, rewritten when it changes,
+# so that a file removed or renamed makes them afresh)
+DISK_LIST := build/disks.list
+$(shell mkdir -p build && find disks -type f | sort > $(DISK_LIST).new && \
+    { cmp -s $(DISK_LIST).new $(DISK_LIST) || cp $(DISK_LIST).new $(DISK_LIST); })
+DISK_SOURCES := $(shell find disks -type f) $(DISK_LIST) tools/mkdisks tools/rxlib.py
 disks: $(DISKS)/fdb.img
 
 $(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img &: $(DISK_SOURCES)
@@ -203,20 +212,26 @@ $(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img &: $(DISK_SOURCES)
 	mv $(DISKS).tmp/fdb.img $(DISKS).tmp/hd0.img $(DISKS).tmp/hd1.img $(DISKS)/
 	rmdir $(DISKS).tmp
 
+$(RUN_DISKS)/fdb.img $(RUN_DISKS)/hd0.img $(RUN_DISKS)/hd1.img &: \
+        $(DISKS)/fdb.img $(DISKS)/hd0.img $(DISKS)/hd1.img
+	rm -rf $(RUN_DISKS)
+	mkdir -p $(RUN_DISKS)
+	cp --sparse=always $^ $(RUN_DISKS)/
+
 # ---------------------------------------------------------------- running
-run: disks
+run: $(RUN_DISKS)/fdb.img
 	$(MAKE) FLAVOUR=debug image symbols
-	$(PYTHON) tools/install-programs $(DISKS)/hd0.img build/debug
+	$(PYTHON) tools/install-programs $(RUN_DISKS)/hd0.img build/debug
 	$(PYTHON) tools/bochs-run --mode run --build build/debug
 
-debugger: disks
+debugger: $(RUN_DISKS)/fdb.img
 	$(MAKE) FLAVOUR=debug image symbols
 	$(PYTHON) tools/bochs-run --mode debugger --build build/debug
 
 # The release image, whose COM2 is the modem's line (term), not the log.
-run-release: disks
+run-release: $(RUN_DISKS)/fdb.img
 	$(MAKE) FLAVOUR=release image symbols
-	$(PYTHON) tools/install-programs $(DISKS)/hd0.img build/release
+	$(PYTHON) tools/install-programs $(RUN_DISKS)/hd0.img build/release
 	$(PYTHON) tools/bochs-run --mode run --build build/release --release
 
 # ---------------------------------------------------------------- checks
@@ -224,34 +239,46 @@ test: disks
 	$(PYTHON) tools/run-test
 
 # The suites on two 286 cores (roadmap M9): DOSBox-X's, and MAME's IBM PC/AT,
-# which needs the IBM 5170 ROM set in ~/mame/roms (docs/emulators.md).
+# which needs the IBM 5170 ROM set in ~/mame/roms (docs/emulators.md). Either
+# missing fails, unless SKIP_DOSBOX=1 or SKIP_MAME=1 says to go without it.
 test-286: disks
-	$(PYTHON) tools/run-test --emulator dosbox-x
-	@if (cd /tmp && mame -rompath $(HOME)/mame/roms -verifyroms ibm5170 2>/dev/null | grep -q '1 were OK'); then \
+	@if [ -n "$(SKIP_DOSBOX)" ]; then \
+	    echo "test-286: DOSBox-X's suites skipped (SKIP_DOSBOX)"; \
+	elif command -v dosbox-x >/dev/null; then \
+	    $(PYTHON) tools/run-test --emulator dosbox-x; \
+	else \
+	    echo "test-286: no dosbox-x: install it, or make SKIP_DOSBOX=1"; exit 1; \
+	fi
+	@if [ -n "$(SKIP_MAME)" ]; then \
+	    echo "test-286: MAME's suites skipped (SKIP_MAME)"; \
+	elif (cd /tmp && mame -rompath $(HOME)/mame/roms -verifyroms ibm5170 2>/dev/null | \
+	        grep -q '1 were OK'); then \
 	    $(PYTHON) tools/run-test --emulator mame; \
 	else \
-	    echo "test-286: no IBM 5170 ROMs in ~/mame/roms: MAME's suites skipped"; \
+	    echo "test-286: no MAME, or no IBM 5170 ROMs in ~/mame/roms: make SKIP_MAME=1"; \
+	    exit 1; \
 	fi
 
 unit:
 	$(PYTHON) -m pytest -q -W ignore::DeprecationWarning tests/unit
 
-# Every listing there is: the flavours', and the test images' once the tests
-# have run (make check runs them first).
+# Every listing of the flavours, and of the test images once the tests have
+# run (make check runs them first): the directories of the tests there are,
+# not those a removed test left behind.
+TEST_NAMES := $(basename $(patsubst tests/%,%,$(wildcard tests/*/*.test)))
+CHECKED_DIRS := build/release build/debug build/test \
+    $(foreach t,$(TEST_NAMES),build/tests/$(t) build/tests-mame/$(t))
 check-286: all test-build
 	$(PYTHON) tools/check-286 --self-test
-	$(PYTHON) tools/check-286 $$(find build -name '*.lst' -o -name '*.dis' | sort)
+	$(PYTHON) tools/check-286 $$(for d in $(CHECKED_DIRS); do \
+	    [ ! -d $$d ] || find $$d -name '*.lst' -o -name '*.dis'; done | sort)
 
 check-image: all
 	$(PYTHON) tools/check-image build/release
 	$(PYTHON) tools/check-image build/debug
 
 check-repro:
-	rm -rf build/repro-a build/repro-b
-	$(MAKE) FLAVOUR=release B=build/repro-a image
-	$(MAKE) FLAVOUR=release B=build/repro-b image
-	cmp build/repro-a/rx286.img build/repro-b/rx286.img
-	@echo "check-repro: two release images are identical"
+	$(PYTHON) tools/check-repro
 
 lint:
 	$(PYTHON) tools/lint
@@ -259,17 +286,19 @@ lint:
 check-docs:
 	$(PYTHON) tools/check-docs
 
-check: unit test test-286 check-286 check-image check-repro lint check-docs
-	@echo "make check: all checks passed"
+# In two steps, so that check-286 reads the tests' listings once they are
+# all there, under make -j too.
+check:
+	$(MAKE) unit test test-286
+	$(MAKE) check-286 check-image check-repro lint check-docs
+	@echo "make check: all checks passed$(if $(SKIP_DOSBOX)$(SKIP_MAME), (skipped:$(if \
+	    $(SKIP_DOSBOX), DOSBox-X's suites)$(if $(SKIP_MAME), MAME's suites)))"
 
-# The C built with gcc-ia16 too (roadmap os-server.md D1, D22): the tests
-# whose images carry C programs, on Bochs; not part of make check, since it
-# needs gcc-ia16 in $(IA16) (docs/building.md).
-IA16_TESTS := tests/demo/demo.test tests/root/fault.test $(wildcard tests/threads/*.test) \
-    $(wildcard tests/services/*.test) $(wildcard tests/posix/*.test) $(wildcard tests/sh/*.test) \
-    tests/root/own-fault.test tests/kernel/stretch-kill.test
+# The C built with gcc-ia16 too (roadmap os-server.md D1, D22): every test,
+# on Bochs, since every image carries C (the root, the OS server, /z); not
+# part of make check, since it needs gcc-ia16 in $(IA16) (docs/building.md).
 check-ia16: disks
-	$(PYTHON) tools/run-test --cc ia16 $(IA16_TESTS)
+	$(PYTHON) tools/run-test --cc ia16
 	$(MAKE) FLAVOUR=release B=build/release-ia16 CC_KIND=ia16 image
 	$(PYTHON) tools/check-286 $$(find build/tests-ia16 build/release-ia16 -name '*.dis' | sort)
 	@echo "make check-ia16: the C built with gcc-ia16 passed"

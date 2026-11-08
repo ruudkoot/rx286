@@ -18,7 +18,11 @@
 # from offset 0 of its own: the stack (crt0's _STACKBOT or .stackbot), the
 # initialised data, then .bss. wlink puts the data 64 KB past the code in
 # its raw image (code at 1000:0, data at 2000:0). The map's sections are
-# rxtext and rxdata (the data from the segment's offset 0).
+# rxtext and rxdata (the data from the segment's offset 0). wlink's map does
+# not say which segment a symbol is in: the objects and libraries its link
+# script (RAW's .lnk) names do, in their OMF records (PUBDEF, SEGDEF), so
+# C's public data (environ) goes in rxdata. A segment neither of the code
+# nor of DGROUP, a stack not at DGROUP's offset 0, or no entry stops it.
 # ============================================================================
 
 import os
@@ -30,6 +34,70 @@ import rxlib
 
 E = rxlib.include_constants('exe.inc')
 WLINK_DATA_AT = 0x10000         # 2000:0 against 1000:0 in wlink's raw image
+OMF_LNAMES, OMF_SEGDEF, OMF_PUBDEF = 0x96, (0x98, 0x99), (0x90, 0x91)
+OMF_MODEND, OMF_LIBHEAD, OMF_LIBEND = (0x8A, 0x8B), 0xF0, 0xF1
+
+
+def omf_publics(path):
+    """The publics of an OMF object or library: {name: its segment's
+    class}, from LNAMES, SEGDEF and PUBDEF (Intel OMF; a library's modules
+    each on a page of the size its header record gives)."""
+    blob = open(path, 'rb').read()
+    publics = {}
+    page = 0
+    i = 0
+    lnames, segments = [''], [None]
+
+    def index(at):
+        if blob[at] & 0x80:
+            return ((blob[at] & 0x7F) << 8) | blob[at + 1], at + 2
+        return blob[at], at + 1
+    while i + 3 <= len(blob):
+        kind = blob[i]
+        length = struct.unpack_from('<H', blob, i + 1)[0]
+        body, end = i + 3, i + 3 + length - 1         # less the checksum
+        if kind == OMF_LIBHEAD:
+            page = length + 3
+        elif kind == OMF_LIBEND:
+            break
+        elif kind == OMF_LNAMES:
+            at = body
+            while at < end:
+                lnames.append(blob[at + 1:at + 1 + blob[at]].decode('latin-1'))
+                at += 1 + blob[at]
+        elif kind in OMF_SEGDEF:
+            acbp = blob[body]
+            at = body + 1 + (3 if acbp >> 5 == 0 else 0)   # an absolute segment's frame
+            at += 4 if kind == 0x99 else 2                  # its length
+            _, at = index(at)                               # its name
+            cls, at = index(at)
+            segments.append(lnames[cls])
+        elif kind in OMF_PUBDEF:
+            _, at = index(body)                             # its group
+            seg, at = index(at)
+            if seg == 0:
+                at += 2                                     # a frame number
+            while at < end:
+                name = blob[at + 1:at + 1 + blob[at]].decode('latin-1')
+                at += 1 + blob[at] + (4 if kind == 0x91 else 2)
+                _, at = index(at)                           # its type
+                publics[name] = segments[seg] if seg else 'ABSOLUTE'
+        i = end + 1
+        if kind in OMF_MODEND:
+            lnames, segments = [''], [None]
+            if page:
+                i = -(-i // page) * page                    # the next module's page
+    return publics
+
+
+def link_publics(lnk_path):
+    """{name: class} of every object and library a link script names."""
+    publics = {}
+    for line in open(lnk_path, encoding='latin-1'):
+        words = line.split()
+        if len(words) == 2 and words[0] in ('file', 'library'):
+            publics.update(omf_publics(words[1]))
+    return publics
 
 
 def wlink_parts(raw_path, map_path):
@@ -54,6 +122,13 @@ def wlink_parts(raw_path, map_path):
             m = re.match(r'^([0-9a-f]{8})[*+ ]?\s+(\S+)\s*$', line)
             if m:
                 symbols.append((int(m.group(1), 16), m.group(2)))
+    for name, cls, grp, _, _ in segments:
+        if cls != 'CODE' and grp != 'DGROUP':
+            sys.exit('mkexe: %s: segment %s (class %s, group %s) is neither code nor DGROUP'
+                     % (map_path, name, cls, grp))
+    stackbot = [a for name, _, _, a, _ in segments if name == '_STACKBOT']
+    if stackbot != [0]:
+        sys.exit('mkexe: %s: the stack, _STACKBOT, is not at DGROUP\'s offset 0' % map_path)
     code_end = max(a + n for _, cls, _, a, n in segments if cls == 'CODE')
     data_end = max([a + n for _, cls, grp, a, n in segments if grp == 'DGROUP' and cls != 'BSS']
                    or [0])
@@ -62,14 +137,17 @@ def wlink_parts(raw_path, map_path):
     code = raw[:code_end]
     data = raw[WLINK_DATA_AT:WLINK_DATA_AT + data_end]
     data += bytes(data_end - len(data))
-    # wlink's map does not say which segment a symbol is in. rx286's C
-    # publishes no data names that the tools look up, so they are all code.
-    # Watcom's cdecl names begin with an underscore, which C's do not: the
-    # map gives C's, as gcc-ia16's does (_start for __start, rx_ud2 for _rx_ud2).
-    out = [('rxtext', addr, name[1:] if name.startswith('_') else name)
-           for addr, name in symbols]
-    entry = next((a for a, n in symbols if n in ('__start', '_start')), 0)
-    return code, data, bss_end - data_end, stack, entry, out
+    # Which segment a symbol is in: its object's (link_publics); a symbol
+    # of none of them (wlink's own) is the code's. Watcom's cdecl names begin
+    # with an underscore, which C's do not: the map gives C's, as gcc-ia16's
+    # does (_start for __start, rx_ud2 for _rx_ud2).
+    classes = link_publics(os.path.splitext(raw_path)[0] + '.lnk')
+    out = [('rxdata' if classes.get(name) in ('DATA', 'BSS') else 'rxtext', addr,
+            name[1:] if name.startswith('_') else name) for addr, name in symbols]
+    entry = [a for a, n in symbols if n in ('__start', '_start')]
+    if len(entry) != 1:
+        sys.exit('mkexe: %s: no entry, __start' % map_path)
+    return code, data, bss_end - data_end, stack, entry[0], out
 
 
 def elf_parts(path):
@@ -101,7 +179,9 @@ def elf_parts(path):
     data_addr, data_size = span('.data')
     data = bytes(data_addr) + body('.data') if data_size else bytes(stack)
     bss_addr, bss_size = span('.bss')
-    bss = bss_size + (bss_addr - (data_addr + data_size) if data_size and bss_size else 0)
+    bss = bss_addr + bss_size - len(data) if bss_size else 0     # (alignment gaps too)
+    if bss < 0:
+        sys.exit('mkexe: %s: .bss below the data' % path)
     symbols = []
     symtab = by_name.get('.symtab')
     strtab = by_name.get('.strtab')
@@ -114,8 +194,10 @@ def elf_parts(path):
                 continue
             sym = blob[strtab[4] + st_name:blob.index(b'\0', strtab[4] + st_name)].decode()
             symbols.append(('rxtext' if shndx in text_index else 'rxdata', value, sym))
-    entry = next((v for s, v, n in symbols if n == '_start'), 0)
-    return code, data, bss, stack, entry, symbols
+    entry = [v for s, v, n in symbols if n == '_start']
+    if len(entry) != 1:
+        sys.exit('mkexe: %s: no entry, _start' % path)
+    return code, data, bss, stack, entry[0], symbols
 
 
 def write_map(path, code, data, symbols):

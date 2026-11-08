@@ -9,7 +9,7 @@
 # segment each of 64 KB at most, the data with its stack; /z, the archive,
 # against the 64 KB a module's data holds; and the boot image. The programs
 # are /z's and those named after the build directory, C's /BIN (`make
-# run`'s). Warns at 90% full.
+# run`'s). Warns at 90% full, and fails (exit 1) for a part past its room.
 #
 #   tools/sizes build/release [PROGRAM...]
 # ============================================================================
@@ -53,10 +53,16 @@ def section_lengths(path):
     return lengths
 
 
+PAST = []                               # the parts past their rooms
+
+
 def row(label, used, room):
-    """A line of the table: whether it is over 90% full."""
+    """A line of the table: whether it is over 90% full (a part past its
+    room goes in PAST too)."""
     full = 100.0 * used / room
-    flag = '  <- over 90%' if full > 90 else ''
+    flag = '  <- PAST ITS ROOM' if used > room else '  <- over 90%' if full > 90 else ''
+    if used > room:
+        PAST.append(label)
     print('%-30s %7d %7d %4.0f%%%s' % (label, used, room, full, flag))
     return bool(flag)
 
@@ -114,13 +120,16 @@ def main(build, programs):
             warn = executable(name + ' (C)', path) or warn
     arc = os.path.join(build, 'z.arc')
     if os.path.exists(arc):
-        warn = row('/z, the archive', os.path.getsize(arc), 0xFFFF) or warn
+        warn = row('/z, the archive', os.path.getsize(arc), 0xFFFE) or warn   # (mkarchive)
         for name in archive_names(arc):
             warn = executable('/z/' + name, os.path.join(build, 'z-%s.rx' % name)) or warn
     for name in programs:
         warn = executable('/c/bin/' + name, os.path.join(build, 'z-%s.rx' % name)) or warn
     if os.path.exists(image):
         warn = row('boot image (KERNEL.BIN)', os.path.getsize(image), L['IMAGE_MAX']) or warn
+    if PAST:
+        print('sizes: past its room: %s' % ', '.join(PAST))
+        return 1
     return 0
 
 

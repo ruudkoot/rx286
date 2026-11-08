@@ -17,16 +17,16 @@ match: contains
 timeout: 60
 ---
 /a$ ps -e
-status, clock:
+status, clock: {...}
   PID  PPID  PGID   SID TTY  S NI COMMAND
     1     0     1     1 -    S 20 init
-   11     1    11    11 -
+   11     1    11    11 -    {...} clock
    13     1    13    13 -    R 39 counter
 /a$ kill 11
 /a$ clock
 /a$ ps -e
-status, counter: idle
-   17     1    17    17 -
+status, counter: idle {...}k/s
+   17     1    17    17 -    {...} clock
    13     1    13    13 -    R 39 counter
 /a$ nice -n 5 ps
    19     2    19     2 tty1 R 25 ps

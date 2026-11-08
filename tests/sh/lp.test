@@ -6,10 +6,10 @@ emulators: bochs
 install: C /BIN/LP z-lp.rx
 keys: echo one > /b/p.txt; lp /b/p.txt c:/docs/printme.txt; echo two | lp -d lpt2\n
 lpt1: one
-lpt1: rx286 printer test page
-lpt1: -----------------------
-lpt1: The kernel sent each of these bytes to the printer port,
-lpt1: polling the printer's BUSY line, one strobe a byte.
+lpt1: rx286 printer test page\r
+lpt1: -----------------------\r
+lpt1: The kernel sent each of these bytes to the printer port,\r
+lpt1: polling the printer's BUSY line, one strobe a byte.\r
 lpt2: two
 ---
 rx286, test build

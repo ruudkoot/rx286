@@ -13,14 +13,21 @@ relies on, and NASM refuses segments that overlap.
 ## 2. On the binaries and the image
 
 - `tools/check-286` reads every listing, and every C object's disassembly,
-  and fails on an instruction a 286 cannot run (in C, a `LOCK` too): a 66h, 67h, 64h or 65h prefix anywhere among an instruction's
-  prefixes, FS or GS, a 0Fh opcode outside the 286's, a 387-only opcode.
-  NASM's `cpu 286` misses some of these (roadmap E4, E10). Its own test,
-  `--self-test`, assembles `tools/testdata/slips.asm` and must flag exactly
-  the lines marked SLIP.
+  and fails on an instruction a 286 cannot run (in C, a `LOCK` too): a
+  66h, 67h, 64h or 65h prefix anywhere among an instruction's prefixes, FS
+  or GS, a 0Fh opcode outside the 286's (0F 00 and 0F 01 by their ModRM
+  byte too: no `INVLPG`, `RDTSCP`, `MONITOR`), an ESC the 287 has not (the
+  387's, the P6's `FCMOVcc` and `FCOMI`, SSE3's `FISTTP`, `FFREEP`), and on
+  a listing that hides lines (`[list -]`) or `align` filling with such an
+  instruction. NASM's `cpu 286` misses some of these (roadmap E4, E10). Its
+  own test, `--self-test`, assembles `tools/testdata/slips.asm` and must
+  flag exactly the lines marked SLIP. Given no listing it fails.
 - `tools/check-image`: the BPB, the reserved sectors, the loader's bytes,
-  `KERNEL.BIN` in one run of clusters, `fsck.fat`.
-- `make check-repro`: the same image twice.
+  `KERNEL.BIN` in one run of clusters, the module table as the loader and
+  the root take it (its count, each module's code and data apart and inside
+  the image, its data within its room, its flags, IRQ and service),
+  `fsck.fat`.
+- `make check-repro`: each flavour and the disks twice, the same bytes.
 - `tools/lint` and `tools/check-docs`.
 
 ## 3. Pure routines on the host
@@ -67,7 +74,9 @@ the test image), `image` (a fragmented, missing, truncated or oversized
 `KERNEL.BIN`, one of `IMAGE_MAX` bytes, one whose first module is not the root or
 whose table places a module outside it, a disk without a loader),
 `timeout`, `match` (full, prefix, contains), `break` and `debugger` (a
-debugger session at a kernel symbol), `media` (B without a diskette or
+debugger session at a kernel symbol: the two go together, and the test
+passes only if the breakpoint was met and the script ran to its `quit`),
+`media` (B without a diskette or
 write-protected, no fixed disk D, which the emulator is told; B's FAT
 damaged, a directory's chain that loops, a directory's entry with cluster
 0, two files with long names, D without a partition, B with paths of 64
@@ -76,20 +85,36 @@ of COM2, in an image built with COM2 the modem and the log on COM3: it
 echoes, and answers `AT` and `ATI`; Bochs then runs on real time, so its
 answers come in the ticks they would),
 `lpt1` and `lpt2` (what each printer must
-have printed, line by line),
+have printed, byte for byte: each line and an LF, `\r` for a CR),
 `fsck` (a drive whose volume `fsck.fat` must find sound after the run),
-`file` (a file of a drive's volume and the text it must hold, by mtools) and
-`install` (a file the build made, put on a drive before the run). In expected lines, `{name}` is
+`file` (a file of a drive's volume and the bytes it must hold, by mtools) and
+`install` (a file the build made, put on a drive before the run). A value
+loses the spaces around it: `\s` writes one at a key script's, a printed
+line's or a file's ends. A test that asks an emulator for what it has not
+(DOSBox-X has drive A alone and changes no media; MAME has no printers, no
+modem and no write protection) is refused unless its `emulators:` leaves
+that emulator out, and so is a `prefix` or `contains` test that expects
+nothing. An expected line is a whole line; `{...}` in it stands for any
+text, perhaps none (`status, clock: {...}`). In expected lines, `{name}` is
 a program symbol's offset, `{k:name}` a kernel one, `{c:name}` the
-counter's and `{r:name}` the root's; `{m:module.base}`, `{m:module.limit}`,
+counter's, `{r:name}` the root's, `{o:name}` the OS server's and
+`{z:program.name}` a program of `/z`'s; `{x:name}` and `{kx:name}` are a
+program's and the kernel's in eight lower-case digits, as Bochs' debugger
+prints them; `{m:module.base}`, `{m:module.limit}`,
 `{m:module.codesum}` and `{m:module.datasum}` say where a module's code is
 in the boot image and what it and its data sum to; `{image_sum}`,
-`{image_size}` and `{image_free}` describe `KERNEL.BIN` and the floppy;
-`{{` and `}}` are braces themselves.
+`{image_size}` (`{image_size8}` right in 8 columns) and `{image_free}`
+describe `KERNEL.BIN` and the floppy; `{{` and `}}` are braces themselves.
 
 Every run gets its own copies of drives B, C and D (`make disks`,
 *docs/storage.md*), and its printers print into files of its directory, so
-tests that write to them run side by side. A `file` line checks on the
+tests that write to them run side by side. A test builds in
+`build/tests/<suite>/<name>/`, which Bochs and DOSBox-X share under a lock
+(MAME's images differ: `build/tests-mame/`), and each emulator's run keeps
+its files in `run-<emulator>/` there, made afresh each time. An error in
+one test (a symbol not found, a bad key script) is that test's failure, and
+the others still run. A MAME that had to be killed has not written its
+diskettes back, so a test that checks A or B after it fails. A `file` line checks on the
 host what a run wrote, which a write and a read back through the same
 system cannot: a wrong turn from sector number to cylinder, head and sector
 would read back what it wrote (`tests/posix/drives.test` writes a file on
@@ -139,9 +164,9 @@ The suites:
 | `tests/fuzz` | 10,000 iterations of random code in ring 3, with random calls on the OS server (`os_px`) and random kernel calls on `INT 31h` |
 | `tests/unit` | the host tests (layer 3) |
 
-`make check-ia16` (not in `make check`) runs the suites whose images carry C
-programs with the C built by gcc-ia16 instead of Open Watcom, and check-286
-over its objects (*docs/c.md*).
+`make check-ia16` (not in `make check`) runs every suite on Bochs with the
+C built by gcc-ia16 instead of Open Watcom (every image carries C: the
+root, the OS server, `/z`), and check-286 over its objects (*docs/c.md*).
 
 ## 5. The attack suite and the fuzzer
 

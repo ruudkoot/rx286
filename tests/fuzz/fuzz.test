@@ -8,6 +8,6 @@ timeout: 300
 emulators: bochs mame
 ---
 fuzz: starting
-fuzz: faults
-fuzz: faults inside the random bytes:
+{...}fuzz: faults {...}
+fuzz: faults inside the random bytes: {...}
 fuzz: 10000 iterations; the kernel's code and tables unchanged

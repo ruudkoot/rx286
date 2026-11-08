@@ -166,12 +166,12 @@ static void signal_entry(unsigned i)
     rx_kcall(&r);
 }
 
-/* sleep_on - until a notification is signalled; with a tick, at most one
- * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
- * a Ctrl+Break) */
 static rx_u8 break_seen;                /* a Ctrl+Break the control thread's lock wait
                                            took (proc_break_seen, P15) */
 
+/* sleep_on - until a notification is signalled; with a tick, at most one
+ * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
+ * a Ctrl+Break) */
 static void sleep_on(rx_u16 notify, int tick)
 {
     struct rx_kregs r;

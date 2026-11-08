@@ -22,6 +22,11 @@
 # whose code is a paragraph of zeros, never run. The image
 # ends with a paragraph whose last word is KERNEL_END_MARK, which the
 # loader checks; the table gives its length (layout.inc, docs/memory-map.md).
+# A spec is checked as the loader and the root would take it: the root
+# first, `os` second, names unique, a ring of 1 to 3, a priority of 0 to
+# PRIORITY_MAX, an IRQ of 0 to 15, a service of drivers.inc's, no flag it
+# does not know; an executable's header too (its version, no RXF_MEDIUM,
+# its length).
 # ============================================================================
 
 import os
@@ -43,6 +48,13 @@ def paragraph(data):
 
 
 E = rxlib.include_constants('exe.inc')
+K = rxlib.include_constants('kcalls.inc')
+SERVICES = {v for k, v in rxlib.include_constants('drivers.inc').items()
+            if k.startswith('SERVICE_')}
+FLAGS = {'fg': 'MF_FOREGROUND', 'driver': 'MF_DRIVER', 'iopl': 'MF_IOPL',
+         'archive': 'MF_ARCHIVE'}
+NUMBERS = {'irq': range(16), 'service': SERVICES, 'stack': range(2, 0x10000, 2)}
+ROOT = 'root'                           # layout.inc's ROOT_NAME, ROOT_NAME_2
 RX_START_STACK = 64     # a C module's stack from the root (slot 2): crt0 leaves it at once
 
 
@@ -51,11 +63,17 @@ def rx_parts(binary):
     segment's offset 0 (the stack's zeros, then the initialised data), its
     data room, its stack and its entry."""
     blob = open(binary, 'rb').read()
-    if blob[0:2] != b'RX':
+    if blob[0:2] != b'RX' or len(blob) < E['RX_HEADER_SIZE']:
         sys.exit('mkimage: %s: not an rx286 executable' % binary)
 
     def word(field):
         return struct.unpack_from('<H', blob, E[field])[0]
+    if word('RXH_VERSION') != E['RX_VERSION'] or word('RXH_FLAGS') & ~E['RXF_287']:
+        sys.exit('mkimage: %s: version %d, flags %04Xh: not a module mkimage knows'
+                 % (binary, word('RXH_VERSION'), word('RXH_FLAGS')))
+    if len(blob) != E['RX_HEADER_SIZE'] + word('RXH_CODE') + word('RXH_DATA'):
+        sys.exit('mkimage: %s: %d bytes, not the %d its header says' % (
+            binary, len(blob), E['RX_HEADER_SIZE'] + word('RXH_CODE') + word('RXH_DATA')))
     code_at = E['RX_HEADER_SIZE']
     code = blob[code_at:code_at + word('RXH_CODE')]
     data = blob[code_at + len(code):code_at + len(code) + word('RXH_DATA')]
@@ -96,6 +114,10 @@ def main(args):
     if len(specs) > L['MODULE_MAX']:
         sys.exit('mkimage: more than MODULE_MAX modules')
     names = [spec.partition('=')[0] for spec in specs]
+    if names[0] != ROOT:
+        sys.exit('mkimage: the first module must be the root, %s' % ROOT)
+    if len(set(names)) != len(names):
+        sys.exit('mkimage: a module named twice')
     if 'os' in names and names.index('os') != 1:
         # its programs' slots are 8n to 8n + 7 of its space: n = 1 would be
         # its own fixed slots (src/os/os.c; roadmap l4.md L13)
@@ -105,11 +127,22 @@ def main(args):
     for spec in specs:
         name, _, rest = spec.partition('=')
         fields = rest.split(':')
+        if len(fields) < 3:
+            sys.exit('mkimage: %s: not NAME=BINARY:RING:PRIORITY[:FLAG...]' % spec)
         binary, ring, priority = fields[0], int(fields[1]), int(fields[2])
-        options = dict(f.partition('=')[::2] for f in fields[3:])
+        if not 1 <= ring <= 3 or not 0 <= priority <= K['PRIORITY_MAX']:
+            sys.exit('mkimage: %s: ring %d, priority %d: a ring of 1 to 3, a priority of '
+                     '0 to %d' % (name, ring, priority, K['PRIORITY_MAX']))
+        options = {}
+        for f in fields[3:]:
+            option, equals, value = f.partition('=')
+            if option in options or (option in FLAGS) == bool(equals) or \
+                    option not in FLAGS and option not in NUMBERS or \
+                    equals and (not value.isdigit() or int(value) not in NUMBERS[option]):
+                sys.exit('mkimage: %s: the flag %r' % (name, f))
+            options[option] = value
         flags = 0
-        for option, flag in (('fg', 'MF_FOREGROUND'), ('driver', 'MF_DRIVER'),
-                             ('iopl', 'MF_IOPL'), ('archive', 'MF_ARCHIVE')):
+        for option, flag in FLAGS.items():
             if option in options:
                 flags |= L[flag]
         irq = int(options['irq']) + 1 if 'irq' in options else 0

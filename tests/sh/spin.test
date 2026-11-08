@@ -11,7 +11,7 @@ match: contains
 ---
 /a$ spin &
 [1] 10
-Spinning; ^C ends it.
+{...}Spinning; ^C ends it.
 echo beside it
 beside it
 /a$ fg

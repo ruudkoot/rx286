@@ -44,7 +44,7 @@ files: stat the old name (-1, ENOENT 2): -1, errno 2
 files: rmdir it, now empty (0): 0
 files: unlink big.dat (0): 0
 files: / holds: a b c d dev z
-files: /dev holds: null tty lpt1 lpt2
+files: /dev holds: null tty lpt1 lpt2 speaker joystick mouse com2 status
 files: /z holds: init files
 files: /dev/null takes 7 bytes (7): 7
 files: open no file (-1, ENOENT 2): -1, errno 2

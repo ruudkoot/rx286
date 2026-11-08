@@ -20,7 +20,7 @@ with gcc-ia16 instead of Watcom; `c.mk` holds the rules for both:
 
 | | Open Watcom | gcc-ia16 |
 |---|---|---|
-| C | `wcc -2 -ms -zl -zls -zld -s -ecc -os -zastd=c99 -wx -we` | `ia16-elf-gcc -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin -Os -std=gnu99 -Werror` (GNU's C99: `__far` is a GNU keyword) |
+| C | `wcc -2 -ms -zl -zls -zld -s -ecc -os -zastd=c99 -wx -we` | `ia16-elf-gcc -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin -fcall-used-es -Os -std=gnu99 -Wall -Wextra -Werror` (GNU's C99: `__far` is a GNU keyword) |
 | NASM | `-f obj --gprefix _` | `-f elf32 -dELF` |
 | libraries | `wlib` | `ia16-elf-ar` |
 | link | `wlink format raw bin`, the code at 1000:0, the data at 2000:0 | `ia16-elf-ld -T tools/ia16.ld` |
@@ -123,7 +123,8 @@ is fixed by its slot.
 whose state then survives a signal's handler, *docs/processes.md*), and a
 map in NASM's form beside it, so that `tools/run-test` (`{c:rx_ud2}`) and
 `tools/map2sym` read a C module as they read an assembled one; its
-symbols are C's names. `tools/sizes` reads an executable's header (`make
+symbols are C's names, the data's (`environ`) in `rxdata` by what the
+objects' OMF records say (wlink's map does not). `tools/sizes` reads an executable's header (`make
 sizes`). `tools/mkimage` takes an executable as a module of the boot image
 (`counter=build/test/counter.rx:3:1`).
 
