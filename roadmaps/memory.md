@@ -78,7 +78,86 @@ DOSBox-X; none of their code is in the repository.
 | M5: the libraries for far data | done (2026-11-08) |
 | M6: the OS server in the compact model | done (2026-11-08): the faulted thread runs the policy itself |
 | M7: 48 processes | done (2026-11-08): the server's space stays at 512 slots, not D12's 1,024 |
-| M8: the documents, a review, and the close | not started; os-server.md's *At the close* (P2, P3) put right on 2026-11-08 |
+| M8: the documents, a review, and the close | done (2026-11-08): nine findings of the review fixed; *At the close* below |
+## At the close
+
+### What the owner asked for (2026-11-08)
+
+"please implement the roadmap and all milestones", then "please proceed". Every milestone is
+done, on the branch `memory`, from `master`'s eb4eda5 (this roadmap and its decisions), one
+commit a milestone and one for the review's fixes, each with `make check` and `make
+check-ia16` green. Nothing is pushed: the owner merges and pushes.
+
+| Commit | What |
+|---|---|
+| 5ebce01 | M1: the masks of entries past entry 15, and the kernel's timers |
+| a6f05d2 | M2: the boot information, and the base memory from the BIOS |
+| 3998f43 | M3: every byte of extended memory to the root |
+| dbcb9b1 | M4: the processes' memory from all of it, and the root's room |
+| 0342487 | M5: the libraries for far data |
+| d67077f | M6: the OS server in the compact model |
+| 90141aa | M7: 48 processes |
+| 3348c9b | M8: the review of M1-M7, its findings fixed |
+| this record | M8: the documents and the close |
+
+### The last checks
+
+From a fresh clone of the branch at 3348c9b, on this machine (16 CPUs, shared with another
+job), `make check` passed in 544 s: the host tests (209), Bochs (133 of 133), DOSBox-X (62
+of 62), MAME's IBM PC/AT (110 of 110), `check-286` over 18,650 listings and disassemblies,
+`check-image`, `check-repro` (162 files, twice), `lint` (221 files) and `check-docs`; and
+`make check-ia16` in 154 s (133 of 133 on Bochs, `check-286` over 6,466).
+
+The release build (`make sizes`), against os-server.md's close:
+
+| Part | Bytes | At os-server.md's close |
+|---|---|---|
+| the boot loader | 1,304 of 1,536 | 1,214 |
+| the kernel: code, data | 13,208; 3,827 | 12,980; 3,274 |
+| the root (C): code, data | 9,969; 10,152 | 8,704; 5,610 |
+| the OS server (C): code, data | 46,009; 36,010, its tables alone | 40,609; 55,836, 29 stacks among them |
+| the boot image (`KERNEL.BIN`) | 128,752 of 196,608 (65%) | 120,528 |
+
+### What the roadmap promised, and what it gave
+
+Every milestone's *Done when* holds. Where one departed from the plan, and why (each
+milestone's *Done* says more):
+
+- **M1.** A third bug of the same kind beside the two masks: the kernel's 16 timers, which
+  23 processes' waits for the server's lock used up.
+- **M2.** Bochs at 16 MB moved to M3; the least machine needs about 376 KB of base memory
+  for a release image (`UMEM_LEAST` 192 KB for programs).
+- **M3.** The pieces' sizes come from `KCALL_SEGMENT`, not the boot information.
+- **M4.** `tests/services/calls.test` compares the 64 KB loads' addresses only when they
+  take all the memory.
+- **M5.** Every Watcom program links as a DOS executable, whose relocations `mkexe`
+  resolves, its output byte for byte as before; eleven sites, not ten.
+- **M6.** The thread that faulted runs the server's policy itself, restarted at a second
+  entry, rather than the control thread being told; the lock's holder is a word beside it;
+  DOSBox-X checks no stack segment's limit, so the overflow tests run on Bochs and MAME. On
+  MAME a getpid costs 4.8% more, a write 3.5%; the server's data segment fell from 56,170 to
+  26,934 bytes at 25 entries.
+- **M7.** **The server's space stays at 512 slots, not D12's 1,024:** retyping 1,024 slots
+  zeroes 32 KB with interrupts off, 12.9 ms on MAME, past the 10 ms the suites hold, and a
+  512 KB machine had too little left; 48 entries take 502. Stacks come from 8 KB blocks as
+  asked, not one block at boot; without extended memory the allocator takes all the memory
+  for segments the boot left.
+- **M8.** The review found nine defects, one high (M7's static arrays in `end()`, which an
+  `end()` within it overwrote) and two medium (a fault reply's IP kept as the thread's
+  entry; a block lost for each oversized stack): all fixed, with `tests/posix/orphans.test`
+  and more of `twin.test`.
+
+Found on `master` on the way: the two 16-bit masks of entries (M1), the kernel's timers
+(M1), and the root's 256 dynamic slots, which refused a fork at 23 processes (M4).
+
+### What is left
+
+*Later* lists it. For the owner: whether the server's space should grow past 512 slots,
+which needs the kernel to zero a space in pieces first; a real AT, to measure the compact
+server's cost and the interrupts-off stretches where MAME only approximates them; and the
+owner's own roadmaps, the disk scheduler and the window manager, the second of which takes
+*The model for multi-threaded servers* as M5 and M6 built it.
+
 ## The request
 
 The owner's draft, as written. It stood at the head of `roadmaps/memory.md`, above the earlier
@@ -1567,6 +1646,12 @@ less, M a few, L a week.
   kernel refuses (no thread stops itself), and so spun after the test; thread 2 stops it
   now. And `tty_forget` must tell test builds of a reader's end only when it ended one,
   else the `idle` program's own wait went unseen and `overflow.test` never ended.
+- **Done** (2026-11-08). The documents as each milestone changed them, and here
+  `docs/memory-map.md` (the OS server's memory, the spaces' sizes), `docs/testing.md` (the
+  memory suite's row, the posix suite's new tests, the times), `docs/processes.md`,
+  `docs/posix.md` and `docs/security.md` (48 entries, the fork bomb's 46); the review, its
+  findings fixed; *At the close*; os-server.md's *At the close* points to M3 and M4. A fresh
+  clone's `make check` (544 s) and `make check-ia16` (154 s) are green.
 
 ### Later
 
@@ -1623,7 +1708,8 @@ Each needs a roadmap of its own:
 
 ## Left open for the owner
 
-- **None of the decisions:** all are decided (2026-11-08).
+- **None of the decisions:** all are decided (2026-11-08); D12's 1,024 slots gave way in M7
+  (*At the close*).
 - **A real AT,** to measure the compact server's cost where MAME only approximates it.
 
 ## References

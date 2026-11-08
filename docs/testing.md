@@ -217,9 +217,12 @@ real bug that Bochs cannot show (a single-step trap carried into the kernel).
 
 ## What `make check` costs
 
-Under five minutes on this machine, 16 CPUs: 284 s from a fresh clone at
-os-server.md P15's close (936 s before that day's changes), the tests of
-each emulator a CPU each, one emulator at a time:
+Under ten minutes on this machine, 16 CPUs: 544 s from a fresh clone at
+memory.md's close, with 133 tests on Bochs, 62 on DOSBox-X and 110 on MAME
+(`tests/memory`'s `sizes.test` alone boots 14 machines), on a host another
+job shared; 284 s at os-server.md P15's close (936 s before that day's
+changes), the tests of each emulator a CPU each, one emulator at a time.
+The parts, as P15's close measured them:
 
 | Part | Time |
 |---|---|
@@ -232,5 +235,6 @@ each emulator a CPU each, one emulator at a time:
 | `check-repro` (three flavours and the disks, twice) | 11 s |
 | `lint`, `check-docs` | 1 s |
 
-`make check-ia16`, every test again on Bochs with gcc-ia16's C, takes
-156 s more.
+`make check-ia16`, every test again on Bochs with gcc-ia16's C (the
+compact model's parts, the OS server among them, Watcom's still), takes
+154 s more.
