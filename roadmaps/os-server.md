@@ -231,9 +231,13 @@ more):
 - **P1.** As planned: Open Watcom v2 builds, gcc-ia16 checks
   (`make check-ia16`), and the crt and libc are rx286's own.
 - **P2, P3.** D9 whole: pools of 64, retype in pieces, one kernel stack,
-  every object anywhere through its own descriptor, extended memory for
-  objects and segments, and each capability's list of children. An untyped
-  is under 1 MB still; the root's allocator takes more of them.
+  every object anywhere through its own descriptor, and each capability's
+  list of children. D18 B only in part: the kernel gives the root two
+  pieces of extended memory of under 1 MB each (an untyped's size is 16
+  bits of paragraphs), for objects and for the boot modules' segments; the
+  processes' memory, the buddy allocator's, is the memory below 1 MB alone,
+  and extended memory past the two pieces is never handed out
+  (roadmaps/memory.md, written at the close, plans the rest).
 - **P5.** No lock until P6: the server's threads shared no table while
   each served one program.
 - **P6.** init did not run the old shell; the shell stayed a program the

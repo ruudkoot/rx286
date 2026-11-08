@@ -32,7 +32,9 @@ F8 show the terminals.
   `roadmaps/storage.md`: the disks, the printers and the DOS-like shell;
   `roadmaps/devices.md`: the speaker, game port, mouse and modem;
   `roadmaps/l4.md`: the kernel made a microkernel; `roadmaps/os-server.md`:
-  the POSIX-like OS server in C, its processes and the shell in C.
+  the POSIX-like OS server in C, its processes and the shell in C;
+  `roadmaps/realtime.md`: how long interrupts stay off; `roadmaps/memory.md`:
+  all of the memory, extended memory for the processes too.
 - `docs/`: how it works (start with `docs/README.md`).
 
 Licence: CC0 1.0 (`LICENSE`).
