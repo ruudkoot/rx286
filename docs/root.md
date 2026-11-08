@@ -148,7 +148,14 @@ names:
   notification come from the arena while it has room, and then from a
   block each (P15): blocks of 1 KB kept for good, spread through the memory
   for segments, left no 64 KB block for a process without extended memory.
-  Its faults are the root's, badged `SERVE_BADGE`.
+  Its faults are the root's, badged `SERVE_BADGE`. It refuses (`E_INVAL`),
+  before it takes anything, a stack of no bytes, of an odd number or of
+  more than 8 KB, which no block of stacks would hold, and an SP that is 0,
+  odd or lies at or past its stack segment's top, where no thread starts
+  (memory.md M8's review). The root keeps its own copy of the stack until
+  the thread has started, then deletes it, which leaves the server's; if
+  the thread cannot be started, the root revokes the stack, the server's
+  copy with it, so that the server's slot is empty again.
 
 The memory is a buddy allocator's (`src/root/buddy.c`; D10), from the
 first request on: with extended memory, all the memory below 1 MB
