@@ -70,7 +70,7 @@ DOSBox-X; none of their code is in the repository.
 | The survey and this roadmap | done (2026-11-08) |
 | D10 | decided (2026-11-08): B, a stack segment for each thread, with the fault rule |
 | D11 | decided (2026-11-08): B, servers Watcom's alone; gcc-ia16 builds the rest |
-| D1-D9, D12, D13 | undecided |
+| D1-D9, D12, D13 | decided (2026-11-08): as recommended |
 | M1: the masks of entries past entry 15 | not started |
 | M2: the boot information, and the base memory from the BIOS | not started |
 | M3: every byte of extended memory to the root | not started |
@@ -106,7 +106,9 @@ The owner then asked where the limit of 25 processes comes from (*Where the 25 c
 - **What it rests on:** experiments first, as for the earlier roadmaps (*The experiments*).
 - **The memory model:** "i meant a memory model that can have multiple data segments not
   code. do prototype, measure and find alternatives" (E6, E7, D10).
-- **The decisions:** left for the owner, each with a recommendation.
+- **The decisions:** left for the owner, each with a recommendation. After it was written
+  (2026-11-08): D10 B with the fault rule, D11 B, and "take your recommendations for all
+  decisions" for the others (*Decisions*).
 - **Where:** one commit on `master`, replacing the draft. It is not pushed.
 - "gcc-ia32" in the draft is read as gcc-ia16, the second compiler rx286 builds with.
 ## What the draft leaves open, contradicts, or makes dangerous
@@ -1049,25 +1051,28 @@ half of MAME's share, and test the top of MAME's memory no longer.
 
 ## Decisions
 
-D10 and D11 are decided (2026-11-08); the others are undecided, each with a recommendation.
+All are decided (2026-11-08). D10 and D11 by the owner's own choice; the others as
+recommended: "take your recommendations for all decisions".
 
 | | Decision | Recommended | Decided |
 |---|---|---|---|
-| D1 | How the loader finds the memory | A: the BIOS (INT 12h; INT 15h AH=88h with CF cleared; the CMOS if 88h fails) | undecided |
-| D2 | Where the boot information lives | A: at 600h, copied by the kernel, read-only to the root | undecided |
-| D3 | The EBDA | A: left alone, as INT 12h says | undecided |
-| D4 | The least machine | A: a check at the start against `UMEM_LEAST` | undecided |
-| D5 | How the kernel hands over more than 1 MB | A: a run of untypeds of 768 KB | undecided |
-| D6 | The kernel objects' share | B: a small arena at the top | undecided |
-| D7 | When the buddy allocator carves | B: as it needs | undecided |
-| D8 | The root's room | A: 1,024 slots and 320 records | undecided |
-| D9 | How a DMA buffer keeps to its page | A: as today, checked and retried, and tested | undecided |
+| D1 | How the loader finds the memory | A: the BIOS (INT 12h; INT 15h AH=88h with CF cleared; the CMOS if 88h fails) | as recommended (2026-11-08) |
+| D2 | Where the boot information lives | A: at 600h, copied by the kernel, read-only to the root | as recommended (2026-11-08) |
+| D3 | The EBDA | A: left alone, as INT 12h says | as recommended (2026-11-08) |
+| D4 | The least machine | A: a check at the start against `UMEM_LEAST` | as recommended (2026-11-08) |
+| D5 | How the kernel hands over more than 1 MB | A: a run of untypeds of 768 KB | as recommended (2026-11-08) |
+| D6 | The kernel objects' share | B: a small arena at the top | as recommended (2026-11-08) |
+| D7 | When the buddy allocator carves | B: as it needs | as recommended (2026-11-08) |
+| D8 | The root's room | A: 1,024 slots and 320 records | as recommended (2026-11-08) |
+| D9 | How a DMA buffer keeps to its page | A: as today, checked and retried, and tested | as recommended (2026-11-08) |
 | D10 | The OS server's data model | A: Watcom's compact model, `-zu -zdp`, its stacks in its stack segment | B, with the fault rule (2026-11-08) |
 | D11 | The small variant | B, after D10 B (A before) | B, servers Watcom's alone (2026-11-08) |
-| D12 | How many processes | A: 48, with the server's space at 1,024 slots | undecided |
-| D13 | The suites' machines | A: Bochs at 16 MB, and a memory suite on every machine each emulator can be | undecided |
+| D12 | How many processes | A: 48, with the server's space at 1,024 slots | as recommended (2026-11-08) |
+| D13 | The suites' machines | A: Bochs at 16 MB, and a memory suite on every machine each emulator can be | as recommended (2026-11-08) |
 
 ### D1. How the loader finds the memory
+
+**Decided: A** (2026-11-08), as recommended.
 
 - **A. The BIOS:** INT 12h for the base memory; INT 15h AH=88h for the extended memory, with
   CF cleared before the call (E1: IBM's leaves it); CMOS 30h-31h, flagged, if 88h fails.
@@ -1080,6 +1085,8 @@ D10 and D11 are decided (2026-11-08); the others are undecided, each with a reco
 
 ### D2. Where the boot information lives
 
+**Decided: A** (2026-11-08), as recommended.
+
 - **A. At 600h**, below the loader's stack's reach and past the BIOS's byte at 500h (its
   print-screen status, X5); the kernel's entry copies it into its data
   before anything uses that memory; the root reads the copy in slot 102.
@@ -1091,6 +1098,8 @@ D10 and D11 are decided (2026-11-08); the others are undecided, each with a reco
 
 ### D3. The EBDA
 
+**Decided: A** (2026-11-08), as recommended.
+
 - **A. Left alone:** the memory for programs ends where INT 12h says, 639 KB on Bochs.
 - **B. Taken back:** rx286 never calls the BIOS again, so its EBDA is dead memory.
 
@@ -1098,6 +1107,8 @@ D10 and D11 are decided (2026-11-08); the others are undecided, each with a reco
 to the BIOS's word; a later BIOS service (a PS/2 mouse's, ACPI's) is not rx286's anyway.
 
 ### D4. The least machine
+
+**Decided: A** (2026-11-08), as recommended.
 
 - **A. A check at the start:** if the memory for programs below 1 MB, from the image's end to
   the base memory, is less than `UMEM_LEAST`, the kernel says how much there is and stops.
@@ -1112,6 +1123,8 @@ to the BIOS's word; a later BIOS service (a PS/2 mouse's, ACPI's) is not rx286's
 
 ### D5. How the kernel hands over more than 1 MB
 
+**Decided: A** (2026-11-08), as recommended.
+
 - **A. A run of untypeds of 768 KB,** each on 256 KB, in slots 64 to 95 (E5). Nothing in the
   capabilities changes.
 - **B. An untyped's size in 24 bits:** one untyped for all of it, but every retype, check and
@@ -1121,6 +1134,8 @@ to the BIOS's word; a later BIOS service (a PS/2 mouse's, ACPI's) is not rx286's
 
 ### D6. The kernel objects' share
 
+**Decided: B** (2026-11-08), as recommended.
+
 - **A. As today:** a quarter of the extended memory, at most 1 MB.
 - **B. A small arena at the top:** at most a quarter and at most 128 KB, for the boot modules'
   spaces and the server's threads; a process's objects already come from a block of its own.
@@ -1128,6 +1143,8 @@ to the BIOS's word; a later BIOS service (a PS/2 mouse's, ACPI's) is not rx286's
 **Recommended: B** (E5): today's quarter mostly lies idle.
 
 ### D7. When the buddy allocator carves
+
+**Decided: B** (2026-11-08), as recommended.
 
 - **A. At the start,** as today, every untyped at once: 15 MB is 60 blocks and slots before the
   first process.
@@ -1137,6 +1154,9 @@ to the BIOS's word; a later BIOS service (a PS/2 mouse's, ACPI's) is not rx286's
 **Recommended: B.**
 
 ### D8. The root's room
+
+**Decided: A** (2026-11-08), as recommended: 1,024 slots and 320 block records, the root's
+space made from the memory for programs.
 
 - **A. 1,024 slots (768 dynamic) and 320 block records,** the root's space made from the
   memory for programs, as the server's space is (`src/root/root.c`), not from the kernel's
@@ -1151,6 +1171,8 @@ to the BIOS's word; a later BIOS service (a PS/2 mouse's, ACPI's) is not rx286's
 **Recommended: A** now, measured; B if the slots bind again.
 
 ### D9. DMA buffers
+
+**Decided: A** (2026-11-08), as recommended.
 
 The AT's DMA reaches all of its 16 MB (E4, W5), so the choice is only how a buffer is kept
 within its page.
@@ -1210,6 +1232,9 @@ layout to keep in step, and the very build that D10 B is meant to rule out.
 
 ### D12. How many processes
 
+**Decided: A** (2026-11-08), as recommended: 48 entries, with the server's space at 1,024
+slots.
+
 - **A. 48:** with the changes of *More processes*, the next limit is the server's 512 slots. With
   D10 B, decided, an entry takes a seventh slot, for its stack: the limit is then 49 entries,
   and 48 leaves one; with the server's space at 1,024 slots (32 KB, from the memory for
@@ -1222,6 +1247,8 @@ takes. 48 processes of 64 KB use 3 MB, which today's machines have. With D10 dec
 leave the compact server's room unused.
 
 ### D13. The suites' machines
+
+**Decided: A** (2026-11-08), as recommended.
 
 - **A. Bochs at 16 MB** (`megs: 16`) for every Bochs test; MAME at 1664K and DOSBox-X at 1 MB
   as today; the memory suite on every size each emulator can be.
@@ -1423,9 +1450,7 @@ Each needs a roadmap of its own:
 
 ## Left open for the owner
 
-- **The decisions,** D1-D13.
-- **How many processes** (D12), which decides how much of M5-M7 is needed: 31 needs none of
-  them but the root's room.
+- **None of the decisions:** all are decided (2026-11-08).
 - **A real AT,** to measure the compact server's cost where MAME only approximates it.
 
 ## References
