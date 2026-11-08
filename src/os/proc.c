@@ -463,7 +463,7 @@ static int image_take(struct image *img, int i, const char *path, rx_u16 segment
     if ((error = vfs_exe_open(i, path, &img->file)) != 0)
         return error;
     memcpy(img->name, img->file.name, AR_NAME_SIZE);
-    if (vfs_exe_read(&img->file, 0, OS_DATA, (rx_u16)(unsigned)head, RX_HEADER_SIZE))
+    if (vfs_exe_read(&img->file, 0, RX_SEG(head), RX_OFF(head), RX_HEADER_SIZE))
         goto noexec;
     img->code_bytes = head[RXH_CODE / 2];
     img->data = head[RXH_DATA / 2];
@@ -535,7 +535,7 @@ static int image_make(struct image *img, rx_u16 to, unsigned badge, rx_u16 *n)
         root(ROOT_EXIT, *n, 0, 0, 0, 0);
         return EIO;
     }
-    far_copy(data, img->args_at, OS_DATA, (rx_u16)(unsigned)args, img->args_size);
+    far_copy(data, img->args_at, RX_SEG(args), RX_OFF(args), img->args_size);
     envp = img->args_at + 2 * (img->argc + 1);
     at = (rx_u16)(img->stack - 6);      /* main's argc, argv, envp (crt0) */
     *far_word(data, at) = img->argc;
@@ -1337,7 +1337,7 @@ static int handle(int i, struct rx_kregs *r)
         give();                         /* then the report: the console may wait */
         if (n) {
             rx_log(line, n);
-            console(OS_DATA, (rx_u16)(unsigned)line, n, CON_MAIN | (unit << 8), 0);
+            console(RX_SEG(line), RX_OFF(line), n, CON_MAIN | (unit << 8), 0);
         }
         return 0;
     }
@@ -1531,10 +1531,13 @@ void proc_interrupt(void)
 void proc_boot(void)
 {
     static const char path[] = "/z/init";
-    static const char *const argv[] = { path, 0 };
-    static const char *const envp[] = { "PATH=/z:/c/bin", "HOME=/a", 0 };
-    int error;
+    static const char env_path[] = "PATH=/z:/c/bin", env_home[] = "HOME=/a";
+    static rx_u16 argv[2], envp[3];     /* offsets in the server's data, as spawn reads */
+    int error;                          /* them: a far pointer is two words (memory.md M5) */
 
+    argv[0] = RX_OFF(path);
+    envp[0] = RX_OFF(env_path);
+    envp[1] = RX_OFF(env_home);
     take(OS_CONTROL);
     cache_init();                       /* the files' cache (P7) */
     pipes_init();                       /* the pipes' buffers (P9) */
@@ -1542,8 +1545,7 @@ void proc_boot(void)
         rx_log("os: no room for the current directories\n", 40);
     if (tty_keys())                     /* the terminal's thread (P11) */
         root(ROOT_SERVE, 0, TTY_N * 4, 0, TTY_THREAD, 0);
-    if (spawn(path, OS_DATA, (rx_u16)(unsigned)argv, (rx_u16)(unsigned)envp, 0, -1,
-              &error) < 0) {
+    if (spawn(path, RX_SEG(argv), RX_OFF(argv), RX_OFF(envp), 0, -1, &error) < 0) {
         char line[40];
 
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: no init: error %d\n",

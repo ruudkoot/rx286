@@ -337,6 +337,52 @@ def test_mkexe_reads_a_publics_segment(tmp_path):
     assert MKEXE.omf_publics(str(obj)) == {'code_name': 'CODE', 'data_name': 'DATA'}
 
 
+def an_mz(tmp_path, module, relocations):
+    """A DOS executable as wlink writes one for c_link: the load module from
+    1000:0, each relocation as a segment and an offset from there."""
+    table, count = 0x1C, len(relocations)
+    header = -(-(table + 4 * count) // 16)
+    size = header * 16 + len(module)
+    head = bytearray(header * 16)
+    struct.pack_into('<2sHHHH', head, 0, b'MZ', size % 512, -(-size // 512), count, header)
+    struct.pack_into('<H', head, 0x18, table)
+    for n, at in enumerate(relocations):
+        linear = 0x10000 + at
+        struct.pack_into('<HH', head, table + 4 * n, linear & 0xF, linear >> 4)
+    path = tmp_path / 'probe.exe'
+    path.write_bytes(bytes(head) + module)
+    return str(path)
+
+
+def test_mkexe_makes_relocations_selectors(tmp_path):
+    module = bytearray(0x10010)
+    struct.pack_into('<HH', module, 0x10002, 0x1234, 0x2000)       # a far pointer to data
+    struct.pack_into('<H', module, 0x0004, 0x1000)                  # code's segment, in code
+    image, relocations = MKEXE.mz_image(an_mz(tmp_path, bytes(module), [0x10004, 0x0004]))
+    assert image == bytes(module) and relocations == [0x10004, 0x0004]
+    for ring, data, code in ((3, 0x0F, 0x07), (2, 0x0E, 0x06)):
+        out = MKEXE.relocate(image, relocations, ring, 'probe.exe')
+        assert struct.unpack_from('<HHH', out, 0x10002)[1] == data
+        assert struct.unpack_from('<H', out, 0x0004)[0] == code
+        assert out[0x10002:0x10004] == b'\x34\x12'
+
+
+def test_mkexe_refuses_another_paragraph(tmp_path):
+    module = bytearray(0x10010)
+    struct.pack_into('<H', module, 0x10004, 0x3000)
+    image, relocations = MKEXE.mz_image(an_mz(tmp_path, bytes(module), [0x10004]))
+    with pytest.raises(SystemExit):
+        MKEXE.relocate(image, relocations, 3, 'probe.exe')
+    with pytest.raises(SystemExit):
+        MKEXE.relocate(image, [0x1000F], 3, 'probe.exe')
+
+
+def test_mkexe_reads_wlinks_addresses():
+    assert MKEXE.map_address('1000:0013') == 0x13
+    assert MKEXE.map_address('2001:0002') == 0x12
+    assert MKEXE.map_address('0000:0400') == 0x400
+
+
 def an_rx(tmp_path, name, code=b'\xC3'):
     E = rxlib.include_constants('exe.inc')
     header = bytearray(E['RX_HEADER_SIZE'])
@@ -394,6 +440,18 @@ def test_lint_finds_a_function_without_its_comment(tmp_path, body):
                                   '_Pragma("x")', 'int far *p;'])
 def test_lint_finds_a_compilers_word(tmp_path, word):
     assert 'compiler' in lint_probe(tmp_path, 'probe.c', '\n' + word + '\n')
+
+
+@pytest.mark.parametrize('call', ['f(OS_DATA, (rx_u16)(unsigned)line, n);',
+                                  'f(SLOT(1),\n  (unsigned)&local);',
+                                  'f(OS_DATA, (unsigned long)buf);'])
+def test_lint_finds_a_data_selector_and_a_cast_offset(tmp_path, call):
+    assert 'selector' in lint_probe(tmp_path, 'probe.c', '\n' + call + '\n')
+
+
+def test_lint_takes_a_pointers_own_selector(tmp_path):
+    body = '\nf(RX_SEG(line), RX_OFF(line), n);\nf(OS_DATA, offset);\n/* OS_DATA, (rx_u16)x */\n'
+    assert 'selector' not in lint_probe(tmp_path, 'probe.c', body)
 
 
 @pytest.mark.parametrize('body', [

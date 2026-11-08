@@ -422,7 +422,7 @@ static int deliver(int i)
             return 0;
         }
     }
-    if (thread_call(i, THREAD_FRAME, FRAME_READ, OS_DATA, (rx_u16)(unsigned)kf, &r)) {
+    if (thread_call(i, THREAD_FRAME, FRAME_READ, RX_SEG(kf), RX_OFF(kf), &r)) {
         proc_end(i, SIGKILL);
         return 0;
     }
@@ -452,7 +452,7 @@ static int deliver(int i)
     kf[TFR_DS / 2] = PROC_DS;
     kf[TFR_ES / 2] = PROC_DS;
     kf[TFR_FLAGS / 2] &= (rx_u16)~(FLAG_DF | FLAG_TF);      /* C's: DF clear */
-    if (thread_call(i, THREAD_FRAME, FRAME_WRITE, OS_DATA, (rx_u16)(unsigned)kf, &r)) {
+    if (thread_call(i, THREAD_FRAME, FRAME_WRITE, RX_SEG(kf), RX_OFF(kf), &r)) {
         proc_end(i, SIGSEGV);
         return 0;
     }

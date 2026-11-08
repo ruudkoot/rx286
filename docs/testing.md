@@ -40,8 +40,11 @@ unit`). Unicorn is not a 286, so only pure code is tested this way. The C
 is tested there too (roadmap os-server.md P1, *docs/c.md*): the libc built
 by the host's gcc with the sanitizers (`test_libc.py`), and the 32-bit
 helpers the compilers call, in Unicorn against Python's arithmetic
-(`test_helpers.py`), and the root's buddy allocator against a simulation
-of untyped memory, 20,000 allocations and frees (`test_buddy.py`).
+(`test_helpers.py`), the crt's `memcpy`, `memmove`, `memset` and `memcmp`,
+near and far, the far ones with a pointer into a stack segment that is not
+DS (`test_memory.py`; memory.md M5), and the root's buddy allocator against
+a simulation of untyped memory, 20,000 allocations and frees
+(`test_buddy.py`).
 
 ## 4. Boot tests in Bochs
 
@@ -77,13 +80,14 @@ memory.md M2). Then it runs once on each machine the emulator can be
 none of whose machines an emulator can be is skipped there. Its expected
 lines may name the run's machine: `{mem_base}`, `{mem_ext}` and `{mem_end}`.
 `tests/memory` runs every size the owner named on the emulators that can be
-it.
+it, and a program in C's compact model, whose initialised data holds
+pointers (`tables.test`, M5).
 
 Header lines (`tools/run-test` documents them all): `program` (`sh` or
 `shell`, the shell in C on the terminals; `none`, no program module, the
 processes having the keys; else a test program the root builds:
 `idle`, the default, `attack`, `fuzz`, `caps`, `ipc`, `revoke`, `rings`,
-`keys`, `additions`, `fputhreads`, `services`), `keys` (what to type),
+`keys`, `additions`, `fputhreads`, `services`, `tables`), `keys` (what to type),
 `define` (a NASM and C define for
 the test image), `image` (a fragmented, missing, truncated or oversized
 `KERNEL.BIN`, one of `IMAGE_MAX` bytes, one whose first module is not the root or
@@ -183,6 +187,8 @@ The suites:
 `make check-ia16` (not in `make check`) runs every suite on Bochs with the
 C built by gcc-ia16 instead of Open Watcom (every image carries C: the
 root, the OS server, `/z`), and check-286 over its objects (*docs/c.md*).
+What is in C's compact model, the far libraries and `tables`, stays
+Watcom's there too: gcc-ia16 has no such model (memory.md D11 B).
 
 ## 5. The attack suite and the fuzzer
 

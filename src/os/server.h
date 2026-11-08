@@ -19,7 +19,7 @@
 #define RING 2
 #define SLOT(n) ((rx_u16)((n) * 8 + 4 + RING))  /* a slot of the server's, as a selector */
 
-#define OS_DATA SLOT(1)                 /* its own data, passed to the console */
+#define OS_DATA SLOT(1)                 /* its own data (a buffer's selector: RX_SEG, M5) */
 #define OS_MODULES SLOT(3)              /* the module table */
 #define OS_SOUND_STOP SLOT(13)          /* the sound driver's notification */
 #define OS_CONTROL SLOT(14)             /* the control notification */

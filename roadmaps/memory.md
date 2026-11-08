@@ -75,7 +75,7 @@ DOSBox-X; none of their code is in the repository.
 | M2: the boot information, and the base memory from the BIOS | done (2026-11-08) |
 | M3: every byte of extended memory to the root | done (2026-11-08) |
 | M4: the processes' memory from all of it, and the root's room | done (2026-11-08) |
-| M5: the libraries for far data | not started |
+| M5: the libraries for far data | done (2026-11-08) |
 | M6: the OS server in the compact model | not started |
 | M7: 48 processes | not started |
 | M8: the documents, a review, and the close | not started; os-server.md's *At the close* (P2, P3) put right on 2026-11-08 |
@@ -1387,6 +1387,25 @@ less, M a few, L a week.
   initialised data, built compact, reads them right (`mkexe`); the lint rule finds the ten
   sites on today's code.
 - **Decisions:** D10, D11.
+- **Done** (2026-11-08). `c.mk` builds `crt`, `c`, `rx286` and `os` again with `-mc -zu
+  -zdp` into `c/far`, with their start (crt0 with `FAR_DATA`, `start.c`), with Watcom in every
+  build, gcc-ia16's too; `memory-far.asm`; `kcall.asm`'s far `rx_kcall`, `rx_log` and
+  `rx_xchg`; `RX_SEG` and `RX_OFF`, and the server's sites use them; `tools/mkexe` resolves
+  wlink's relocations; `tools/lint`'s `selector` rule; `tests/unit/test_memory.py` (both
+  `memory.asm` and `memory-far.asm`, the far ones with a pointer into a stack segment that is
+  not DS; two mutations of `memory-far.asm` each fail it) and five more cases in
+  `test_tools.py`; `tests/memory/tables.test`, a module program in the compact model whose
+  data holds 9 relocated pointers, passes on all three emulators. Not as planned:
+  - **every Watcom program links as a DOS executable** (`format dos`, not `format raw bin`),
+    so that `mkexe` has one path: the 190 executables and maps of five builds (debug,
+    release, two test builds, ring 1) came out byte for byte as before. `mkexe --ring N`
+    gives the selectors' RPL, 3 unless a module's link says 2 (the root, the server) or the
+    program's ring;
+  - **eleven sites, not ten:** the rule found E6's ten and init's `spawn` in `proc_boot`,
+    whose argv and envp became arrays of offsets, as `spawn` reads them;
+  - **the far `os` library and start** (`module.c`, crt0 with room for far argv and envp)
+    came with the test program, a program the root builds; `setjmp` is not among the far
+    libraries, since no program in the compact model uses it.
 
 ### M6. The OS server in the compact model (M)
 

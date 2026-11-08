@@ -262,7 +262,7 @@ static void report(struct session *s, int vector, rx_u16 error, rx_u16 cs, rx_u1
     *name_add(name, s->n) = 0;
     n = fault_text(line, sizeof line, name, vector, error, cs, ip);
     rx_log(line, n);
-    console(OS_DATA, (rx_u16)(unsigned)line, n, CON_MAIN, 0);     /* (SS = DS) */
+    console(RX_SEG(line), RX_OFF(line), n, CON_MAIN, 0);
 }
 
 /* put_back - a capability of the server's copied into the program's slot, if
@@ -413,7 +413,7 @@ static void control(void)
         r.bp = 0;
         if (rx_kcall(&r) == 0) {
             rx_log(msg_ctrl_break, sizeof msg_ctrl_break - 1);     /* the log */
-            console(OS_DATA, (rx_u16)(unsigned)msg_ctrl_break,     /* and the screen */
+            console(RX_SEG(msg_ctrl_break), RX_OFF(msg_ctrl_break),    /* and the screen */
                     sizeof msg_ctrl_break - 1, CON_MAIN, 0);
             r.ax = (KCALL_THREAD << 8) | THREAD_RESTART;
             r.dx = OS_FOREGROUND;
@@ -421,7 +421,7 @@ static void control(void)
             rx_kcall(&r);
         } else {
             rx_log(msg_interrupt, sizeof msg_interrupt - 1);
-            console(OS_DATA, (rx_u16)(unsigned)msg_interrupt, sizeof msg_interrupt - 1,
+            console(RX_SEG(msg_interrupt), RX_OFF(msg_interrupt), sizeof msg_interrupt - 1,
                     CON_MAIN, 0);
             proc_interrupt();
         }

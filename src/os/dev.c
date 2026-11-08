@@ -55,7 +55,7 @@ static void field_put(int f, unsigned n)
 {
     while (n < CON_FIELD)
         text[n++] = ' ';
-    console(OS_DATA, (rx_u16)(unsigned)text, CON_FIELD, CON_STATUS,
+    console(RX_SEG(text), RX_OFF(text), CON_FIELD, CON_STATUS,
             (rx_u16)(VIDEO_COLUMNS - f * CON_FIELD));
 }
 

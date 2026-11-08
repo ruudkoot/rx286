@@ -23,14 +23,36 @@ with gcc-ia16 instead of Watcom; `c.mk` holds the rules for both:
 | C | `wcc -2 -ms -zl -zls -zld -s -ecc -os -zastd=c99 -wx -we` | `ia16-elf-gcc -march=i80286 -mcmodel=small -mprotected-mode -ffreestanding -fno-builtin -fcall-used-es -Os -std=gnu99 -Wall -Wextra -Werror` (GNU's C99: `__far` is a GNU keyword) |
 | NASM | `-f obj --gprefix _` | `-f elf32 -dELF` |
 | libraries | `wlib` | `ia16-elf-ar` |
-| link | `wlink format raw bin`, the code at 1000:0, the data at 2000:0 | `ia16-elf-ld -T tools/ia16.ld` |
-| into an executable | `tools/mkexe --wlink RAW MAP OUT.rx` | `tools/mkexe --elf ELF OUT.rx` |
+| link | `wlink format dos`, the code at 1000:0, the data at 2000:0 | `ia16-elf-ld -T tools/ia16.ld` |
+| into an executable | `tools/mkexe [--ring N] --wlink EXE MAP OUT.rx` | `tools/mkexe --elf ELF OUT.rx` |
 | for `check-286` | `wdis` of each object (`.dis`) | `objdump -d` of each object (`.dis`) |
 
 Both build the small model: 64 KB of code and 64 KB of data, stack and
 heap together, SS = DS (D2). `-zl` and `-ffreestanding` keep the
 compilers' own libraries out: nothing of Open Watcom's or of libgcc goes
 into a binary, so no licence comes with one.
+
+**The far libraries** (roadmap memory.md M5): Watcom builds `crt`, `c`,
+`rx286` and `os` a second time in its compact model, `-mc -zu -zdp`, into
+`$(B)/c/far`, in every build, gcc-ia16's too, since gcc-ia16 has no such
+model (memory.md D11 B). Every data pointer is then far, a selector and an
+offset; SS need not be DS (`-zu`), as a server thread's stack, a segment of
+its own, is not; DS stays DGROUP's (`-zdp`), so that the code needs no
+segment's name. Their assembly is assembled with `FAR_DATA`:
+`memory-far.asm` in place of `memory.asm`, and `kcall.asm`'s far `rx_kcall`,
+`rx_log` and `rx_xchg`; crt0 then leaves room for far argv and envp, a
+program the root builds having zeros there. `setjmp` is not among them.
+`c.mk`'s `FAR_PROGRAMS` (`tests/programs/tables.c`) link on them.
+
+C written for both models passes a buffer by its own selector and offset,
+`RX_SEG(p)` and `RX_OFF(p)` (`compiler.h`), never as "the data's selector
+and `(unsigned)p`", which names the wrong segment for a local once SS is
+not DS: `tools/lint`'s `selector` rule finds that. A pointer in initialised
+data is a segment's name in the compact model, which wlink leaves to the
+loader as a relocation: `tools/mkexe` writes each one's selector itself,
+the program's slot 0 for the code's paragraph (1000h) and slot 1 for the
+data's (2000h), at the program's ring (`--ring`, 3 unless a module's link
+gives its own), and stops at any other.
 
 ## The program's segments
 
@@ -104,7 +126,8 @@ once.
 
 `src/include/exe.inc` (D12): a header of `RX_HEADER_SIZE` bytes, then the
 code, then the initialised data. There are no relocations: every selector
-is fixed by its slot.
+is fixed by its slot, so `tools/mkexe` resolves a linker's relocation into
+its selector (*The far libraries*, above).
 
 | Offset | Field | What |
 |---|---|---|
@@ -143,4 +166,5 @@ sizes`). `tools/mkimage` takes an executable as a module of the boot image
   threads with its own start (`src/os/start.asm`), not crt0: a part of the
   stacks in its data segment for each (*docs/os-server.md*).
 - **The second compiler:** `make check-ia16` runs those suites with every C
-  module built by gcc-ia16, and check-286 over its objects.
+  module built by gcc-ia16, and check-286 over its objects; what is in the
+  compact model (*The far libraries*) is Watcom's there too.

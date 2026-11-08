@@ -150,7 +150,7 @@ static void echo(const char *s, unsigned n)
 static void echo_flush(void)
 {
     if (echoed) {
-        tty_output(echo_unit, OS_DATA, (rx_u16)(unsigned)echoes, echoed);
+        tty_output(echo_unit, RX_SEG(echoes), RX_OFF(echoes), echoed);
         echoed = 0;
     }
 }

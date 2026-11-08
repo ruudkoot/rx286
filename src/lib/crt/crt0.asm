@@ -12,7 +12,9 @@
 ; zeroes the data: the root built it zeroed, and a restarted program keeps
 ; its data, as every rx286 program does. The stack's top three words are
 ; main's argc, argv and envp: a process's, which the OS server put there
-; (os-server.md P6), or zeros, for a program the root builds.
+; (os-server.md P6), or zeros, for a program the root builds. With FAR_DATA
+; (C's compact model, memory.md M5) argv and envp are far, five words: a
+; program the root builds, whose are zeros, since a process's are offsets.
 ; ============================================================================
 
 cpu 286
@@ -23,7 +25,11 @@ bits 16
 %ifndef STACK_TOP
 STACK_TOP           equ 0x0400          ; the stack's bytes: data begins there
 %endif
+%ifdef FAR_DATA
+CRT_ARGS            equ 10              ; argc, argv, envp far at its top: rx_crt_main's
+%else
 CRT_ARGS            equ 6               ; argc, argv, envp at its top: rx_crt_main's
+%endif
 RX_GUARD            equ 0x5A5A          ; the null pointer's guard word
 RX_GUARD_AT         equ 0               ; where: the data segment's first word
 

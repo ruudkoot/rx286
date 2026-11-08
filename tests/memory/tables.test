@@ -1,0 +1,16 @@
+# A program in C's compact model (roadmap memory.md M5;
+# tests/programs/tables.c): the pointers in its initialised data, which
+# tools/mkexe makes selectors from wlink's relocations, read right; the far
+# libraries on its data and its stack.
+program: tables
+match: contains
+timeout: 30
+---
+tables: names: alpha beta gamma
+tables: primes 2 3 5 7 11; squares 1 4 9
+tables: the greeting: hello; through a pointer to .bss: 3
+tables: their selector the data's: yes
+tables: memcpy, memmove, memset and memcmp: yes
+tables: rx_kcall and rx_xchg on the stack: yes
+tables: the kernel's log from the stack
+tables: done

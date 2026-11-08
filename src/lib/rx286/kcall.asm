@@ -6,6 +6,10 @@
 ; rx_kcall makes any call of INT 31h with a struct of registers in and out
 ; (docs/kernel-calls.md); the others are the calls C makes often, without
 ; the struct. The C convention of cabi.inc.
+;
+; With FAR_DATA, for C's compact model (roadmap memory.md M5): the routines
+; that take a pointer take it far, an offset and a selector, and SS need
+; not be DS (the far libraries, c.mk).
 ; ============================================================================
 
 cpu 286
@@ -31,11 +35,47 @@ code_section
 ; ----------------------------------------------------------------------------
 ; rx_kcall - int rx_kcall(struct rx_kregs *r): INT 31h with r's registers,
 ; which come back changed
-;   In:       the stack: r
+;   In:       the stack: r (far with FAR_DATA)
 ;   Out:      AX = the status (KE_*): 0, or the error with CF; r's registers
-;   Destroys: BX, CX, DX
+;   Destroys: BX, CX, DX (and ES with FAR_DATA)
 ; ----------------------------------------------------------------------------
 rx_kcall:
+%ifdef FAR_DATA
+        push bp
+        mov bp, sp
+        push si
+        push di
+        push word ARG(1)
+        push word ARG(0)
+        les bx, ARG(0)
+        mov ax, [es:bx + KR_AX]
+        mov cx, [es:bx + KR_CX]
+        mov dx, [es:bx + KR_DX]
+        mov si, [es:bx + KR_SI]
+        mov di, [es:bx + KR_DI]
+        mov bp, [es:bx + KR_BP]
+        mov bx, [es:bx + KR_BX]
+        int KCALL_VECTOR
+        push bx
+        mov bx, sp
+        les bx, [ss:bx + 2]             ; r again (no flags change from here)
+        mov [es:bx + KR_AX], ax
+        pop word [es:bx + KR_BX]
+        mov [es:bx + KR_CX], cx
+        mov [es:bx + KR_DX], dx
+        mov [es:bx + KR_SI], si
+        mov [es:bx + KR_DI], di
+        mov [es:bx + KR_BP], bp
+        mov ax, 0
+        jnc .far_done
+        mov al, [es:bx + KR_AX]         ; the status, KE_*
+.far_done:
+        add sp, 4                       ; r
+        pop di
+        pop si
+        pop bp
+        ret
+%else
         push bp
         mov bp, sp
         push si
@@ -69,6 +109,7 @@ rx_kcall:
         pop si
         pop bp
         ret
+%endif
 
 ; ----------------------------------------------------------------------------
 ; rx_verr - int rx_verr(unsigned selector): may the caller read through it?
@@ -164,7 +205,7 @@ rx_ticks:
 ; ----------------------------------------------------------------------------
 ; rx_log - int rx_log(const void *bytes, unsigned n): to the kernel's log
 ; (KCALL_LOG)
-;   In:       the stack: bytes, n
+;   In:       the stack: bytes (far with FAR_DATA), n
 ;   Out:      AX = the bytes written, or -1
 ;   Destroys: BX, CX, DX
 ; ----------------------------------------------------------------------------
@@ -172,13 +213,22 @@ rx_log:
         push bp
         mov bp, sp
         push si
+%ifdef FAR_DATA
+        push ds
+        lds si, ARG(0)
+        mov cx, ARG(2)
+%else
         mov si, ARG(0)
         mov cx, ARG(1)
+%endif
         mov ah, KCALL_LOG
         int KCALL_VECTOR
         jnc .done
         mov ax, -1
 .done:
+%ifdef FAR_DATA
+        pop ds
+%endif
         pop si
         pop bp
         ret
@@ -214,16 +264,22 @@ rx_log_far:
 ; rx_xchg - int rx_xchg(int *word, int value): the word swapped with a value
 ; in one instruction, for a lock (os-server.md D17): XCHG locks the bus by
 ; itself, which a LOCK prefix at ring 3 may not (W4)
-;   In:       the stack: word, value
+;   In:       the stack: word (far with FAR_DATA), value
 ;   Out:      AX = the word's old value
-;   Destroys: BX
+;   Destroys: BX (and ES with FAR_DATA)
 ; ----------------------------------------------------------------------------
 rx_xchg:
         push bp
         mov bp, sp
+%ifdef FAR_DATA
+        les bx, ARG(0)
+        mov ax, ARG(2)
+        xchg ax, [es:bx]
+%else
         mov bx, ARG(0)
         mov ax, ARG(1)
         xchg ax, [bx]
+%endif
         pop bp
         ret
 

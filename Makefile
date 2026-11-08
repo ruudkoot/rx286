@@ -59,6 +59,7 @@ program_main_keys := tests/programs/keys.asm
 program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
 program_main_services := tests/programs/services.c
+program_main_tables := tests/programs/tables.c
 # PROGRAM=none: no program the root builds; the processes have the keys (P9);
 # PROGRAM=shell (sh too): no program the root builds either, and init runs
 # the shell in C on each terminal (os-server.md P9; the shell in assembly
@@ -95,7 +96,7 @@ MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=256 \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
     z=$(B)/z.arc:3:0:archive
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions or services, not '$(PROGRAM)')
+$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions, services or tables, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed
