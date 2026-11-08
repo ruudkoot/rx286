@@ -118,6 +118,32 @@ void say(const char *text)
 }
 
 #ifdef TEST_MEMORY
+/* extended_report - TEST_MEMORY builds: the extended memory the root holds
+ * as untyped, in slots 3, 4 and ROOT_SLOT_EXTENDED on, as the kernel says
+ * each is (KCALL_SEGMENT; memory.md M3) */
+static void extended_report(void)
+{
+    struct rx_kregs r;
+    rx_u32 paras = 0;
+    unsigned n, pieces = 0;
+    char line[64];
+
+    for (n = ROOT_SLOT_UNTYPED; n < ROOT_SLOT_EXTENDED + ROOT_SLOTS_EXTENDED; n++) {
+        if (n > ROOT_SLOT_ARENA && n < ROOT_SLOT_EXTENDED)
+            continue;
+        r.ax = KCALL_SEGMENT << 8;
+        r.dx = SLOT(n);
+        r.bp = 0;
+        if (rx_kcall(&r) || (r.dx & 0xFF) < 0x10)
+            continue;                   /* not an untyped, or below 1 MB */
+        paras += r.cx;
+        pieces++;
+    }
+    snprintf(line, sizeof line, "root: extended memory held: %lu KB in %u pieces\n",
+             (unsigned long)(paras / 64), pieces);
+    say(line);
+}
+
 /* memory_report - TEST_MEMORY builds (tests/memory): what the loader found
  * of the memory and how the kernel sized it, from the boot information
  * (slot 102; layout.inc's BI_*; memory.md M2) */
@@ -137,6 +163,7 @@ static void memory_report(void)
     snprintf(line, sizeof line, "root: memory for programs below 1 MB: %04X0h to %04X0h\n",
              w[BI_UMEM_START / 2], w[BI_UMEM_END / 2]);
     say(line);
+    extended_report();
 }
 #endif
 

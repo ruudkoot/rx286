@@ -73,7 +73,7 @@ milestone.
 | 9 | `KCALL_THREAD` | DX a thread; AL `THREAD_CONFIGURE` (SI its space, BX its entry, CX its stack's top), `THREAD_START` (CL its priority, 0 to `PRIORITY_MAX`; CH `START_*`), `THREAD_BIND` (SI a notification), `THREAD_FAULT` (SI an endpoint), `THREAD_RESTART`, `THREAD_STOP`, `THREAD_INFO`, `THREAD_SUSPEND` (SI a notification, or 0) or `THREAD_FRAME` (BL `FRAME_READ` or `FRAME_WRITE`; SI:DI `TFR_SIZE` bytes of the caller's) | `THREAD_INFO`: BL its state (`STATE_*`), BH its priority, CX how often it ran |
 | 10 | `KCALL_IRQ` | DX an interrupt line; AL `IRQ_BIND` (SI a notification) or `IRQ_ACK` | the line unmasked |
 | 11 | `KCALL_TIMER` | DX a notification; CX ticks, 1 to 7FFFh (`KE_ARG` otherwise) | |
-| 12 | `KCALL_SEGMENT` | DX a segment | DL:AX its physical base, CX its limit (for DMA) |
+| 12 | `KCALL_SEGMENT` | DX a segment, or an untyped | DL:AX its physical base, CX its limit (for DMA); an untyped's: CX its paragraphs, SI those retyped so far (memory.md M3) |
 | 13 | `KCALL_DELETE` | DX a slot of the caller's, not empty | the slot empty |
 | 14 | `KCALL_SAVE_REPLY` | SI an empty slot of the caller's | the reply owed, as a `CAP_REPLY` there |
 | 15 | `KCALL_REVOKE` | DX a slot of the caller's, not empty | every capability derived from it deleted, in every space; an untyped's memory free again |
@@ -433,12 +433,13 @@ has `ROOT_SLOTS` slots:
 | Slot | Constant | What |
 |---|---|---|
 | 0, 1, 2 | | its code, its data (initialised from its module) and its stack |
-| 3 | `ROOT_SLOT_UNTYPED` | the memory for programs, as untyped: what its data and stack left; with extended memory, three quarters of that, up to 1 MB (roadmap os-server.md P3) |
-| 4 | `ROOT_SLOT_ARENA` | the arena, as untyped: what its space and thread left; with extended memory, the rest of it, up to 1 MB |
+| 3 | `ROOT_SLOT_UNTYPED` | the memory for programs, as untyped: what its data and stack left; with extended memory, its first piece, 768 KB at most, from 1 MB (roadmap os-server.md P3, memory.md M3) |
+| 4 | `ROOT_SLOT_ARENA` | the arena, as untyped: what its space and thread left; with extended memory, the top of that, a quarter at most and 128 KB at most |
 | 5 | `ROOT_SLOT_MODULES` | the module table, read-only |
 | 6 | `ROOT_SLOT_SPACE` | its own space |
 | 7 | `ROOT_SLOT_THREAD` | its own thread |
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
+| 64-95 | `ROOT_SLOT_EXTENDED`, `ROOT_SLOTS_EXTENDED` | with extended memory: the rest of it for segments, in pieces of 768 KB, each on 256 KB; empty past the last (memory.md M3) |
 | 100 | `ROOT_SLOT_LOW_UNTYPED` | with extended memory: the memory for programs below 1 MB, what its data and stack left |
 | 101 | `ROOT_SLOT_LOW_ARENA` | with extended memory: the arena, what its space and thread left |
 | 102 | `ROOT_SLOT_BOOT_INFO` | the boot information, read-only: what the loader found of the memory, and the kernel's sizing (roadmap memory.md M2; *docs/memory-map.md*) |

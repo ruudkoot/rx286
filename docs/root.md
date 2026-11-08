@@ -17,6 +17,7 @@ waiting.
 | 0, 1, 2 | its code, its data (initialised from its module) and its stack |
 | 3 | the memory for programs' segments, as untyped (`ROOT_SLOT_UNTYPED`) |
 | 4 | the arena, as untyped (`ROOT_SLOT_ARENA`): what its own space and thread left |
+| 64-95 | with extended memory: the rest of it for segments, past slot 3's piece, in pieces of 768 KB, each on 256 KB (`ROOT_SLOT_EXTENDED`; memory.md M3); empty past the last piece. `KCALL_SEGMENT` gives each one's base, its paragraphs and those retyped |
 | 5 | the module table, read-only |
 | 6, 7 | its own space and thread |
 | 8 on | each module's code, and its data as assembled, read-only, two slots a module |

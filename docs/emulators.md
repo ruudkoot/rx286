@@ -29,7 +29,7 @@ Bochs is told everything about the machine it can be told. What it cannot be:
 | Video | EGA | VGA, a superset of the EGA registers rx286 uses |
 | LDTR at start | Intel: load it | a live LDT at 0, limit FFFFh (rx286 loads LDTR with 0) |
 | A20 after the BIOS | | on |
-| Memory | as fitted, up to 15,232 KB above 1 MB (the POST stops at FE0000h) | `megs`: whole megabytes, 639 KB base (the BIOS's EBDA at 9FC00h); 4 by default: 3 MB extended (roadmap os-server.md P3, memory.md E1) |
+| Memory | as fitted, up to 15,232 KB above 1 MB (the POST stops at FE0000h) | `megs`: whole megabytes, 639 KB base (the BIOS's EBDA at 9FC00h); 16 by default: 15 MB extended (roadmap memory.md D13, E1) |
 | `LOCK` at CPL 3 | #GP(0000) (seen on MAME) | runs |
 | `LOADALL` (0Fh 05h) at CPL 3 | #GP(0000) (seen on MAME) | #UD: it is `SYSCALL` |
 | `IRET` with NT and a null back link | #TS(0000) (seen on MAME; Intel's text says #GP, its pseudocode #TS) | #TS(0000) |

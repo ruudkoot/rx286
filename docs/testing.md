@@ -69,7 +69,7 @@ hello
 ```
 
 A test runs on each emulator's own machine (`rxlib.MACHINES_DEFAULT`: Bochs
-639 KB and 3 MB above 1 MB, MAME 640 KB and 1 MB, DOSBox-X 640 KB and
+639 KB and 15 MB above 1 MB, MAME 640 KB and 1 MB, DOSBox-X 640 KB and
 none) unless it names machines with `memory: BASE EXTENDED` lines (roadmap
 memory.md M2). Then it runs once on each machine the emulator can be
 (`rxlib.machine_can`; memory.md E1): each run has a directory of its own,

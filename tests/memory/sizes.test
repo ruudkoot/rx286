@@ -4,7 +4,9 @@
 # most). The loader asks INT 12h and INT 15h AH=88h and leaves the answer
 # at 600h; the kernel copies it, ends the memory for programs below 1 MB
 # where the base memory ends, and gives the root the boot information,
-# which the root reports (TEST_MEMORY). Then the shell runs a command.
+# which the root reports (TEST_MEMORY), and every byte of the extended
+# memory, as the kernel says each untyped of the root's is (M3). Then the
+# shell runs a command.
 program: sh
 define: TEST_MEMORY
 memory: 639K 0K
@@ -27,4 +29,5 @@ timeout: 60
 ---
 root: memory: base {mem_base} KB, extended {mem_ext} KB
 root: memory for programs below 1 MB: {...} to {mem_end}h
+root: extended memory held: {mem_ext} KB in {...} pieces
 hello

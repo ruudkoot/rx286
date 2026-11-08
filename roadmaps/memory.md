@@ -73,7 +73,7 @@ DOSBox-X; none of their code is in the repository.
 | D1-D9, D12, D13 | decided (2026-11-08): as recommended |
 | M1: the masks of entries past entry 15 | done (2026-11-08): with a third bug, the kernel's timers |
 | M2: the boot information, and the base memory from the BIOS | done (2026-11-08) |
-| M3: every byte of extended memory to the root | not started |
+| M3: every byte of extended memory to the root | done (2026-11-08) |
 | M4: the processes' memory from all of it, and the root's room | not started |
 | M5: the libraries for far data | not started |
 | M6: the OS server in the compact model | not started |
@@ -1331,6 +1331,13 @@ less, M a few, L a week.
 - **Done when:** on Bochs at 16 MB, MAME at 15M and DOSBox-X at 15 MB, `sizes.test` finds every
   byte of the extended memory in the root's slots, and every other test passes as before.
 - **Decisions:** D5, D6.
+- **Done** (2026-11-08). `ext_detect` and `boot_ext_run`: the arena at the top, the rest in
+  pieces of 768 KB in slots 3 and 64-95. `sizes.test` finds every byte of the extended memory
+  in the root's slots on every machine (15,360 KB in 21 pieces at 16 MB). Bochs runs at 16 MB
+  by default (D13; from M2), every Bochs test passing unchanged. Not as planned: the root
+  learns each piece's size from the kernel, not from the boot information: `KCALL_SEGMENT`
+  now describes an untyped too (its base, its paragraphs, those retyped), which the
+  allocator's reserves use in M4 (E5 found their sizes nominal).
 
 ### M4. The processes' memory from all of it, and the root's room (M)
 

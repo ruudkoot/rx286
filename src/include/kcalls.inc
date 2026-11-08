@@ -193,6 +193,8 @@ ROOT_SLOT_SPACE     equ 6   ; its own space
 ROOT_SLOT_THREAD    equ 7   ; its own thread
 ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2 (n - 1),
                             ;    and its data as assembled, read-only, in the next
+ROOT_SLOT_EXTENDED  equ 64  ; the extended memory for segments past slot 3's, in pieces
+ROOT_SLOTS_EXTENDED equ 32  ;    of 768 KB, each on 256 KB; empty past its end (memory.md M3)
 ROOT_SLOT_LOW_UNTYPED equ 100 ; with extended memory: the memory for segments below 1 MB,
 ROOT_SLOT_LOW_ARENA equ 101 ;    and the arena (slots 3 and 4 then hold extended memory)
 ROOT_SLOT_BOOT_INFO equ 102 ; the loader's boot information and the kernel's sizing,
