@@ -81,6 +81,39 @@ kernel objects each. So the gain is real on MAME's AT and on Bochs, from
 458 KB to 1.5-3 MB for the processes; past about 4 MB only the medium model
 (os-server.md, *Later*) or more processes would use more.
 
+### Where the 25 comes from
+
+The owner asked next where the limit of 25 processes comes from. It is
+`OS_PROCS` (`src/include/os.inc`), the size of the OS server's table of
+processes (`PROCS`, `src/os/server.h`); `CHILD_MAX` (`limits.h`) is set
+to it. It counts processes and POSIX threads together: each thread is an
+entry of the table, with a thread of the server's of its own (os-server.md
+D4 A).
+
+25 is POSIX's least, `_POSIX_CHILD_MAX`: os-server.md's P15 (80de566)
+raised the table to it, and no further, because a larger one does not fit.
+An entry costs something in four places, and the OS server's data
+segment runs out first:
+
+| Where | An entry costs | Room |
+|---|---|---|
+| The OS server's data segment | a thread of the server's with a stack of 1 KB (`OS_PART`), and its table entry | **the limit**: the server is C in the small model, one data segment of 64 KB holding its stacks too (SS = DS), at 55,836 of 65,536 bytes (`make sizes`): about 9.5 KB left, some 8 entries more at most |
+| The server's capability space | 6 slots, from slot 166 (`PROC_SLOT0`) | 512 slots: about 57 entries |
+| The root | an entry of its own table | `PROCS_MAX` 32 |
+| The kernel | a thread, a space, their descriptors | `THREAD_MAX` 192, `SPACE_MAX` 128, about 1,013 descriptors in the GDT's pool |
+
+So 25 is a floor POSIX set, not a ceiling the design chose; the server's
+64 KB is the ceiling. Well past 30 needs one of these:
+
+- **A larger data model for the server** (os-server.md, *Later*), which
+  gcc-ia16, the second compiler every C program is built with, has not
+  (os-server.md, *At the close*).
+- **The server's stacks outside its data segment,** which small-model C
+  cannot have: it needs SS = DS.
+- **Another structure for the server:** an event loop with saved replies,
+  not a thread a process (D4's other options), so that an entry costs its
+  table entry alone.
+
 ## The milestones
 
 ### M1. Every byte of extended memory to the root
