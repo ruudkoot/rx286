@@ -197,11 +197,20 @@ real bug that Bochs cannot show (a single-step trap carried into the kernel).
 
 ## What `make check` costs
 
-About thirteen minutes on this machine, 16 threads (790 s from a fresh
-clone at os-server.md P15), most of it MAME's: its 90 tests take nine or
-ten minutes, each running the IBM BIOS's power-on test and waiting for an
-AT's diskette in an AT's time. Bochs' 101 take about a minute and a half,
-DOSBox-X's 37 under a minute, the host tests 10 s, and the static checks
-(`check-286`, `check-image`, `check-repro`, `lint`, `check-docs`) the
-rest. Each emulator's tests run in parallel. `make check-ia16` takes a
-minute and a half more.
+Under five minutes on this machine, 16 CPUs: 284 s from a fresh clone at
+os-server.md P15's close (936 s before that day's changes), the tests of
+each emulator a CPU each, one emulator at a time:
+
+| Part | Time |
+|---|---|
+| the host tests | 10 s |
+| Bochs, 119 tests | 56 s |
+| DOSBox-X, 39 tests, fast-forward | 5 s |
+| MAME, 95 tests | 3 min 10 s: each runs the IBM BIOS's power-on test and waits for an AT's diskette in an AT's time |
+| `check-286` (the flavours built on every CPU, then every listing read on every CPU) | 11 s |
+| `check-image` | 1 s |
+| `check-repro` (three flavours and the disks, twice) | 11 s |
+| `lint`, `check-docs` | 1 s |
+
+`make check-ia16`, every test again on Bochs with gcc-ia16's C, takes
+156 s more.

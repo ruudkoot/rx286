@@ -133,7 +133,7 @@ What it rests on:
 | P12 | The commands and the devices | done (2026-11-07, branch `os-server`) |
 | P13 | POSIX threads | done (2026-11-07, branch `os-server`) |
 | P14 | The old calls deleted; the demonstration | done (2026-11-07, branch `os-server`) |
-| P15 | The documents, a review, the release | not started |
+| P15 | The documents, a review, the release | done (2026-11-08, branch `os-server`) |
 
 **Decided (2026-11-06):** every decision as recommended, except these, and D5 with a
 condition (*Decisions*):
@@ -152,6 +152,308 @@ condition (*Decisions*):
 The architecture and the milestones below follow the decisions. Where the owner chose
 otherwise than recommended, the text that follows says so (D4, D9, D13, D15, D18). The
 experiments, and the W, A and X items, are as they were found.
+
+## At the close
+
+### What the owner asked for (2026-11-06 to 2026-11-08)
+
+"Start implementation of this roadmap and all the milestones on a new
+branch", then "please proceed" at each step, and "please complete the
+roadmap": P15. At the close: the open items fixed, "all except
+disk-scheduler [...] and real at", "plus your recommendations" (the last
+reviews, below), and `make check` made faster ("please change now").
+
+Every milestone is done, on the branch `os-server`, from `master`'s
+6c29765, one commit for each step, each with `make check` green, and
+`make check-ia16` with each milestone. `master` holds this roadmap and its
+decisions, and is not merged into. Nothing is pushed.
+
+| Commit | What |
+|---|---|
+| e4dbf3f | this roadmap (on `master`) |
+| bd3e997, 6c29765 | the owner's decisions; D4 A's costs (on `master`) |
+| e5aa7e7 | P1: the C toolchain, the crt, the first C modules |
+| d87ece9 | P2: the kernel's additions; the list of children |
+| 15c4b6f, d0a8a8b, ae50702 | P3: one kernel stack; the kernel's objects anywhere; extended memory |
+| e208e0c, bee237a | P4: the root in C; its allocator and its services |
+| 1203c53 | P5: the OS server in C |
+| 999431b | P6: processes |
+| 82c25a1 | P7: files |
+| 4c97121 | P8: programs from disk |
+| fe32b2b, 5dc44a2, b0925cc | P9: pipes and the terminal's keys; the shell in C and its first commands; the drives through it |
+| e3758b0, 099fd8e | P10: signals, their handlers and the timers; the 287 around a handler |
+| f3d8bce, 412a942, 58adf85, aad4a89 | P11: the line discipline; job control; the console's pages; eight terminals |
+| cb56298, 82de19e, 8193412, 13caf85 | P12: the commands; the devices; the daemons; the old shell goes |
+| 08d3ffa | P13: POSIX threads |
+| a6a49ca | `make run` no longer waits on mtools' hidden question |
+| 9405517, 7ae7b0b, 2d095f5 | P14: the system calls' tests in C; the old calls go; the demonstration and `make sizes` |
+| 5be338a, a2648c6, b8fdd9a, ed81dad, 1d4374a, 056484f, 3cb08c9, 068ec74, b7be777 | P15: the documents; the random tests; the reviews' fixes |
+| 033525f, 4def28d, 0db9aeb, bca78d2, 0c7b98e, 0dcf7b7, 80de566, 35e3faa, 6251dd6 | P15: the open items (below) |
+| bf944c0, d5e1487, 1c3ec7f, d017324 | P15: the last reviews' fixes |
+| 8b7a600 and this record | P15: `make check` in less time; at the close |
+
+### The last checks
+
+From a fresh clone of the branch at 8b7a600, on this machine (16 CPUs),
+`make check` passed in 284 s: the host tests (186), Bochs (119 of 119),
+DOSBox-X (39 of 39), MAME's IBM PC/AT (95 of 95), `check-286` over 15,132
+listings and disassemblies, `check-image`, `check-repro` (162 files, twice),
+`lint` (211 files) and `check-docs`; and `make check-ia16` in 156 s (119 of
+119 on Bochs, `check-286` over 9,237). The same `make check` took 936 s at
+d017324: the close ran every emulator a test a CPU, let MAME exit as at
+its own end instead of waiting 10 s for a kill, ran DOSBox-X fast-forward,
+and built on every CPU (8b7a600), since the tests measure only the
+machine's time (*docs/testing.md* has the parts).
+
+The release build (`make sizes`):
+
+| Part | Bytes | Of |
+|---|---|---|
+| the kernel: code, data | 12,980; 3,274 | 16,384; 6,144 |
+| the root (C): code, data | 8,704; 5,610 | 64 KB each |
+| the OS server (C): code, data | 40,609; 55,836 | 64 KB each |
+| `/z/init`: code, data | 2,725; 1,164 | |
+| `/z/sh`: code, data | 13,150; 6,700 | |
+| the boot image (`KERNEL.BIN`) | 120,528 | 196,608 (61%) |
+
+At the start (`master` 6c29765) the boot image was 41,360 bytes and the OS
+server 4.3 KB of assembly, with 24 DOS-like calls; now the OS server is
+about 40 KB of C code with 51 POSIX-like calls, and the shell, its 30
+commands and two daemons are processes on eight terminals. The boot image
+was at 90% of its 128 KB, which the close raised to 192 KB.
+
+### What the roadmap promised, and what it gave
+
+Every milestone's *Done when* holds, but P14's on DOSBox-X (below). Where
+one departed from the plan, and why (each milestone's *Done* notes say
+more):
+
+- **P1.** As planned: Open Watcom v2 builds, gcc-ia16 checks
+  (`make check-ia16`), and the crt and libc are rx286's own.
+- **P2, P3.** D9 whole: pools of 64, retype in pieces, one kernel stack,
+  every object anywhere through its own descriptor, extended memory for
+  objects and segments, and each capability's list of children. An untyped
+  is under 1 MB still; the root's allocator takes more of them.
+- **P5.** No lock until P6: the server's threads shared no table while
+  each served one program.
+- **P6.** init did not run the old shell; the shell stayed a program the
+  root built until P9's in C. fork did not keep the 287's state until
+  the close (033525f, below).
+- **P7.** Done but for the diskette driver: its track transfers and change
+  line are the owner's disk-scheduler draft's. The FAT and directory
+  sectors are written at the end of each call that changed them, not at
+  each change: MAME's diskette was too slow otherwise.
+- **P8.** The corruptions of a program's file are `tests/posix/exec`'s,
+  not the attack suite's.
+- **P9.** The old shell's deletion moved to P12, since 23 of its tests
+  needed its commands, which P12 made programs.
+- **P11.** Orphaned process groups were not told apart until the close
+  (033525f).
+- **P13.** As planned; a thread costs a table entry and a server thread,
+  as a process does (D4 A).
+- **P14.** The demonstration's test runs on Bochs and MAME, not DOSBox-X,
+  which has no drive rx286's drivers can use. The attack suite lost the
+  disk, print and file attacks with their calls (74 attacks).
+- **The security model's attacks** are in `tests/posix` rather than the
+  attack suite, whose program has no `exec`, files or signals: the seal
+  (`tests/caps/seal`), exec's corrupt headers (`exec`), forged pids and
+  descriptors (`proc`, `files`), buffers (`drives`, `poll`, the attack
+  suite), spoilt frames (`signal`), a fork bomb (`proc`). The fuzzer's
+  random calls still come from the module program the root builds; P15
+  added `tests/posix/pxrand`, 8,000 random calls on the OS server from a
+  process, while a test build's server checks its tables after each file
+  call (`vfs_check`).
+
+### What the tests found
+
+Each milestone's *Done* notes list what its tests found; among them:
+
+- **Races:** a wait of a server thread gave the lock up, and a process
+  ended meanwhile left the wait serving another's call (P11,
+  `proc_still`).
+- **The 286 against C:** `memcpy` assumed ES = DS (P6); `LOCK` faults at
+  ring 3, so the mutexes are `XCHG`'s (P13); `rx_sp` in the wrong object
+  pulled threads into every program, past the image's 128 KB (P13).
+- **The drives:** a write-protected diskette's error became `EIO`, and its
+  sector poisoned the cache for every later call; on MAME's AT an absent
+  drive D left C unusable (P14).
+- **The shell:** a path DOS reaches at 64 characters was refused (P9); a
+  stopped pipeline was said twice, and `fg` gave a job back cooked keys
+  (P14).
+
+### What an independent review found (P15)
+
+Fresh readers, each an agent with no part in the code, read one part
+against the documents and POSIX.1-2024 and ran probes in Bochs; the
+faults they found were fixed with a test each, which fails on the old
+code where a test could show it.
+
+- **The first reader,** of the whole branch, was stopped partway by the
+  model's own safeguards, its brief having read as a search for
+  exploits. Its probes had found two FAT faults (a2648c6): two
+  descriptions of one file kept a first cluster and a size each, and a
+  directory could be renamed into its own subdirectory.
+- **Two random tests** came next, written for P15: `tests/posix/fsrand` (400
+  file operations checked against a model) and `tests/posix/pxrand`
+  (8,000 random calls from a process, the server checking its tables
+  after each, `vfs_check`). pxrand found three write faults (b8fdd9a): a
+  cluster index that wrapped at 16 bits, clusters left past a failed
+  write's size, and holes not zeroed.
+- **Three correctness reviews** (the file system; the libraries, the
+  shell and the commands; the processes, signals and terminals) were
+  each told to stop at about ten findings, to save the session's
+  budget, and each did: 30 findings, all fixed (ed81dad). Among them
+  six hangs (lseek's result read as a private code, a looping directory
+  holding the server's lock, `pthread_once` within `pthread_once`, an
+  exec from a thread, a lost futex wake-up, a background thread's
+  write), six that spoilt data (a byte reference count that wrapped,
+  `cp f f`, `sbrk` past 64 KB, a damaged chain made worse, a terminal's
+  queue overrun, `lines` wrapping), and the rest wrong results, leaks
+  and an unchecked `nice`. Their notes past the cap (inode numbers that
+  collided, the path limit before "..", the cache's 16-bit clock, a
+  freed thread's stale call, `tty_open`'s leader) were fixed too
+  (ed81dad, 1d4374a).
+- **A reader of the documents** (posix.md, processes.md, terminals.md,
+  c.md) against `docs/style.md` and the code: 19 findings, all fixed
+  (1d4374a).
+- **An uncapped round**, one reviewer at a time, as the owner asked on
+  learning of the cap, found what the cap had hidden: 103 findings
+  more, 57 of them confirmed in Bochs, all fixed, with tests that fail
+  on the old code wherever a test could show the fault:
+  - **The file system:** 31 (056484f). Any process with two threads
+    could take the OS server down (a buffer checked before a wait,
+    another thread's `brk` shrinking the segment meanwhile); a pipe woke
+    one waiter of several, the others for ever asleep; the first round's
+    fixes left a failed write's clusters lost and a looping directory
+    walked in quadratic time; renames, `fsync` and `close` on a
+    protected diskette; and the rest, POSIX's errors.
+  - **The processes, signals and terminals:** 23 (3cb08c9). argv and
+    environ long enough wrapped a count, and the server wrote past its
+    data; a call received just before an exec was served to the new
+    image (now each image's endpoint has a badge of its own); Ctrl+Break
+    was lost while the server waited on a disk; a tone could not be
+    stopped; and the rest.
+  - **The libraries, the shell and the commands:** 31 (068ec74). `fg`
+    after a background job's end could leave the shell waiting beyond
+    ^C; the shell's syntax brought to POSIX's; two faults in the first
+    round's own fixes (an alias still cut, `malloc`'s `ENOMEM`); the
+    root's allocator lost a split it could not finish.
+  - **The kernel's P2/P3 changes:** 18 (b7be777), their first review.
+    `THREAD_FRAME` let a holder of a ring-3 thread's capability send it
+    back at ring 0; a retype, a dead thread and a dead space could each
+    go on using memory a revoke had given out again; nothing enforced
+    `SPACE_MAX`; a thread whose space died carried its marks into its
+    next life; and long lists of siblings were walked with interrupts
+    off (now each capability has a back link, and the walks that remain
+    open a window every 16 children).
+  One reply in this round was stopped by the safeguards as well; the
+  test it was writing (the argv count's) was left out, and that fix
+  rests on reading.
+
+### What the open items became
+
+Shown the open items, the owner asked for all of them but the disk
+scheduler and a real AT to be fixed, "plus your recommendations": more
+review. Each came with a test that fails on the old code where one could:
+
+| Item | What was done | Commit |
+|---|---|---|
+| `TEST_STRETCH`'s measure topped out near 10 ms | the PIT in mode 2 in test builds, and the master PIC's IRR read for a whole period: a stretch is measured to 40 ms; `siblings.test` sees the old kernel's 21.7 ms | 033525f |
+| fork and the 287 | `THREAD_FPU` copies the parent thread's 287 state into the child's, kept through its first start | 033525f |
+| two thread tests passed on the old code; the argv count's fix had no test | a write while a read waits on an end closed under it; argv and environ of 16,383 each, `E2BIG` | 033525f |
+| orphaned process groups not told apart | XBD 3.252: stops from the terminal discarded, `EIO`, `SIGHUP` and `SIGCONT` to a newly orphaned group with a stopped member | 033525f |
+| the boot image at 90% of its 128 KB | the memory for programs starts at the image's end, on a kilobyte (`umem_size`); `IMAGE_MAX` 192 KB, and today's image leaves 10 KB more for programs | 4def28d |
+| a data segment grew by a copy | `KCALL_RESIZE` makes a segment longer or shorter in place, with every copy; `ROOT_BRK` uses it while the block has room | bca78d2 |
+| a capability's many children each told of a new parent | each capability's children are a ring, and only the first names the parent: a delete or a move tells one child, however many there are | 0dcf7b7 |
+| below POSIX's least limits | `CHILD_MAX` 25 and `PATH_MAX` 256, POSIX's least: the server's stacks for the programs alone (14 KB had waited on drivers' module numbers), the current directories in a segment of their own; the server's space of 512 slots | 80de566, 35e3faa, 6251dd6 |
+
+A non-small model for the server, which the open items named, is not to
+be had: gcc-ia16, the second compiler every C program is built with, has
+no model with more than one data segment. The limits were lifted inside
+the small model instead, and `PTHREAD_THREADS_MAX` stays 8: each thread
+is an entry of the table, with a server thread and 1 KB of stack.
+
+### What the last reviews found
+
+The owner's "plus your recommendations" were reviews of what no reader
+had had: the drivers, `tools/`, and the attack and fuzz programs; then a
+`make check` from a fresh clone. One reviewer at a time, uncapped, as
+before:
+
+- **The drivers:** 34 findings, 7 confirmed in Bochs, all fixed
+  (bf944c0). The console's escapes were ECMA-48's only in part (a third
+  parameter ran into the second, `ESC [ ? 25 l` showed "25l", `ESC [ 1 K`
+  erased the wrong half, bright reversed blinked); an enhanced keyboard's
+  grey Home, End, Insert, Page Up and Page Down did nothing; a packet's
+  lost first byte could leave the mouse deaf; a printer port with no
+  adapter took every byte; the diskette's motor stopped only by the
+  grace of a stale timer; and no driver checked a buffer against its
+  segment's limit (now `dw_fits`, everywhere).
+- **`tools/`:** 36 findings, 26 confirmed by running, all fixed (d5e1487,
+  1c3ec7f; one premise was wrong: MAME writes a diskette's image as it
+  runs, not only when it stops, so a MAME test now fails if its diskette
+  comes out of the run as it went in). The worst were tests that could
+  pass wrongly: a `contains` line matched any line it was part of
+  (`demo.test`'s `2`, the count `wc -l` gave, was met by the status line's
+  `idle 882k/s`); the printers' and `file:` checks dropped every CR; a
+  `debugger:` line without `break:` never ran; an empty `prefix` test
+  passed a boot that never happened; a test that asked DOSBox-X for drive
+  B, or MAME for a printer, ran without it. An expected line is now a
+  whole line, with `{...}` for what may vary, printers and files are
+  compared byte for byte, and a test is refused for what its emulator has
+  not. `check-286` let the P6's `FCMOVcc` and `FCOMI`, SSE3's `FISTTP`,
+  `INVLPG` and `RDTSCP` through; `inc2h` turned NASM's `010`, `300 * 200`
+  and unsigned `/` into other numbers in C without a word, and now
+  computes each constant by both languages' rules and stops where they
+  differ; `check-image`, `mkimage`, `mkarchive`, `mkdisks`, `lint` and
+  `check-docs` checked less than they said (lint now finds a function's
+  definition however its lines break, and check-docs a table's stale
+  value). The host's time zone was in the disks' bytes and the guest's
+  date (all tools now run in UTC); `make run` wrote on the disks the tests
+  copy (it has its own now); `make check` skipped MAME without a word when
+  its ROMs were missing (now it fails, unless `SKIP_MAME=1`); and `check-
+  repro` now builds every flavour and the disks twice, in another time
+  zone, locale and umask. 107 host tests in `tests/unit/test_tools.py`, 88
+  of which fail on the old tools.
+- **The attack and fuzz programs:** 26 findings, 13 shown by bugs the
+  reviewer seeded behind `PROBE_*` defines, under which both suites still
+  passed; all fixed (d017324), and all 16 seeded bugs now fail them.
+  The attacks on the kernel's stack and the TSS could not fail (an RPL of
+  0 faults whatever the DPL; the running TSS is busy), no test loaded any
+  of the GDT pool's thousand descriptors, the IDT's and the LDT's limits
+  were claimed but not seen, and no attack reached the kernel's own buffer
+  check. The attack program now loads the GDT's selectors at RPL 3, walks
+  all 1,024 with `LAR`, `VERR` and `VERW`, reads the limits with `SGDT`
+  and `SIDT`, logs across its limits with `KCALL_LOG`, raises vector 9 in
+  ring 0 (`TEST_OVERRUN`: no emulator here does), and lists its slots
+  again after the kernel calls. The fuzzer silenced every thread's faults,
+  not its own alone; nothing checked that random code ran (23% of the
+  iterations never reached it), or that the watchdog ended few; its
+  server calls never got past their descriptor; and the kernel's check
+  was a plain sum of 8 of the GDT's 1,024 descriptors. Now the kernel
+  checks Fletcher sums, the GDT's invariants (no descriptor above DPL 0,
+  every space's LDT exactly its slots) and its queues, which l4.md had
+  planned and P15 builds; the summary has floors the test holds to; and
+  run-test fails a test on a line it must not hold (`forbid:`) and on a
+  second boot. On Bochs, a 386, the test kernels null FS and GS on every
+  way back. (os-server.md's plan of random POSIX calls through `lib/os`
+  is met by the random tests of processes and files, P15's `pxrand` and
+  `fsrand`, whose server checks its tables after each call: the fuzz
+  program is no process.)
+
+### What is open
+
+- **A real AT.** As for every roadmap here: MAME's IBM PC/AT is the
+  nearest.
+- **The diskette driver's rework, and a disk scheduler:** the owner's
+  `roadmaps/disk-scheduler.md`.
+- **`PTHREAD_THREADS_MAX`** is 8, below POSIX's 64 (above).
+- **A path's 12 names** bind before `PATH_MAX` with names of 8.3.
+- **What the tests cannot show:** the pthread_exit of a main thread whose
+  others are still being made is a race no user program can force; its
+  test runs the new path, and passes on the old code too.
+- *Later*, in *The milestones*, lists what needs a roadmap of its own:
+  users and permissions first.
 
 ## The request
 
@@ -2671,6 +2973,21 @@ The largest change to the kernel since l4.md, in three steps, each with every su
   - **A review** by a fresh reader, against this roadmap, POSIX.1-2024 and `docs/style.md`.
   - **The release:** a `make check` from a fresh clone; *At the close* in this roadmap.
 * **Done when:** all of that is committed.
+* **Done (2026-11-08):**
+  - **The documents** (5be338a): `docs/posix.md`, `docs/c.md`, `docs/processes.md` and
+    `docs/terminals.md` new; the others rewritten; every one read again by a fresh reader
+    against `docs/style.md` and the code (1d4374a).
+  - **The review** became several: fresh readers, each an agent with no part in the code,
+    one part each, first capped at about ten findings and then, as the owner asked on
+    learning of the cap, uncapped and one at a time: the file system, the processes, the
+    libraries and the shell, the kernel's P2 and P3 changes, and at the close the drivers,
+    `tools/` and the attack and fuzz programs. About 250 findings, all fixed, each with a
+    test that fails on the old code wherever a test could show it; two random tests
+    (`tests/posix/fsrand`, `pxrand`) besides. *At the close* says what they found.
+  - **The open items** the reviews left were fixed at the owner's word, but the disk
+    scheduler (the owner's own roadmap) and a real AT (*At the close*).
+  - **The release:** `make check` and `make check-ia16` from a fresh clone, green
+    (*At the close*). Nothing is pushed: the owner pushes.
 
 ### Later
 
