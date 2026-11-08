@@ -14,7 +14,8 @@ and leaves the rest unused, and holds 25 processes at most. After it:
   room for 48 processes;
 - **the OS server moves to Watcom's compact model**, a model with several data segments, as the
   owner asked, with each thread's stack in a segment of its own, so that an overflow faults at
-  once and a rule confines it (D10, decided). gcc-ia16 keeps a small variant;
+  once and a rule confines it (D10, decided). The server, and every later server, is Watcom's
+  alone (D11, decided), built on parts that the next server reuses;
 - **DMA stays where it is,** anywhere in the AT's 16 MB, and a test says so;
 - **the suites run on every size the owner named** that an emulator can be: 512, 639 and
   640 KB of base memory; 0, 384 KB, 1, 3 and 15 MB of extended memory.
@@ -51,7 +52,8 @@ server in the compact model, 48 processes, and the close. Every suite stays gree
   - its code grows by 11.6%, and a call takes 2-3% longer on MAME's AT;
   - about 30 lines of C changed, and about 210 of NASM;
   - `-zdp` keeps it free of segment relocations, which rx286's executables cannot hold;
-  - gcc-ia16 has no such model, so it keeps a small variant built from the same source.
+  - gcc-ia16 has no such model. A small variant built from the same source would be cheap
+    (E7), but the owner decided that servers are Watcom's alone (D11).
 - **The small model can reach about 40 entries without a new model** (E7), by moving its two
   largest tables out of its data segment, with both compilers.
 - **Two bugs on master** (E6, E8, X2): two masks of the process table's entries have 16
@@ -67,7 +69,8 @@ DOSBox-X; none of their code is in the repository.
 |---|---|
 | The survey and this roadmap | done (2026-11-08) |
 | D10 | decided (2026-11-08): B, a stack segment for each thread, with the fault rule |
-| D1-D9, D11-D13 | undecided |
+| D11 | decided (2026-11-08): B, servers Watcom's alone; gcc-ia16 builds the rest |
+| D1-D9, D12, D13 | undecided |
 | M1: the masks of entries past entry 15 | not started |
 | M2: the boot information, and the base memory from the BIOS | not started |
 | M3: every byte of extended memory to the root | not started |
@@ -156,7 +159,8 @@ The owner then asked where the limit of 25 processes comes from (*Where the 25 c
 - **A2. "a smalle memory variant for low memory systems".** A small machine gains little from
   the small model: the far server's code is 4.7 KB larger, once, and a process costs the same
   (a stack of 1 KB and 374 bytes of tables either way: E6). A small variant is gcc-ia16's
-  need, which has no model with several data segments (D11).
+  need, which has no model with several data segments; the owner decided against one, for
+  every server (D11 B).
 - **A3. Which emulator is which machine.** Each covers part of the owner's sizes; together
   they cover all of them but MAME's 15 MB (E1's table). The suites name a machine for each
   test (D13).
@@ -293,7 +297,7 @@ move (M5-M7).
 | `cap.asm`: `umem_size`, `ext_detect`, `boot_root` | 640 KB assumed; two pieces of extended memory | the BIOS's base memory; every byte of extended memory in pieces of 768 KB; the boot information in a slot of the root's (M2, M3) |
 | The root: `buddy.c`, `services.c` | the memory below 1 MB, carved at the first request | that, and the extended memory as reserves carved as needed; 1,024 slots (M4) |
 | The diskette driver and its buffer | above 1 MB already, unsaid | the same, and said by a test (M4) |
-| The OS server | small model, its stacks in DGROUP | compact model, a stack segment for each thread, a fault in one confined (D10 B); a small variant for gcc-ia16 (M6) |
+| The OS server | small model, its stacks in DGROUP | compact model, a stack segment for each thread, a fault in one confined (D10 B); Watcom's alone (D11 B) (M6) |
 | The process table and its limits | 25 entries; the root's 256 slots bind first | 48 entries (M7) |
 | `tools/run-test`, `rxlib.py` | one machine an emulator | a `memory:` line names the machine; `CAN` says who can be it (M2) |
 ## The experiments
@@ -678,7 +682,8 @@ image (X4), a build failure, not the server's.
    code and 2-3% more time a call, and its DGROUP falls from 56 KB to 26.5 KB. `-zdp` is what
    keeps it free of segment relocations.
 2. **gcc-ia16 cannot build it:** it has no model with several data segments. Keeping gcc-ia16
-   means keeping a small variant, which E6's source builds as well (D11).
+   means keeping a small variant, which E6's source builds as well. The owner decided for
+   none (D11 B).
 3. **The server is not the first limit.** Today the root's 256 dynamic slots run out at 21
    children of `rtt.c`, 23 processes, before the table's 25 entries. The same holds on master:
    the 22nd child is refused with 251 slots taken. Past the root come the badge's 5 bits (31
@@ -734,7 +739,8 @@ does keeping a small variant beside the compact one cost?
    shrink, and a segment for each thread would let the CPU catch an overflow at its limit.
 4. **A small variant is cheap to keep.** The same C builds both ways, the assembly has two
    branches, and the build a second set of the server's objects. What differs is the ceiling:
-   CHILD_MAX becomes the build's own, and a test that counts processes reads it.
+   CHILD_MAX becomes the build's own, and a test that counts processes reads it. The owner
+   decided for none (D11 B), every server following D10's model.
 5. **A small machine gains nothing from it:** the compact server's code is 4.7 KB larger,
    once, and a process costs the server the same.
 
@@ -929,10 +935,46 @@ The server in Watcom's compact model, `-mc -zu -zdp` (E6):
   selector and offset; no pointers in initialised data (or `tools/mkexe` resolves them);
 - **the assembly the server links** gains far versions: `memory-far.asm`, and `%ifdef
   FAR_DATA` in `kcall.asm` and `start.asm`;
-- **the small variant** is the same source built with `-ms`: gcc-ia16's, whose `CHILD_MAX` is
-  31 (D11). At 31 entries Watcom's small DGROUP has 1,076 bytes left (E6) and gcc-ia16's,
-  280 bytes larger today, about 800 (E8): a check in the build says when a DGROUP no longer
-  fits, which the linker says only at 64 KB.
+- **no small variant** (D11 B, decided): the server is Watcom's alone, in every build. `make
+  check-ia16` builds the server and its far libraries with Watcom, and everything else with
+  gcc-ia16. A check in the build says when a DGROUP no longer fits, which the linker says only
+  at 64 KB.
+
+### The model for multi-threaded servers (M5, M6; D10, D11)
+
+The owner, on 2026-11-08: "i want to follow the same model for future servers such as window
+manager as well (stack segment per thread to avoid stack overflows turning into data
+corruption and exploits)". So the OS server's model is every server's: Watcom's compact
+model, a stack segment for each thread, and a rule for a fault in a thread. M5 and M6 build
+its parts as parts of their own, not as the OS server's, so that the next server takes them
+as they are.
+
+**Who needs it: several stacks in one segment.** A program of one thread in the small model
+already faults when its stack overflows: its stack lies at the bottom of its data segment,
+and an overflow wraps past the segment's limit (os-server.md E7). The root and ordinary
+processes are safe as they are. A server of many threads is not, while its stacks share a
+segment; nor is a process with POSIX threads, whose stacks lie in its data segment (*Later*).
+
+**The parts, built once:**
+
+| Part | What | Milestone |
+|---|---|---|
+| The far libraries | `lib/crt`, `lib/c` and `lib/rx286` built with `-mc -zu -zdp` into `c/far`; `memory-far.asm`, `kcall.asm`'s far branches; `RX_SEG` and `RX_OFF` in `compiler.h` | M5 |
+| Segment relocations | `tools/mkexe` takes wlink's output with its relocations (MZ) and patches each with the selector of the segment it names, which is fixed for every program (code slot 0, data slot 1): pointers in initialised data then work as written, where E6 rewrote 18 | M5 |
+| A lint rule | `tools/lint` flags a buffer passed as a data segment's selector and a cast offset, the pattern that broke on the stack segment (ten sites in E6) | M5 |
+| A server's start | `lib/crt`'s start for a server's threads: the root's start at SP = 4n, the thread's stack selector found from its number, SS loaded, the guard word set; `os_stack_ok` and `os_stack_used` made general | M6 |
+| The root's service | `ROOT_SERVE` for any server, not the OS server alone as today: a thread with a stack segment of its own, from a block kept for that server's stacks, its faults badged with the server's and the thread's numbers | M6 |
+| The lock and the fault notice | a library: a lock that records its holder; the root's notice to a server's control thread of which thread faulted; a call of the server's own handler, which is told whether the thread held the lock | M6 |
+
+**What stays each server's own:**
+- **its policy on a fault.** The OS server ends the client, or stops the system if the lock
+  was held (D10). A window manager might close the client's windows, or start itself again:
+  its roadmap decides;
+- **one review of its code** for the compact model's pitfalls, which the lint rule and
+  `mkexe`'s relocations make a review rather than a port.
+
+**The compiler:** servers are Watcom's alone (D11 B). gcc-ia16 builds the root, the libraries
+in the small model and the processes, so it still checks most of the C.
 
 ### More processes (M7; D12)
 
@@ -1007,7 +1049,7 @@ half of MAME's share, and test the top of MAME's memory no longer.
 
 ## Decisions
 
-D10 is decided (2026-11-08); the others are undecided, each with a recommendation.
+D10 and D11 are decided (2026-11-08); the others are undecided, each with a recommendation.
 
 | | Decision | Recommended | Decided |
 |---|---|---|---|
@@ -1021,7 +1063,7 @@ D10 is decided (2026-11-08); the others are undecided, each with a recommendatio
 | D8 | The root's room | A: 1,024 slots and 320 records | undecided |
 | D9 | How a DMA buffer keeps to its page | A: as today, checked and retried, and tested | undecided |
 | D10 | The OS server's data model | A: Watcom's compact model, `-zu -zdp`, its stacks in its stack segment | B, with the fault rule (2026-11-08) |
-| D11 | The small variant | A: kept, for gcc-ia16, with its own CHILD_MAX | undecided |
+| D11 | The small variant | B, after D10 B (A before) | B, servers Watcom's alone (2026-11-08) |
 | D12 | How many processes | A: 48, with the server's space at 1,024 slots | undecided |
 | D13 | The suites' machines | A: Bochs at 16 MB, and a memory suite on every machine each emulator can be | undecided |
 
@@ -1147,15 +1189,24 @@ gcc-ia16 must stay the server's equal.
 
 ### D11. The small variant
 
+**Decided: B** (2026-11-08). The owner: "record my decision as D11 = b", after deciding that
+every future server follows D10's model (*The model for multi-threaded servers*). Servers are
+Watcom's alone; gcc-ia16 builds everything else.
+
 - **A. Kept,** for gcc-ia16 and as a choice for Watcom: the same source built with `-ms`, its
   CHILD_MAX 31 (E6's ceiling), tests reading CHILD_MAX rather than assuming it.
-- **B. Dropped for the server only:** `make check-ia16` builds everything else with gcc-ia16,
-  and the server with Watcom.
+- **B. Dropped for the servers:** `make check-ia16` builds everything else with gcc-ia16, and
+  the servers with Watcom.
 - **C. Dropped:** gcc-ia16 no longer builds rx286.
 
-**Recommended: A** (E7): it costs two branches of assembly, a second set of objects and tests
-that read the limit, and keeps gcc-ia16 a check on the C. A small machine gains nothing from
-the small variant itself (E7).
+**Recommended at first: A** (E7): it costs two branches of assembly, a second set of objects
+and tests that read the limit, and keeps gcc-ia16 a check on the C. A small machine gains
+nothing from the small variant itself (E7).
+
+**Recommended after D10 B: B.** A small variant cannot have a stack segment for each thread
+(SS must be DS in the small model: E7's 232 sites), so it would keep the layout in which an
+overflow corrupts a neighbour's stack, and every later server would need it twice: a second
+layout to keep in step, and the very build that D10 B is meant to rule out.
 
 ### D12. How many processes
 
@@ -1167,9 +1218,8 @@ the small variant itself (E7).
 - **C. 64,** with the server's space at 1,024 slots, which D10 B needs past 49 anyway.
 
 **Recommended: A, with the server's space at 1,024 slots in M7** for the margin that D10 B
-takes. 48 processes of 64 KB use 3 MB, which today's machines have. B is the
-cheaper way if room for processes is all that is wanted: it needs the root's room (D8) and no
-new model at all, so D10 would be for the model's own sake.
+takes. 48 processes of 64 KB use 3 MB, which today's machines have. With D10 decided, B would
+leave the compact server's room unused.
 
 ### D13. The suites' machines
 
@@ -1246,53 +1296,68 @@ less, M a few, L a week.
 
 ### M5. The libraries for far data (M)
 
-- **What:** the server's model in the build, before the server moves:
+- **What:** the model's first parts (*The model for multi-threaded servers*), in the build
+  before the server moves:
   - `c.mk` builds the C libraries a second time with `-mc -zu -zdp` into `c/far`, and the
-    assembly with `-dFAR_DATA`: `memory-far.asm`, `kcall.asm`'s branches (E6);
+    assembly with `-dFAR_DATA`: `memory-far.asm`, `kcall.asm`'s branches (E6), with Watcom in
+    every build, `make check-ia16`'s too (D11 B);
   - `compiler.h` gains `RX_SEG` and `RX_OFF`; every "`OS_DATA`, offset" call in the server uses
-    them (ten, E6), and its two tables of names and init's arguments lose their pointers;
+    them (ten, E6); init's arguments become offsets, as `spawn` reads them;
+  - `tools/mkexe` resolves segment relocations from wlink's MZ output, so that the server's
+    tables of names keep their pointers;
+  - `tools/lint`'s rule against a buffer passed as a data selector and a cast offset;
   - host tests for `memory-far.asm`, and for today's `memory.asm` beside it, which has none:
     `tests/unit/x86.py` runs them under Unicorn in real mode, with segments in place of the
     selectors (E8);
   - `tools/lint` and `tools/check-286` know the new objects.
 - **Done when:** the server, still small, passes every suite with the changed source; the far
-  libraries build and pass their unit tests.
+  libraries build and pass their unit tests; a test program with a table of pointers in its
+  initialised data, built compact, reads them right (`mkexe`); the lint rule finds the ten
+  sites on today's code.
 - **Decisions:** D10, D11.
 
 ### M6. The OS server in the compact model (M)
 
-- **What:** the server built with `-mc -zu -zdp` (D10) in the release, debug and test builds;
-  a stack segment for each of its threads, from one block of the root's, in a seventh slot an
-  entry (`start.asm`, `ROOT_SERVE`, `src/os/server.h`), DGROUP its tables' alone; the fault
-  rule (D10): each server thread's faults badged with its number, the lock recording its
-  holder, the root telling the control thread, which ends the process or stops the system;
-  the small variant for `make check-ia16` (D11); `docs/c.md` (the models, `-zdp`, the far
-  libraries), `docs/os-server.md` (the stacks, the rule).
+- **What:** the server built with `-mc -zu -zdp` (D10) in every build, `make check-ia16`'s too
+  (D11 B), on the model's other parts, built as parts of their own:
+  - **a server's start** in `lib/crt`, in place of `src/os/start.asm`'s stacks: a stack
+    segment for each thread, in a seventh slot an entry (`src/os/server.h`);
+  - **`ROOT_SERVE` for any server,** with a block of stacks for each server and each thread's
+    faults badged with its number;
+  - **the lock and the fault notice** as a library: the lock records its holder, and the root
+    tells the server's control thread which thread faulted;
+  - **the OS server's policy** (D10's rule): it ends the process, or stops the system if the
+    lock was held or the thread serves no entry.
+
+  DGROUP then holds the tables alone. `docs/c.md` gains the models, `-zdp`, the far libraries
+  and the model for servers; `docs/os-server.md` the stacks and the rule.
 - **Done when:** every suite passes with the compact server on all three emulators, and
-  `make check-ia16` with the small one; the server's DGROUP is under 28 KB; `rtt.test` on MAME
+  `make check-ia16` with the server built by Watcom; the server's DGROUP is under 28 KB;
+  `rtt.test` on MAME
   costs at most 5% more than today's; a test build that overflows a server thread's stack on
   purpose ends the process it served and serves the next one in that entry, and one that
-  does so while the thread holds the lock stops with the panic.
+  does so while the thread holds the lock stops with the panic; a test server of two threads
+  (`tests/programs`), built on the same parts and nothing of the OS server's, faults on its
+  own stack's overflow and has its own policy called.
 - **Decisions:** D10, D11.
 
 ### M7. 48 processes (M)
 
-- **What:** the limits of *More processes*: `OS_PROCS` and `CHILD_MAX` 48 in the compact build
-  and 31 in the small one; a badge's entry in 6 bits; `PROCS_MAX` 64 and `CODES_MAX` 64;
+- **What:** the limits of *More processes*: `OS_PROCS` and `CHILD_MAX` 48 in every build; a
+  badge's entry in 6 bits; `PROCS_MAX` 64 and `CODES_MAX` 64;
   `end()`'s arrays of entries static, off the server's stacks; a stack segment for each of 52
   threads (M6), the server's stack segment the starts' room (`OS_STACK_SIZE`), the module's
   `stack=` derived from `os.inc`, and `ROOT_SERVE` checking the SP; the server's space at
   1,024 slots (D12). A check in the build finds every table, mask and bit field sized by the
   entries (`tools/lint`: a shift by an entry's index into anything narrower than `PROCS`
-  bits, X3), and a check that each DGROUP fits
-  (gcc-ia16's small one has about 800 bytes left at 31 entries, E8). Tests that count
+  bits, X3), and a check that each DGROUP fits. Tests that count
   processes read CHILD_MAX: `proc.test`'s fork bomb says "23 children" today, and its server
   threads past the arena come from 1 KB blocks of the 128 KB a machine without extended memory
   has (E8).
 - **Done when:** `rtt.test` holds 46 children and is then refused for the table (EAGAIN with
   no slot or memory short); `late.test`'s reader at entry 47; `tests/sh/stacks.test` at 48
   entries with a quarter of each stack to spare; `proc.test` on DOSBox-X's 1 MB at 48 entries;
-  `make check-ia16` with the small variant at 31; every suite green.
+  `make check-ia16` green; every suite green.
 - **Decisions:** D12.
 
 ### M8. The documents, a review, and the close (S)
@@ -1314,6 +1379,10 @@ Each needs a roadmap of its own:
   (BDA 40:00h-40:0Fh), the 287, so that the root starts the right drivers (the draft's
   "future roadmap").
 - **Past 120 processes:** the server's space past 1,024 slots, and the kernel's pools.
+- **The window manager, and every later server,** on *The model for multi-threaded servers*'
+  parts, with a policy on a fault of its own (the owner's `roadmaps/window-manager.md`).
+- **POSIX threads in processes:** a stack segment for each thread too, which needs the
+  processes' C in the compact model; the same rule as the servers'.
 - **Programs in larger models:** today's processes are small; a program of more than 64 KB of
   data needs the compact or large model, and fork and brk then copy and grow several segments.
 - **The owner's disk scheduler** (its draft): "it should be able to use all unallocated memory
@@ -1335,6 +1404,9 @@ Each needs a roadmap of its own:
 - **The root's slots and records** were measured with 16 to 29 children of one program; other
   workloads split blocks otherwise. M4's numbers are a floor: `rtt.test` and `many.test` say
   when they no longer hold.
+- **gcc-ia16 no longer checks the servers' C** (D11 B): a fault that Watcom's code hides goes
+  unseen by a second compiler. The host's gcc compiles only the root's allocator and the libc
+  for the unit tests.
 - **The fault rule trusts the lock's holder** (D10): a fault with the lock free but a table
   changed outside it would end only the process. The server changes its tables under the lock
   (os-server.md D4's rule), and M6's test checks both cases; a table changed without the lock
