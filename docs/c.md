@@ -88,7 +88,7 @@ server is, in the compact model on the far libraries, with a server's start
 `c.mk` links the OS server so (`SERVER_START`), and `FAR_SERVERS` a test
 program; `tools/mkexe` takes a program with no stack in DGROUP, and
 `--dgroup-max` stops the build when DGROUP passes a server's most
-(`SERVER_DGROUP_MAX`, 32 KB for the OS server), which the linker would say
+(`SERVER_DGROUP_MAX`, 40 KB for the OS server), which the linker would say
 only at 64 KB.
 
 ## The program's segments

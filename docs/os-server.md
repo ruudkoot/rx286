@@ -31,8 +31,8 @@ server's table, `server_stacks` (`src/os/os.c`), moves to it and calls
 `server_thread(n)`. An overflow faults at the segment's limit (#SS) before
 it writes anything that is not the thread's own (*Faults*, below). Each
 stack's lowest word is a guard too, which the thread checks after every
-message: a thread that used all of its stack says so on the log and serves
-no more. On a thread's first start its stack is filled with the guard's
+message: a thread that used all of its stack says so on the log, writes
+the guard again and serves on, since nothing of another's was touched. On a thread's first start its stack is filled with the guard's
 word, so that `server_stack_used` can tell how deep it has gone
 (`tests/sh/stacks.test`). The server's data segment holds its tables
 alone, 35.1 KB at 48 entries (the build stops past 40 KB, `c.mk`'s
@@ -163,7 +163,8 @@ A fault of one of the server's own threads goes to the root, badged
 D10's rule). The root reports it ("rx286: os fault #SS(0000) at
 0006:27F7"), puts back the server's segments, and replies
 `SERVE_FAULT_AT` bytes past the server's entry: the thread starts again
-there, on its stack filled afresh if it overflowed, and its start calls
+there, on its stack (filled with the guard again if its lowest word was
+overwritten), and its start calls
 the server's policy, `server_fault(n)` (`src/os/proc.c`), before it serves
 again:
 

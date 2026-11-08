@@ -471,22 +471,18 @@ void os_stacks_report(void)
 }
 #endif
 
-/* overflowed - a thread's stack ran past its part's guard: the server's
- * data may be damaged, so the thread says so and serves no more, asleep on
- * its notification */
-void overflowed(unsigned n, rx_u16 notify)
+/* overflowed - a thread used all of its stack, to its guard: said, and the
+ * guard written again. Nothing of another's was damaged, since the stack is
+ * a segment of its own (memory.md M6), whose limit faults one push further:
+ * the thread serves on (it slept for good while the stacks shared the data
+ * segment: the review of M7) */
+void overflowed(unsigned n)
 {
     char line[LINE_SIZE];
-    struct rx_kregs r;
 
     rx_log(line, (unsigned)snprintf(line, sizeof line,
-                                    "rx286: os: thread %u overflowed its stack\n", n));
-    for (;;) {
-        r.ax = KCALL_RECV << 8;
-        r.dx = notify;
-        r.bp = 0;
-        rx_kcall(&r);
-    }
+                                    "rx286: os: thread %u used all of its stack\n", n));
+    server_stack_rearm(n);
 }
 
 /* serve - receive the program's calls and faults, and answer them */
@@ -523,7 +519,7 @@ static void serve(struct session *s)
             r.ax = KCALL_REPLY_RECV << 8;
         }
         if (!server_stack_ok(s->n))
-            overflowed(s->n, SLOT(OS_SLOT_SLEEP + s->n));
+            overflowed(s->n);
         r.dx = K_SLOT(s, OS_K_EP);
         r.bp = 0;
         status = rx_kcall(&r);

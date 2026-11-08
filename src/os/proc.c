@@ -670,23 +670,36 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
 static int group_orphaned(pid_t pgid, pid_t sid);
 static int group_stopped(pid_t pgid);
 
+/* The groups end() looks at once a process has ended (its own, its
+ * children's), each with whether it was orphaned before: a queue, which the
+ * outermost end() works through, since the signals it sends end more
+ * processes, whose end() calls add theirs (static, off the thread's stack:
+ * the lock is held; memory.md M7 and its review). A process is in at most
+ * two entries, its own end's and its parent's */
+#define END_GROUPS (2 * (PROCS + 1))
+static pid_t end_pgids[END_GROUPS], end_sids[END_GROUPS];
+static rx_u8 end_was[END_GROUPS];
+static unsigned end_count, end_depth;
+
 /* end - process i ends with a wait status: everything of it revoked (unless
  * it is already), a zombie; its children init's; its parent woken if it
- * waits, and sent SIGCHLD (lock held) */
+ * waits, and sent SIGCHLD; a group orphaned now with a member stopped sent
+ * SIGHUP and SIGCONT, by the outermost end() (lock held) */
 static void end(int i, int status, int revoke)
 {
-    static pid_t pgids[PROCS + 1], sids[PROCS + 1];     /* (the lock is held: static, off */
-    static rx_u8 was[PROCS + 1];                        /*    the thread's stack, M7) */
     struct proc *p = &procs[i];
-    int k, init = entry_of(INIT_PID, P_ALIVE), parent, groups = 0;
+    int k, init = entry_of(INIT_PID, P_ALIVE), parent;
+    unsigned g;
     char line[48];
 
+    end_depth++;
     for (k = 0; k < PROCS; k++)         /* its group, its children's: orphaned */
-        if (k == i || (procs[k].state == P_ALIVE && procs[k].ppid == p->pid)) {
-            pgids[groups] = procs[k].pgid;  /*    before it ends? (P15) */
-            sids[groups] = procs[k].sid;
-            was[groups] = (rx_u8)group_orphaned(procs[k].pgid, procs[k].sid);
-            groups++;
+        if ((k == i || (procs[k].state == P_ALIVE && procs[k].ppid == p->pid))
+                && end_count < END_GROUPS) {    /*    before it ends? (P15) */
+            end_pgids[end_count] = procs[k].pgid;
+            end_sids[end_count] = procs[k].sid;
+            end_was[end_count] = (rx_u8)group_orphaned(procs[k].pgid, procs[k].sid);
+            end_count++;
         }
     dev_tone_stop(i);                   /* (a tone it waits for: ended, P15) */
     if (revoke)
@@ -711,13 +724,18 @@ static void end(int i, int status, int revoke)
         waiters_wake(parent);
     if (parent >= 0)
         sig_send(parent, SIGCHLD);
-    for (k = 0; k < groups; k++)        /* a group orphaned now, a member of it */
-        if (!was[k] && group_orphaned(pgids[k], sids[k]) && group_stopped(pgids[k])) {
-            proc_group(pgids[k], SIGHUP);   /*    stopped: SIGHUP, then SIGCONT */
-            proc_group(pgids[k], SIGCONT);  /*    (XSH _exit; P15) */
-        }
     if (p->pid == INIT_PID)             /* D8: nothing would wait for the orphans */
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: init ended\n"));
+    if (end_depth == 1) {               /* the outermost: the queue, as it grows */
+        for (g = 0; g < end_count; g++) /* a group orphaned now, a member of it */
+            if (!end_was[g] && group_orphaned(end_pgids[g], end_sids[g])
+                    && group_stopped(end_pgids[g])) {
+                proc_group(end_pgids[g], SIGHUP);   /* stopped: SIGHUP, then SIGCONT */
+                proc_group(end_pgids[g], SIGCONT);  /* (XSH _exit; P15) */
+            }
+        end_count = 0;
+    }
+    end_depth--;
 }
 
 /* group_orphaned - is a process group orphaned: no live member whose
@@ -1521,7 +1539,7 @@ void proc_thread(unsigned i)
         while (rx_kcall(&r) == 0) {
             reply = (r.ax & 0xFF) != NOTIFY_LABEL && handle((int)i, &r);
             if (!server_stack_ok(PROC_N0 + i))
-                overflowed(PROC_N0 + i, notify);
+                overflowed(PROC_N0 + i);
             take(notify);
             sig_step((int)i);
             give();
@@ -1552,6 +1570,9 @@ void server_fault(unsigned n)
             ;                           /* (the root stops the system) */
     }
     take(P_SLOT(i, PK_NOTIFY));
+    dev_forget(i);                      /* the marks of a wait it faulted around, the lock */
+    tty_forget(i);                      /*    given up (review of M7) */
+    vfs_forget(i);
     if (proc_alive(i)) {
         rx_log(line, (unsigned)snprintf(line, sizeof line,
                                         "rx286: os: thread %u faulted serving process %d: it is "

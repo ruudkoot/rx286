@@ -459,13 +459,14 @@ def entry_probe(tmp_path, monkeypatch, body, where='src/os'):
 
 
 @pytest.mark.parametrize('body', ['\nx |= (rx_u16)(1u << i);\n', '\nif (m & (1u << k))\n',
-                                  '\nm &= ~(1 << entry);\n'])
+                                  '\nm &= ~(1 << entry);\n', '\nm |= 1u << (i % 16);\n',
+                                  '\nm |= 1u << (t & 15);\n', '\nm |= 1u << n;\n'])
 def test_lint_finds_an_entrys_bit_in_a_narrow_mask(tmp_path, monkeypatch, body):
     assert 'entry-bit' in entry_probe(tmp_path, monkeypatch, body)
 
 
 def test_lint_takes_an_entrys_bit_in_a_byte(tmp_path, monkeypatch):
-    body = '\nb[i >> 3] |= (rx_u8)(1u << (i & 7));\nw |= 1u << unit;\n'
+    body = '\nb[i >> 3] |= (rx_u8)(1u << (i & 7));\nb[k / 8] |= 1u << (k % 8);\nw |= 1u << unit;\n'
     assert 'entry-bit' not in entry_probe(tmp_path, monkeypatch, body)
     assert 'entry-bit' not in entry_probe(tmp_path, monkeypatch, '\nm |= 1u << i;\n',
                                           'src/bin')

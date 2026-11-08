@@ -588,6 +588,20 @@ int tty_setpgrp(int i, int unit, pid_t pgid, int *error)
     return 0;
 }
 
+/* tty_forget - entry i reads no terminal (server.h): said to test builds
+ * only if it was a reader, as a read's end says it */
+void tty_forget(int i)
+{
+    int u, was = 0;
+
+    for (u = 0; u < TTYS; u++) {
+        was |= ttys[u].readers[i >> 3] & (1u << (i & 7));
+        ttys[u].readers[i >> 3] &= (rx_u8)~(1u << (i & 7));
+    }
+    if (was)
+        reader_flag();
+}
+
 /* tty_hangup - a session's leader ended: the terminal its session has
  * hung up, SIGHUP and SIGCONT for its foreground group, and no session
  * (server.h; lock held) */

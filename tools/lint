@@ -23,10 +23,11 @@
 #             segment, which need not be the data's in the compact model
 #             (roadmap memory.md M5); RX_SEG(p) and RX_OFF(p) name its own
 #   entry-bit in the OS server's and the root's C (src/os, src/root), no
-#             bit of a mask by an entry's index alone (1u << i, with i, k, c,
-#             p or entry): a 16-bit mask holds 16 entries, not the table's 48
-#             (roadmap memory.md M1, M7, X3); a byte array, bits[i >> 3] and
-#             1u << (i & 7), holds every one
+#             bit of a mask by an entry's index but within a byte (1u << i,
+#             1u << (i % 16), with i, j, k, c, p, t, n, e or entry): a 16-bit
+#             mask holds 16 entries, not the table's 48, and folds the rest
+#             on them (roadmap memory.md M1, M7, X2, X3); a byte array,
+#             bits[i >> 3] and 1u << (i & 7) or (i % 8), holds every one
 #   layout    as for assembly
 # Rules for assembly:
 #   header    the file starts with the banner and "; rx286 - <its path>"
@@ -63,7 +64,8 @@ COMPILER_WORDS = re.compile(
 DATA_SELECTOR_CAST = re.compile(
     r'\b(?:OS_DATA|SLOT\s*\(\s*1\s*\))\s*,\s*\(\s*(?:rx_u16|rx_u32|unsigned'
     r'(?:\s+(?:int|short|long))?)\s*\)')
-ENTRY_BIT = re.compile(r'\b1[uUlL]{0,2}\s*<<\s*\(?\s*(?:i|k|c|p|entry)\s*\)?(?![\w\s]*[&%])')
+ENTRY_BIT = re.compile(r'\b1[uUlL]{0,2}\s*<<\s*\(?\s*(?:i|j|k|c|p|t|n|e|entry)\b'
+                       r'(?!\s*(?:&\s*7|%\s*8)\s*\))')
 CPU_LINE = re.compile(r'^\s*\[?\s*cpu\s+(\w+)', re.I | re.M)
 SECTION_LINE = re.compile(r'^\s*\[?\s*(?:section|segment)\s+([^\s\]]+)', re.I)
 

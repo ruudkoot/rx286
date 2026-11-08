@@ -293,6 +293,12 @@ int dev_ioctl(int i, int unit, rx_u16 data, rx_u16 request, rx_u16 at, int *erro
     return -1;
 }
 
+/* dev_forget - entry i waits for no tone (server.h) */
+void dev_forget(int i)
+{
+    toning[i >> 3] &= (rx_u8)~(1u << (i & 7));
+}
+
 /* dev_tone_stop - a tone that a thread of process p waits for ended at
  * once, as Ctrl+Break ends one: the process ends, or a handler's signal is
  * due (server.h; lock held; P15) */

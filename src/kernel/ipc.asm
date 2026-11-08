@@ -622,7 +622,9 @@ ipc_fault:
 
 ; ----------------------------------------------------------------------------
 ; fault_resume - a thread whose fault's call has ended, when it runs again
-; (CONT_FAULT, CONT_FAULT_WAY): restarted at the reply's BX, or as a
+; (CONT_FAULT, CONT_FAULT_WAY): restarted at the reply's BX, this start
+; alone (its entry stays its later restarts': a server's thread restarts
+; after a fault SERVE_FAULT_AT past its entry, memory.md M6), or as a
 ; restart left it; or, suspended meanwhile (KE_SUSPENDED), its registers as
 ; at the fault, and stopped
 ;   In:       AL = its T_CONT; BX = the thread; BP = its frame; DS =
@@ -636,14 +638,15 @@ fault_resume:
         mov ah, [bp + FRAME_AX]
         cmp ah, KE_SUSPENDED
         je .suspended
+        mov dx, [es:T_ENTRY]            ; a restart's IP: its entry,
         cmp ah, KE_OK
         jne .restart
-        mov dx, [bp + FRAME_BX]
-        mov [es:T_ENTRY], dx
+        mov dx, [bp + FRAME_BX]         ;    or the reply's, for this start alone
 .restart:
         push ds
         pop es
-        call restart_program
+        call restart_program            ; (DX kept)
+        mov [bp + FRAME_IP], dx
         cmp al, CONT_FAULT_WAY
         jne isr_exit
         call way_back_again             ; found by the way back: counted there

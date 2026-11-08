@@ -343,7 +343,9 @@ was given. The label is the vector; BX the error code (0 if none); CX:SI
 the CS:IP; DI `FAULT_COUNTED` if a test build counted the fault already
 (the fuzzer), which the handler then does not report. The thread waits
 for the reply, and the reply restarts it at the IP in its BX, with fresh
-registers and a fresh stack; until one comes it waits, or a
+registers and a fresh stack, that start alone: its later restarts are at
+its entry still (roadmap memory.md M7's review; a server's thread restarts
+after a fault `SERVE_FAULT_AT` past its entry). Until a reply comes it waits, or a
 `THREAD_SUSPEND` stops it as it was. A thread without a fault endpoint is
 reported and restarted by the kernel, as before.
 

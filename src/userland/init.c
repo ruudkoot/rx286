@@ -121,7 +121,8 @@ int main(void)
     || defined(TEST_POSIX_CONSOLE) || defined(TEST_POSIX_POLL) || defined(TEST_POSIX_THREAD) \
     || defined(TEST_POSIX_DRIVES) || defined(TEST_POSIX_DEVICES) || defined(TEST_POSIX_FSRAND) \
     || defined(TEST_POSIX_PXRAND) || defined(TEST_POSIX_EDGES) || defined(TEST_POSIX_LATE) \
-    || defined(TEST_POSIX_MANY) || defined(TEST_POSIX_HELD) || defined(TEST_POSIX_OVERFLOW)
+    || defined(TEST_POSIX_MANY) || defined(TEST_POSIX_HELD) || defined(TEST_POSIX_OVERFLOW) \
+    || defined(TEST_POSIX_ORPHANS)
 #if defined(TEST_POSIX_PROC)
     static char *const argv[] = { "/z/proc", 0 };
 #elif defined(TEST_POSIX_FILES)
@@ -162,6 +163,8 @@ int main(void)
     static char *const argv[] = { "/z/held", 0 };
 #elif defined(TEST_POSIX_OVERFLOW)
     static char *const argv[] = { "/z/overflow", 0 };
+#elif defined(TEST_POSIX_ORPHANS)
+    static char *const argv[] = { "/z/orphans", 0 };
 #else
     static char *const argv[] = { "/z/pipes", 0 };
 #endif

@@ -31,11 +31,12 @@
 #define OS_PART OS_THREAD_STACK         /* each thread's stack segment (os.inc; M6) */
 #define PROCS OS_PROCS                  /* the processes and threads at once (os.inc;
                                            proc.c; P6, P11, P15) */
-#define PROC_SLOT0 166                  /* process entry i's slots: PROC_SLOT0 + 6i on */
+#define PROC_SLOT0 166                  /* process entry i's slots: PROC_SLOT0 + 7i on */
 #define PROC_SLOTS_EACH 7
 #define PROC_N0 OS_PROC_N0              /* the server's thread for entry i: PROC_N0 + i */
 
-/* A program's slots of the server's: 8n + k (6 and 7 unused) */
+/* A program's slots of the server's: 8n + k (6 its thread's stack, os.inc's
+ * OS_K_THREAD_STACK; 7 unused) */
 #define OS_K_EP 0                       /* the endpoint it calls on */
 #define OS_K_THREAD 1
 #define OS_K_SPACE 2
@@ -74,8 +75,9 @@ int console_show(int page);
  * #GP(0000) at 0007:0123"), into a line: its bytes */
 unsigned fault_text(char *line, unsigned size, const char *who, int vector, rx_u16 error,
                     rx_u16 cs, rx_u16 ip);
-/* overflowed - thread n ran past its stack's guard: said, and no more served */
-void overflowed(unsigned n, rx_u16 notify);
+/* overflowed - thread n used all of its stack, to its guard: said, the guard
+ * written again (os.c) */
+void overflowed(unsigned n);
 /* proc_thread, proc_boot - the processes (proc.c): the server's thread for
  * entry i; init's start, from the control thread */
 void proc_thread(unsigned i);
@@ -146,6 +148,11 @@ int tty_holds(pid_t id);
 /* dev_tone_stop - a tone a thread of process p waits for, ended (dev.c;
  * lock held; P15) */
 void dev_tone_stop(int p);
+/* dev_forget, tty_forget - entry i waits for no tone, and reads no
+ * terminal: its marks cleared after its thread faulted while it waited
+ * with the lock given up (server_fault; lock held; review of memory.md M7) */
+void dev_forget(int i);
+void tty_forget(int i);
 int tty_getpgrp(int i, int unit, int *error);
 int tty_setpgrp(int i, int unit, pid_t pgid, int *error);
 void tty_hangup(pid_t sid);

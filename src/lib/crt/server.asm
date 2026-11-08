@@ -34,6 +34,7 @@ bits 16
 %include "build.inc"
 %include "cabi.inc"
 %include "os.inc"
+%include "kcalls.inc"
 
 %ifndef FAR_DATA
   %error "server.asm: a server's threads are in C's compact model (FAR_DATA)"
@@ -46,11 +47,13 @@ STACK_SHIFT         equ 2               ; SP = n * OS_STACK (4) at a start
 SERVER_GUARD        equ 0x5A5A          ; the guard, and the fill
 LOCK_HOLDER         equ 2               ; struct server_lock: the word, then its holder
 
-global _start, server_self, server_stack_ok, server_stack_used
+global _start, server_self, server_stack_ok, server_stack_used, server_stack_rearm
 global server_lock_try, server_lock_give, server_lock_holder
 extern server_thread, server_fault, server_stacks, server_threads
 
 data_section                            ; (DGROUP, for the table's offsets)
+msg_no_stack        db "rx286: a server's thread has no stack: it stops", 10
+msg_no_stack_end:
 
 code_section
 
@@ -73,7 +76,7 @@ _start:
         mov dx, sp
         shr dx, STACK_SHIFT             ; DX = n
         call stack_of                   ; AX = its stack, SI = its top (pushes nothing)
-        jc .stop                        ; none such: the root starts none
+        jc .stop                        ; none such: a server's slip
         mov es, ax
         cmp word [es:0], SERVER_GUARD
         je .filled                      ; started before, within its stack
@@ -99,7 +102,12 @@ _start:
         push dx
         call server_thread              ; does not return
 .stop:
-        jmp .stop
+        mov si, DGROUP_OFFSET(msg_no_stack)     ; (no stack used: INT 31h takes the
+        mov cx, msg_no_stack_end - msg_no_stack ;    kernel's)
+        mov ah, KCALL_LOG
+        int KCALL_VECTOR
+.spin:
+        jmp .spin                       ; (it has no capability to wait on)
 
 %if _start.fault - _start != SERVE_FAULT_AT
   %error "server.asm: the entry after a fault must be SERVE_FAULT_AT past the start"
@@ -164,6 +172,28 @@ server_stack_ok:
         cmp word [es:0], SERVER_GUARD
         jne .done
         inc ax
+.done:
+        pop si
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; server_stack_rearm - void server_stack_rearm(unsigned n): thread n's guard
+; written again, after it used all of its stack (which is no damage: its
+; stack is a segment of its own)
+;   In:       the stack: n
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX, ES
+; ----------------------------------------------------------------------------
+server_stack_rearm:
+        push bp
+        mov bp, sp
+        push si
+        mov dx, ARG(0)
+        call stack_of
+        jc .done
+        mov es, ax
+        mov word [es:0], SERVER_GUARD
 .done:
         pop si
         pop bp

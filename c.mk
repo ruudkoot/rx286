@@ -247,7 +247,8 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     devices=$(C_B)/tests/posix/devices.$(OBJ) fsrand=$(C_B)/tests/posix/fsrand.$(OBJ) \
     pxrand=$(C_B)/tests/posix/pxrand.$(OBJ) edges=$(C_B)/tests/posix/edges.$(OBJ) \
     late=$(C_B)/tests/posix/late.$(OBJ) many=$(C_B)/tests/posix/many.$(OBJ) \
-    held=$(C_B)/tests/posix/held.$(OBJ) overflow=$(C_B)/tests/posix/overflow.$(OBJ)
+    held=$(C_B)/tests/posix/held.$(OBJ) overflow=$(C_B)/tests/posix/overflow.$(OBJ) \
+    orphans=$(C_B)/tests/posix/orphans.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -274,6 +275,7 @@ Z_FOR_LATE := late
 Z_FOR_MANY := many
 Z_FOR_HELD := held
 Z_FOR_OVERFLOW := overflow
+Z_FOR_ORPHANS := orphans
 Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))

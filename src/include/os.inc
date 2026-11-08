@@ -95,7 +95,8 @@ ROOT_EXIT           equ 11      ; BX a process: everything of it revoked, its me
                                 ;    its code's count lowered (the code gone at 0; with CX
                                 ;    1, kept, sealed, for an exec of the same file: P12)
 ROOT_UNLOAD         equ 12      ; BX a load, or a code no process runs: gone, its memory free
-ROOT_SERVE          equ 13      ; BX a stack's bytes (0: none); CX an SP; SI the stack's slot;
+ROOT_SERVE          equ 13      ; BX a stack's bytes (even, 8 KB at most); CX an SP below the
+                                ;    server's stack segment's top; SI the stack's slot;
                                 ;    DI two slots -> a thread of the server's own, at its
                                 ;    entry with that SP and its priority, started, its faults
                                 ;    the root's (SERVE_BADGE); a notification; a stack segment

@@ -1498,8 +1498,8 @@ less, M a few, L a week.
   segment, the starts' room, `OS_STACK_SIZE` (264 bytes), read from `os.inc` by the
   Makefile for the module's `stack=`, and `ROOT_SERVE` refuses an SP past it; the server's
   DGROUP 35,922 bytes, the build's most for it 40 KB. `tools/lint`'s `entry-bit` rule (a
-  mask's bit by an entry alone, in `src/os` and `src/root`) finds the eight masks M1 fixed,
-  on eb4eda5's code, and none now. `held.test` holds 46 children, then the table refuses
+  mask's bit by an entry alone, in `src/os` and `src/root`) finds the eight sites of the two
+  masks M1 fixed, on eb4eda5's code, and none now. `held.test` holds 46 children, then the table refuses
   (`EAGAIN`) on Bochs and MAME; `late.test`'s and `tone.test`'s third stage at entry 47;
   `stacks.test` keeps a quarter of each stack at 48 entries; `proc.test`'s fork bomb reads
   `CHILD_MAX` and stops at 46 on all three emulators, DOSBox-X's 1 MB too. Not as planned:
@@ -1535,6 +1535,38 @@ less, M a few, L a week.
 - **Done when:** a fresh clone's `make check` and `make check-ia16` are green, and the records
   match the code.
 - **Decisions:** none.
+- **The review** (2026-11-08), by a fresh agent over M1-M7, found nine defects, each fixed:
+  1. **(high) `end()` within `end()`:** M7 made its arrays static, and a hangup's SIGHUP
+     ends more processes inside it, whose `end()` wrote over them: an orphaned stopped job
+     was never hung up. Its groups are a queue now, which the outermost `end()` works
+     through as the ends it causes add to it, so that the nesting stays shallow too
+     (`tests/posix/orphans.test`, new; it fails on M7's code);
+  2. **(medium) a stack over 8 KB:** `ROOT_SERVE` took a new block for each, never freed,
+     until the allocator was spent. It refuses a stack of none, an odd size or over 8 KB
+     (os.inc says so);
+  3. **(medium) the kernel kept a fault reply's IP as the thread's entry,** so that after
+     one fault every plain restart of a server thread ran its policy again. The reply's IP
+     is that start's alone now (`fault_resume`, `docs/kernel-calls.md`); `twin.test` starts
+     thread 1 again after its policy and sees no second call (it fails on M7's kernel);
+  4. **(low) a failed `ROOT_SERVE` left its stack in the server's slot,** which no later one
+     could fill: the server holds a copy until the thread has started, the root's revoked
+     on a failure;
+  5. **(low) a fault while the lock was given up left the entry's wait marks** (a tone, a
+     terminal read, a pipe): `server_fault` clears them (`dev_forget`, `tty_forget`,
+     `vfs_forget`);
+  6. **(low) a thread that used all its stack slept for good,** a rule from the shared
+     segment: it says so, writes the guard again and serves on;
+  7. **(low) a thread with no stack spun silently:** it says so on the log first, and
+     `ROOT_SERVE` refuses an SP at or past the starts' room's top;
+  8. **(low) lint's `entry-bit` let `1u << (i % 16)` pass,** which folds entries 16-47 onto
+     others: only `& 7` and `% 8` pass now, and more names are indexes;
+  9. **(low) the records:** `docs/c.md`'s 32 KB, `server.h`'s slots, `os-server.md`'s
+     refill, and this roadmap's count of the masks.
+
+  Found while fixing them: `tests/programs/twin.c`'s thread 1 stopped itself, which the
+  kernel refuses (no thread stops itself), and so spun after the test; thread 2 stops it
+  now. And `tty_forget` must tell test builds of a reader's end only when it ended one,
+  else the `idle` program's own wait went unseen and `overflow.test` never ended.
 
 ### Later
 
@@ -1543,7 +1575,10 @@ Each needs a roadmap of its own:
   adapter and its memory, the drives' geometry (INT 13h AH=08h), the serial and parallel ports
   (BDA 40:00h-40:0Fh), the 287, so that the root starts the right drivers (the draft's
   "future roadmap").
-- **Past 120 processes:** the server's space past 1,024 slots, and the kernel's pools.
+- **Past 48 processes:** the server's space past 512 slots, which M7 found the kernel cannot
+  retype at once within 10 ms of interrupts off (12.9 ms for 1,024 on MAME): the kernel must
+  first zero a space in pieces, as it retypes other objects (os-server.md P2); then the
+  kernel's pools.
 - **The window manager, and every later server,** on *The model for multi-threaded servers*'
   parts, with a policy on a fault of its own (the owner's `roadmaps/window-manager.md`).
 - **POSIX threads in processes:** a stack segment for each thread too, which needs the

@@ -15,7 +15,11 @@
  * itself until its stack ends: #SS at the segment's limit, which the root
  * reports; the root starts it again after the fault, and the start calls
  * this server's policy, server_fault, on a fresh stack: it says whether
- * the thread held the lock, gives it up, and wakes thread 2.
+ * the thread held the lock and gives it up; then the thread wakes thread 2
+ * and spins. Thread 2 stops it (no thread stops itself) and starts it
+ * again, a plain start at its entry, where the policy must not run again
+ * (the kernel kept the fault's IP for that start alone: memory.md M7's
+ * review), waits for it once more, and stops it.
  * ============================================================================ */
 
 #include <stdio.h>
@@ -24,6 +28,7 @@
 #include "rx/rx286.h"
 #include "rx/server.h"
 #include "kcalls.h"
+#include "drivers.h"
 #include "os.h"
 
 #define SEL(n) ((rx_u16)((n) * 8 + 7))  /* a slot of mine, as a selector */
@@ -36,7 +41,7 @@
 rx_u16 server_stacks[3] = { 0, SECOND_STACK, FIRST_STACK };
 const unsigned server_threads = 3;
 static struct server_lock lock;
-static volatile unsigned faults;
+static volatile unsigned faults, starts;
 
 /* say - a line on the standard output (PX_WRITE), through the data
  * segment, where the OS server reads a program's buffers: a thread's
@@ -85,7 +90,7 @@ static unsigned deep(unsigned k)
 }
 
 /* server_fault - this server's policy after thread n faulted (rx/server.h):
- * said, with whether it held the lock; the lock given up; thread 2 woken */
+ * said, with whether it held the lock; the lock given up */
 void server_fault(unsigned n)
 {
     char line[96];
@@ -95,12 +100,12 @@ void server_fault(unsigned n)
              yes(server_lock_holder(&lock) == n));
     say(line);
     server_lock_give(&lock);
-    kcall(KCALL_SIGNAL, 0, 0, 0, SECOND_NOTIFY, 0, 0);
 }
 
-/* server_thread - thread 2: thread 1 asked for, then its policy awaited;
- * thread 1: the lock taken and the stack overflowed, or after the fault,
- * stopped */
+/* server_thread - thread 2: thread 1 asked for, its policy awaited, then
+ * thread 1 stopped and started again; thread 1: the lock taken and the
+ * stack overflowed, or after the fault thread 2 woken, until thread 2 stops
+ * it */
 void server_thread(unsigned n)
 {
     char line[96];
@@ -109,20 +114,36 @@ void server_thread(unsigned n)
     if (n == 1) {
         if (faults == 0 && server_lock_try(&lock, n))
             deep(0);
-        kcall(KCALL_THREAD, THREAD_STOP, 0, 0, SECOND, 0, 0);
+        starts++;
+        kcall(KCALL_SIGNAL, 0, 0, 0, SECOND_NOTIFY, 0, 0);
         for (;;)
-            ;                           /* (stopped) */
+            ;                           /* (until thread 2 stops it) */
     }
     snprintf(line, sizeof line, "twin: thread %u on a stack of its own: %s; the data's DS: %s\n",
              server_self(), yes(rx_ss() == FIRST_STACK), yes(rx_ds() != rx_ss()));
+    say(line);
+    status = kcall(KCALL_CALL, ROOT_SERVE, 0x4000, 1 * OS_STACK, ROOT_EP, SECOND_STACK, SECOND);
+    status = status == E_INVAL && kcall(KCALL_CALL, ROOT_SERVE, 0, 1 * OS_STACK, ROOT_EP,
+                                        SECOND_STACK, SECOND) == E_INVAL
+        && kcall(KCALL_CALL, ROOT_SERVE, OS_THREAD_STACK, 2 * OS_STACK, ROOT_EP, SECOND_STACK,
+                 SECOND) == E_INVAL;    /* (SP 8: the starts' room's top, thread 2's own) */
+    snprintf(line, sizeof line, "twin: ROOT_SERVE refuses a stack of 16 KB, none, and an SP at "
+             "its starts' top: %s\n", yes(status));
     say(line);
     status = kcall(KCALL_CALL, ROOT_SERVE, OS_THREAD_STACK, 1 * OS_STACK, ROOT_EP, SECOND_STACK,
                    SECOND);
     snprintf(line, sizeof line, "twin: ROOT_SERVE for thread 1: %d\n", status);
     say(line);
     kcall(KCALL_RECV, 0, 0, 0, SECOND_NOTIFY, 0, 0);
-    snprintf(line, sizeof line, "twin: thread 2 woken by the policy: %s; the lock free: %s\n",
+    snprintf(line, sizeof line, "twin: thread 2 woken after the policy: %s; the lock free: %s\n",
              yes(faults == 1), yes(server_lock_holder(&lock) == 0));
+    say(line);
+    status = kcall(KCALL_THREAD, THREAD_STOP, 0, 0, SECOND, 0, 0);
+    status |= kcall(KCALL_THREAD, THREAD_START, 0, 3, SECOND, 0, 0);
+    kcall(KCALL_RECV, 0, 0, 0, SECOND_NOTIFY, 0, 0);
+    status |= kcall(KCALL_THREAD, THREAD_STOP, 0, 0, SECOND, 0, 0);
+    snprintf(line, sizeof line, "twin: thread 1 started again at its entry, its policy not "
+             "called: %s\n", yes(status == 0 && starts == 2 && faults == 1));
     say(line);
     say("twin: done\n");
     for (;;)                            /* a reader waiting for ever: the test's end */

@@ -617,6 +617,17 @@ static void wake_all(const struct waiters *who)
             wake(i);
 }
 
+/* vfs_forget - entry i waits at no pipe's end (fs.h) */
+void vfs_forget(int i)
+{
+    int p;
+
+    for (p = 0; p < PIPES; p++) {
+        pipes[p].reading.bits[i >> 3] &= (rx_u8)~(1u << (i & 7));
+        pipes[p].writing.bits[i >> 3] &= (rx_u8)~(1u << (i & 7));
+    }
+}
+
 /* pipe_wait - process i's thread waits, the lock given up, until another
  * signals it: 1; 0 if the process ended meanwhile; -1 if a signal is ready
  * for it (P10) */

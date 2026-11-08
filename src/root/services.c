@@ -480,26 +480,41 @@ int server_stacks_keep(unsigned module, rx_u16 paragraphs)
     return 0;
 }
 
-/* server_stack - a stack segment of so many bytes for a thread of a server
- * (a module) of a ring, moved into its space's slot (root.h; memory.md M6):
- * from the block kept for that server's stacks, or a new one when it is
- * full, kept for good as its threads are: 0, or the error */
-int server_stack(unsigned module, int ring, rx_u16 space, rx_u16 bytes, rx_u16 to)
+/* stack_new - a stack segment of so many bytes (2 to 8 KB, even) for a
+ * thread of a server (a module) of a ring, in a slot of the root's: from
+ * the block kept for that server's stacks, or a new one when it is full,
+ * kept for good as its threads are; its slot, or 0 */
+static rx_u16 stack_new(unsigned module, int ring, rx_u16 bytes)
 {
-    rx_u16 slot = slot_take();
-    int access = (ring << 5) | ACC_DATA, status = E_NOMEM;
+    rx_u16 slot;
+    int access = (ring << 5) | ACC_DATA;
 
-    if (slot == 0 || module >= MODULE_MAX || bytes == 0)
-        return slot ? (slot_give(slot), E_INVAL) : E_NOMEM;
+    if (module >= MODULE_MAX || bytes < 2 || bytes & 1 || bytes > STACK_BLOCK_PARAS * 16)
+        return 0;                       /* (a larger one would fit no block: review of M7) */
+    slot = slot_take();
+    if (slot == 0)
+        return 0;
     if (stack_blocks[module] == 0
             || retype(stack_blocks[module], CAP_SEGMENT, slot, bytes, access)) {
         stack_blocks[module] = stack_block();       /* none yet, or the last one full */
         if (stack_blocks[module] == 0
                 || retype(stack_blocks[module], CAP_SEGMENT, slot, bytes, access)) {
             slot_give(slot);
-            return status;
+            return 0;
         }
     }
+    return slot;
+}
+
+/* server_stack - a stack segment as stack_new makes one, moved into a
+ * space's slot (root.h; memory.md M6): 0, or the error */
+int server_stack(unsigned module, int ring, rx_u16 space, rx_u16 bytes, rx_u16 to)
+{
+    rx_u16 slot = stack_new(module, ring, bytes);
+    int status;
+
+    if (slot == 0)
+        return E_NOMEM;
     status = copy(space, slot, to, COPY_MOVE, 0, 0) ? E_IO : 0;
     if (status)
         kcall(KCALL_DELETE, 0, 0, 0, slot, 0, 0);
@@ -512,14 +527,18 @@ int server_stack(unsigned module, int ring, rx_u16 space, rx_u16 bytes, rx_u16 t
  * entry with SP sp (os-server.md P6), and its stack (memory.md M6). They
  * come from the arena while it has room - made once each, never given back
  * - and from a block after: blocks of 1 KB kept for good, spread through
- * the memory for segments, would leave no large block for a process (P15) */
+ * the memory for segments, would leave no large block for a process (P15).
+ * The stack is the server's copy of the root's until the thread has
+ * started, so that a failure takes it back (review of M7) */
 static int serve(rx_u16 bytes, rx_u16 sp, rx_u16 stack_to, rx_u16 to)
 {
     int block = -1, status = E_NOMEM;
-    rx_u16 thread, notify;
+    rx_u16 thread, notify, stack;
 
-    if (services_module == 0 || sp < 2 || sp & 1 || sp > server_room(services_module))
-        return E_INVAL;                 /* a server's alone, its SP in its stack segment */
+    if (services_module == 0 || sp < 2 || sp & 1 || sp >= server_room(services_module)
+            || bytes < 2 || bytes & 1 || bytes > STACK_BLOCK_PARAS * 16)
+        return E_INVAL;                 /* a server's alone, its SP among its starts (each */
+                                        /*    thread's below the room's top), its stack 8 KB */
     thread = slot_take();
     notify = slot_take();
     if (thread && notify && (retype(ARENA, CAP_THREAD, thread, 0, 0)
@@ -534,12 +553,17 @@ static int serve(rx_u16 bytes, rx_u16 sp, rx_u16 stack_to, rx_u16 to)
     if (thread && notify) {
         status = E_IO;
         if (give(thread, to) == 0 && give(notify, (rx_u16)(to + 8)) == 0) {
-            status = bytes ? server_stack(services_module, server_ring(services_module),
-                                          services_space, bytes, stack_to) : 0;
-            if (status == 0 && serve_thread(services_module, thread, sp) == 0)
+            stack = stack_new(services_module, server_ring(services_module), bytes);
+            if (stack == 0) {
+                status = E_NOMEM;
+            } else if (give(stack, stack_to) == 0
+                       && serve_thread(services_module, thread, sp) == 0) {
+                kcall(KCALL_DELETE, 0, 0, 0, stack, 0, 0);  /* the server's copy stays */
+                slot_give(stack);
                 return 0;
-            if (status == 0)
-                status = E_IO;
+            } else {
+                slot_drop(stack);       /* the server's copy too */
+            }
         }
     }
 failed:

@@ -35,6 +35,9 @@ unsigned server_self(void);
 int server_stack_ok(unsigned n);
 /* server_stack_used - the bytes of its stack thread n has used at most */
 unsigned server_stack_used(unsigned n);
+/* server_stack_rearm - thread n's guard written again, after it used all
+ * of its stack, which damaged nothing of another's */
+void server_stack_rearm(unsigned n);
 /* server_lock_try - the lock taken by the thread holder, if it was free: 1, else 0 */
 int server_lock_try(struct server_lock *lock, unsigned holder);
 /* server_lock_give - the lock given up */
