@@ -911,7 +911,7 @@ def at_cmos():
     return bytes(c)
 
 
-MAME_STOP_SECONDS = 10       # for MAME to save its diskettes and stop, after SIGTERM
+MAME_STOP_SECONDS = 10       # for a diskette's last writes to reach its image, after the end
 MAME_RAM = '1664K'           # 640 KB, and 1 MB above 1 MB (roadmap os-server.md P3)
 MAME_EXTENDED_KB = 1024      # which the CMOS says, or the POST stops at error 164
 
@@ -925,10 +925,11 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     command line). The AT has no printer port here: its
     four slots hold the EGA, the diskette controller, the serial card and
     the IDE card, which the diskettes need too (docs/emulators.md). MAME
-    writes a diskette back to its file only when it stops, so it is asked
-    to stop (SIGTERM) before it is killed. Returns (status, seconds, saved):
-    saved false if it had to be killed, its diskettes then as they were
-    before the run. SDL's dummy drivers keep MAME
+    run so takes no signal to stop (SIGTERM and SIGINT alike are ignored),
+    but writes a diskette's image back while it runs: it is asked to stop,
+    given MAME_STOP_SECONDS for the diskettes' last writes, and killed.
+    (tools/run-test fails a test whose diskette it checks if MAME left its
+    image as it was.) SDL's dummy drivers keep MAME
     from opening any window: `-video none` alone still opens one under
     WSLg."""
     nvram = os.path.join(directory, 'mame-nvram')
@@ -971,17 +972,15 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
             status = 'until'
             break
         time.sleep(0.05)
-    saved = True
     if proc.poll() is None:
         proc.terminate()
         try:
             proc.wait(MAME_STOP_SECONDS)
         except subprocess.TimeoutExpired:
-            proc.kill()                 # its diskettes not written back
+            proc.kill()
             proc.wait()
-            saved = False
     log.close()
-    return status, time.monotonic() - started, saved
+    return status, time.monotonic() - started
 
 
 # Bochs' rfb display takes the first free port from 5900 up, but two Bochs

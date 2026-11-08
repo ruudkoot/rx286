@@ -722,6 +722,11 @@ def run_one(test):
     error = install(test)
     if error:
         return error
+    # MAME writes a diskette's image back as it runs, never at once: a
+    # diskette a test checks must not come out as it went in (check_written)
+    diskettes = sorted({d for d in test.fscks if d in 'AB'} |
+                       {d for d, _, _ in test.files if d in 'AB'}) if EMULATOR == 'mame' else []
+    before = {d: open(os.path.join(r, DRIVE_IMAGES[d]), 'rb').read() for d in diskettes}
     peer = None
     if test.modem:
         peer = HayesPeer()
@@ -750,7 +755,6 @@ def run_one(test):
         if test.match == 'prefix':
             return lines_match(wanted, got[:len(wanted)])
         return 'TEST END' in got
-    saved = True                            # the diskettes written back (MAME)
     if EMULATOR == 'bochs':
         status, _ = rxlib.run_bochs(bochsrc, rc, timeout, until=until, serial=serial,
                                     log=os.path.join(r, 'bochs.log'), disks=disks)
@@ -759,18 +763,19 @@ def run_one(test):
                                      printers=printers, modem=modem,
                                      log_port='com3' if test.modem else 'com2')
     else:
-        status, _, saved = rxlib.run_mame(r, os.path.join(r, 'run.img'), serial, timeout,
-                                          until, disks=disks, media=test.media)
+        status, _ = rxlib.run_mame(r, os.path.join(r, 'run.img'), serial, timeout, until,
+                                   disks=disks, media=test.media)
     if peer:
         peer.close()
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \
         if os.path.exists(serial) else []
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
         if os.path.exists(dbglog) else []
-    diskettes = {d for d in test.fscks if d in 'AB'} | {d for d, _, _ in test.files if d in 'AB'}
+    unwritten = [d for d in diskettes if open(os.path.join(r, DRIVE_IMAGES[d]), 'rb').read()
+                 == before[d]]
     error = compare(test, transcript, debugger_lines) or check_printers(test, printers) \
-        or (not saved and diskettes and 'MAME was killed: drive %s\'s image is as before '
-            'the run' % min(diskettes)) or check_volumes(test)
+        or (unwritten and 'drive %s\'s image is as before the run: MAME never wrote it back'
+            % unwritten[0]) or check_volumes(test)
     if status == 'timeout':
         error = 'timed out after %.0f s; %s' % (timeout, error or 'the transcript matched')
     return error

@@ -113,8 +113,9 @@ tests that write to them run side by side. A test builds in
 (MAME's images differ: `build/tests-mame/`), and each emulator's run keeps
 its files in `run-<emulator>/` there, made afresh each time. An error in
 one test (a symbol not found, a bad key script) is that test's failure, and
-the others still run. A MAME that had to be killed has not written its
-diskettes back, so a test that checks A or B after it fails. A `file` line checks on the
+the others still run. MAME writes a diskette's image back as it runs, not
+at once: a MAME test that checks drive A or B fails if the image came out
+of the run as it went in. A `file` line checks on the
 host what a run wrote, which a write and a read back through the same
 system cannot: a wrong turn from sector number to cylinder, head and sector
 would read back what it wrote (`tests/posix/drives.test` writes a file on
