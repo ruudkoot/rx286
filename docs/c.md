@@ -28,7 +28,8 @@ with gcc-ia16 instead of Watcom; `c.mk` holds the rules for both:
 | for `check-286` | `wdis` of each object (`.dis`) | `objdump -d` of each object (`.dis`) |
 
 Both build the small model: 64 KB of code and 64 KB of data, stack and
-heap together, SS = DS (D2). `-zl` and `-ffreestanding` keep the
+heap together, SS = DS (D2), but for the servers, which are Watcom's in
+its compact model (below). `-zl` and `-ffreestanding` keep the
 compilers' own libraries out: nothing of Open Watcom's or of libgcc goes
 into a binary, so no licence comes with one.
 
@@ -52,7 +53,43 @@ data is a segment's name in the compact model, which wlink leaves to the
 loader as a relocation: `tools/mkexe` writes each one's selector itself,
 the program's slot 0 for the code's paragraph (1000h) and slot 1 for the
 data's (2000h), at the program's ring (`--ring`, 3 unless a module's link
-gives its own), and stops at any other.
+gives its own), and stops at any other. In the compact model a
+program's calls still name their buffers by an offset in its data segment
+(os.inc), where the OS server reads them: `os_write` refuses bytes outside
+it, and a thread on a stack of its own copies a local there first
+(`RX_FAR_DATA`, which `compiler.h` defines for the compact model).
+
+**The model for servers** (roadmap memory.md M6, *The model for
+multi-threaded servers*): every server of many threads is built as the OS
+server is, in the compact model on the far libraries, with a server's start
+(`src/lib/crt/server.asm`, `rx/server.h`) in place of crt0:
+
+- **each thread on a stack segment of its own**, so that an overflow
+  faults at the segment's limit (#SS) before it writes anything not its
+  own. The root starts thread n with SP = 4n in the server's stack segment,
+  the starts' room; the start finds the thread's stack in the server's
+  table, `server_stacks[n]` (`server_threads` of them), fills it with a
+  guard word on a first start, keeps n at its top (`server_self`) and calls
+  `server_thread(n)`, the server's;
+- **the root's `ROOT_SERVE`** for any server: a thread, its notification
+  and its stack, from blocks the root keeps for that server's stacks
+  (*docs/root.md*);
+- **a lock that records its holder** (`server_lock_try`,
+  `server_lock_give`, `server_lock_holder`): XCHG takes the word, and the
+  holder's number is written with no push between, so that no fault leaves
+  the lock taken by no one;
+- **a fault**: the root restarts the thread `SERVE_FAULT_AT` bytes past
+  the server's entry, where the start calls the server's own policy,
+  `server_fault(n)`, on a fresh stack, then `server_thread(n)` again. The
+  OS server's ends the process the thread served, or stops the system if
+  the thread held the lock (*docs/os-server.md*, *Faults*); the test server
+  of two threads (`tests/programs/twin.c`) has its own.
+
+`c.mk` links the OS server so (`SERVER_START`), and `FAR_SERVERS` a test
+program; `tools/mkexe` takes a program with no stack in DGROUP, and
+`--dgroup-max` stops the build when DGROUP passes a server's most
+(`SERVER_DGROUP_MAX`, 32 KB for the OS server), which the linker would say
+only at 64 KB.
 
 ## The program's segments
 
@@ -163,8 +200,9 @@ sizes`). `tools/mkimage` takes an executable as a module of the boot image
   the processes (`src/userland/init.c`, `src/bin/`) are C, and so is the services' test
   program (`tests/programs/services.c`), so every suite tests the crt and
   the libraries in every `make check`. The OS server starts each of its
-  threads with its own start (`src/os/start.asm`), not crt0: a part of the
-  stacks in its data segment for each (*docs/os-server.md*).
+  threads with a server's start (`src/lib/crt/server.asm`), not crt0: a
+  stack segment of its own for each (*The model for servers*, above).
 - **The second compiler:** `make check-ia16` runs those suites with every C
   module built by gcc-ia16, and check-286 over its objects; what is in the
-  compact model (*The far libraries*) is Watcom's there too.
+  compact model (*The far libraries*), the OS server too, is Watcom's
+  there.

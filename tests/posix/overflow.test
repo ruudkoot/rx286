@@ -1,0 +1,18 @@
+# A thread of the OS server overflows its stack on purpose (roadmap
+# memory.md M6, D10's rule; tests/posix/overflow.c): its stack is a segment
+# of its own, so the overflow faults (#SS) before it writes anything not its
+# own; the root reports it and starts the thread again after the fault,
+# where the server's policy ends the process it served (process 3, in entry
+# 2: thread 19) and serves the next one in that entry.
+program: idle
+define: TEST_POSIX_OVERFLOW
+define: TEST_OS_OVERFLOW
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
+# DOSBox-X checks no stack segment's limit (docs/emulators.md).
+emulators: bochs mame
+match: contains
+timeout: 60
+---
+rx286: os: thread 19 faulted serving process 3: it is ended
+overflow: the child ended by signal 9
+overflow: the next child: exit 7

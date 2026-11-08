@@ -60,6 +60,7 @@ program_main_revoke := tests/programs/revoke.asm
 program_main_additions := tests/programs/additions.asm
 program_main_services := tests/programs/services.c
 program_main_tables := tests/programs/tables.c
+program_main_twin := tests/programs/twin.c
 # PROGRAM=none: no program the root builds; the processes have the keys (P9);
 # PROGRAM=shell (sh too): no program the root builds either, and init runs
 # the shell in C on each terminal (os-server.md P9; the shell in assembly
@@ -92,11 +93,11 @@ MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=256 \
     fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \
     serial=$(B)/serial.bin:1:7:driver:irq=3:service=7 sound=$(B)/sound.bin:1:7:driver:service=8 \
     rtc=$(B)/rtc.bin:1:7:driver:service=9 \
-    $(if $(PROGRAM_BIN),program=$(PROGRAM_BIN):$(PROGRAM_RING)) \
+    $(if $(PROGRAM_BIN),program=$(PROGRAM_BIN):$(PROGRAM_RING)$(if $(filter twin,$(PROGRAM)),:stack=8)) \
     $(if $(WITH_COUNTER),counter=$(B)/counter.rx:3:$(COUNTER_PRIORITY)) \
     z=$(B)/z.arc:3:0:archive
 ifeq ($(PROGRAM_MAIN),)
-$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions, services or tables, not '$(PROGRAM)')
+$(error PROGRAM must be shell, sh, none, idle, attack, fuzz, fputhreads, caps, ipc, rings, keys, revoke, additions, services, tables or twin, not '$(PROGRAM)')
 endif
 
 # Reproducible images (roadmap E5): a zeroed file, mformat without -C, a fixed

@@ -70,6 +70,7 @@ base memory whatever it is: INT 12h is right.
 | no fault for memory used through a null selector | #GP(0000) |
 | a write through CS goes through | #GP(0000) |
 | a kernel stack overflow never reaches the double-fault task | the double-fault task |
+| a push past a stack segment's limit goes through, SP wrapping to FFFEh past the segment's base (a server thread's overflow, memory.md M6) | #SS(0000) |
 | after the 8042's reset, real-mode code meets protected-mode segment limits | a reset |
 | no IRQ13 for a 287 error | IRQ13 |
 | no IRQ6 from the diskette controller's reset, no fixed-disk controller (IRQ14) | both |

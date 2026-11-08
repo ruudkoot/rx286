@@ -367,10 +367,11 @@ entry's endpoint is badged with the entry and a count of the images and
 threads it has held, so that a call that was received before an exec or the
 entry's reuse, and waited for the lock meanwhile, is dropped, not served to
 the new one (P15). Entry i has its slots of the server's, `PROC_SLOT0`
-(166) + 6i on: the process's endpoint, thread, space and data segment (as
-the root gives them), the server's thread for it and that thread's
-notification. The thread, thread `PROC_N0` + i of the server's
-(`ROOT_SERVE`), serves process i alone and sleeps while the entry is empty.
+(166) + 7i on: the process's endpoint, thread, space and data segment (as
+the root gives them), the server's thread for it, that thread's
+notification and its stack, a segment of its own (memory.md M6). The
+thread, thread `PROC_N0` + i of the server's (`ROOT_SERVE`), serves process
+i alone and sleeps while the entry is empty.
 One lock guards the table, taken with XCHG (`rx_xchg`), and given up before
 a wait for a child and before the console (but for `/dev/status`'s short
 writes to the status line, and its last close, which keep it). While a call

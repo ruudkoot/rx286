@@ -216,14 +216,21 @@ $(B)/root.rx: $(C_LIB_OBJS) $(ROOT_OBJS) tools/mkexe tools/rxlib.py
 
 $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 
-# The OS server (roadmap l4.md L6; in C since os-server.md P5): its own start
-# (start.asm), a thread a program, each on its part of the stacks
-SERVER_OBJS := $(addprefix $(C_B)/os/,start.$(OBJ) os.$(OBJ) proc.$(OBJ) \
-    cache.$(OBJ) vol.$(OBJ) vfs.$(OBJ) signal.$(OBJ) tty.$(OBJ) dev.$(OBJ))
-$(B)/os.rx: $(SERVER_OBJS) $(C_LIBS) tools/mkexe tools/rxlib.py
-	$(call c_link,os,$(SERVER_OBJS) $(C_LIBS),--ring 2)
+# The OS server (roadmap l4.md L6; in C since os-server.md P5): in C's
+# compact model on the far libraries, Watcom's in every build (memory.md
+# M6, D10 B, D11 B), with a server's start (lib/crt/server.asm): each
+# thread on a stack segment of its own. Its DGROUP holds its tables alone:
+# the build stops past SERVER_DGROUP_MAX, which the linker would say only
+# at 64 KB
+SERVER_START := $(FAR_B)/lib/crt/server.obj
+SERVER_OBJS := $(addprefix $(FAR_B)/os/,os.obj proc.obj cache.obj vol.obj vfs.obj signal.obj \
+    tty.obj dev.obj)
+SERVER_DGROUP_MAX := 32768
+$(B)/os.rx: $(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.py
+	$(call wlink_exe,os,$(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS), \
+	    --ring 2 --dgroup-max $(SERVER_DGROUP_MAX))
 
-$(C_B)/os/%.$(OBJ): $(wildcard src/os/*.h)
+$(FAR_B)/os/%.obj: $(wildcard src/os/*.h)
 
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)
@@ -240,7 +247,7 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     devices=$(C_B)/tests/posix/devices.$(OBJ) fsrand=$(C_B)/tests/posix/fsrand.$(OBJ) \
     pxrand=$(C_B)/tests/posix/pxrand.$(OBJ) edges=$(C_B)/tests/posix/edges.$(OBJ) \
     late=$(C_B)/tests/posix/late.$(OBJ) many=$(C_B)/tests/posix/many.$(OBJ) \
-    held=$(C_B)/tests/posix/held.$(OBJ)
+    held=$(C_B)/tests/posix/held.$(OBJ) overflow=$(C_B)/tests/posix/overflow.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -266,6 +273,7 @@ Z_FOR_EDGES := edges
 Z_FOR_LATE := late
 Z_FOR_MANY := many
 Z_FOR_HELD := held
+Z_FOR_OVERFLOW := overflow
 Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TEST_DEFINES))), \
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))
@@ -301,16 +309,18 @@ $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 
 # A test program in C (tests/programs/*.c), the program module of its
 # build; those of FAR_PROGRAMS in the compact model, on the far libraries
-# (memory.md M5)
-FAR_PROGRAMS := tables
+# (memory.md M5), a server of them on a server's start (M6)
+FAR_PROGRAMS := tables twin
+FAR_SERVERS := twin
+FAR_PROGRAM_START := $(if $(filter $(PROGRAM),$(FAR_SERVERS)),$(SERVER_START),$(FAR_START_OBJS))
 ifeq ($(filter $(PROGRAM),$(FAR_PROGRAMS)),)
 $(B)/user.rx: $(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ) tools/mkexe tools/rxlib.py
 	$(call c_link,user,$(C_LIB_OBJS) $(C_B)/tests/programs/$(PROGRAM).$(OBJ), \
 	    --ring $(firstword $(subst :, ,$(PROGRAM_RING))))
 else
-$(B)/user.rx: $(FAR_START_OBJS) $(FAR_LIBS) $(FAR_B)/tests/programs/$(PROGRAM).obj tools/mkexe \
+$(B)/user.rx: $(FAR_PROGRAM_START) $(FAR_LIBS) $(FAR_B)/tests/programs/$(PROGRAM).obj tools/mkexe \
     tools/rxlib.py
-	$(call wlink_exe,user,$(FAR_START_OBJS) $(FAR_LIBS) $(FAR_B)/tests/programs/$(PROGRAM).obj, \
+	$(call wlink_exe,user,$(FAR_PROGRAM_START) $(FAR_LIBS) $(FAR_B)/tests/programs/$(PROGRAM).obj, \
 	    --ring $(firstword $(subst :, ,$(PROGRAM_RING))))
 endif
 

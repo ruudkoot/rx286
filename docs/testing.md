@@ -80,14 +80,15 @@ memory.md M2). Then it runs once on each machine the emulator can be
 none of whose machines an emulator can be is skipped there. Its expected
 lines may name the run's machine: `{mem_base}`, `{mem_ext}` and `{mem_end}`.
 `tests/memory` runs every size the owner named on the emulators that can be
-it, and a program in C's compact model, whose initialised data holds
-pointers (`tables.test`, M5).
+it, a program in C's compact model, whose initialised data holds
+pointers (`tables.test`, M5), and a test server of two threads, each on a
+stack of its own, with its own policy after a fault (`twin.test`, M6).
 
 Header lines (`tools/run-test` documents them all): `program` (`sh` or
 `shell`, the shell in C on the terminals; `none`, no program module, the
 processes having the keys; else a test program the root builds:
 `idle`, the default, `attack`, `fuzz`, `caps`, `ipc`, `revoke`, `rings`,
-`keys`, `additions`, `fputhreads`, `services`, `tables`), `keys` (what to type),
+`keys`, `additions`, `fputhreads`, `services`, `tables`, `twin`), `keys` (what to type),
 `define` (a NASM and C define for
 the test image), `image` (a fragmented, missing, truncated or oversized
 `KERNEL.BIN`, one of `IMAGE_MAX` bytes, one whose first module is not the root or
@@ -187,8 +188,9 @@ The suites:
 `make check-ia16` (not in `make check`) runs every suite on Bochs with the
 C built by gcc-ia16 instead of Open Watcom (every image carries C: the
 root, the OS server, `/z`), and check-286 over its objects (*docs/c.md*).
-What is in C's compact model, the far libraries and `tables`, stays
-Watcom's there too: gcc-ia16 has no such model (memory.md D11 B).
+What is in C's compact model, the far libraries, the OS server, `tables`
+and `twin`, stays Watcom's there too: gcc-ia16 has no such model (memory.md
+D11 B).
 
 ## 5. The attack suite and the fuzzer
 

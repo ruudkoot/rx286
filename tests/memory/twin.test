@@ -1,0 +1,18 @@
+# A server of two threads on the parts every server is built on, and
+# nothing of the OS server's (roadmap memory.md M6, *The model for
+# multi-threaded servers*; tests/programs/twin.c): a stack segment for each
+# thread, the root's ROOT_SERVE, a lock that records its holder, and a
+# policy of its own after a fault, which the root's restart after the
+# fault calls on a fresh stack.
+program: twin
+define: TEST_TWIN
+# DOSBox-X checks no stack segment's limit (docs/emulators.md).
+emulators: bochs mame
+match: contains
+timeout: 30
+---
+twin: thread 2 on a stack of its own: yes; the data's DS: yes
+twin: ROOT_SERVE for thread 1: 0
+twin: thread 1 faulted; it held the lock: yes
+twin: thread 2 woken by the policy: yes; the lock free: yes
+twin: done

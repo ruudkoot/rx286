@@ -6,7 +6,7 @@
 # so that tools/run-test, tools/map2sym and tools/sizes read it as they read
 # an assembled program's (rxlib.read_map, rxlib.map_sections).
 #
-#   tools/mkexe [--ring N] --wlink EXE WLINK_MAP OUT.rx
+#   tools/mkexe [--ring N] [--dgroup-max BYTES] --wlink EXE WLINK_MAP OUT.rx
 #                                   Open Watcom: wlink's `format dos`, its map
 #   tools/mkexe --elf ELF OUT.rx    gcc-ia16: ld's ELF output
 #
@@ -23,7 +23,11 @@
 # in: the objects and libraries its link script (EXE's .lnk) names do, in
 # their OMF records (PUBDEF, SEGDEF), so C's public data (environ) goes in
 # rxdata. A segment neither of the code nor of DGROUP, a stack not at
-# DGROUP's offset 0, or no entry stops it.
+# DGROUP's offset 0, or no entry stops it. A server in C's compact model
+# has no stack in DGROUP: its threads' are segments of their own
+# (src/lib/crt/server.asm; memory.md M6). --dgroup-max stops it when the
+# stack, the data and .bss together pass so many bytes, which the linker
+# says only at 64 KB.
 #
 # Segment relocations (roadmap memory.md M5): a far pointer in initialised
 # data (the compact model's tables of names), or a segment's name in code,
@@ -184,7 +188,7 @@ def wlink_parts(exe_path, map_path, ring):
             sys.exit('mkexe: %s: segment %s (class %s, group %s) is neither code nor DGROUP'
                      % (map_path, name, cls, grp))
     stackbot = [a for name, _, _, a, _ in segments if name == '_STACKBOT']
-    if stackbot != [0]:
+    if stackbot not in ([0], []):
         sys.exit('mkexe: %s: the stack, _STACKBOT, is not at DGROUP\'s offset 0' % map_path)
     code_end = max(a + n for _, cls, _, a, n in segments if cls == 'CODE')
     data_end = max([a + n for _, cls, grp, a, n in segments if grp == 'DGROUP' and cls != 'BSS']
@@ -279,12 +283,16 @@ def write_map(path, code, data, symbols):
 def main(args):
     flags = 0
     ring = 3
-    while args and args[0] in ('--287', '--ring'):
+    dgroup_max = 0xFFFF
+    while args and args[0] in ('--287', '--ring', '--dgroup-max'):
         if args[0] == '--287':
             flags = E['RXF_287']
             args = args[1:]
-        elif len(args) > 1 and args[1] in ('1', '2', '3'):
+        elif args[0] == '--ring' and len(args) > 1 and args[1] in ('1', '2', '3'):
             ring = int(args[1])
+            args = args[2:]
+        elif args[0] == '--dgroup-max' and len(args) > 1 and args[1].isdigit():
+            dgroup_max = int(args[1])
             args = args[2:]
         else:
             break
@@ -295,10 +303,13 @@ def main(args):
         code, data, bss, stack, entry, symbols = elf_parts(args[1])
         out = args[2]
     else:
-        sys.exit('usage: mkexe [--287] [--ring N] --wlink EXE MAP OUT.rx | '
+        sys.exit('usage: mkexe [--287] [--ring N] [--dgroup-max BYTES] --wlink EXE MAP OUT.rx | '
                  '[--287] --elf ELF OUT.rx')
     if len(code) > 0xFFFF or stack + len(data[stack:]) + bss > 0xFFFF:
         sys.exit('mkexe: %s: a segment past 64 KB' % out)
+    if stack + len(data[stack:]) + bss > dgroup_max:
+        sys.exit('mkexe: %s: DGROUP is %d bytes, past its most, %d (--dgroup-max)'
+                 % (out, stack + len(data[stack:]) + bss, dgroup_max))
     if any(data[:stack]):
         sys.exit('mkexe: %s: the stack (the data\'s first %d bytes) is not zeros' % (out, stack))
     initial = data[stack:]

@@ -334,7 +334,7 @@ static void reader_flag(void)
     test_reader(waits ? TEST_READER_FOREVER : TEST_READER_NONE);
 }
 
-/* tty_thread - the tty thread (os_thread): each key through the shown
+/* tty_thread - the tty thread (server_thread): each key through the shown
  * terminal's discipline, its readers woken, a terminal shown */
 void tty_thread(void)
 {

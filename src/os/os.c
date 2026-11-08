@@ -6,8 +6,9 @@
  * The root builds it in ring 2 with a thread for each program the root
  * builds, which serves that program alone: it starts with SP at the n-th
  * OS_STACK of the server's stack segment, n the program's module number,
- * which is how it knows its program, and runs on the n-th part of the
- * stacks in its data segment (start.asm; C wants SS = DS). For each program
+ * which is how it knows its program, and runs on a stack segment of its own
+ * (src/lib/crt/server.asm, server_stacks; C's compact model, memory.md M6).
+ * For each program
  * the root gives it, in slots 8n to 8n + 5 (OS_K_*): the endpoint the
  * program calls on, the program's thread and space, its code, data and
  * stack; and in slot OS_SLOT_SLEEP + n a notification its thread sleeps on,
@@ -45,6 +46,20 @@
 /* A module's entry in the module table */
 typedef const rx_u8 RX_FAR *entry_ptr;
 #define ENTRY_W(e, field) (*(const rx_u16 RX_FAR *)((e) + (field)))
+
+/* The threads' stacks, by thread number (src/lib/crt/server.asm; memory.md
+ * M6): a program's thread's in the program's slots, the control thread's;
+ * an entry's thread's and the tty thread's are set before ROOT_SERVE starts
+ * them (proc.c, tty.c) */
+#define PROGRAM_STACK(n) SLOT((n) * 8 + OS_K_THREAD_STACK)
+rx_u16 server_stacks[TTY_N + 1] = {
+    0, 0, PROGRAM_STACK(2), PROGRAM_STACK(3), PROGRAM_STACK(4), PROGRAM_STACK(5),
+    PROGRAM_STACK(6), PROGRAM_STACK(7), PROGRAM_STACK(8), PROGRAM_STACK(9), PROGRAM_STACK(10),
+    PROGRAM_STACK(11), PROGRAM_STACK(12), PROGRAM_STACK(13), PROGRAM_STACK(14),
+    PROGRAM_STACK(15), SLOT(OS_SLOT_CONTROL_STACK)
+};
+const unsigned server_threads = TTY_N + 1;
+RX_STATIC_ASSERT(OS_CONTROL_N == 16, the_table_of_stacks);
 
 static const char msg_ctrl_break[] = "rx286: Ctrl+Break: the program starts again\n";
 static const char msg_interrupt[] = "rx286: Ctrl+Break: SIGINT\n";
@@ -433,7 +448,7 @@ static void control(void)
 }
 
 #ifdef TEST_OS_STACKS
-static rx_u8 started[TTY_N + 1];        /* the threads that have started (os_thread) */
+static rx_u8 started[TTY_N + 1];        /* the threads that have started (server_thread) */
 
 /* os_stacks_report - TEST_OS_STACKS builds: the deepest any of the server's
  * threads that have started has gone, said at a program's or a process's
@@ -444,7 +459,7 @@ void os_stacks_report(void)
     unsigned n, used, most = 0, deepest = 2;
 
     for (n = 2; n <= TTY_N; n++)
-        if (started[n] && (used = os_stack_used(n)) > most) {
+        if (started[n] && (used = server_stack_used(n)) > most) {
             most = used;
             deepest = n;
         }
@@ -507,7 +522,7 @@ static void serve(struct session *s)
             m_call(s, r.ax & 0xFF, &r);
             r.ax = KCALL_REPLY_RECV << 8;
         }
-        if (!os_stack_ok(s->n))
+        if (!server_stack_ok(s->n))
             overflowed(s->n, SLOT(OS_SLOT_SLEEP + s->n));
         r.dx = K_SLOT(s, OS_K_EP);
         r.bp = 0;
@@ -515,10 +530,10 @@ static void serve(struct session *s)
     }
 }
 
-/* os_thread - a thread's start (start.asm): serve its program for ever; the
- * control thread, which starts init first (os-server.md P6; not in TEST_CAPS
- * builds, whose program holds the memory); or serve a process */
-void os_thread(unsigned n)
+/* server_thread - a thread's start (rx/server.h): serve its program for
+ * ever; the control thread, which starts init first (os-server.md P6; not in
+ * TEST_CAPS builds, whose program holds the memory); or serve a process */
+void server_thread(unsigned n)
 {
     struct session s;
 

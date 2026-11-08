@@ -16,6 +16,9 @@
 #if defined(__WATCOMC__)
 #  define RX_COMPILER "watcom"
 #  define RX_16BIT 1
+#  if defined(__COMPACT__) || defined(__LARGE__)
+#    define RX_FAR_DATA 1               /* C's compact model: every data pointer far (M5) */
+#  endif
 #  define RX_FAR __far
 #  define RX_NORETURN __declspec(noreturn)
 #  define RX_INLINE __inline

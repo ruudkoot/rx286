@@ -60,23 +60,27 @@ programs below 1 MB, 32 KB, so that the kernel's arena keeps its room
    keys are for with `START_FOREGROUND`.
 4. **The OS server:** the module table; `/z`, the archive module's bytes
    (`MF_ARCHIVE`, for which the root builds nothing; *docs/processes.md*);
-   its control thread, on the last
-   part of its stack, with the control notification and the foreground
-   program's thread; a copy of the fault endpoint badged `ROOT_BADGE_OS`,
+   its control thread, on a stack segment of its own in its slot
+   `OS_SLOT_CONTROL_STACK`, with the control notification and the
+   foreground program's thread; a copy of the fault endpoint badged `ROOT_BADGE_OS`,
    for its requests; each driver's endpoint in the slot its service names,
    and the sound driver's notification badged `DRV_STOP_BIT`; and for each
    program, the program's capabilities in slots 8n to 8n + 5, a
    notification to sleep on in slot 128 + n, and a thread of its own that
-   serves that program alone (`START_SESSION`) on the n-th part of its
-   stack (*docs/os-server.md*).
+   serves that program alone (`START_SESSION`), on a stack segment of its
+   own in slot 8n + `OS_K_THREAD_STACK` (*docs/os-server.md*). Every stack
+   of a server's threads comes from a block of 32 KB the root keeps for
+   that server's stacks, from the memory for segments while it builds, from
+   the allocator after; a block is kept for good, as the threads are, and a
+   full one is followed by another (roadmap memory.md M6).
 
 A kernel call the root's building needs, refused, stops it with "rx286:
 the root could not build the system", as does an OS server that is not the
 image's second module (`tools/mkimage` refuses such an image too). What
 there is no room for is skipped instead: modules past `PROGRAMS_MAX`
 (`MODULE_MAX` - 1, as many as its slots hold) are not built, and a program
-whose part of the OS server's stack would lie past its end gets no thread
-there, nor the control thread its part.
+whose start in the OS server's stack segment would lie past its end gets
+no thread there, nor the control thread.
 
 ## Faults
 
@@ -84,7 +88,14 @@ A fault of the OS server, a driver, or a program when there is no OS
 server is a call on the fault endpoint, badged with the module's number.
 The root reports it as the kernel did ("rx286: os fault #GP(0000) at
 0006:0123"), copies back any of the module's first three slots it emptied,
-and replies with the module's entry, which restarts it there.
+and replies with the module's entry, which restarts it there. A fault of a
+server's own thread comes badged `SERVE_BADGE` with the server's module
+number, and the root's reply restarts it `SERVE_FAULT_AT` bytes past the
+entry, where the server's start calls its policy on a fresh stack (roadmap
+memory.md M6, D10's rule; *docs/os-server.md*, *Faults*). A server whose
+policy cannot go on asks `ROOT_PANIC`: the root says so ("rx286: root:
+thread 19 of os cannot go on: the system stops") and stops the system with
+its own fault.
 
 A fault of the root itself stops the system (os-server.md D8): the kernel
 reports "rx286 PANIC: the root faulted" with the fault's vector and
@@ -94,7 +105,9 @@ address. It has no fault endpoint, and nothing could build it again.
 
 On the same endpoint, badged `ROOT_BADGE_OS` (os.inc; roadmap os-server.md
 P4), `ROOT_LOAD` to `ROOT_UNTHREAD` and `ROOT_SERVE` make and end the
-processes the OS server runs; any other request is `E_INVAL`. (Until P14
+processes the OS server runs, and `ROOT_PANIC` stops the system; any other
+request is `E_INVAL`. `ROOT_SERVE` and `ROOT_PANIC` are a server's, any
+server's (memory.md M6): the OS server's, or `TEST_TWIN`'s test server's. (Until P14
 requests 1 to 3, `ROOT_INFO`, `ROOT_KILL` and `ROOT_START`, answered `ps`,
 `kill` and `start` of the programs the root built, a background program
 built of untyped of its own so that `kill` freed it all by a revoke: l4.md
@@ -126,11 +139,14 @@ names:
   code's count lowered, the code gone at none; with CX 1 kept, for an
   exec of the same file, whose `ROOT_SPAWN` runs it again (P12).
 - **`ROOT_SERVE`:** a thread of the server's own, at its entry with the SP
-  asked for, and its notification, which the server keeps: the server's
-  thread for each entry of its table of processes (*docs/processes.md*).
-  They come from the arena while it has room, and then from a block each
-  (P15): blocks of 1 KB kept for good, spread through the memory for
-  segments, left no 64 KB block for a process without extended memory.
+  asked for, its notification, which the server keeps, and its stack, of
+  the bytes asked for (memory.md M6), from the server's block of stacks:
+  the server's thread for each entry of its table of processes
+  (*docs/processes.md*), and the tty thread. The thread and the
+  notification come from the arena while it has room, and then from a
+  block each (P15): blocks of 1 KB kept for good, spread through the memory
+  for segments, left no 64 KB block for a process without extended memory.
+  Its faults are the root's, badged `SERVE_BADGE`.
 
 The memory is a buddy allocator's (`src/root/buddy.c`; D10), from the
 first request on: with extended memory, all the memory below 1 MB
@@ -165,5 +181,9 @@ untyped, its own space and its own thread (`tests/caps`, `tests/ipc`,
 `tests/revoke`); with `TEST_SERVICES`, in slot 14 the OS server's
 capability for the services, badged `ROOT_BADGE_TEST`, so that what they
 make for it goes to its own space (`tests/services`). `TEST_ROOT_FAULT` builds
-make the root fault once it has built everything (`tests/root`). `TEST_ROOT_REPORT` builds say how each module was found:
+make the root fault once it has built everything (`tests/root`).
+`TEST_TWIN` builds give the program the keys are for, a test server of
+two threads (`tests/programs/twin.c`), its first thread's stack in slot 10
+and in slot 14 the root's services, badged `ROOT_BADGE_TWIN`, for its
+`ROOT_SERVE` (`tests/memory/twin.test`; memory.md M6). `TEST_ROOT_REPORT` builds say how each module was found:
 where its code is, and sums of its code and its data (`tests/root`).

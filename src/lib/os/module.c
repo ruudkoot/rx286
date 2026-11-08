@@ -5,6 +5,11 @@
  * program. Such a program is no process: the OS server answers it a few of
  * the processes' calls, PX_WRITE, PX_READ (a key), PX_NANOSLEEP and PX_EXIT,
  * on its endpoint OS_EP (docs/syscalls.md). lib/posix is the processes'.
+ *
+ * A call's buffer is an offset in the program's data segment, where the
+ * server reads it (os.inc). In C's compact model (the far libraries,
+ * memory.md M5) a thread's stack may be a segment of its own: os_write
+ * refuses bytes outside the data segment, and os_key's word is static.
  * ============================================================================ */
 
 #include "rx/oscall.h"
@@ -35,21 +40,30 @@ int os_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, int *error)
     return (int)r.bx;
 }
 
-/* os_write - PX_WRITE of n bytes to the standard output */
+/* os_write - PX_WRITE of n bytes to the standard output (of the data
+ * segment: else -1) */
 int os_write(const void *bytes, unsigned n)
 {
     int error;
 
-    return os_px(PX_WRITE, 1, (rx_u16)n, (rx_u16)(unsigned)bytes, 0, &error);
+#ifdef RX_FAR_DATA
+    if (RX_SEG(bytes) != rx_ds())
+        return -1;
+#endif
+    return os_px(PX_WRITE, 1, (rx_u16)n, RX_OFF(bytes), 0, &error);
 }
 
 /* os_key - PX_READ of the next key, waited for */
 unsigned os_key(void)
 {
+#ifdef RX_FAR_DATA
+    static rx_u16 key;                  /* in the data segment */
+#else
     rx_u16 key;
+#endif
     int error;
 
-    while (os_px(PX_READ, 0, 2, 0, (rx_u16)(unsigned)&key, &error) != 2)
+    while (os_px(PX_READ, 0, 2, 0, RX_OFF(&key), &error) != 2)
         ;
     return key;
 }

@@ -76,7 +76,7 @@ DOSBox-X; none of their code is in the repository.
 | M3: every byte of extended memory to the root | done (2026-11-08) |
 | M4: the processes' memory from all of it, and the root's room | done (2026-11-08) |
 | M5: the libraries for far data | done (2026-11-08) |
-| M6: the OS server in the compact model | not started |
+| M6: the OS server in the compact model | done (2026-11-08): the faulted thread runs the policy itself |
 | M7: 48 processes | not started |
 | M8: the documents, a review, and the close | not started; os-server.md's *At the close* (P2, P3) put right on 2026-11-08 |
 ## The request
@@ -1431,6 +1431,46 @@ less, M a few, L a week.
   (`tests/programs`), built on the same parts and nothing of the OS server's, faults on its
   own stack's overflow and has its own policy called.
 - **Decisions:** D10, D11.
+- **Done** (2026-11-08). The server is built with `-mc -zu -zdp` on the far libraries, by
+  Watcom in every build, on a server's start (`src/lib/crt/server.asm`, `rx/server.h`):
+  each thread on a stack segment of its own, found in the server's table `server_stacks`,
+  filled with the guard at a first start, its number at its top (`server_self`); a lock
+  that records its holder (`server_lock_try`, `server_lock_give`, `server_lock_holder`).
+  `ROOT_SERVE` makes a stack too (BX its bytes, SI its slot), for any server, from blocks
+  the root keeps for that server's stacks; the root makes the sessions' and the control
+  thread's at boot. The server's code is 46,267 bytes (41,164 small, +12.4%) and its DGROUP
+  26,934 (56,170 small); `mkexe --dgroup-max` stops the build past 32 KB. On MAME, against
+  M5's small server: 2,000 getpids 3,520 ms (3,360: +4.8%), 2,000 writes 9,380 ms (9,060:
+  +3.5%), 50 forks, exits and waits 5,220 ms (5,460: 4.4% less), 23 children held in both
+  (E6's `rtt.c`, run apart). `tests/posix/overflow.test` (a thread overflows on purpose,
+  `TEST_OS_OVERFLOW`: #SS, the process ended, the next one in the entry served),
+  `overflow-locked.test` (with the lock held: the panic) and `tests/memory/twin.test` (a
+  test server of two threads, `tests/programs/twin.c`, its own policy called) pass on Bochs
+  and MAME. Not as planned:
+  - **the thread that faulted runs the policy itself.** The root replies to a server
+    thread's fault `SERVE_FAULT_AT` bytes past the server's entry, where the start calls the
+    server's `server_fault(n)` on a fresh stack, then `server_thread(n)`; the roadmap had
+    the root tell the control thread. A session's thread is also restarted at its entry by
+    `THREAD_RESTART` (a program's exit, Ctrl+Break), so a restart alone cannot say that a
+    fault came, and the second entry says it at no cost. The faults are badged
+    `SERVE_BADGE` with the server's number, not each thread's: the thread finds its number
+    from its SP at the second entry;
+  - **the lock's holder is a word beside the lock,** written by the routine that takes it
+    with no push between: an XCHG of the holder's number into the lock would overwrite the
+    holder's when it found the lock taken;
+  - **the stacks' blocks are of 32 KB,** a full one followed by another, not one of 64 KB:
+    29 threads today, 52 at 48 entries;
+  - **the panic is the root's own fault** (`ROOT_PANIC`, os.inc), the kernel having no call
+    for one: "rx286 PANIC: the root faulted" follows the server's and the root's lines;
+  - **DOSBox-X checks no stack segment's limit:** an overflow there writes past the segment
+    (the server's came out as a #GP elsewhere), so the three tests run on Bochs and MAME
+    (`docs/emulators.md`);
+  - **the far `os` library's calls:** a program's call names its buffer by an offset in its
+    data segment, so `os_write` refuses bytes outside it and `os_key`'s word is static
+    (`RX_FAR_DATA`, defined by `compiler.h` for the compact model); the twin copies its
+    lines into its data;
+  - **the twin's first thread is number 2:** the root starts a program with SP at its
+    stack's top (`stack=8`), so the thread `ROOT_SERVE` makes is number 1.
 
 ### M7. 48 processes (M)
 

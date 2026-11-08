@@ -13,6 +13,7 @@
 #include "build.h"
 #include "kcalls.h"
 #include "os.h"
+#include "rx/server.h"
 #include "drivers.h"
 #include "layout.h"
 
@@ -27,11 +28,11 @@
 #define OS_ROOT SLOT(OS_SLOT_ROOT)      /* the root's endpoint, for requests */
 #define OS_SERVICE(s) SLOT((OS_SLOT_SERVICE + (s)) & 0xFF)  /* a driver's endpoint */
 #define OS_SLOT_SLEEP 128               /* program n's thread's notification: + n */
-#define OS_PART 1024                    /* each thread's part of the stacks (start.asm) */
+#define OS_PART OS_THREAD_STACK         /* each thread's stack segment (os.inc; M6) */
 #define PROCS OS_PROCS                  /* the processes and threads at once (os.inc;
                                            proc.c; P6, P11, P15) */
 #define PROC_SLOT0 166                  /* process entry i's slots: PROC_SLOT0 + 6i on */
-#define PROC_SLOTS_EACH 6
+#define PROC_SLOTS_EACH 7
 #define PROC_N0 OS_PROC_N0              /* the server's thread for entry i: PROC_N0 + i */
 
 /* A program's slots of the server's: 8n + k (6 and 7 unused) */
@@ -62,9 +63,6 @@ rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:
  * does it lie within the segment's limit? (vfs.c) */
 int in_segment(rx_u16 data, rx_u16 at, rx_u16 n);
-/* os_thread - a thread's C, from start.asm: n its program's module number,
- * OS_CONTROL_N, or PROC_N0 and on for the processes */
-void os_thread(unsigned n);
 /* console - bytes of a segment of the server's (passed) to the console
  * driver: the main screen, or a background program's field of the status
  * line ending before a column; where's high byte a page (CON_MAIN) */
@@ -102,8 +100,9 @@ void proc_lend(int i, int on);
 #define OS_TIMER SLOT(OS_SLOT_TIMER)    /* the control notification, CONTROL_TIMER (P10) */
 #define TTY_N OS_TTY_N                  /* the tty thread's number (P11) */
 #define TTYS VIDEO_PAGES                /* the terminals: the EGA's pages, at most */
-#define TTY_THREAD SLOT(164)            /* its thread and notification (ROOT_SERVE) */
+#define TTY_THREAD SLOT(164)            /* its thread and notification (ROOT_SERVE), */
 #define TTY_NOTIFY SLOT(165)
+#define TTY_STACK SLOT(OS_SLOT_TTY_STACK)   /* and its stack */
 
 /* The terminals (tty.c; P11), a unit each, 0 to TTYS - 1. tty_keys - do the
  * processes have the keys? tty_terminals - how many terminals there are;
@@ -169,7 +168,8 @@ void lock_give(void);
 #define PK_SPACE 2                      /* space, */
 #define PK_DATA 3                       /* data segment, */
 #define PK_SERVER 4                     /* the server's thread for it, */
-#define PK_NOTIFY 5                     /* and that thread's notification */
+#define PK_NOTIFY 5                     /* and that thread's notification, */
+#define PK_STACK 6                      /* and its stack (memory.md M6) */
 #define PROC_NOTIFY(i) P_SLOT(i, PK_NOTIFY)
 #define PROC_PRIORITY 3                 /* the processes': today's programs' */
 #define PROC_DS 0x0F                    /* a process's data and its copy for the stack, */
@@ -254,10 +254,6 @@ void sig_step(int i);
 void sig_renice(int i);
 int sig_call(int i, struct rx_kregs *r, int *error);
 void sig_timers(void);
-/* os_stack_ok, os_stack_used - thread n's part of the stacks (start.asm):
- * is its guard there; the bytes it has used at most */
-int os_stack_ok(unsigned n);
-unsigned os_stack_used(unsigned n);
 /* os_stacks_report - TEST_OS_STACKS builds: the deepest thread's (os.c) */
 void os_stacks_report(void);
 
