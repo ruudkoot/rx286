@@ -13,7 +13,8 @@ and leaves the rest unused, and holds 25 processes at most. After it:
 - **the root's allocator carves the processes' memory from all of it**, as it needs, and has
   room for 48 processes;
 - **the OS server moves to Watcom's compact model**, a model with several data segments, as the
-  owner asked, with its stacks out of its data segment. gcc-ia16 keeps a small variant;
+  owner asked, with each thread's stack in a segment of its own, so that an overflow faults at
+  once and a rule confines it (D10, decided). gcc-ia16 keeps a small variant;
 - **DMA stays where it is,** anywhere in the AT's 16 MB, and a test says so;
 - **the suites run on every size the owner named** that an emulator can be: 512, 639 and
   640 KB of base memory; 0, 384 KB, 1, 3 and 15 MB of extended memory.
@@ -65,7 +66,8 @@ DOSBox-X; none of their code is in the repository.
 | | State |
 |---|---|
 | The survey and this roadmap | done (2026-11-08) |
-| D1-D13 | undecided |
+| D10 | decided (2026-11-08): B, a stack segment for each thread, with the fault rule |
+| D1-D9, D11-D13 | undecided |
 | M1: the masks of entries past entry 15 | not started |
 | M2: the boot information, and the base memory from the BIOS | not started |
 | M3: every byte of extended memory to the root | not started |
@@ -291,7 +293,7 @@ move (M5-M7).
 | `cap.asm`: `umem_size`, `ext_detect`, `boot_root` | 640 KB assumed; two pieces of extended memory | the BIOS's base memory; every byte of extended memory in pieces of 768 KB; the boot information in a slot of the root's (M2, M3) |
 | The root: `buddy.c`, `services.c` | the memory below 1 MB, carved at the first request | that, and the extended memory as reserves carved as needed; 1,024 slots (M4) |
 | The diskette driver and its buffer | above 1 MB already, unsaid | the same, and said by a test (M4) |
-| The OS server | small model, its stacks in DGROUP | compact model with its stacks apart, a small variant for gcc-ia16 (M6) |
+| The OS server | small model, its stacks in DGROUP | compact model, a stack segment for each thread, a fault in one confined (D10 B); a small variant for gcc-ia16 (M6) |
 | The process table and its limits | 25 entries; the root's 256 slots bind first | 48 entries (M7) |
 | `tools/run-test`, `rxlib.py` | one machine an emulator | a `memory:` line names the machine; `CAN` says who can be it (M2) |
 ## The experiments
@@ -702,8 +704,11 @@ does keeping a small variant beside the compact one cost?
   the root at boot (`ROOT_LOAD`, slot 152 of the server's), and `SIGS[i]` a far pointer.
 - **(b), (c) SS apart from DS with near data:** Watcom's `-ms -zu` and gcc-ia16's experimental
   option, compiled in E6.
-- **(d) Smaller stacks,** from the deepest that a server thread went in the POSIX and shell
-  suites (`tests/sh/stacks.test`'s report).
+- **(d) Smaller stacks,** from the deepest that a server thread went in `tests/sh/stacks.test`.
+  That test runs the deep calls P15 chose: a listing of a directory of two clusters, a file
+  read through the FAT, a `cd`, `ps`, and a fault reported. Signal delivery inside a fault,
+  exec with long arguments, renames and the random tests (`pxrand`, `fsrand`) were not
+  measured, so the figure is a floor, not the worst case.
 - **(e) An event loop with saved replies** (os-server.md D4 C), on paper.
 
 **Result.**
@@ -715,7 +720,7 @@ does keeping a small variant beside the compact one cost?
 | (a) | small, `sigs` apart | both | 1,114 B | about 39 | measured: DGROUP from 56,060 to 48,988 B, 519 B of code; 34 uses renamed, 10 pointers made far, 3 memsets a loop; `signal.test` passes |
 | (a), and `files_of` apart | small | both | 1,074 B | about 41 | 31 lines more (estimated) |
 | (b), (c) | small, `-zu` | either | 50 B and the tables | as E6 | 232 sites changed |
-| (d) | stacks of 768 B | both | 1,142 B | about 39 | the deepest was 466 B of 1,024 at 25 entries: 300 B to spare, a guard word the only check; at 48 entries `end()`'s arrays on the stack take up to 115 B more unless made static (E8) |
+| (d) | stacks of 768 B | both | 1,142 B | about 39 | the deepest in `stacks.test`'s calls was 466 B of 1,024 at 25 entries (other paths not measured): 300 B to spare at most, a guard word the only check; at 48 entries `end()`'s arrays on the stack take up to 115 B more unless made static (E8) |
 | (a) and (d) | | both | 858 B | about 51 | as both |
 | (a), `files_of` apart, and (d) | | both | 818 B | about 54 | as all three |
 | (e) | an event loop | both | the tables | hundreds | a new server: not this roadmap's |
@@ -886,14 +891,39 @@ extended memory, which is aligned (D9).
 The server in Watcom's compact model, `-mc -zu -zdp` (E6):
 - **every data pointer is far,** so the server reaches its tables, its stacks and other
   segments alike;
-- **its stacks leave DGROUP** for its stack segment, slot 2, which the root makes as large as
-  the parts need. The parts begin past the room of the root's start, SP = 4n, which is
-  `OS_STACK_SIZE` (`(OS_TTY_N + 1) * 4`, `os.inc`): 172 bytes today, 264 at 48 entries, so
-  the parts begin at 512 and `start.asm` stops the build if `OS_STACK_SIZE` outgrows that
-  (E8: the prototype's fixed 256 would put the tty thread's start inside the first part at
-  48 entries). `ROOT_SERVE` checks the SP against the segment, as the root's
-  `serve_program` does. DGROUP then holds the tables alone: 26.5 KB today, about 35 KB at
-  48 entries;
+- **its stacks leave DGROUP, each server thread's for a segment of its own** (D10 B, decided):
+  - **1 KB each,** as today. The root carves them from one block kept for the server's
+    stacks (a block of 64 KB holds 64), so that they do not scatter 1 KB blocks, kept for good,
+    through the memory for segments (P15's concern for the server's threads). It moves each
+    into the server's space rather than copying it, so that the root keeps no slot for it;
+  - **in a seventh slot an entry** (`PK_STACK`): all six of today's are in use
+    (`src/os/server.h`). The four threads that serve no entry (the two sessions', the control
+    thread, the tty thread) take four of the server's free slots 152-160;
+  - **the root's start stays as today:** SP = 4n in the server's stack segment, slot 2, which
+    is only that start's room, `OS_STACK_SIZE` (`(OS_TTY_N + 1) * 4`, `os.inc`): 172 bytes
+    today, 264 at 48 entries. The module's `stack=` comes from `os.inc` (E8), and
+    `ROOT_SERVE` checks the SP against the segment, as the root's `serve_program` does.
+    `start.asm` then loads SS with the thread's own stack;
+  - **an overflow faults at once,** #SS at the segment's limit, before it writes anything that
+    is not its own; `os_stack_ok` and `os_stack_used` read the guard word through the thread's
+    own selector.
+
+  DGROUP then holds the tables alone: 26.5 KB today, about 35 KB at 48 entries;
+- **the fault rule** (D10, decided with B). Today a server thread that faults goes to the root,
+  which reports the fault and starts the thread again at its entry (`src/root/root.c`). That is
+  not safe: the thread may hold the server's one lock with its tables half-changed, and the
+  call of the process it served is lost, so that process waits for ever. Instead:
+  - **the root knows which thread faulted:** each server thread's faults are badged with its
+    number (today they all carry the server's module number), and the root tells the
+    server's control thread, which did not fault;
+  - **the lock records its holder:** `lock_take` writes the thread's number, not 1
+    (`src/os/proc.c`);
+  - **if the faulted thread did not hold the lock,** the process it served is ended as a kill
+    would end it, with a line on the log ("rx286: os: thread N faulted (#SS) serving process
+    P: it is ended"), and the thread starts again at its entry, with a fresh stack, for the
+    next process in that entry;
+  - **if it held the lock,** or it is one of the four threads that serve no entry, the system
+    stops with a panic that names the thread, since the tables can no longer be trusted;
 - **DS stays pegged to DGROUP** (`-zdp`), so the code needs no segment relocations;
 - **the C changes work in both models:** `RX_SEG(p)` and `RX_OFF(p)` for a buffer passed by
   selector and offset; no pointers in initialised data (or `tools/mkexe` resolves them);
@@ -906,16 +936,17 @@ The server in Watcom's compact model, `-mc -zu -zdp` (E6):
 
 ### More processes (M7; D12)
 
-48 entries. With the changes below, the next limit is the server's 512 slots, at 57 entries
-(D12):
+48 entries. With the changes below, the next limit is the server's 512 slots: at 49 entries,
+now that D10 B takes a seventh slot an entry, or at 120 with the server's space at 1,024
+slots (D12):
 
 | Limit | Today | At 48 |
 |---|---|---|
 | The OS server's table (`OS_PROCS`, `CHILD_MAX`) | 25 | 48 |
 | A badge's entry (`badge_new`, `src/os/proc.c`) | 5 bits | 6 bits; 9 for the count of images (P15) |
 | The terminals' readers (`tty.c`) and the tones waited for (`toning`, `dev.c`) | 16-bit masks (X2; M1 makes them byte arrays) | byte arrays |
-| The server's stack segment | 256 B (stacks in DGROUP) | 512 + 52 parts of 1 KB: 53,760 B |
-| The server's slots (166 + 6 an entry) | 316 of 512 | 454 of 512 |
+| The server's stacks | 29 parts of 1 KB in DGROUP | 52 segments of 1 KB from one block of 64 KB (D10 B); slot 2 the starts' room, 264 B |
+| The server's slots (166 + 6 an entry today, 7 with D10 B) | 316 of 512 | 502 of 512, or of 1,024 (D12) |
 | The root's table (`PROCS_MAX`) | 32 | 64 |
 | The root's codes (`CODES_MAX`, `services.c`: a code for each process and the server's loads) | 32 | 64 (E8) |
 | `end()`'s arrays on a server thread's stack (`src/os/proc.c`: 5 bytes an entry) | 130 B | 245 B: made static, it runs with the lock held (E8) |
@@ -925,8 +956,8 @@ The server in Watcom's compact model, `-mc -zu -zdp` (E6):
 | The kernel's spaces (`SPACE_MAX`) | 128 | 128: 48 and about 15 |
 | The kernel's descriptors (`OBJ_MAX`) | 1,013 | 1,013: about 6 an entry is 300 |
 
-Past 57, the server's space needs 1,024 slots, and past about 59 its stacks a second segment,
-or a segment each: *Later*.
+Past 49, the server's space needs 1,024 slots (D12); its stacks, each a segment of its own,
+need nothing more.
 
 ### The test machines (M2; D13)
 
@@ -976,23 +1007,23 @@ half of MAME's share, and test the top of MAME's memory no longer.
 
 ## Decisions
 
-All undecided, each with a recommendation.
+D10 is decided (2026-11-08); the others are undecided, each with a recommendation.
 
-| | Decision | Recommended |
-|---|---|---|
-| D1 | How the loader finds the memory | A: the BIOS (INT 12h; INT 15h AH=88h with CF cleared; the CMOS if 88h fails) |
-| D2 | Where the boot information lives | A: at 600h, copied by the kernel, read-only to the root |
-| D3 | The EBDA | A: left alone, as INT 12h says |
-| D4 | The least machine | A: a check at the start against `UMEM_LEAST` |
-| D5 | How the kernel hands over more than 1 MB | A: a run of untypeds of 768 KB |
-| D6 | The kernel objects' share | B: a small arena at the top |
-| D7 | When the buddy allocator carves | B: as it needs |
-| D8 | The root's room | A: 1,024 slots and 320 records |
-| D9 | How a DMA buffer keeps to its page | A: as today, checked and retried, and tested |
-| D10 | The OS server's data model | A: Watcom's compact model, `-zu -zdp`, its stacks in its stack segment |
-| D11 | The small variant | A: kept, for gcc-ia16, with its own CHILD_MAX |
-| D12 | How many processes | A: 48 |
-| D13 | The suites' machines | A: Bochs at 16 MB, and a memory suite on every machine each emulator can be |
+| | Decision | Recommended | Decided |
+|---|---|---|---|
+| D1 | How the loader finds the memory | A: the BIOS (INT 12h; INT 15h AH=88h with CF cleared; the CMOS if 88h fails) | undecided |
+| D2 | Where the boot information lives | A: at 600h, copied by the kernel, read-only to the root | undecided |
+| D3 | The EBDA | A: left alone, as INT 12h says | undecided |
+| D4 | The least machine | A: a check at the start against `UMEM_LEAST` | undecided |
+| D5 | How the kernel hands over more than 1 MB | A: a run of untypeds of 768 KB | undecided |
+| D6 | The kernel objects' share | B: a small arena at the top | undecided |
+| D7 | When the buddy allocator carves | B: as it needs | undecided |
+| D8 | The root's room | A: 1,024 slots and 320 records | undecided |
+| D9 | How a DMA buffer keeps to its page | A: as today, checked and retried, and tested | undecided |
+| D10 | The OS server's data model | A: Watcom's compact model, `-zu -zdp`, its stacks in its stack segment | B, with the fault rule (2026-11-08) |
+| D11 | The small variant | A: kept, for gcc-ia16, with its own CHILD_MAX | undecided |
+| D12 | How many processes | A: 48, with the server's space at 1,024 slots | undecided |
+| D13 | The suites' machines | A: Bochs at 16 MB, and a memory suite on every machine each emulator can be | undecided |
 
 ### D1. How the loader finds the memory
 
@@ -1092,21 +1123,27 @@ needs today.
 
 ### D10. The OS server's data model
 
+**Decided: B, with the fault rule** (2026-11-08), not A as recommended. The owner: "for d10
+i decide B with the rule". The rule is *The OS server's data*'s: a server thread's fault ends
+the process it served and restarts the thread, unless the thread held the server's lock, or
+serves no entry, when the system stops with a panic.
+
 - **A. Watcom's compact model, `-mc -zu -zdp`,** its stacks in its stack segment, one segment
   for all of them (E6): DGROUP from 56 KB to 26.5 KB, 11.6% more code, 2-3% more time a call;
   about 59 entries at most.
 - **B. As A, with a stack segment for each thread:** an overflow faults at its segment's
   limit instead of running into a neighbour; a slot and a descriptor more each; no ceiling
-  but the server's slots.
+  but the server's slots. It needs a rule for the fault: today's restart of the thread is not
+  safe while it may hold the server's lock.
 - **C. The small model, with its largest tables in segments of their own** (E7 a): both
   compilers, about 60 lines, about 40 entries.
 - **D. The large model:** far code too, about 2% more code than compact with the same options
   (`-ml -zu -zdp` not built), for code that fits in 64 KB: no gain.
 - **E. An event loop with saved replies** (os-server.md D4 C): no stack an entry, a new server.
 
-**Recommended: A,** the owner's model with several data segments, at a measured cost. B when a
-stack overflow is seen, or past 59 entries. C is the alternative if gcc-ia16 must stay the
-server's equal.
+**Recommended (before the decision): A,** the owner's model with several data segments, at a
+measured cost; B when a stack overflow is seen, or past 59 entries. C is the alternative if
+gcc-ia16 must stay the server's equal.
 
 ### D11. The small variant
 
@@ -1122,13 +1159,15 @@ the small variant itself (E7).
 
 ### D12. How many processes
 
-- **A. 48:** with the changes of *More processes*, the next limit is the server's 512 slots, at
-  57 entries; 48 leaves nine of margin.
+- **A. 48:** with the changes of *More processes*, the next limit is the server's 512 slots. With
+  D10 B, decided, an entry takes a seventh slot, for its stack: the limit is then 49 entries,
+  and 48 leaves one; with the server's space at 1,024 slots (32 KB, from the memory for
+  segments, as today's 512) it is 120.
 - **B. 31,** the badge's and the small model's: needs the root's room (D8) and no new model.
-- **C. 57,** the server's slots' most, with no margin; or **64**, which needs the server's
-  space at 1,024 slots as well.
+- **C. 64,** with the server's space at 1,024 slots, which D10 B needs past 49 anyway.
 
-**Recommended: A.** 48 processes of 64 KB use 3 MB, which today's machines have. B is the
+**Recommended: A, with the server's space at 1,024 slots in M7** for the margin that D10 B
+takes. 48 processes of 64 KB use 3 MB, which today's machines have. B is the
 cheaper way if room for processes is all that is wanted: it needs the root's room (D8) and no
 new model at all, so D10 would be for the model's own sake.
 
@@ -1223,23 +1262,29 @@ less, M a few, L a week.
 ### M6. The OS server in the compact model (M)
 
 - **What:** the server built with `-mc -zu -zdp` (D10) in the release, debug and test builds;
-  its stacks in its stack segment (`start.asm`, the module's `stack=`), DGROUP its tables'
-  alone; the small variant for `make check-ia16` (D11); `docs/c.md` (the models, `-zdp`, the
-  far libraries), `docs/os-server.md`.
+  a stack segment for each of its threads, from one block of the root's, in a seventh slot an
+  entry (`start.asm`, `ROOT_SERVE`, `src/os/server.h`), DGROUP its tables' alone; the fault
+  rule (D10): each server thread's faults badged with its number, the lock recording its
+  holder, the root telling the control thread, which ends the process or stops the system;
+  the small variant for `make check-ia16` (D11); `docs/c.md` (the models, `-zdp`, the far
+  libraries), `docs/os-server.md` (the stacks, the rule).
 - **Done when:** every suite passes with the compact server on all three emulators, and
   `make check-ia16` with the small one; the server's DGROUP is under 28 KB; `rtt.test` on MAME
-  costs at most 5% more than today's.
+  costs at most 5% more than today's; a test build that overflows a server thread's stack on
+  purpose ends the process it served and serves the next one in that entry, and one that
+  does so while the thread holds the lock stops with the panic.
 - **Decisions:** D10, D11.
 
 ### M7. 48 processes (M)
 
 - **What:** the limits of *More processes*: `OS_PROCS` and `CHILD_MAX` 48 in the compact build
   and 31 in the small one; a badge's entry in 6 bits; `PROCS_MAX` 64 and `CODES_MAX` 64;
-  `end()`'s arrays of entries static, off the server's stacks; the server's stack
-  segment for 52 parts from offset 512 (`OS_PARTS_AT`, past `OS_STACK_SIZE`), the module's
-  `stack=` derived from `os.inc`, and `ROOT_SERVE` checking the SP. A check in the build finds
-  every table, mask and bit field sized by the entries (`tools/lint`: a shift by an entry's
-  index into anything narrower than `PROCS` bits, X3), and a check that each DGROUP fits
+  `end()`'s arrays of entries static, off the server's stacks; a stack segment for each of 52
+  threads (M6), the server's stack segment the starts' room (`OS_STACK_SIZE`), the module's
+  `stack=` derived from `os.inc`, and `ROOT_SERVE` checking the SP; the server's space at
+  1,024 slots (D12). A check in the build finds every table, mask and bit field sized by the
+  entries (`tools/lint`: a shift by an entry's index into anything narrower than `PROCS`
+  bits, X3), and a check that each DGROUP fits
   (gcc-ia16's small one has about 800 bytes left at 31 entries, E8). Tests that count
   processes read CHILD_MAX: `proc.test`'s fork bomb says "23 children" today, and its server
   threads past the arena come from 1 KB blocks of the 128 KB a machine without extended memory
@@ -1268,8 +1313,7 @@ Each needs a roadmap of its own:
   adapter and its memory, the drives' geometry (INT 13h AH=08h), the serial and parallel ports
   (BDA 40:00h-40:0Fh), the 287, so that the root starts the right drivers (the draft's
   "future roadmap").
-- **Past 48 processes:** the server's space at 1,024 slots, a stack segment for each thread
-  (D10 B), the kernel's pools.
+- **Past 120 processes:** the server's space past 1,024 slots, and the kernel's pools.
 - **Programs in larger models:** today's processes are small; a program of more than 64 KB of
   data needs the compact or large model, and fork and brk then copy and grow several segments.
 - **The owner's disk scheduler** (its draft): "it should be able to use all unallocated memory
@@ -1291,8 +1335,10 @@ Each needs a roadmap of its own:
 - **The root's slots and records** were measured with 16 to 29 children of one program; other
   workloads split blocks otherwise. M4's numbers are a floor: `rtt.test` and `many.test` say
   when they no longer hold.
-- **One stack segment for every server thread** keeps today's weakness: an overflow runs into
-  the neighbour's part, caught only by the guard word after the message (D10 B removes it).
+- **The fault rule trusts the lock's holder** (D10): a fault with the lock free but a table
+  changed outside it would end only the process. The server changes its tables under the lock
+  (os-server.md D4's rule), and M6's test checks both cases; a table changed without the lock
+  is a bug the rule does not catch.
 - **The compact model's far pointers** make a stray pointer reach any segment the server has a
   selector for, where a near one reached DGROUP only. The selectors are the same; the reach of a
   bug is larger.
