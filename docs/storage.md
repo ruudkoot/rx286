@@ -2,10 +2,9 @@
 
 The AT's four drives and two printer ports, as rx286 drives them
 (`roadmaps/storage.md`). Drivers in ring 1 drive them (*docs/drivers.md*;
-roadmap l4.md L7, L9). The program sees them through system calls
-(*docs/syscalls.md*): the disks a sector at a time, or as files in DOS's
-way, which the OS server keeps (roadmap l4.md L9); the shell's drive
-letters, directories and files are those (*docs/shell.md*).
+roadmap l4.md L7, L9). A process sees the drives' files as `/a` to `/d`,
+which the OS server keeps (*docs/processes.md*), and so does the shell
+(*docs/shell.md*); it prints through `/dev/lpt1` and `/dev/lpt2`.
 
 ## The drives
 
@@ -26,15 +25,14 @@ controllers' terms as the BIOS's callers do: sector *n* mod sectors a track,
 plus 1; head (*n* / sectors a track) mod heads; cylinder *n* / (sectors a
 track × heads).
 
-## The calls
+## The disks' sectors
 
-`SYS_DISK_READ` and `SYS_DISK_WRITE` move one sector between the program's
-buffer and the disk. The OS server checks the drive, the sector and the
-buffer, as the kernel did, and calls the drive's driver: the diskettes'
-for A and B, the fixed disks' for C and D, passing it the program's
-transfer segment, where the sector is. `SYS_PRINT` sends bytes to a
-printer. All three are synchronous, and every wait inside them has a
-limit:
+The OS server reads and writes the drives a sector at a time, through its
+cache of 32 sectors (*docs/processes.md*, *Files*): it asks the drive's
+driver, the diskettes' for A and B, the fixed disks' for C and D, passing
+the cache's segment, where the sector is; the printers it asks for a
+process's writes to `/dev/lpt1` and `/dev/lpt2`. Every call is synchronous,
+and every wait inside a driver has a limit:
 
 | Wait | Limit | Source |
 |---|---|---|
@@ -46,32 +44,25 @@ limit:
 
 A driver waits on its notification (`src/drivers/dwait.asm`): for its
 interrupt, or for the kernel's one-tick timer, after which it looks at the
-time again; meanwhile every other thread runs. A Ctrl+Break during a call
-restarts the program at once; the driver finishes the sector, and its
-reply finds no one waiting. Ctrl+Alt+Del does not wait.
+time again; meanwhile every other thread runs. Ctrl+Alt+Del does not wait.
+Until roadmap os-server.md P14 a program read and wrote any sector itself
+(`SYS_DISK_READ`, `SYS_DISK_WRITE`) and printed (`SYS_PRINT`) through a
+transfer segment; `tests/posix/drives.test` now writes a file on each
+drive and finds it on the host's image.
 
 ## The files
 
-The file calls (`SYS_FIND` to `SYS_FREE`, *docs/syscalls.md*) are the OS
-server's (`src/os/files.asm`), on the FAT12 library that was the shell's
-(`src/os/fat.asm`; storage roadmap D7). As DOS does, the server keeps each
-program's current drive and each drive's current directory. Each call
-mounts its drive afresh: on a fixed disk, the master boot record's first
-FAT12 partition; then the volume's boot sector, whose BPB says where the
-FATs, the root directory and the clusters lie. `SYS_FIND` follows a path
-to what it names, and `SYS_DIR_NEXT` or `SYS_FILE_NEXT` then read that
-directory's entries or that file's sectors. Every cluster number is checked
-against the volume and every chain against looping, so a damaged disk
-gives `E_BROKEN`, never a hang. Nothing is written.
-
-A program's file state is in a files segment of its own (`FILES_SIZE`
-bytes), which the root makes for each program and gives only to the OS
-server: the current directories, the library's variables and its buffers,
-a sector for directories and files and two for the FAT. The thread that
-serves a program works in that segment alone, so no program's file calls
-wait for another's or disturb them, and a restart leaves nothing held. The
-disk drivers read straight into the segment, which the server passes with
-each call.
+The processes' files are the OS server's (`src/os/vol.c`, `vfs.c`,
+`cache.c`; roadmap os-server.md P7; *docs/processes.md*): FAT12 volumes,
+read and written. A fixed disk's volume is its master boot record's first
+FAT12 partition; a volume's boot sector, whose BPB says where the FATs,
+the root directory and the clusters lie, is read when its drive is first
+used. Every cluster number is checked against the volume and every chain
+against looping, so a damaged disk gives `EIO` (`E_BROKEN`), never a hang
+(`tests/sh/damaged.test`). Until P14 a program's DOS-like file calls
+(`SYS_FIND` to `SYS_FREE`) read the drives too, with the FAT12 library
+that was the shell's in assembly, each program's state in a files segment
+of its own.
 
 ## The diskette drives
 
@@ -107,12 +98,13 @@ before each wait for a call. The diskette change line is not read.
 ## The fixed disks
 
 The task file of IBM's adapter at 1F0h-1F7h, IRQ14, programmed I/O,
-driven by the fixed disk driver (`src/drivers/fixeddisk.asm`). Before a
-drive's first transfer, and after any failure, the driver resets the
-controller, tells it the drive's heads and sectors
-a track (Set Parameters) and sends the heads to cylinder 0 (Restore), as
-the BIOS does at start: a reset leaves the step rate at 7.5 ms, and Restore
-sets the one the controller's implied seeks use. Then, for each sector:
+driven by the fixed disk driver (`src/drivers/fixeddisk.asm`). Before the
+first transfer, and after any failure, the driver resets the controller;
+before a drive's first transfer it tells the controller the drive's heads
+and sectors a track (Set Parameters) and sends the heads to cylinder 0
+(Restore), as the BIOS does at start (a reset for the second drive would
+undo the first's set-up): a reset leaves the step rate at 7.5 ms, and
+Restore sets the one the controller's implied seeks use. Then, for each sector:
 the precompensation cylinder / 4, a count of 1, the sector, cylinder and
 head, and Read Sectors or Write Sectors with retries. A read interrupts
 when the sector is in the controller's buffer, and the driver reads its
@@ -137,5 +129,7 @@ never stay busy.
 `make disks` builds drives B, C and D in `build/disks/` with `tools/mkdisks`,
 the same bytes each time; `disks/README.md` lists the files. C and D each
 have a master boot record and one FAT12 partition from sector 17 (cylinder
-0, head 1), as FDISK lays them out. `make run` uses these images, and the
-shell may write to them; the tests use copies.
+0, head 1), as FDISK lays them out. `make run` uses copies of these images
+(`build/run-disks/`), puts the shell's commands in C's `/BIN`, and the
+shell may write to them; each test uses copies of its own, so that what one
+session or test wrote never reaches another.

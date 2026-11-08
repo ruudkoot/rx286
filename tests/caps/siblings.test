@@ -1,0 +1,25 @@
+# A long list of siblings (roadmap os-server.md P15, the kernel's review,
+# finding 13): an endpoint copied into every slot of twelve spaces of 256;
+# six of the spaces deleted - each slot's delete takes one copy out of the
+# endpoint's ring of 3,072, at once - then the endpoint, its other 1,536
+# copies put in its place in its untyped's ring at once (P15).
+# Interrupts are off longest in a space's retype (call 09: its 8 KB zeroed
+# at once), never in a delete or a revoke, and never for half a tick
+# (before: a delete walked its older siblings, and an adoption all the
+# children, in one stretch: 21.7 ms, once the measure could tell, P15).
+# tests/programs/additions.asm, TEST_ADD_SIBLINGS; on Bochs, whose timing
+# the measure needs.
+program: additions
+define: TEST_CAPS
+define: TEST_ADD_SIBLINGS
+define: TEST_STRETCH
+emulators: bochs
+match: contains
+timeout: 180
+---
+additions: copies made (3072): 3072
+additions: half the spaces deleted with them (0): 0
+additions: the endpoint deleted (0): 0
+additions: done
+rx286: interrupts off at most {...} us, at vector 31, call 09
+rx286: interrupts never off for 10 ms

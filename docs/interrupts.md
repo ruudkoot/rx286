@@ -69,7 +69,13 @@ What happens next depends on who was running (the frame's CS):
   single-step trap (on a 286 the program's pending trap arrives at the first
   instruction of a fault's handler, Intel 9.7.1: dropped), and vector 9, the
   287 overrunning a segment after the CPU moved on (Intel 9.6.3: the program
-  is restarted on its way back, like IRQ13).
+  is restarted on its way back).
+- **IRQ13, the 287's error,** is its owner's, whichever thread runs (Intel
+  11.4). An owner with a fault endpoint, a process or a program the root
+  builds, has it as its fault #MF (vector 16, which the AT never raises
+  itself) on its way back to its ring, at the IP it has then; the OS server
+  makes it `SIGFPE` for a process (os-server.md P12). Another is
+  restarted.
 - **The way back checks the segments** (roadmap l4.md L1, X3). Before the
   POPs and the `IRET` load them, the kernel checks each of the frame's
   segment registers for its own use (`way_back_check`), since the
@@ -135,27 +141,30 @@ every other line.
 All gates but the double fault's are interrupt gates, so the kernel runs with
 IF clear and nothing interleaves with a half-done change. Since the devices
 left it (roadmap l4.md L7-L10), no kernel path waits for one, and it sets IF
-in three places only, each where its state is whole (the `KWINDOW` macro,
+in four places only, each where its state is whole (the `KWINDOW` macro,
 but for the idle loop):
 
 - **The log's bytes** (`KCALL_LOG`, *docs/kernel-calls.md*), after each
   one: `sti; nop; cli`. `STI` takes effect after the next instruction, so
   `sti; cli` would open nothing. Without the window, a line of 4,096 bytes
   would keep IF clear for a third of a second at the log's 115,200 baud.
-  Before it writes a byte, a thread waits its turn at the log (`kwait`),
-  so that lines never mix.
-- **A revocation's passes** (`KCALL_REVOKE`, and the objects a delete
-  takes with it: `revoke.asm`), after each search for a child and after
-  each capability deleted. The
-  revocation's place is kept in the thread's control block, so another
-  thread's revocation may run meanwhile; one whose thread is to restart
-  stops there (roadmap l4.md L13).
-- **The idle loop**: with no thread ready, the kernel halts on its own
-  stack (`sti; hlt; cli`).
+  Before it writes a byte, a thread waits its turn at the log
+  (`call_enter`), so that lines never mix.
+- **A revocation** (`KCALL_REVOKE`, and the slots of a space a delete
+  kills: `revoke.asm`), after each capability deleted. The revocation's
+  place is kept in the thread's control block, so another thread's
+  revocation may run meanwhile; one whose thread is to restart stops there
+  (roadmap l4.md L13).
+- **A retype's zeroing** (`KCALL_RETYPE` of a segment over 2 KB), after
+  each 2 KB (roadmap os-server.md P2).
+- **The idle loop**: with no thread ready, the kernel halts on its stack
+  (`sti; hlt; cli`).
 
-After a window of the log or of a revocation, a thread more urgent than
-the running one may run (`kpreempt`): the running thread's kernel context
-waits on its own kernel stack. Everything else - IPC, the other calls on
+After a window, a thread more urgent than the running one may run
+(`kpreempt`): the running thread's call gives way and resumes when it runs
+again, from its progress in its control block (roadmap os-server.md P3).
+`TEST_GIVE_WAY` makes every window give way, so `tests/caps/resume.test`
+resumes each such call. Everything else - IPC, the other calls on
 capabilities, the timer's tick - runs to its end with interrupts off. The
 drivers run with interrupts on, in ring 1, and a wait that polls sleeps a
 tick after each burst of reads (`dw_poll`); only the sound driver turns
@@ -165,18 +174,26 @@ of a tick, so no tick is lost.
 **How long.** Test builds made with `TEST_STRETCH` measure every stretch
 with interrupts off, with timer channel 0's latched count, from the
 kernel's entry or a window's end to the next window or `IRET`, and say at
-the end of a test how long the longest was and where
+the end of a test how long the longest was and where. In these builds
+channel 0 is a rate generator (mode 2, at the same 50 Hz), whose count
+falls by one a clock and wraps once a period, and a tick pending in the
+master PIC's IRR says a whole period passed: a stretch is measured to two
+periods, 40 ms, and longer ones as at least that (os-server.md P15; mode
+3's count, falling by two and wrapping twice a period, hid every stretch
+past 10 ms)
 (`tests/kernel/stretch.test`, `stretch-kill.test`; roadmaps/realtime.md
 R0). On MAME's AT, which runs at an AT's speed: 4.5 ms at most in a test
 build, most of it a trace line on the log, written whole; 3.5 ms without
-the log's bytes, which a release build does not have. A kill is the longest
-work: 6.5 ms, one pass of its revocation over every slot of every space,
-which a window ends.
+the log's bytes, which a release build does not have. A kill was the
+longest work, 6.5 ms, while its revocation looked through every slot of
+every space for each child; it follows each capability's ring of children
+now (roadmap os-server.md D9), and stays under 3.6 ms, as does a 64 KB
+retype, zeroed 2 KB at a time, with 40 spaces more (`tests/caps/pools.test`).
 
-An IRQ at either point nests once on the running thread's kernel stack
-(or the kernel's own, when it idles): handlers run with IF clear and never
-wait. After every IRQ, a thread waiting its turn at the log is made ready
-to look again (`wake_waiters`).
+An IRQ at either point nests once on the kernel's stack: handlers run with IF clear and never
+wait. After every tick, and every IRQ that is not a driver's, a thread waiting
+its turn at the log is made ready to look again (`wake_waiters`): within
+a tick of the log's end.
 
 A restart that arrives while a thread is inside the kernel - the OS
 server's `THREAD_RESTART` for Ctrl+Break or an exit, which takes the OS

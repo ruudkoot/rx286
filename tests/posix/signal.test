@@ -1,0 +1,37 @@
+# Signals (roadmap os-server.md P10): init starts tests/posix/signal.c
+# (TEST_POSIX_SIGNAL), whose handlers run in a busy loop, in a blocked read
+# (EINTR; and made again, SA_RESTART), in a sleep, nested, after being
+# blocked and pending, for sigsuspend, pause and alarm; faults reach
+# handlers; SIG_IGN, SIGCHLD, SIGTERM's and SIGKILL's default actions; and
+# a frame its handler spoilt ends its process with SIGSEGV.
+program: idle
+define: TEST_POSIX_SIGNAL
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 240
+emulators: bochs mame
+---
+signal: a handler in a busy loop (3): exit 3
+signal: a read broken off, EINTR (4): exit 4
+signal: a read made again, SA_RESTART (5): exit 5
+signal: a sleep broken off, the seconds left (6): exit 6
+signal: nested (12/): 12/
+signal: blocked: ran 0, pending 1 (0 1)
+signal: unblocked: ran 1 (1)
+signal: sigsuspend: -1, EINTR 1, ran 1 (-1 1 1)
+signal: its child (0): exit 0
+signal: pause: -1, EINTR 1, SIGALRM 1 (-1 1 1)
+signal: alarm: 5 seconds left (5): 5
+signal: nanosleep: 5 ticks or more (1): 1
+signal: SIGUSR2 ignored: alive
+signal: a child for SIGCHLD (0): exit 0
+signal: SIGCHLD (1): 1
+signal: #UD to its handler (SIGILL 4): exit 4
+signal: #GP to its handler (SIGSEGV 11): exit 11
+signal: #DE to its handler (SIGFPE 8): exit 8
+signal: SIGTERM's default action (15): signal 15
+signal: SIGKILL, never caught (9): signal 9
+signal: a spoilt frame (SIGSEGV 11): signal 11
+signal: IOPL and NT asked for: IOPL 0 (0), NT 1
+signal: its own IRET with NT (SIGSEGV 11): signal 11
+signal: done

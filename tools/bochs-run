@@ -7,8 +7,10 @@
 #   --mode debugger   load the symbols and stop at the kernel's entry
 # The log (COM2) is <build>/com2.log, Bochs' log <build>/bochs.log and the
 # debugger's <build>/debugger.log; what LPT1 and LPT2 print goes to
-# <build>/lpt1.txt and <build>/lpt2.txt. Drives B, C and D are build/disks/
-# (make disks), which the shell may write to. The window is Bochs' X11
+# <build>/lpt1.txt and <build>/lpt2.txt. Drives B, C and D are
+# build/run-disks/, copies of build/disks/ (make disks) the Makefile makes,
+# which the shell may write to; the tests copy build/disks/, which only
+# tools/mkdisks writes. The window is Bochs' X11
 # display if the package bochs-x is installed, else SDL2 (bochs-sdl), else
 # wx (bochs-wx).
 # ============================================================================
@@ -25,8 +27,8 @@ import rxlib
 def clear_stale_locks():
     """Bochs locks its disk images with <image>.lock and leaves the lock
     behind when it is stopped with Ctrl-C; with no Bochs running (Debian's
-    is bochs-bin behind a script, others bochs), every lock in build/disks is
-    stale."""
+    is bochs-bin behind a script, others bochs), every lock in
+    build/run-disks is stale."""
     for pid in os.listdir('/proc'):
         try:
             with open('/proc/%s/comm' % pid) as f:
@@ -34,7 +36,7 @@ def clear_stale_locks():
                     return
         except (OSError, ValueError):
             continue
-    for lock in glob.glob(os.path.join(rxlib.DISKS, '*.lock')):
+    for lock in glob.glob(os.path.join(rxlib.RUN_DISKS, '*.lock')):
         os.remove(lock)
 
 
@@ -55,7 +57,7 @@ def main():
                         log=os.path.join(build, 'bochs.log'),
                         display=rxlib.window_display(),
                         debugger_log=os.path.join(build, 'debugger.log'),
-                        magic=(args.mode == 'debugger'),
+                        magic=(args.mode == 'debugger'), disks=rxlib.RUN_DISKS,
                         printers=(os.path.join(build, 'lpt1.txt'),
                                   os.path.join(build, 'lpt2.txt')))
     rc = bochsrc + '.rc'

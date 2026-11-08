@@ -1,0 +1,18 @@
+# A packet's first byte lost (roadmap os-server.md P15, the review of the
+# drivers): its second and third come alone, the second 28h, '(' - which
+# began a Plug and Play identity, and the mouse was deaf until a ')' came.
+# An identity is taken only before the first packet now: the two bytes are
+# passed over, and the next packet moves the mouse.
+program: sh
+emulators: bochs mame
+install: C /BIN/MOUSE z-mouse.rx
+keys: {wait 20}mouse\n{wait 5}{mouse 16 8 -}{wait 2}{mouse-bytes 28 05 00}{wait 2}{mouse 8 0 -}{wait 2}{mouse 0 0 LR}
+---
+rx286, test build
+/a$ mouse
+Move the mouse; Esc or both buttons end.
+x 320, y 100 (column 40, row 12), buttons: none
+x 336, y 108 (column 42, row 13), buttons: none
+x 344, y 108 (column 43, row 13), buttons: none
+x 344, y 108 (column 43, row 13), buttons: both
+/a$

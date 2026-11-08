@@ -47,6 +47,29 @@ check unicorn   required 2.0     "$(python3 -c 'import unicorn; print(unicorn.__
 check fsck.fat  required 4.2     "$(dpkg-query -W -f='${Version}' dosfstools 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+')" "(dosfstools)"
 check dosbox-x  optional 2024.03 "$(ver dosbox-x -version)" "M9: a 286 core"
 check mame      optional 0.264   "$(ver mame -version)" "M9: the IBM PC/AT"
+check gcc       required 9.0     "$(ver gcc --version)" "the host tests of the C"
+
+# The C compilers (docs/building.md, docs/c.md): Open Watcom v2 for the build,
+# gcc-ia16 for make check-ia16, both built from their repositories.
+WATCOM=${WATCOM:-$HOME/opt/open-watcom}
+IA16=${IA16:-$HOME/opt/gcc-ia16}
+# c.mk runs wcc, wlink, wlib (the libraries) and wdis (check-286's .dis);
+# check-ia16 gcc-ia16's gcc, ld, ar and objdump.
+if [ -x "$WATCOM/binl64/wcc" ] && [ -x "$WATCOM/binl64/wlink" ] &&
+        [ -x "$WATCOM/binl64/wlib" ] && [ -x "$WATCOM/binl64/wdis" ]; then
+    printf '%-12s %-12s %s\n' "open watcom" OK "$WATCOM ($("$WATCOM/binl64/wcc" 2>&1 | grep -o -E 'Version [0-9.]+ [a-z]* *[A-Z][a-z]+ +[0-9]+ [0-9]+' | head -n 1))"
+else
+    printf '%-12s %-12s %s\n' "open watcom" MISSING \
+        "wcc, wlink, wlib and wdis in $WATCOM/binl64 (docs/building.md)"
+    status=1
+fi
+if [ -x "$IA16/bin/ia16-elf-gcc" ] && [ -x "$IA16/bin/ia16-elf-ld" ] &&
+        [ -x "$IA16/bin/ia16-elf-ar" ] && [ -x "$IA16/bin/ia16-elf-objdump" ]; then
+    printf '%-12s %-12s %s\n' "gcc-ia16" OK "$IA16 ($("$IA16/bin/ia16-elf-gcc" --version | head -n 1)), for make check-ia16"
+else
+    printf '%-12s %-12s %s\n' "gcc-ia16" "MISSING (optional)" \
+        "make check-ia16 needs ia16-elf-gcc, -ld, -ar and -objdump in $IA16/bin"
+fi
 
 # Bochs: 2.7.x exactly, since its configuration syntax changes between releases.
 bochs_found=$(dpkg-query -W -f='${Version}' bochs 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+' )
@@ -91,7 +114,15 @@ probe "bochs: 287 IRQ"  test -f /usr/lib/x86_64-linux-gnu/bochs/plugins/libbx_ex
 probe "bochs: BIOS"     test -f /usr/share/bochs/BIOS-bochs-legacy
 probe "bochs: VGABIOS"  test -f /usr/share/bochs/VGABIOS-lgpl-latest
 probe "mformat -R"      sh -c 'f=$(mktemp); dd if=/dev/zero of=$f bs=512 count=2400 status=none; MTOOLS_SKIP_CHECK=1 mformat -i $f -f 1200 -R 4 :: ; r=$?; rm -f $f; exit $r'
-probe "mame: ibm5170"   sh -c 'cd /tmp && mame -verifyroms ibm5170 2>/dev/null | grep -q "1 were OK"'
+# MAME's ROMs, where test-286 looks for them; optional, as MAME is: make
+# check then needs SKIP_MAME=1 (docs/building.md)
+if (cd /tmp && mame -rompath "$HOME/mame/roms" -verifyroms ibm5170 2>/dev/null |
+        grep -q "1 were OK"); then
+    printf '%-12s %-12s %s\n' "mame: roms" OK "ibm5170 in ~/mame/roms"
+else
+    printf '%-12s %-12s %s\n' "mame: roms" "MISSING (optional)" \
+        "ibm5170 in ~/mame/roms; else make check SKIP_MAME=1"
+fi
 
 if [ $status -ne 0 ]; then
     echo "doctor: something required is missing (docs/building.md says what to install)"

@@ -11,8 +11,9 @@
 # make debugger); the tests run without a window, on textconfig and rfb.
 config_interface: @CONFIG_INTERFACE@
 
-# 640 KB of base memory and nothing above 1 MB (roadmap D6).
-megs: 1
+# 640 KB of base memory and 3 MB above 1 MB: the kernel's objects and
+# programs' segments live there (roadmap os-server.md P3, D18 B).
+megs: 4
 cpu: model=bx_generic, count=1, ips=4000000, reset_on_triple_fault=1
 romimage: file=/usr/share/bochs/BIOS-bochs-legacy
 vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest
@@ -21,7 +22,8 @@ pci: enabled=0
 
 # A fixed start time (1989-01-01 00:00:00) and emulated time, so runs repeat;
 # real time when a test talks to a modem on the host, so that its answers
-# come in the ticks they would.
+# come in the ticks they would. Bochs reads time0 in the local time zone:
+# the tools that start it run in UTC (tools/rxlib.py).
 clock: sync=@CLOCK_SYNC@, time0=599616000
 
 # Drive A: 1.2 MB 5.25", the boot disk; drive B: 360 KB 5.25" (roadmap D2).
@@ -51,7 +53,7 @@ com2: enabled=1, @COM2@
 com3: enabled=1, @COM3@
 com4: enabled=1, mode=null
 parport1: enabled=1, file=@LPT1@
-parport2: enabled=1, file=@LPT2@
+parport2: enabled=@LPT2_ENABLED@, file=@LPT2@
 speaker: enabled=1, mode=gui
 
 # Debugging aids: magic breakpoints (xchg bx, bx), and the debugger's log.

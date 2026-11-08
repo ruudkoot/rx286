@@ -32,7 +32,7 @@ MY_SPACE            equ 0x67            ; slot 12: its own space
 MY_THREAD           equ 0x6F            ; slot 13: its own thread
 MY_EMPTY            equ 0x77            ; slot 14: empty
 PAST_MY_SPACE       equ 0x207           ; slot 64: past its 64 slots
-; (slots 8 and 9: its endpoint to the OS server, its transfer segment)
+; (slot 8: its endpoint to the OS server)
 GDT_SELECTOR        equ 0x10            ; the kernel's data: no slot of anyone's
 ACC_DATA3           equ 0xF2            ; present, DPL 3, data, writable
 ACC_CODE3           equ 0xFA            ; present, DPL 3, code, readable
@@ -47,6 +47,7 @@ NEW_ENDPOINT        equ 0x1F
 
 begin_udata
 started             db 0
+base                dw 0, 0             ; the first segment's base: DL:AX
 end_udata
 
 ; report "what" - "caps: what: " and AX, the status, in decimal
@@ -85,13 +86,37 @@ entry:
         report "the segment, zeroed, reads back (4660)"
         mov dx, MY_SLOT3
         kcall KCALL_SEGMENT
-        mov bx, ax
-        mov ax, dx
-        report "its base, high byte (5)"
-        mov ax, bx                      ; past the others' segments, and its own
-        report "its base, low word (5136)"
-        mov ax, cx
+        mov [base], ax
+        mov [base + 2], dx
+        push cx
+        mov dx, MY_CODE                 ; past its own code, in the boot image
+        kcall KCALL_SEGMENT
+        xor bx, bx
+        cmp dx, [base + 2]
+        ja .before
+        jb .past
+        cmp ax, [base]
+        jae .before
+.past:
+        inc bx
+.before:
+        mov ax, bx
+        report "its base, past the program's code in the image (1)"
+        pop ax
         report "its limit (255)"
+        mov dx, UT_MEMORY               ; the next: its base 256 bytes on
+        mov al, CAP_SEGMENT
+        mov si, MY_SLOT4
+        mov cx, NEW_SIZE
+        mov bl, ACC_DATA3
+        kcall KCALL_RETYPE
+        mov dx, MY_SLOT4
+        kcall KCALL_SEGMENT
+        sub ax, [base]
+        sbb dx, [base + 2]
+        report "the next segment's base, from its (256)"
+        mov dx, MY_SLOT4
+        kcall KCALL_DELETE
         mov dx, UT_ARENA
         mov al, CAP_SPACE
         mov si, MY_SLOT4
@@ -128,18 +153,22 @@ entry:
         mov bl, ACC_DATA3
         kcall KCALL_RETYPE
         report "retype into a full slot (4)"
-        mov dx, UT_ARENA
-        mov al, CAP_SEGMENT
+        mov dx, UT_ARENA                ; any untyped gives segments and objects
+        mov al, CAP_SEGMENT             ; alike (os-server.md P3)
         mov si, MY_EMPTY
         mov cx, 16
         mov bl, ACC_DATA3
         kcall KCALL_RETYPE
-        report "a segment from the arena (1)"
+        report "a segment from the arena (0)"
+        mov dx, MY_EMPTY
+        kcall KCALL_DELETE
         mov dx, UT_MEMORY
         mov al, CAP_THREAD
         mov si, MY_EMPTY
         kcall KCALL_RETYPE
-        report "a thread from the memory for segments (1)"
+        report "a thread from the memory for segments (0)"
+        mov dx, MY_EMPTY
+        kcall KCALL_DELETE
         mov dx, UT_MEMORY
         mov al, CAP_SEGMENT
         mov si, MY_EMPTY
@@ -302,12 +331,11 @@ entry:
         mov es, ax
 .done:
         PRINT "caps: done", CHAR_LF
-        mov al, WAIT_MOUSE              ; a few ticks for the new thread, below
-        mov cx, 5                       ; this program, before the test ends
-        sys SYS_WAIT
+        xor cx, cx                      ; a few ticks for the new thread, below
+        mov si, 5                       ; this program, before the test ends
+        px PX_NANOSLEEP
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------

@@ -10,9 +10,13 @@
 # - 4 reserved sectors, with the loader's bytes in sectors 1-3;
 # - the boot sector's code is the build's;
 # - KERNEL.BIN present, the build's boot image, in one run of clusters;
-# - the boot image's module table as the loader checks it: its length the
-#   file's, the root first, every module inside the image after the table,
-#   its end mark last (roadmap l4.md L5);
+# - the boot image's module table as the loader and the root take it: its
+#   length the file's, 1 to MODULE_MAX modules, the root first, every
+#   module's code and data inside the image after the table, before the end
+#   mark's paragraph, and apart from every other's; its data where M_DATA_AT
+#   says within its room; its ring, priority, flags (MF_*), IRQ (0 to 16:
+#   the line plus one) and service drivers.inc's; an archive's code one
+#   paragraph of zeros; its end mark last (roadmap l4.md L5);
 # - fsck.fat finds nothing wrong.
 # ============================================================================
 
@@ -24,6 +28,10 @@ import sys
 import rxlib
 
 LAYOUT = rxlib.LAYOUT
+PRIORITY_MAX = rxlib.include_constants('kcalls.inc')['PRIORITY_MAX']
+SERVICES = {0} | {v for k, v in rxlib.include_constants('drivers.inc').items()
+                  if k.startswith('SERVICE_')}
+MF_ALL = sum(v for k, v in LAYOUT.items() if k.startswith('MF_'))
 
 
 def mtools(*args):
@@ -94,16 +102,36 @@ def check_modules(image):
         errors.append('the boot image is longer than IMAGE_MAX')
     if struct.unpack_from('<H', image, len(image) - 2)[0] != LAYOUT['KERNEL_END_MARK']:
         errors.append('the boot image does not end with KERNEL_END_MARK')
+    count = struct.unpack_from('<H', image, table + LAYOUT['MH_COUNT'])[0]
+    if not 1 <= count <= LAYOUT['MODULE_MAX']:
+        return errors + ['the module table counts %d modules' % count]
     modules = rxlib.image_modules(image)
-    if not modules or modules[0]['name'] != 'root':
+    if modules[0]['name'] != 'root':
         errors.append('the first module is not the root')
+    spans = []
+    end = len(image) - 16                       # the end mark's paragraph
     for m in modules:
         for part in ('code', 'data'):
             start, size = m[part], m[part + '_size']
-            if start < LAYOUT['MODULES_OFF'] or start + size > len(image):
+            if start < LAYOUT['MODULES_OFF'] or start + size > end:
                 errors.append('module %s: its %s lies outside the image' % (m['name'], part))
-        if not 1 <= m['ring'] <= 3 or m['priority'] > 7 or m['data_size'] > m['data_room']:
-            errors.append('module %s: its ring, priority or data room is wrong' % m['name'])
+            spans.append((start, start + size, '%s\'s %s' % (m['name'], part)))
+        if not 1 <= m['ring'] <= 3 or m['priority'] > PRIORITY_MAX:
+            errors.append('module %s: its ring or priority is wrong' % m['name'])
+        if m['data_at'] + m['data_size'] > m['data_room']:
+            errors.append('module %s: its data at %04Xh passes its room' % (m['name'],
+                                                                         m['data_at']))
+        if m['flags'] & ~MF_ALL or m['irq'] > 16 or m['service'] not in SERVICES:
+            errors.append('module %s: flags %02Xh, IRQ byte %d, service %d' % (
+                m['name'], m['flags'], m['irq'], m['service']))
+        if m['flags'] & LAYOUT['MF_ARCHIVE'] and (
+                m['code_size'] != 16 or any(image[m['code']:m['code'] + 16])):
+            errors.append('module %s: an archive whose code is not a paragraph of zeros'
+                          % m['name'])
+    spans.sort()
+    for (_, a_end, a), (b_start, _, b) in zip(spans, spans[1:]):
+        if b_start < a_end:
+            errors.append('%s overlaps %s' % (a, b))
     return errors
 
 

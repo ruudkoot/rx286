@@ -1,0 +1,12 @@
+# The 287 computes the square root of 2 and pi (roadmap os-server.md P12);
+# FBSTP stores 18 digits. MAME's AT has no 287; DOSBox-X no drive C.
+program: sh
+emulators: bochs
+install: C /BIN/FPU z-fpu.rx
+keys: fpu\n
+match: contains
+---
+/a$ fpu
+sqrt(2) = 1.41421356237309505
+pi      = 3.14159265358979324
+/a$

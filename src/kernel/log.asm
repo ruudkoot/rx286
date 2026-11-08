@@ -6,14 +6,17 @@
 ;
 ; In debug and test builds the log is COM2 (COM3 when COM2 is the modem),
 ; which every test reads; until the threads start, the screen too
-; (console.asm). The OS server writes a program's SYS_WRITE there, and the
+; (console.asm). The OS server writes a program's writes there (a process's
+; first terminal's, and the foreground program's the root builds), and the
 ; root and the drivers their own lines. The caller's buffer is checked with
 ; the 286's own instructions before the kernel reads it: ARPL against the
 ; caller's CS, VERR, LAR's present bit, LSL and bounds (docs/kernel-calls.md);
 ; and checked again after every interrupt window, since a descriptor may
 ; change while interrupts are in (l4.md X2). Interrupts come in after every
 ; byte, so a long line keeps neither the clock nor a more urgent thread
-; waiting; one thread's line at a time (call_enter), so lines never mix.
+; waiting: a call that gives way resumes after the bytes it wrote
+; (T_LOG_DONE), keeping the log's turn meanwhile; one thread's line at a
+; time (call_enter), so lines never mix.
 ; ============================================================================
 
 ; ----------------------------------------------------------------------------
@@ -21,16 +24,23 @@
 ;   In:       BP = the frame; DS = SEL_KDATA
 ;   Out:      the frame's AX = bytes written, CF clear; or CF and AX =
 ;             KE_ARG (more than LOG_MAX) or KE_CAP (a buffer it may not read)
-;   Destroys: AX, BX, CX, DX, SI, ES
+;   Destroys: AX, BX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 kc_log:
         call call_enter                 ; one thread's bytes at a time
+        mov es, [cur_thread]
+        xor bx, bx                      ; BX = bytes written
+        cmp byte [es:T_CONT], CONT_RESUMED
+        jne .fresh
+        mov bx, [es:T_LOG_DONE]         ; it gave way after these
+.fresh:
         mov cx, [bp + FRAME_CX]
         cmp cx, LOG_MAX
         ja .arg
-        xor bx, bx                      ; BX = bytes written
+        sub cx, bx                      ; CX = bytes left
         jcxz .written
         mov si, [bp + FRAME_SI]
+        add si, bx
         mov ax, [bp + FRAME_DS]
         call check_buffer               ; ES = the caller's segment, or CF
         jc .cap
@@ -45,6 +55,8 @@ kc_log:
         ; not with the caller's segment in ES, which a switch would reload
         ; in ring 0 after its slot may have gone (l4.md X2): recheck_buffer
         ; loads it again. Stop early if the thread is to restart.
+        mov es, [cur_thread]
+        mov [es:T_LOG_DONE], bx         ; where it resumes, if it gives way
         push ds
         pop es
         KWINDOW (VEC_KCALL << 8) | KCALL_LOG
@@ -52,6 +64,10 @@ kc_log:
         jne .written
         loop .next
 .written:
+        mov es, [cur_thread]
+        mov word [es:T_LOG_DONE], 0
+        push ds
+        pop es
         call con_cursor
         mov [bp + FRAME_AX], bx
         and word [bp + FRAME_FLAGS], ~FLAGS_CF
@@ -63,12 +79,12 @@ kc_log:
         call con_cursor
         mov al, KE_CAP
 .failed:
+        push es                         ; (its count of bytes written: none for the
+        mov es, [cur_thread]            ;    next call, P15)
+        mov word [es:T_LOG_DONE], 0
+        pop es
         call kc_done
         jmp call_leave
-
-%if LOG_MAX != WRITE_MAX
-  %error "log.asm: SYS_WRITE's limit is the log's"
-%endif
 
 ; ----------------------------------------------------------------------------
 ; kc_ticks - KCALL_TICKS: the ticks since the kernel started

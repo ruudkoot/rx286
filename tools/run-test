@@ -1,61 +1,98 @@
 #!/usr/bin/env python3
 # ============================================================================
 # rx286 - tools/run-test
-# Builds a test image for every test, boots it in Bochs without a window and
-# compares what COM1 shows with what the test expects.
+# Builds a test image for every test, boots it in Bochs (or DOSBox-X, or
+# MAME) without a window and compares the log, which COM2 carries (COM3 with
+# a modem), with what the test expects.
 #
 #   tools/run-test                    every tests/*/*.test
-#   tools/run-test tests/shell/echo.test ...
-#   tools/run-test --jobs 4 --verbose
+#   tools/run-test tests/sh/echo.test ...
+#   tools/run-test --jobs 4
+#
+# A test builds in build/tests/SUITE/NAME/ (build/tests-mame/ for MAME,
+# build/tests-ia16/ with --cc ia16), and each emulator's run of it keeps its
+# files in run-EMULATOR/ there: transcript.log, bochs.log, debugger.log,
+# lpt1.out, the disks.
 #
 # A test file is a header, a line `---`, and the expected transcript:
 #
-#   program: idle               idle (default: waits for keys), shell, syscalls,
-#                               attack or fuzz
+#   program: idle               a PROGRAM of the Makefile's: idle (the default:
+#                               waits for keys), sh, shell, none, attack, fuzz,
+#                               caps...
 #   keys: echo hi\n             a key script (tools/rxlib.py); may repeat
 #   define: TEST_PANIC_DIVIDE   a NASM define for the kernel; may repeat
 #   image: fragmented           change the floppy: fragmented, missing, oversized,
 #                               truncated (a sector short), noloader (sectors
 #                               1-3 zeroed); change KERNEL.BIN: noroot (its
 #                               first module renamed), outside (a module past
-#                               its end), large (padded past 64 KB)
-#   timeout: 30                 seconds of wall time (default 30)
+#                               its end), large (padded to IMAGE_MAX)
+#   timeout: 30                 seconds of wall time (default 30, at most 600)
 #   match: full                 full (default), prefix or contains
 #   break: syscall              a debugger breakpoint, by kernel symbol...
-#   debugger: info gdt 0 11     ...and commands to run there; may repeat
+#   debugger: info gdt 0 11     ...and commands to run there; may repeat. The
+#                               one needs the other
 #   emulators: bochs dosbox-x   where the test applies (default: all)
 #   media: B ejected            change a drive: B ejected, B protected, D absent,
+#                               LPT2 absent (no adapter),
 #                               B damaged (MANY's chain leaves the volume),
 #                               D blank (no partition), B deep (paths of 64
-#                               characters: rxlib.DEEP_PATH); may repeat
-#   lpt1: text                  a line LPT1 must have printed; may repeat (the
-#                               whole of what it printed, in order); lpt2 too
+#                               characters: rxlib.DEEP_PATH), B loop (MANY's
+#                               chain to itself), B zerodir (MANY's cluster
+#                               0), B longnames (two VFAT names); may repeat
+#   lpt1: text\r                a line LPT1 must have printed, then LF; may
+#                               repeat: byte for byte the whole of what it
+#                               printed (\r CR, \f a form feed, \t, \s a
+#                               space, \n, \\); lpt2 too
 #   modem: hayes                a modem at the far end of COM2 (HayesPeer):
 #                               it echoes, and answers AT, ATI. The image is
 #                               built with MODEM_COM2 (COM2 the modem, the
-#                               log on COM3): Bochs and DOSBox-X only
-#   sector: B 700 text          after the run, sector 700 of drive B (A, B, C
-#                               or D) must hold text, then each byte its own
-#                               offset (storage.asm's fill); may repeat
+#                               log on COM3)
+#   fsck: B                     after the run, fsck.fat finds drive B's volume
+#                               (its partition's, on C or D) sound; may repeat
+#   file: B /MOVED.TXT text\n   after the run, that file of drive B's volume
+#                               holds the text, byte for byte (by mtools; the
+#                               escapes of lpt1:)
+#   install: C /BIN/CHILD z-child.rx
+#                               before the run, a file the build made put on
+#                               the run's copy of drive C (B, D) at that path,
+#                               its directories made; may repeat
+#   forbid: {...} fault #{...}  a line the transcript must not hold, as an
+#                               expected line is matched ({...}); may repeat:
+#                               what contains mode would pass over
 #   ---
+# A header's value is taken without the spaces around it; a key script, an
+# lpt1: line or a file: text writes \s for a space at its ends. A test that
+# asks an emulator for what it has not (CAN: DOSBox-X has drive A alone and
+# no media changes; MAME no printers, no modem, no write protection) is
+# refused: it says emulators:.
+#
 #   expected lines; {name} is a program symbol's offset, {k:name} a kernel one,
-#   {c:name} the counter's, {r:name} the root's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   {c:name} the counter's, {r:name} the root's, {o:name} the OS server's,
+#   {z:program.name} a program of
+#   /z's (four hex digits); {x:name}, {kx:name} the same as eight lower-case digits;
+#   {{ and }} a brace itself;
 #   {m:module.base}, {m:module.limit} where a module's code is, and its limit;
 #   {m:module.codesum}, {m:module.datasum} sums of its code and data;
 #   {image_sum} entry.asm's Fletcher sum of the image's words; {image_size}
-#   KERNEL.BIN's bytes, {image_free} the boot floppy's free bytes. A line that
-#   starts with
+#   KERNEL.BIN's bytes ({image_size8} right in 8 columns, as ls -l puts
+#   them), {image_free} the boot floppy's free bytes; {...} any text, perhaps
+#   none, else an expected line is a whole line. A line that starts with
 #   @bochs, @dosbox-x or @mame counts on that emulator only: where they
 #   differ (docs/emulators.md).
 #
 # --emulator chooses Bochs (the default), DOSBox-X's 286 or MAME's IBM PC/AT
-# (roadmap M9).
+# (roadmap M9). --cc ia16 builds the C with gcc-ia16 instead of Open Watcom
+# (c.mk; roadmap os-server.md D1), into build/tests-ia16/ (make check-ia16).
 #
 # full:     the transcript is exactly the expected lines, then `TEST END`.
 # prefix:   the transcript starts with the expected lines (the run stops then).
 # contains: the expected lines appear in this order, among the transcript's
-#           and the debugger's lines, and the test ends (TEST END, or the
-#           debugger's quit). A timeout always fails.
+#           and the debugger's lines, and the test ends (TEST END; with
+#           debugger:, its breakpoint met and its script's quit reached).
+# A timeout always fails, and so does a test that expects no line on its
+# emulator, unless it is full (TEST END alone), and a run in which the
+# machine started more often than the test expects the banner (one at
+# least): a reset, which MAME's AT and a real one boot again from.
 # Lines the kernel marks `[trace]`, register lines (`regs:`) and blank lines
 # are ignored. docs/testing.md
 # explains the layers of tests.
@@ -63,6 +100,7 @@
 
 import argparse
 import concurrent.futures
+import fcntl
 import glob
 import os
 import re
@@ -78,19 +116,39 @@ import rxlib
 
 ROOT = rxlib.ROOT
 IGNORED_PREFIXES = ('[trace]', 'regs:')
-# The image of each drive in a test's directory (`sector:`).
+BANNER = 'rx286, test build'            # a test build's first line: once a boot
+# The image of each drive in a run's directory (Test.run_dir).
 DRIVE_IMAGES = {'A': 'run.img', 'B': 'disks/fdb.img', 'C': 'disks/hd0.img',
                 'D': 'disks/hd1.img'}
 SECTOR_SIZE = rxlib.LAYOUT['SECTOR_SIZE']
 EMULATORS = ('bochs', 'dosbox-x', 'mame')
 # A test's timeout is written for Bochs; the others boot slower (MAME runs
-# IBM's power-on test, about 6 s alone) and are heavier to run side by side.
+# IBM's power-on test, about 6 s alone). Every emulator runs a test to a CPU
+# at once: each is one thread, unthrottled (Bochs' and MAME's time is
+# emulated) or paced to real time (DOSBox-X), and the tests' own measures
+# are of emulated time, so a busier host costs only wall time.
 TIMEOUT_SCALE = {'bochs': 1, 'dosbox-x': 2, 'mame': 4}
 # The boot floppy's data area (the Makefile's 1.2 MB disk: 2,400 sectors, 4
 # reserved, two FATs of 7, a root directory of 14), in bytes
 FLOPPY_DATA_BYTES = (2400 - 4 - 2 * 7 - 14) * 512
-JOBS_DIVISOR = {'bochs': 1, 'dosbox-x': 2, 'mame': 3}
+# What each emulator can do of what a test asks (docs/emulators.md): the
+# drives it has (fsck:, file:, install:, media:), the media changes it makes,
+# its printers and the modem. DOSBox-X mounts drive A alone; MAME's AT has no
+# printer port, no COM3 for the log, and no write protection from its
+# command line (rxlib.run_mame).
+CAN = {'bochs': {'drives': 'ABCD', 'media': set(rxlib.MEDIA), 'printers': True,
+                 'modem': True},
+       'dosbox-x': {'drives': 'A', 'media': set(), 'printers': True, 'modem': True},
+       'mame': {'drives': 'ABCD', 'media': set(rxlib.MEDIA) - {'B protected', 'LPT2 absent'},
+                'printers': False, 'modem': False}}
+MATCHES = ('full', 'prefix', 'contains')
+IMAGE_CHANGES = ('fragmented', 'missing', 'oversized', 'truncated', 'noloader', 'noroot',
+                 'outside', 'large')
+TIMEOUT_MAX = 600
+ESCAPES = {'n': '\n', 'r': '\r', 'f': '\f', 't': '\t', 's': ' ', '\\': '\\'}
+ANY = '\x02'                        # {...} in an expected line, after substitute
 EMULATOR = 'bochs'                  # set from --emulator
+CC_KIND = 'watcom'                  # set from --cc
 
 
 class Test:
@@ -110,8 +168,11 @@ class Test:
         self.media = []
         self.modem = None
         self.printed = {}                   # 'lpt1' -> the lines it must print
-        self.sectors = []                   # (drive, sector, text)
+        self.fscks = []                     # drives whose volumes fsck.fat checks
+        self.files = []                     # (drive, path, text)
+        self.installs = []                  # (drive, path, a file the build made)
         self.expected = []
+        self.forbidden = []                 # lines the transcript must not hold
         self.parse(open(path, encoding='utf-8').read())
 
     def parse(self, text):
@@ -132,10 +193,16 @@ class Test:
             elif key == 'define':
                 self.defines.append(value)
             elif key == 'image':
+                if value not in IMAGE_CHANGES:
+                    raise ValueError('%s: unknown image change %r' % (self.path, value))
                 self.image = value
             elif key == 'timeout':
                 self.timeout = float(value)
+                if not 0 < self.timeout <= TIMEOUT_MAX:     # (nan too)
+                    raise ValueError('%s: a timeout of %r' % (self.path, value))
             elif key == 'match':
+                if value not in MATCHES:
+                    raise ValueError('%s: unknown match %r' % (self.path, value))
                 self.match = value
             elif key == 'break':
                 self.breakpoint = value
@@ -149,32 +216,84 @@ class Test:
             elif key == 'modem':
                 if value != 'hayes':
                     raise ValueError('%s: unknown modem %r' % (self.path, value))
-                if 'mame' in self.emulators and 'emulators:' not in text:
-                    raise ValueError('%s: a modem test moves the log to COM3, which '
-                                     'MAME has not: say emulators:' % self.path)
                 self.modem = value
             elif key == 'media':
                 if value not in rxlib.MEDIA:
                     raise ValueError('%s: unknown media change %r' % (self.path, value))
                 self.media.append(value)
             elif key in ('lpt1', 'lpt2'):
-                self.printed.setdefault(key, []).append(line.partition(':')[2].strip())
-            elif key == 'sector':
-                drive, number, text = (value.split(None, 2) + [''])[:3]
-                if drive not in DRIVE_IMAGES or not number.isdigit() or not text:
-                    raise ValueError('%s: bad sector line %r' % (self.path, line))
-                self.sectors.append((drive, int(number), text))
+                self.printed.setdefault(key, []).append(self.unescape(value))
+            elif key == 'fsck':
+                if value not in DRIVE_IMAGES:
+                    raise ValueError('%s: bad fsck line %r' % (self.path, line))
+                self.fscks.append(value)
+            elif key == 'install':
+                drive, path, name = (value.split(None, 2) + ['', ''])[:3]
+                if drive not in ('B', 'C', 'D') or not path.startswith('/') or not name:
+                    raise ValueError('%s: bad install line %r' % (self.path, line))
+                self.installs.append((drive, path, name))
+            elif key == 'forbid':
+                if not value:
+                    raise ValueError('%s: an empty forbid line' % self.path)
+                self.forbidden.append(value)
+            elif key == 'file':
+                drive, path, text = (value.split(None, 2) + [''])[:3]
+                if drive not in DRIVE_IMAGES or not path.startswith('/'):
+                    raise ValueError('%s: bad file line %r' % (self.path, line))
+                self.files.append((drive, path, self.unescape(text)))
             else:
                 raise ValueError('%s: unknown header %r' % (self.path, key))
         self.expected = body.rstrip('\n').split('\n') if body.strip() else []
+        if bool(self.debugger) != bool(self.breakpoint):
+            raise ValueError('%s: break: and debugger: go together' % self.path)
         if self.debugger:
             self.match = 'contains'
+        if not self.expected and self.match != 'full':
+            raise ValueError('%s: no expected line, and match: %s' % (self.path, self.match))
+        for e in self.emulators:
+            lack = self.lacks(e)
+            if lack:
+                raise ValueError('%s: %s has %s: say emulators:' % (self.path, e, lack))
+
+    def unescape(self, value):
+        """An lpt1: line or a file: text, its escapes (ESCAPES) made bytes."""
+        def one(m):
+            if m.group(1) not in ESCAPES:
+                raise ValueError('%s: unknown escape \\%s' % (self.path, m.group(1)))
+            return ESCAPES[m.group(1)]
+        return re.sub(r'\\(.)', one, value)
+
+    def lacks(self, emulator):
+        """What of this test's asks the emulator cannot do (CAN), or None."""
+        can = CAN[emulator]
+        drives = set(self.fscks) | {d for d, _, _ in self.files} | \
+            {d for d, _, _ in self.installs} | {m[0] for m in self.media if m[1] == ' '}
+        for d in sorted(drives - set(can['drives'])):
+            return 'no drive %s' % d
+        for m in self.media:
+            if m not in can['media']:
+                return 'no media change %r' % m
+        if self.printed and not can['printers']:
+            return 'no printers'
+        if self.modem and not can['modem']:
+            return 'no modem (the log moves to COM3)'
+        return None
 
     @property
     def build_dir(self):
-        # MAME's images differ (TEST_TYPE_DIRECT), so they are built apart.
+        # MAME's images differ (TEST_TYPE_DIRECT), so they are built apart;
+        # Bochs and DOSBox-X share a build (under a lock: build).
         tests = 'tests-mame' if EMULATOR == 'mame' else 'tests'
-        return os.path.join(ROOT, 'build', tests, '%s-%s' % (self.suite, self.name))
+        if CC_KIND != 'watcom':
+            tests += '-' + CC_KIND
+        return os.path.join(ROOT, 'build', tests, self.suite, self.name)
+
+    @property
+    def run_dir(self):
+        """A run's own files, each emulator's apart: the floppy it boots,
+        drives B, C and D, the transcript, the printers' and debugger's
+        output. Made afresh for each run."""
+        return os.path.join(self.build_dir, 'run-' + EMULATOR)
 
 
 class HayesPeer(threading.Thread):
@@ -225,9 +344,25 @@ class HayesPeer(threading.Thread):
 
 
 def build(test):
-    """Build the test's image; returns an error message or None."""
+    """Build the test's image, under a lock of its build directory (two
+    emulators' runs of one test share it), and put a copy in its run's
+    directory; returns an error message or None."""
     b = test.build_dir
     os.makedirs(b, exist_ok=True)
+    with open(os.path.join(b, 'build.lock'), 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        error = build_locked(test)
+        if error:
+            return error
+        # The run boots a copy, so changing it leaves the build's image as make made it.
+        shutil.copyfile(os.path.join(b, 'rx286.img'), os.path.join(test.run_dir, 'run.img'))
+    if test.image:
+        return change_image(test, os.path.join(test.run_dir, 'run.img'))
+    return None
+
+
+def build_locked(test):
+    b = test.build_dir
     keys_inc = os.path.join(b, 'test-keys.inc')
     text = rxlib.keys_include(test.keys)
     if not os.path.exists(keys_inc) or open(keys_inc, encoding='utf-8').read() != text:
@@ -237,12 +372,15 @@ def build(test):
     stamp = os.path.join(b, 'defines.txt')
     wanted = repr((test.program, test.defines, EMULATOR == 'mame', test.modem))
     if not os.path.exists(stamp) or open(stamp, encoding='utf-8').read() != wanted:
-        for name in ('kernel.bin', 'user.bin', 'root.bin', 'os.bin', 'counter.bin',
+        for name in ('kernel.bin', 'user.bin', 'user.rx', 'root.rx', 'os.rx', 'counter.rx',
                      'printer.bin', 'mouse.bin', 'console.bin', 'keyboard.bin',
                      'diskette.bin', 'fixeddisk.bin', 'serial.bin', 'sound.bin',
-                     'rtc.bin', 'clock.bin'):
+                     'rtc.bin', 'z.arc'):
             if os.path.exists(os.path.join(b, name)):
                 os.remove(os.path.join(b, name))
+        for name in glob.glob(os.path.join(b, 'z-*.rx')):     # /z's programs
+            os.remove(name)
+        shutil.rmtree(os.path.join(b, 'c'), ignore_errors=True)    # the C, built with them
         with open(stamp, 'w', encoding='utf-8') as f:
             f.write(wanted)
     defines = ["-dTEST_KEYS_INC='\"%s\"'" % keys_inc]
@@ -256,7 +394,7 @@ def build(test):
     if EMULATOR == 'mame':
         defines.append('-dTEST_TYPE_DIRECT')    # IBM's 8042 firmware has no D2h
     cmd = ['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=test', 'B=' + b,
-           'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
+           'CC_KIND=' + CC_KIND, 'PROGRAM=' + test.program, 'TEST_DEFINES=' + ' '.join(defines),
            'TEST_KEYS_FILE=' + keys_inc,
            'image', 'symbols']
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -264,10 +402,6 @@ def build(test):
         errors = [l for l in (result.stdout + result.stderr).splitlines()
                   if 'error' in l.lower() or 'warning' in l.lower()]
         return 'build failed:\n' + '\n'.join(errors[-20:])
-    # The run boots a copy, so changing it leaves the build's image as make made it.
-    shutil.copyfile(os.path.join(b, 'rx286.img'), os.path.join(b, 'run.img'))
-    if test.image:
-        return change_image(test, os.path.join(b, 'run.img'))
     return None
 
 
@@ -291,11 +425,11 @@ def changed_image(test, kind):
     elif kind == 'outside':                 # the last module's code past the end
         last = first + (data[table + L['MH_COUNT']] - 1) * L['MODULE_ENTRY_SIZE']
         struct.pack_into('<H', data, last + L['M_CODE'], len(data) // 16)
-    elif kind == 'large':                   # past 64 KB: zeros before the end mark
+    elif kind == 'large':                   # IMAGE_MAX: zeros before the end mark
         end = data[-16:]
-        data = data[:-16] + bytes(0x11000 - len(data)) + end
+        data = data[:-16] + bytes(max(0, L['IMAGE_MAX'] - len(data))) + end
         struct.pack_into('<H', data, table + L['MH_PARAGRAPHS'], len(data) // 16)
-    path = os.path.join(test.build_dir, 'run-image.bin')
+    path = os.path.join(test.run_dir, 'run-image.bin')
     with open(path, 'wb') as f:
         f.write(data)
     return path
@@ -305,7 +439,7 @@ def change_image(test, image):
     """The boot tests' floppies: KERNEL.BIN fragmented, missing or changed,
     or no loader."""
     kernel = os.path.join(test.build_dir, 'image.bin')
-    filler = os.path.join(test.build_dir, 'filler.bin')
+    filler = os.path.join(test.run_dir, 'filler.bin')
     if test.image == 'noloader':
         with open(image, 'r+b') as f:
             f.seek(512)
@@ -339,8 +473,9 @@ def change_image(test, image):
 
 
 def booted_image(test):
-    """The KERNEL.BIN the run boots: the build's, or change_image's."""
-    changed = os.path.join(test.build_dir, 'run-image.bin')
+    """The KERNEL.BIN the run boots: the build's, or change_image's (made
+    in this run's fresh directory)."""
+    changed = os.path.join(test.run_dir, 'run-image.bin')
     if test.image and os.path.exists(changed):
         return changed
     return os.path.join(test.build_dir, 'image.bin')
@@ -348,8 +483,9 @@ def booted_image(test):
 
 def substitute(test, line):
     """{name} (the program's), {k:name} (the kernel's), {c:name} (the
-    counter's), {r:name} (the root's), {o:name} (the OS server's) and
-    {l:name} (the clock's) to four upper-case hex digits;
+    counter's), {r:name} (the root's) and {o:name} (the OS server's) to
+    four upper-case hex digits, and
+    {z:program.name} a program of /z's (roadmap os-server.md P6);
     {x:name} and {kx:name} to eight lower-case ones, as Bochs'
     debugger prints them; {m:module.base} to where a module's code is (five
     upper-case hex digits), {m:module.limit} to its code's limit,
@@ -359,8 +495,9 @@ def substitute(test, line):
         which, name = m.group(1) or '', m.group(2)
         if name == 'image_sum':     # entry.asm's Fletcher sum of the image's words
             return '%04X' % rxlib.fletcher(open(booted_image(test), 'rb').read())
-        if name == 'image_size':    # KERNEL.BIN's bytes, as dir lists them
-            return '%d' % os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
+        if name in ('image_size', 'image_size8'):   # KERNEL.BIN's bytes, as dir lists
+            size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))   # them, or ls -l
+            return ('%8d' if name == 'image_size8' else '%d') % size
         if name == 'image_free':    # the boot floppy's free bytes, beside KERNEL.BIN
             size = os.path.getsize(os.path.join(test.build_dir, 'image.bin'))
             return '%d' % (FLOPPY_DATA_BYTES - (size + 511) // 512 * 512)
@@ -378,20 +515,52 @@ def substitute(test, line):
             if field == 'datasum':
                 return '%04X' % rxlib.fletcher(image[m['data']:m['data'] + m['data_size']])
             return '%04X' % (m['code_size'] - 1)
-        mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map', 'o': 'os.map',
-                   'l': 'clock.map'}.get(
-            which[:1], 'user.map')
+        if which == 'z:':
+            program, _, name = name.partition('.')
+            mapfile = 'z-%s.map' % program
+        else:
+            mapfile = {'k': 'kernel.map', 'c': 'counter.map', 'r': 'root.map',
+                       'o': 'os.map'}.get(which[:1], 'user.map')
         symbols = rxlib.symbol_offsets(os.path.join(test.build_dir, mapfile))
         if name not in symbols:
             raise KeyError('%s: no symbol %s in %s' % (test.path, name, mapfile))
         return ('%08x' if 'x' in which else '%04X') % symbols[name]
-    return re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|l:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    line = line.replace('{{', '\x00').replace('}}', '\x01')    # {{ and }}: braces themselves
+    line = line.replace('{...}', ANY)
+    line = re.sub(r'\{(k:|kx:|x:|m:|c:|r:|o:|z:)?([A-Za-z_.][A-Za-z0-9_.]*)\}', lookup, line)
+    return line.replace('\x00', '{').replace('\x01', '}')
+
+
+# What the kernel or the console driver writes to the log as lines of
+# their own, which may fall into another line's middle
+INSERTED = re.compile(r'\[trace\] |screen \d(?: \d\d)?: ')
 
 
 def relevant(lines):
     """The lines a test compares: not the kernel's trace and register lines,
-    and not blank ones."""
-    return [l for l in lines if l and not l.startswith(IGNORED_PREFIXES)]
+    and not blank ones. A trace line, or a TEST_SCREEN build's line of a page,
+    that fell into another's middle (a program's output before its newline,
+    a prompt) is taken out, and that line put together again."""
+    out, carry = [], ''
+    for l in lines:
+        m = INSERTED.search(l)
+        if m:
+            carry += l[:m.start()]
+            if not l.startswith('[trace] ', m.start()):
+                out.append(l[m.start():])       # a page's line
+            continue
+        if l == 'TEST END' and carry:
+            out.append(carry.rstrip())          # (the kernel's own line, never joined)
+        elif not l.startswith(IGNORED_PREFIXES):
+            l = carry + l
+        else:
+            continue
+        carry = ''
+        if l:
+            out.append(l)
+    if carry:
+        out.append(carry)
+    return out
 
 
 def for_emulator(lines):
@@ -409,6 +578,24 @@ def for_emulator(lines):
     return out
 
 
+def line_matches(expected, line):
+    """Whether a line is the expected one: the same, but that {...} (ANY)
+    stands for any text, perhaps none."""
+    if ANY not in expected:
+        return line == expected
+    pattern = '.*'.join(re.escape(part) for part in expected.split(ANY))
+    return re.fullmatch(pattern, line, re.S) is not None
+
+
+def lines_match(expected, got):
+    return len(expected) == len(got) and all(map(line_matches, expected, got))
+
+
+# Bochs' debugger, at the breakpoint (lb) the script set, and at its end:
+# it echoes each command of the script as it reads it
+BREAKPOINT_MET = re.compile(r'\(\d+\) Breakpoint 1, ')
+
+
 def compare(test, transcript, debugger_lines):
     """Returns None if the test passes, else a description of the failure."""
     expected = [substitute(test, l) for l in for_emulator(test.expected) if l]
@@ -416,58 +603,106 @@ def compare(test, transcript, debugger_lines):
     if any(l.startswith('PANIC') or 'rx286 PANIC' in l for l in got) and \
             not any('PANIC' in l for l in expected):
         return 'the kernel panicked'
+    if not expected and test.match != 'full':
+        return 'no expected line on %s' % EMULATOR
+    boots = got.count(BANNER)
+    if boots > max(1, expected.count(BANNER)):
+        return 'the machine started %d times: a reset' % boots
+    for pattern in test.forbidden:
+        wanted = substitute(test, pattern)
+        bad = [l for l in got if line_matches(wanted, l)]
+        if bad:
+            return 'a line it must not hold (forbid: %s): %r' % (pattern, bad[0])
     if test.match == 'full':
         if not got or got[-1] != 'TEST END':
             return 'no TEST END'
         got = got[:-1]
-        if got != expected:
+        if not lines_match(expected, got):
             return diff(expected, got)
     elif test.match == 'prefix':
-        if got[:len(expected)] != expected:
+        if not lines_match(expected, got[:len(expected)]):
             return diff(expected, got[:len(expected) + 5])
     elif test.match == 'contains':
-        if not test.debugger and 'TEST END' not in got:
+        if test.debugger:
+            met = [k for k, l in enumerate(debugger_lines) if BREAKPOINT_MET.match(l)]
+            if not met:
+                return 'the debugger never met the breakpoint %s' % test.breakpoint
+            if 'quit' not in debugger_lines[met[0]:]:
+                return 'the debugger script never reached its end'
+        elif 'TEST END' not in got:
             return 'no TEST END'
         pool = got + debugger_lines
         i = 0
         for line in pool:
-            if i < len(expected) and expected[i] in line:
+            if i < len(expected) and line_matches(expected[i], line):
                 i += 1
         if i < len(expected):
-            return 'not found, in order: %r' % expected[i]
+            return 'not found, in order: %r' % expected[i].replace(ANY, '{...}')
     else:
         return 'unknown match %r' % test.match
     return None
 
 
 def check_printers(test, printers):
-    """What LPT1 and LPT2 printed, against the test's lpt1: and lpt2: lines."""
+    """What LPT1 and LPT2 printed, byte for byte, against the test's lpt1:
+    and lpt2: lines, each a line and LF."""
     for name, path in zip(('lpt1', 'lpt2'), printers):
         if name not in test.printed:
             continue
         raw = open(path, 'rb').read() if os.path.exists(path) else b''
-        got = [l.rstrip() for l in raw.decode('latin-1').replace('\r', '').split('\n')]
-        while got and not got[-1]:
-            got.pop()
-        if got != test.printed[name]:
-            lines = diff(test.printed[name], got).split('\n', 1)[1]
+        wanted = ''.join(l + '\n' for l in test.printed[name]).encode('latin-1')
+        if raw != wanted:
+            shown = [repr(l)[1:-1] for l in raw.decode('latin-1').split('\n')]
+            lines = diff([repr(l)[1:-1] for l in wanted.decode('latin-1').split('\n')],
+                         shown).split('\n', 1)[1]
             return '%s printed otherwise (expected | got):\n%s' % (name, lines)
     return None
 
 
-def check_sectors(test):
-    """Each sector: line against the drive's image after the run."""
-    for drive, number, text in test.sectors:
-        path = os.path.join(test.build_dir, DRIVE_IMAGES[drive])
-        with open(path, 'rb') as f:
-            f.seek(number * SECTOR_SIZE)
-            data = f.read(SECTOR_SIZE)
-        wanted = text.encode('latin-1')
-        wanted += bytes(n & 0xFF for n in range(len(wanted), SECTOR_SIZE))
-        if data != wanted:
-            first = next(i for i in range(SECTOR_SIZE) if i >= len(data) or data[i] != wanted[i])
-            return 'sector %d of drive %s differs from byte %d: %r, not %r' % (
-                number, drive, first, data[first:first + 16], wanted[first:first + 16])
+def volume_image(test, drive):
+    """A drive's volume as an image of its own: the floppies' whole, a fixed
+    disk's first FAT12 partition copied out (mtools and fsck.fat want one)."""
+    path = os.path.join(test.run_dir, DRIVE_IMAGES[drive])
+    if drive in 'AB':
+        return path
+    data = open(path, 'rb').read()
+    for k in range(4):
+        entry = data[0x1BE + 16 * k:0x1CE + 16 * k]
+        if entry[4] == 1:
+            start, count = struct.unpack_from('<II', entry, 8)
+            out = os.path.join(test.run_dir, 'volume-%s.img' % drive)
+            with open(out, 'wb') as f:
+                f.write(data[start * SECTOR_SIZE:(start + count) * SECTOR_SIZE])
+            return out
+    return path
+
+
+def install(test):
+    """Each install: line: a file the build made, onto the run's copy of a
+    drive, its directories made (mtools, at the partition's offset)."""
+    for drive, path, name in test.installs:
+        error = rxlib.install_file(os.path.join(test.run_dir, DRIVE_IMAGES[drive]),
+                                   drive in 'CD', path, os.path.join(test.build_dir, name))
+        if error:
+            return 'install: %s to drive %s\'s %s: %s' % (name, drive, path, error)
+    return None
+
+
+def check_volumes(test):
+    """Each fsck: and file: line against the drives' images after the run."""
+    for drive in test.fscks:
+        done = subprocess.run(['fsck.fat', '-n', volume_image(test, drive)],
+                              capture_output=True, text=True)
+        if done.returncode != 0:
+            return 'fsck.fat finds drive %s unsound:\n%s' % (drive, done.stdout.strip())
+    for drive, path, text in test.files:
+        # Bytes: mtype's text read as text would make CR LF a new line alone.
+        env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
+        done = subprocess.run(['mtype', '-i', volume_image(test, drive), '::' + path],
+                              capture_output=True, env=env)
+        if done.returncode != 0 or done.stdout != text.encode('latin-1'):
+            return 'drive %s\'s %s holds %r, not %r' % (
+                drive, path, done.stdout.decode('latin-1'), text)
     return None
 
 
@@ -476,37 +711,50 @@ def diff(expected, got):
     for k in range(max(len(expected), len(got))):
         e = expected[k] if k < len(expected) else '<none>'
         g = got[k] if k < len(got) else '<none>'
-        mark = '  ' if e == g else '!!'
-        out.append('%s %-50s | %s' % (mark, e[:50], g))
+        mark = '  ' if k < len(expected) and k < len(got) and line_matches(e, g) else '!!'
+        out.append('%s %-50s | %s' % (mark, e.replace(ANY, '{...}')[:50], g))
     return 'transcript differs (expected | got):\n' + '\n'.join(out)
 
 
 def run(test):
+    """(test, None or why it failed, seconds). An exception in one test (a
+    symbol not found, a bad key script) is its failure alone."""
     started = time.monotonic()
+    try:
+        error = run_one(test)
+    except Exception as e:                  # pylint: disable=broad-except
+        error = '%s: %s' % (type(e).__name__, e)
+    return test, error, time.monotonic() - started
+
+
+def run_one(test):
+    shutil.rmtree(test.run_dir, ignore_errors=True)     # (a killed Bochs' locks too)
+    os.makedirs(test.run_dir)
     error = build(test)
     if error:
-        return test, error, time.monotonic() - started
-    b = test.build_dir
-    serial = os.path.join(b, 'transcript.log' if EMULATOR == 'bochs' else
-                          'transcript-%s.log' % EMULATOR)
-    dbglog = os.path.join(b, 'debugger.log')
-    for f in (serial, dbglog):
-        if os.path.exists(f):
-            os.remove(f)
-    printers = [os.path.join(b, '%s.out' % p) for p in ('lpt1', 'lpt2')]
-    for f in printers:
-        if os.path.exists(f):
-            os.remove(f)
-    bochsrc = os.path.join(b, 'test.bochsrc')
-    disks = rxlib.private_disks(os.path.join(b, 'disks'))
+        return error
+    b, r = test.build_dir, test.run_dir
+    serial = os.path.join(r, 'transcript.log')
+    dbglog = os.path.join(r, 'debugger.log')
+    printers = [os.path.join(r, '%s.out' % p) for p in ('lpt1', 'lpt2')]
+    bochsrc = os.path.join(r, 'test.bochsrc')
+    disks = rxlib.private_disks(os.path.join(r, 'disks'))
     rxlib.damage_disks(disks, test.media)
+    error = install(test)
+    if error:
+        return error
+    # MAME writes a diskette's image back as it runs, never at once: a
+    # diskette a test checks must not come out as it went in (check_written)
+    diskettes = sorted({d for d in test.fscks if d in 'AB'} |
+                       {d for d, _, _ in test.files if d in 'AB'}) if EMULATOR == 'mame' else []
+    before = {d: open(os.path.join(r, DRIVE_IMAGES[d]), 'rb').read() for d in diskettes}
     peer = None
     if test.modem:
         peer = HayesPeer()
         peer.start()
     modem = peer.address if peer else None
-    rxlib.write_bochsrc(bochsrc, image=os.path.join(b, 'run.img'), serial=serial,
-                        log=os.path.join(b, 'bochs.log'),
+    rxlib.write_bochsrc(bochsrc, image=os.path.join(r, 'run.img'), serial=serial,
+                        log=os.path.join(r, 'bochs.log'),
                         display=rxlib.DISPLAY_HEADLESS, debugger_log=dbglog,
                         disks=disks, printers=printers, media=test.media,
                         log_port='com3' if test.modem else 'com2', modem=modem)
@@ -526,17 +774,17 @@ def run(test):
     def until(lines):
         got = relevant(lines)
         if test.match == 'prefix':
-            return got[:len(wanted)] == wanted
+            return lines_match(wanted, got[:len(wanted)])
         return 'TEST END' in got
     if EMULATOR == 'bochs':
         status, _ = rxlib.run_bochs(bochsrc, rc, timeout, until=until, serial=serial,
-                                    log=os.path.join(b, 'bochs.log'), disks=disks)
+                                    log=os.path.join(r, 'bochs.log'), disks=disks)
     elif EMULATOR == 'dosbox-x':
-        status, _ = rxlib.run_dosbox(b, os.path.join(b, 'run.img'), serial, timeout, until,
+        status, _ = rxlib.run_dosbox(r, os.path.join(r, 'run.img'), serial, timeout, until,
                                      printers=printers, modem=modem,
                                      log_port='com3' if test.modem else 'com2')
     else:
-        status, _ = rxlib.run_mame(b, os.path.join(b, 'run.img'), serial, timeout, until,
+        status, _ = rxlib.run_mame(r, os.path.join(r, 'run.img'), serial, timeout, until,
                                    disks=disks, media=test.media)
     if peer:
         peer.close()
@@ -544,25 +792,30 @@ def run(test):
         if os.path.exists(serial) else []
     debugger_lines = open(dbglog, encoding='latin-1').read().splitlines() \
         if os.path.exists(dbglog) else []
+    unwritten = [d for d in diskettes if open(os.path.join(r, DRIVE_IMAGES[d]), 'rb').read()
+                 == before[d]]
     error = compare(test, transcript, debugger_lines) or check_printers(test, printers) \
-        or check_sectors(test)
+        or (unwritten and 'drive %s\'s image is as before the run: MAME never wrote it back'
+            % unwritten[0]) or check_volumes(test)
     if status == 'timeout':
         error = 'timed out after %.0f s; %s' % (timeout, error or 'the transcript matched')
-    return test, error, time.monotonic() - started
+    return error
 
 
 def main():
     parser = argparse.ArgumentParser(description='Run rx286 tests in Bochs.')
     parser.add_argument('tests', nargs='*')
-    parser.add_argument('--jobs', type=int, default=0, help='default: CPUs (fewer for MAME)')
-    parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--jobs', type=int, default=0, help='default: the CPUs')
     parser.add_argument('--emulator', choices=EMULATORS, default='bochs')
+    parser.add_argument('--cc', choices=('watcom', 'ia16'), default='watcom')
     args = parser.parse_args()
-    global EMULATOR
+    global EMULATOR, CC_KIND
     EMULATOR = args.emulator
+    CC_KIND = args.cc
     if not args.jobs:
-        args.jobs = max(2, (os.cpu_count() or 2) // JOBS_DIVISOR[EMULATOR])
+        args.jobs = max(2, os.cpu_count() or 2)
     paths = args.tests or sorted(glob.glob(os.path.join(ROOT, 'tests', '*', '*.test')))
+    paths = list(dict.fromkeys(os.path.realpath(p) for p in paths))   # each once: one run dir
     if not paths:
         print('run-test: no tests')
         return 1
@@ -581,9 +834,8 @@ def main():
             if error:
                 failures += 1
                 print('      ' + error.replace('\n', '\n      '))
-                name = 'transcript.log' if EMULATOR == 'bochs' else 'transcript-%s.log' % EMULATOR
                 print('      (transcript: %s)' % os.path.relpath(
-                    os.path.join(test.build_dir, name), ROOT))
+                    os.path.join(test.run_dir, 'transcript.log'), ROOT))
     print('run-test: %d of %d passed on %s' % (len(tests) - failures, len(tests), EMULATOR))
     return 1 if failures else 0
 

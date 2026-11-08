@@ -34,28 +34,30 @@ FRAME_SIZE_KERNEL   equ 30      ; a frame from ring 0
 FRAME_SIZE_USER     equ 34      ; a frame from ring 3
 
 ; ---------------------------------------------------------------- threads
-; A thread control block (thread.asm; roadmap l4.md L2). Its kernel stack is
-; a segment of its own (SEL_TSTACK + 8n), at whose top the CPU puts the frame
-; of every interrupt from ring 3 (SP0); while it does not run, its kernel
-; SS:SP rest here, at what switch_to pushed.
-T_SS                equ 0       ; its kernel stack's SS:SP while another runs
-T_SP                equ 2
+; A thread control block (thread.asm; roadmap l4.md L2, os-server.md P3),
+; an object anywhere, named by its descriptor's selector. Its last bytes
+; keep its frame while it does not run (T_FRAME); the running thread's is at
+; the top of the kernel's one stack (KFRAME), where SP0 puts it. Nothing
+; else of a thread's lies on that stack while the thread does not run: what
+; it still has to do in the kernel is T_CONT, and the call's progress.
+T_CONT              equ 0       ; byte: CONT_*, what it does when it runs again
+T_LOG_DONE          equ 2       ; KCALL_LOG: the bytes written before a preemption
 T_STATE             equ 4       ; byte: TS_*
 T_PRIO              equ 5       ; byte: 0, the lowest, to PRIORITIES - 1
 T_NEXT              equ 6       ; the next of its ready queue
 T_LDT               equ 8       ; its LDT's selector
-T_STACK             equ 10      ; its kernel stack's selector
+T_ZERO_PARAS        equ 10      ; KCALL_RETYPE, _RESIZE: paragraphs, while they are zeroed
 T_USTACK_TOP        equ 12      ; its program's SP at a start
 T_RESTART           equ 14      ; byte: restart_pending, kept while another runs
-T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state
+T_FPU_VALID         equ 15      ; byte: T_FPU holds its 287's state (FPU_GIVEN: given
+                                ;    by THREAD_FPU, kept at its first start, P15)
 T_NAME              equ 16      ; its name (kdata)
 T_SLICE             equ 18      ; byte: ticks left of its time slice
 T_FLAGS             equ 19      ; byte: TF_*
 T_RUN_TICKS         equ 20      ; ticks during which it was running
-T_LDT_LIVE          equ 22      ; its LDT (kdata)
 T_FAULT             equ 24      ; the endpoint its faults go to, or 0 (l4.md D18)
 T_RUNS              equ 26      ; times it was switched to
-T_SPACE             equ 28      ; its space (kdata)
+T_SPACE             equ 28      ; its space
 T_ENTRY             equ 30      ; its program's entry: the IP of a start
 T_RING              equ 32      ; byte: its ring, its space's slot 0's DPL
 T_IPC               equ 33      ; byte: TI_*, of the message it sends
@@ -69,49 +71,86 @@ T_CALLS             equ 46      ; the calls it has made: a stale reply cannot an
 T_FPU               equ 48      ; its 287's state (FNSAVE: 94 bytes) while not the owner
 T_FAULT_BADGE       equ 142     ; the badge of the fault endpoint's capability
 T_WAY_BACK          equ 144     ; byte: faults reported on this way back (isr_exit)
+T_FPU_ERROR         equ 145     ; byte: its 287's error, its fault #MF on its way back
 T_REVOKE_SPACE      equ 146     ; what its KCALL_REVOKE revokes, across its windows
 T_REVOKE_SLOT       equ 148
-T_REVOKE_CHILD      equ 150     ; and the child it deletes next: its space
-T_REVOKE_CHILD_SLOT equ 152     ;    and its slot
-TCB_SIZE            equ 160
+T_SUSPEND_NOTIFY    equ 150     ; THREAD_SUSPEND's notification, signalled once it stopped
+T_SUSPEND_BADGE     equ 152     ;    and the badge to signal with
+T_REFS              equ 154     ; the capabilities to it: it dies with the last (revoke.asm)
+T_SAVED_SPACE       equ 156     ; the slot of the saved reply owed to it, or 0 (ipc.asm)
+T_SAVED_SLOT        equ 158
+T_ZERO_DONE         equ 160     ; KCALL_RETYPE, _RESIZE: the paragraphs zeroed so far
+T_ZERO_BASE         equ 162     ;    the first, in paragraphs
+T_ZERO_SLOT         equ 164     ;    its untyped's slot
+T_FAULT_REGS        equ 166     ; 16 bytes: the registers its fault's message overwrote
+T_ZERO_HIGH         equ 182     ; byte: KCALL_RETYPE, _RESIZE: T_ZERO_BASE's bits 16-19
+T_REVOKE_TYPE       equ 183     ; byte: KCALL_REVOKE: the type and the object of what it
+T_FRAME             equ 184     ;    revokes (P15); its frame while it does not run
+T_REVOKE_OBJECT     equ T_FRAME + FRAME_SIZE_USER
+TCB_SIZE            equ T_REVOKE_OBJECT + 2
+ZERO_CANCELLED      equ 0xFFFF  ; T_ZERO_SLOT: its untyped's memory given back (P15)
+FPU_GIVEN           equ 2       ; T_FPU_VALID: THREAD_FPU's, for its first start (P15)
 %if T_FPU + 94 > T_FAULT_BADGE
   %error "kernel.inc: T_FPU's 94 bytes overlap the next field"
 %endif
 
 TI_CALLING          equ 0x01    ; T_IPC: a call, which waits for a reply
 TI_GRANT            equ 0x02    ;        it passes a capability (its frame's BP)
+TI_FAULT            equ 0x04    ;        its fault's call (ipc_fault)
+KE_SUSPENDED        equ 0x7F    ; a fault's wait ended by THREAD_SUSPEND (the kernel's own:
+                                ;    ipc_fault puts the registers back before any program sees it)
 
-; A thread as an object of the arena (roadmap l4.md L3): its control block,
-; then its kernel stack, a segment of its own from the GDT's pool. The
-; stack's 352 bytes are more than three times the deepest the watermark
-; found in any test once the disks left the kernel (102: l4.md D3, L9).
-TCB_OBJECT_SIZE     equ 512
-TCB_STACK_OFF       equ TCB_SIZE
-TCB_STACK_SIZE      equ TCB_OBJECT_SIZE - TCB_SIZE
+; What a thread does in the kernel when it runs again (T_CONT): the way back
+; to its ring, else the first start of its program, the rest of its fault's
+; call, or the rest of a kernel call that gave way to a more urgent thread
+; (kpreempt) or waits for the log's turn (call_enter)
+CONT_NONE           equ 0
+CONT_FIRST          equ 1
+CONT_KCALL          equ 2
+CONT_RESUMED        equ 3       ; (while the call runs again: it finds its progress)
+CONT_FAULT          equ 4       ; a fault from an exception
+CONT_FAULT_WAY      equ 5       ; a fault the way back found in its frame
+
+; A thread as an object (roadmap l4.md L3): its control block, its frame at
+; its end; no kernel stack of its own since os-server.md P3
+TCB_OBJECT_SIZE     equ 256
+KFRAME              equ KSTACK_TOP - FRAME_SIZE_USER    ; the running thread's frame
+%if TCB_SIZE > TCB_OBJECT_SIZE
+  %error "kernel.inc: a thread's control block outgrew its object"
+%endif
 
 ; ---------------------------------------------------------------- spaces and capabilities
-; A space (l4.md L3): a header, its LDT (a descriptor a slot), then a shadow
-; entry a slot, which says what the slot holds. kcalls.inc names the types.
+; A space (l4.md L3): an object, named by its descriptor's selector (os-server.md
+; P3): a header, its LDT (a descriptor a slot), then a shadow entry a slot, which
+; says what the slot holds. kcalls.inc names the types.
 SP_SLOTS            equ 0       ; the header: how many slots
 SP_GDT_SELECTOR     equ 2       ; its LDT's descriptor, from the GDT's pool
 SP_DEAD             equ 4       ; byte: 1 once its last capability went (revoke.asm)
+SP_REFS             equ 6       ; the capabilities to it: it dies with the last
+SP_FLUSH            equ 8       ; dead: the next slot dead_flush empties
 SP_HEADER_SIZE      equ 16
 SP_LDT              equ SP_HEADER_SIZE
 SH_TYPE             equ 0       ; byte: CAP_*
-SH_RIGHTS           equ 1       ; byte: RIGHT_*, and SR_PARENT
-SR_PARENT           equ 0x80    ; a capability has named it as its parent: a delete looks for
-                                ;    its children (revoke.asm); none has, if clear
+SH_RIGHTS           equ 1       ; byte: RIGHT_*
+SH_HIGH             equ 1       ; byte: memory's base paragraph's bits 16-19 (untyped, a
+                                ;    segment: they have no rights; os-server.md P3)
 SH_OBJECT           equ 2       ; a kernel object's offset in kdata; memory's base in
                                 ; paragraphs (a segment, untyped); an IRQ line
 SH_SIZE             equ 4       ; memory's size in paragraphs (a segment, untyped)
 SH_BADGE            equ 4       ; an endpoint's or notification's badge
 SH_WATERMARK        equ 6       ; untyped: paragraphs retyped so far
-SH_HOLE             equ 12      ; untyped: the room an alignment skipped, kept for
-SH_HOLE_END         equ 14      ;    smaller objects (paragraphs, as the watermark)
-SH_PARENT           equ 8       ; the space it was copied from (0: made, not copied)
-SH_PARENT_SLOT      equ 10      ; and the slot there
-SHADOW_SIZE         equ 16
+SH_PREV             equ 12      ; the previous in its parent's ring of children (the
+SH_PREV_SLOT        equ 14      ;    first's: the last; 0: it has no parent, P15)
+SH_PARENT           equ 8       ; its parent's space and slot, the first of the ring's
+SH_PARENT_SLOT      equ 10      ;    alone; the others' 0 (parent_find, P15)
+SH_CHILD            equ 16      ; its first child's space (0: none) and slot: its children
+SH_CHILD_SLOT       equ 18      ;    are a ring, linked both ways (os-server.md D9, P15)
+SH_NEXT             equ 20      ; the next in its parent's ring (the last's: the first)
+SH_NEXT_SLOT        equ 22
+SHADOW_SIZE         equ 24
+SLOT_SIZE           equ 8 + SHADOW_SIZE ; a slot's bytes in its space: descriptor and shadow
 SMALL_OBJECT_SIZE   equ 16      ; an endpoint, a notification
+OBJ_REFS            equ 6       ; a small object's: the capabilities to it
 ; An endpoint (l4.md L4): a queue of senders or of receivers, never both
 E_HEAD              equ 0
 E_TAIL              equ 2
@@ -149,9 +188,17 @@ TF_DEAD             equ 0x10    ; its last capability went while it ran: it dies
                                 ; way back (revoke.asm)
 TF_ORPHAN           equ 0x20    ; its space died while it ran: at its way back it stops,
                                 ; to be configured again (revoke.asm)
+TF_SUSPEND          equ 0x40    ; to stop at its way back, its registers kept (THREAD_SUSPEND)
+TF_SUSPENDED        equ 0x80    ; stopped so: THREAD_FRAME may move its frame, THREAD_START
+                                ; resumes it
+%if TFR_SIZE != FRAME_SIZE_USER || TFR_IP != FRAME_IP || TFR_SS != FRAME_USER_SS
+  %error "kernel.inc: THREAD_FRAME's layout (kcalls.inc) must be the frame's"
+%endif
 
 PRIORITIES          equ 8
 SLICE_TICKS         equ 5       ; a time slice: a tenth of a second
+EXT_KB_MAX          equ 15360       ; the extended memory a 286 addresses: 15 MB
+EXT_PROBE           equ 0x5AA5      ; ext_detect's word at 1 MB
 STACK_FILL          equ 0xA5A5  ; debug builds: an unused word of a kernel stack
 
 ; ---------------------------------------------------------------- the CPU
@@ -165,6 +212,8 @@ FLAGS_IF            equ 0x0200
 FLAGS_NT            equ 0x4000
 FLAGS_USER_START    equ 0x0202  ; IF set, IOPL 0, everything else clear
 FLAGS_IOPL1         equ 0x1000  ; IOPL 1: a driver's (roadmap l4.md D11)
+FLAGS_USER_KEEP     equ 0x0DD5  ; the flags a program sets itself: CF PF AF ZF SF TF DF OF
+                                ; (THREAD_FRAME writes these, never IF, IOPL or NT)
 FLAGS_DF_TASK       equ 0x0002  ; the double-fault task: interrupts off (bit 1 reads as 1)
 CPL_MASK            equ 3
 
@@ -219,6 +268,18 @@ VECTOR_NAME_CHARS   equ 3       ; "#GP", "NMI": the longest name of an exception
         STRETCH_BEGIN %1
         call kpreempt
 %endmacro
+
+; IWINDOW - an interrupt window alone, where the running thread never gives
+; way: inside a walk of a capability's children, which no interrupt handler
+; looks at, so that a long list keeps no stretch long (os-server.md P15)
+%macro IWINDOW 1
+        STRETCH_END
+        sti
+        nop
+        cli
+        STRETCH_BEGIN %1
+%endmacro
+CHILDREN_WINDOW     equ 16      ; children walked between two IWINDOWs
 
 
 ; ---------------------------------------------------------------- messages

@@ -4,9 +4,10 @@
 ;
 ; At each start it takes the next attack from its table (its data segment
 ; survives the kernel's restarts), prints the attack's name, and runs it. An
-; attack that faults is reported by the kernel, which starts the program
-; again; one that does not prints what happened and moves on. When the table
-; is done it says so and waits for a key, which ends the test.
+; attack that faults is a call on its fault endpoint, the OS server, which
+; reports it as the kernel would and whose reply starts the program again;
+; one that does not prints what happened and moves on. When the table is
+; done it says so and waits for a key, which ends the test.
 ; tests/attack/attacks.test holds what each attack must give; docs/security.md
 ; explains them. Bochs is not a 286: where the two differ, this file says.
 ; ============================================================================
@@ -26,6 +27,7 @@ FLAGS_NT            equ 0x4000
 SEL_BEYOND_GDT      equ (GDT_LIMIT + 1) | RPL_USER                  ; one past the GDT
 SEL_PAST_LDT        equ PROGRAM_SLOTS * 8 | SEL_TI_LDT | RPL_USER   ; one slot past its LDT
 SEL_EMPTY_SLOT      equ (PROGRAM_SLOTS - 1) * 8 | SEL_TI_LDT | RPL_USER ; its last slot: empty
+GDT_LAST            equ GDT_LIMIT - 7 | RPL_USER                    ; the GDT's last selector
 FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 
 ; probe which - KCALL_TEST's TEST_PROBE: the kernel changes one of the
@@ -39,9 +41,7 @@ FPU_CW_ZM           equ 0x037B          ; zero-divide unmasked
 begin_udata
 next_attack         dw 0
 scratch             times 8 db 0
-scratch_sector      times SECTOR_SIZE db 0
 bounds              dw 0, 5
-path_root           db '\', 0
 fpu_cw              dw FPU_CW_ZM
 end_udata
 
@@ -76,13 +76,14 @@ entry:
 .done:
         PRINT "attack: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------
-; attacks - the attacks, each a local label; the kernel restarts the program
-; after each one that faults
+; attacks - the attacks, each a local label; the OS server's reply restarts
+; the program after each one that faults. A GDT selector is loaded at RPL 3,
+; the program's: a load checks RPL against CPL before DPL, so an RPL of 0
+; would fault whatever the DPL (os-server.md P15)
 ;   In:       DS = ES = the program's data
 ;   Out:      does not return
 ;   Destroys: everything
@@ -101,20 +102,22 @@ attacks:
 .ltr_f: ltr ax
 .lldt:  xor ax, ax
 .lldt_f: lldt ax
-.kdata: mov ax, SEL_KDATA
+.kdata: mov ax, SEL_KDATA | RPL_USER
 .kdata_f: mov ds, ax
-.kstack: mov ax, SEL_KSTACK
+.kstack: mov ax, SEL_KSTACK | RPL_USER
 .kstack_f: mov ss, ax
-.video: mov ax, SEL_VIDEO
+.video: mov ax, SEL_VIDEO | RPL_USER
 .video_f: mov es, ax
 .beyond: mov ax, SEL_BEYOND_GDT
 .beyond_f: mov es, ax
 .ldt:   mov ax, SEL_PAST_LDT
 .ldt_f: mov ds, ax
-.kcall: call SEL_KCODE:0
-.tss:   jmp SEL_TSS:0
-.dftss: call SEL_DFTSS:0
-.int32: int 0x32                        ; beyond the IDT's limit
+.kcall: call (SEL_KCODE | RPL_USER):0
+.tss:   jmp (SEL_TSS | RPL_USER):0       ; busy: refused as busy, whatever its DPL
+.dftss: call (SEL_DFTSS | RPL_USER):0    ; available: refused for its DPL alone
+.gdt:   mov bx, 8 | RPL_USER            ; every selector of the GDT, LAR, VERR, VERW
+        jmp gdt_selectors
+.int32: int 0x32                        ; beyond the IDT's limit (.reads: 018Fh)
 .int21: int 0x21                        ; IRQ1's gate: DPL 0
 .int3:  int3
 .into:  mov al, 127
@@ -169,13 +172,15 @@ attacks:
         fld1
         fldz
         fdivp st1, st0
-        fwait                           ; Bochs raises IRQ13 here
+        fwait                           ; Bochs raises IRQ13 here: the fault #MF
+.fpu_f:                                 ;    here (os-server.md P12)
         PRINT "attack: no 287 error arrived (no 287 emulated?)", CHAR_LF
         jmp entry
-.write: mov si, UDATA_ROOM - 2
+.write: mov bx, 1                       ; the standard output, from bytes
+        mov si, UDATA_ROOM - 2          ;    across the data's limit
         mov cx, 4
-        sys SYS_WRITE                   ; refused: past the limit
-        call report_refusal
+        px PX_WRITE                     ; refused: EFAULT
+        call report_errno
         jmp entry
 .ins:   mov dx, KBC_DATA
 .ins_f: insb                            ; IOPL 0
@@ -191,18 +196,32 @@ attacks:
         fwait                           ; #MP (vector 9) on a 286, #GP on Bochs
         PRINT "attack: the 287 read across the limit (no 287 emulated?)", CHAR_LF
         jmp entry
-.nullw: push ds
-        xor ax, ax
+.overrun: mov al, TEST_OVERRUN          ; vector 9 in ring 0, as a 287's overrun
+        kcall KCALL_TEST                ; arrives after the CPU moved on, which no
+        PRINT "attack: back from the overrun, not restarted", CHAR_LF
+        jmp entry                       ; emulator here raises: restarted
+.wrap:  mov bx, 1
+        mov si, 0xFFF0                  ; bytes past FFFFh
+        mov cx, 0x20
+        px PX_WRITE                     ; refused: EFAULT
+        call report_errno
+        jmp entry
+; The kernel's own buffer check (check_buffer, log.asm), which no call on
+; the server reaches: KCALL_LOG of bytes across a limit, or past FFFFh
+.logd:  mov si, UDATA_ROOM - 2          ; across the data's limit
+        jmp log_attack
+.logs:  push ds
+        mov ax, SEL_USTACK              ; across the stack's limit
         mov ds, ax
-        xor si, si
-        mov cx, 1
-        sys SYS_WRITE                   ; refused: a null selector
+        mov si, USTACK_SIZE - 2
+        mov cx, 4
+        kcall KCALL_LOG
         pop ds
         call report_refusal
         jmp entry
-.wrap:  mov si, 0xFFF0
+.logw:  mov si, 0xFFF0                  ; past FFFFh
         mov cx, 0x20
-        sys SYS_WRITE                   ; refused: past FFFFh
+        kcall KCALL_LOG
         call report_refusal
         jmp entry
 .reads: sidt [scratch]                  ; unprivileged on the 286: all allowed
@@ -214,122 +233,46 @@ attacks:
         verr bx
         verw bx
         arpl ax, bx
-        PRINT "attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed", CHAR_LF
+        PRINT "attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed; the IDT's limit "
+        mov ax, [scratch]               ; vectors 0-31h: INT 32h is past it
+        call print_hex16
+        call print_newline
         jmp entry
 .edge:  mov ah, KCALL_TICKS
         jmp edge_of_code                ; INT 31h as the code segment's last bytes
 .int30: int 0x30                        ; the system call's gate until l4.md L10: DPL 0
 .sgdt:  sgdt [scratch]                  ; unprivileged on the 286: allowed
-        PRINT "attack: sgdt allowed", CHAR_LF
+        PRINT "attack: sgdt allowed; the GDT's limit "
+        mov ax, [scratch]               ; 2000h: past it (.beyond)
+        call print_hex16
+        call print_newline
         jmp entry
 .smsw:  smsw ax                         ; unprivileged on the 286: allowed
         PRINT "attack: smsw allowed", CHAR_LF
         jmp entry
-.dcode: push es                         ; a sector into the code: not writable
-        push cs
-        pop es
-        xor di, di
-        jmp disk_read_attack
-.dnull: push es                         ; a sector through a null ES
-        xor ax, ax
-        mov es, ax
-        xor di, di
-        jmp disk_read_attack
-.dlimit: push es                        ; a sector across the data's limit
-        mov di, UDATA_ROOM - SECTOR_SIZE / 2
-        jmp disk_read_attack
-.dwrap: push es                         ; a sector at FF00h: past the limit, and
-        mov di, 0x10000 - SECTOR_SIZE / 2   ; past FFFFh (the limit refuses it first)
-        jmp disk_read_attack
-.dwnull: push ds                        ; a sector written from a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov al, DRIVE_B
-        xor cx, cx
-        sys SYS_DISK_WRITE
-        pop ds
-        call report_refusal
+; The calls on the OS server (roadmap os-server.md P14): a buffer is an
+; offset in the program's data, which the server checks against its limit;
+; no selector is passed, so none can be forged. The server answers a program
+; the root builds four calls alone.
+.rlimit: xor bx, bx                     ; a key read into bytes across the limit:
+        mov di, UDATA_ROOM - 1          ;    refused before it waits, EFAULT
+        mov cx, 2
+        px PX_READ
+        call report_errno
         jmp entry
-.pnull: push ds                         ; printed from a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov al, PRINTER_LPT1
+.badfd: mov bx, 5                       ; a descriptor it has not: EBADF
+        mov si, scratch
         mov cx, 1
-        sys SYS_PRINT
-        pop ds
-        call report_refusal
+        px PX_WRITE
+        call report_errno
         jmp entry
-.drive: push es                         ; drive 80h: no such drive
-        mov di, scratch_sector
-        mov al, 0x80
-        xor cx, cx
-        sys SYS_DISK_READ
-        pop es
-        call report_refusal
+.open:  mov si, scratch                 ; a process's call: ENOSYS
+        xor bx, bx
+        px PX_OPEN
+        call report_errno
         jmp entry
-.sector: push es                        ; sector FFFFh: past A's end
-        mov di, scratch_sector
-        mov al, DRIVE_A
-        mov cx, 0xFFFF
-        sys SYS_DISK_READ
-        pop es
-        call report_refusal
-        jmp entry
-; The file calls (roadmap l4.md L9): the OS server's, refused as the
-; sectors' are: a buffer the stub checks, then the OS server's own checks
-.fnull: push ds                         ; a path through a null DS
-        xor ax, ax
-        mov ds, ax
-        xor si, si
-        mov di, scratch_sector
-        mov al, DRIVE_A
-        sys SYS_FIND
-        pop ds
-        call report_refusal
-        jmp entry
-.fcode: push es                         ; a record into the code: not writable
-        push cs
-        pop es
-        xor di, di
-        mov si, path_root
-        mov al, DRIVE_A
-        sys SYS_FIND
-        pop es
-        call report_refusal
-        jmp entry
-.flimit: mov di, UDATA_ROOM - PATH_MAX / 2  ; a directory's path across the limit
-        mov al, DRIVE_A
-        sys SYS_GETCWD
-        call report_refusal
-        jmp entry
-.fdrive: mov si, path_root              ; drive 80h: no such drive
-        mov di, scratch_sector
-        mov al, 0x80
-        sys SYS_FIND
-        call report_refusal
-        jmp entry
-.flong: mov di, scratch_sector          ; a path with no end in the bytes passed
-        mov cx, PATH_IN_MAX + 8
-        mov al, 'A'
-        rep stosb
-        mov si, scratch_sector
-        mov al, DRIVE_A
-        sys SYS_CHDIR
-        call report_refusal
-        jmp entry
-.fnone: mov di, scratch_sector          ; a file's sector, nothing found
-        sys SYS_FILE_NEXT
-        call report_refusal
-        jmp entry
-.fsect: push es                         ; a file's sector into the code
-        push cs
-        pop es
-        xor di, di
-        sys SYS_FILE_NEXT
-        pop es
-        call report_refusal
+.pxnone: px 0xFF                        ; no such call: ENOSYS
+        call report_errno
         jmp entry
 .empty: mov ax, SEL_EMPTY_SLOT          ; an empty slot of the LDT: all zeros
 .empty_f: mov ds, ax
@@ -357,7 +300,8 @@ attacks:
 .pcsd_r: PRINT "attack: back, with data for code", CHAR_LF
         jmp entry
 ; The kernel's calls (roadmap l4.md L3), from a program that holds no
-; capability but its three segments: each refused, nothing changed.
+; capability but its three segments and its endpoint to the server: each
+; refused, and its slots after them as before them (the second listing).
 .kgdt:  mov dx, SEL_KDATA               ; a GDT selector: no one's slot
         jmp retype_attack
 .kown:  mov dx, SEL_UDATA               ; its own data: not untyped
@@ -381,6 +325,70 @@ attacks:
         jmp entry
 .knone: mov ah, 0x80                    ; no such call
         int KCALL_VECTOR
+        call report_refusal
+        jmp entry
+.seal_data: mov dx, SEL_UDATA           ; its data made code, to run (os-server.md P2):
+        jmp seal_attack                 ; the root keeps a copy
+.seal_stack: mov dx, SEL_USTACK         ; its stack, likewise
+        jmp seal_attack
+.seal_code: mov dx, SEL_UCODE           ; its code: no data to seal
+        jmp seal_attack
+.seal_gdt: mov dx, SEL_KDATA            ; a GDT selector
+        jmp seal_attack
+
+; ----------------------------------------------------------------------------
+; log_attack - KCALL_LOG of 4 bytes at SI of the data, reported
+;   In:       SI = where
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+log_attack:
+        mov cx, 4
+        kcall KCALL_LOG
+        call report_refusal
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; gdt_selectors - every selector of the GDT at RPL 3, from BX to the last:
+; each that LAR, VERR or VERW does not refuse is printed (every descriptor
+; of the GDT has DPL 0: none may be), then how it ended
+;   In:       BX = the first selector
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+gdt_selectors:
+        xor dx, dx                      ; how many were not refused
+.next:
+        lar ax, bx
+        jz .open
+        verr bx
+        jz .open
+        verw bx
+        jnz .step
+.open:
+        inc dx
+        PRINT "attack: GDT selector "
+        mov ax, bx
+        call print_hex16
+        PRINT " not refused", CHAR_LF
+.step:
+        add bx, 8
+        cmp bx, GDT_LAST
+        jbe .next
+        test dx, dx
+        jnz .done
+        PRINT "attack: every selector of the GDT refused", CHAR_LF
+.done:
+        jmp entry
+
+; ----------------------------------------------------------------------------
+; seal_attack - KCALL_SEAL of DX, reported
+;   In:       DX = the selector given as the segment
+;   Out:      does not return: the next attack
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+seal_attack:
+        kcall KCALL_SEAL
         call report_refusal
         jmp entry
 
@@ -436,21 +444,25 @@ ldt_slots:
         jmp entry
 
 ; ----------------------------------------------------------------------------
-; disk_read_attack - SYS_DISK_READ of A's sector 0 into ES:DI, reported
-;   In:       ES:DI = the buffer; the program's ES pushed by the attack
-;   Out:      does not return: the next attack
-;   Destroys: everything
+; report_errno - "attack: refused, errno N" after a call on the OS server
+;   In:       BX and CX as the call returned them
+;   Out:      nothing
+;   Destroys: AX
 ; ----------------------------------------------------------------------------
-disk_read_attack:
-        mov al, DRIVE_A
-        xor cx, cx
-        sys SYS_DISK_READ
-        pop es
-        call report_refusal
-        jmp entry
+report_errno:
+        cmp bx, -1
+        jne .accepted
+        PRINT "attack: refused, errno "
+        mov ax, cx
+        call print_dec
+        call print_newline
+        ret
+.accepted:
+        PRINT "attack: ACCEPTED", CHAR_LF
+        ret
 
 ; ----------------------------------------------------------------------------
-; report_refusal - "attack: refused, error N" after a system call
+; report_refusal - "attack: refused, error N" after a kernel call
 ;   In:       CF and AX as the call returned them
 ;   Out:      nothing
 ;   Destroys: nothing
@@ -491,6 +503,7 @@ attack_table:
         attack "call the kernel", attacks.kcall
         attack "jump to the TSS", attacks.tss
         attack "call the double-fault TSS", attacks.dftss
+        attack "every selector of the GDT", attacks.gdt
         attack "int 32h", attacks.int32
         attack "int 30h, the system call that was", attacks.int30
         attack "int 21h", attacks.int21
@@ -518,27 +531,19 @@ attack_table:
         attack "jump through the null selector", attacks.nulljmp
         attack "pop past the stack's top", attacks.pop
         attack "a 287 operand across the limit", attacks.fpuop
-        attack "write from a null selector", attacks.nullw
+        attack "a 287 overrun in the kernel (vector 9)", attacks.overrun
         attack "write past FFFFh", attacks.wrap
+        attack "log bytes across the data's limit", attacks.logd
+        attack "log bytes across the stack's limit", attacks.logs
+        attack "log bytes past FFFFh", attacks.logw
         attack "unprivileged reads", attacks.reads
         attack "int 31h at the end of the code", attacks.edge
         attack "sgdt", attacks.sgdt
         attack "smsw", attacks.smsw
-        attack "read a sector into the code", attacks.dcode
-        attack "read a sector through a null ES", attacks.dnull
-        attack "read a sector across the limit", attacks.dlimit
-        attack "read a sector at FF00h", attacks.dwrap
-        attack "write a sector from a null selector", attacks.dwnull
-        attack "print from a null selector", attacks.pnull
-        attack "read drive 80h", attacks.drive
-        attack "read sector FFFFh of A", attacks.sector
-        attack "find a path through a null DS", attacks.fnull
-        attack "find into the code", attacks.fcode
-        attack "a directory's path across the limit", attacks.flimit
-        attack "find on drive 80h", attacks.fdrive
-        attack "a path with no end", attacks.flong
-        attack "a file's sector, nothing found", attacks.fnone
-        attack "a file's sector into the code", attacks.fsect
+        attack "read a key past the limit", attacks.rlimit
+        attack "write to a descriptor it has not", attacks.badfd
+        attack "open, a process's call", attacks.open
+        attack "a call on the server that does not exist", attacks.pxnone
         attack "an empty slot of the LDT", attacks.empty
         attack "every slot of the LDT", attacks.slots
         attack "probe: data not present", attacks.pds
@@ -554,6 +559,11 @@ attack_table:
         attack "copy into its code, as a space", attacks.kcopy
         attack "start its data, as a thread", attacks.kthread
         attack "a kernel call that does not exist", attacks.knone
+        attack "seal its own data, to run it", attacks.seal_data
+        attack "seal its stack", attacks.seal_stack
+        attack "seal its code", attacks.seal_code
+        attack "seal a GDT selector", attacks.seal_gdt
+        attack "every slot of the LDT, after the kernel's calls", attacks.slots
         dw 0
 end_udata
 

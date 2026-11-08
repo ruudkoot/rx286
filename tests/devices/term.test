@@ -1,16 +1,17 @@
-# term: a terminal on COM2, with a modem at the far end (the runner's
-# HayesPeer; the image built with COM2 the modem and the log on COM3): what
-# is typed goes out, the echo and the answers come back through IRQ3 and
-# SYS_WAIT. MAME's AT has no COM3 for the log.
-program: shell
+# term (roadmap os-server.md P12): /dev/com2, with a modem at the far end
+# (the runner's HayesPeer; the image built with COM2 the modem and the log
+# on COM3): what is typed goes out, the echo and the answers come back
+# through IRQ3; term waits in poll for the terminal and the line. MAME's AT
+# has no COM3 for the log, and DOSBox-X no drive C.
+program: sh
 modem: hayes
+install: C /BIN/TERM z-term.rx
 keys: term\n{wait 10}AT\n{wait 50}ati\n{wait 50}atz\n{wait 50}{esc}
 timeout: 60
-emulators: bochs dosbox-x
+emulators: bochs
 ---
 rx286, test build
-rx286 shell: type help for the commands
-A:\>term
+/a$ term
 Terminal on COM2 at 9600 baud; Esc ends.
 AT
 OK
@@ -19,4 +20,4 @@ rx286 test modem
 OK
 atz
 ERROR
-A:\>
+/a$

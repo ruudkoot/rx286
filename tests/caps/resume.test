@@ -1,0 +1,22 @@
+# Kernel calls that give way at every window and resume (roadmap os-server.md P3,
+# TEST_GIVE_WAY): tests/programs/additions.asm.
+program: additions
+define: TEST_CAPS
+define: TEST_ADD_RESUME
+emulators: bochs mame
+match: contains
+timeout: 120
+---
+additions: a line written a byte a turn
+additions: the call gave way (1): 1
+additions: its bytes (40): 40
+additions: the call gave way (1): 1
+additions: a 64 KB retype, giving way (0): 0
+additions: the pattern left in it (0): 0
+additions: the call gave way (1): 1
+additions: a revoke of ten copies, giving way (0): 0
+additions: the copies' slots empty after it (0): 0
+additions: the call gave way (1): 1
+additions: a delete that empties a space, giving way (0): 0
+additions: its slot empty (1): 1
+additions: done

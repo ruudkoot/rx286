@@ -28,6 +28,8 @@ its linear address: the segment's base from `layout.inc` plus its offset.
 Bochs looks symbols up by linear address, so they work in every segment
 whatever its base, and disassembly reads `(con_putc+12)`. The boot sector's
 symbols start with `bs.`, the loader's with `ld.`, the program's with `u.`.
+A module's data symbols are not there: its data is copied to a segment the
+root makes at its start, whose base no file knows (the map has them).
 
 ## Magic breakpoints
 
@@ -43,7 +45,9 @@ builds, and to nothing in a release build. `make debugger` turns Bochs'
 | `build/debug/bochs.log` | Bochs' own log: its `e[CPU0]` lines explain every exception it raises, in words ("load_seg_reg(DS, 0x0010): RPL & CPL must be <= DPL") |
 | `build/debug/debugger.log` | everything the debugger printed |
 
-Each test keeps the same three files in `build/tests/<suite>-<name>/`.
+Each test's run keeps the same files in `build/tests/<suite>/<name>/run-bochs/`
+(`transcript.log` the log; `run-dosbox-x/` and `build/tests-mame/.../run-mame/`
+on the other emulators).
 
 ## Listings
 

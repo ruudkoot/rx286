@@ -1,79 +1,139 @@
 #!/usr/bin/env python3
 # ============================================================================
 # rx286 - tools/sizes
-# Each segment of a build against its room in src/include/layout.inc, from
-# the NASM map files. Warns at 90% full.
+# Each part of a build against its room (roadmap os-server.md P14): the
+# boot code and the kernel, from the NASM map files, against
+# src/include/layout.inc; the drivers and a test program in assembly, of
+# the modules the image has; the root, the OS server and every program in
+# C, from their executables' headers (exe.inc), a code segment and a data
+# segment each of 64 KB at most, the data with its stack; /z, the archive,
+# against the 64 KB a module's data holds; and the boot image. The programs
+# are /z's and those named after the build directory, C's /BIN (`make
+# run`'s). Warns at 90% full, and fails (exit 1) for a part past its room.
 #
-#   tools/sizes build/release
+#   tools/sizes build/release [PROGRAM...]
 # ============================================================================
 
 import os
 import re
+import struct
 import sys
 
 import rxlib
 
 L = rxlib.LAYOUT
+E = rxlib.include_constants('exe.inc')
+A = rxlib.include_constants('archive.inc')
+SEGMENT = 0x10000                       # a segment's room: 64 KB
 # (binary, section or the symbol that ends its code, label, room)
-ROOMS = [
+NASM_ROOMS = [
     ('boot-sector', 'boot_sector_end', 'boot sector (BPB and code)', 510),
     ('boot-loader', 'loader_end', 'boot loader', L['LOADER_SECTORS'] * L['SECTOR_SIZE']),
     ('kernel', 'entry', 'kernel: real-mode entry', L['ENTRY_ROOM']),
     ('kernel', 'ktext', 'kernel: code', L['KTEXT_ROOM']),
     ('kernel', 'kdata', 'kernel: data', L['KDATA_ROOM']),
-    ('root', 'utext', 'root: code', L['UTEXT_ROOM']),
-    ('root', 'udata', 'root: data', L['UDATA_ROOM']),
-    ('user', 'utext', 'program: code', L['UTEXT_ROOM']),
-    ('user', 'udata', 'program: data', L['UDATA_ROOM']),
-    ('counter', 'ctext', 'counter: code', L['CTEXT_ROOM']),
-    ('counter', 'cdata', 'counter: data', L['CDATA_ROOM']),
 ]
+# The modules in assembly: a driver's, or the test program's, binary by its
+# name in the image's module table
+NASM_MODULES = [('printer', 'printer'), ('mouse', 'mouse'), ('console', 'console'),
+                ('keyboard', 'kbd'), ('diskette', 'fd'), ('fixeddisk', 'hd'),
+                ('serial', 'serial'), ('sound', 'sound'), ('rtc', 'rtc'), ('user', 'program')]
+# The modules in C: an executable, by its name in the module table
+C_MODULES = [('root', 'root'), ('os', 'os'), ('user', 'program'), ('counter', 'counter')]
 
 
 def section_lengths(path):
+    """A NASM map's sections: name -> bytes."""
     lengths = {}
-    total = 0
     for line in open(path, encoding='utf-8', errors='replace'):
         m = re.match(r'^\s*([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]+)\s+([0-9A-F]{8})\s+'
                      r'(progbits|nobits)\s+(\S+)', line)
         if m:
             lengths[m.group(6)] = int(m.group(4), 16)
-            total += int(m.group(4), 16)
-    return lengths, total
+    return lengths
 
 
-def main(build):
-    print('%-26s %7s %7s %5s' % ('segment', 'used', 'room', 'full'))
+PAST = []                               # the parts past their rooms
+
+
+def row(label, used, room):
+    """A line of the table: whether it is over 90% full (a part past its
+    room goes in PAST too)."""
+    full = 100.0 * used / room
+    flag = '  <- PAST ITS ROOM' if used > room else '  <- over 90%' if full > 90 else ''
+    if used > room:
+        PAST.append(label)
+    print('%-30s %7d %7d %4.0f%%%s' % (label, used, room, full, flag))
+    return bool(flag)
+
+
+def executable(label, path):
+    """An rx286 executable's code and data segments (exe.inc): its code,
+    and its stack, data and .bss against the data segment's most."""
+    head = open(path, 'rb').read(E['RX_HEADER_SIZE'])
+    word = lambda at: struct.unpack_from('<H', head, at)[0]
+    data = word(E['RXH_STACK']) + word(E['RXH_DATA']) + word(E['RXH_BSS'])
+    most = word(E['RXH_DGROUP_MAX']) or SEGMENT
+    warn = row(label + ': code', word(E['RXH_CODE']), SEGMENT)
+    return row(label + ': data', data, most) or warn
+
+
+def archive_names(path):
+    """The names of /z's programs, in the archive's order."""
+    blob = open(path, 'rb').read()
+    count = struct.unpack_from('<H', blob, 2)[0]
+    names = []
+    for k in range(count):
+        entry = blob[A['AR_HEADER_SIZE'] + k * A['AR_ENTRY_SIZE']:][:A['AR_NAME_SIZE']]
+        names.append(entry.split(b'\0')[0].decode('ascii'))
+    return names
+
+
+def main(build, programs):
+    print('%-30s %7s %7s %5s' % ('segment', 'used', 'room', 'full'))
     warn = False
-    for binary, section, label, room in ROOMS:
+    image = os.path.join(build, 'image.bin')
+    modules = ({m['name'] for m in rxlib.image_modules(open(image, 'rb').read())}
+               if os.path.exists(image) else set())
+    for binary, section, label, room in NASM_ROOMS:
         path = os.path.join(build, binary + '.map')
         if not os.path.exists(path):
             continue
-        lengths, total = section_lengths(path)
         if section.endswith('_end'):        # a symbol: its offset is the size used
             used = rxlib.symbol_offsets(path).get(section)
-            if used is not None and binary == 'boot-sector':
-                used -= L['BOOT_SECTOR_PHYS']
-            elif used is not None:
-                used -= L['LOADER_PHYS']
+            if used is not None:
+                used -= L['BOOT_SECTOR_PHYS'] if binary == 'boot-sector' else L['LOADER_PHYS']
         else:
-            used = lengths.get(section)
-        if used is None:
-            continue
-        full = 100.0 * used / room
-        flag = '  <- over 90%' if full > 90 else ''
-        warn = warn or bool(flag)
-        print('%-26s %7d %7d %4.0f%%%s' % (label, used, room, full, flag))
-    image = os.path.join(build, 'image.bin')
+            used = section_lengths(path).get(section)
+        if used is not None:
+            warn = row(label, used, room) or warn
+    for binary, name in NASM_MODULES:
+        path = os.path.join(build, binary + '.map')
+        if name in modules and os.path.exists(path) \
+                and os.path.exists(os.path.join(build, binary + '.bin')):
+            lengths = section_lengths(path)
+            warn = row(name + ': code', lengths.get('utext', 0), L['UTEXT_ROOM']) or warn
+            warn = row(name + ': data', lengths.get('udata', 0), L['UDATA_ROOM']) or warn
+    for binary, name in C_MODULES:
+        path = os.path.join(build, binary + '.rx')
+        if name in modules and os.path.exists(path):
+            warn = executable(name + ' (C)', path) or warn
+    arc = os.path.join(build, 'z.arc')
+    if os.path.exists(arc):
+        warn = row('/z, the archive', os.path.getsize(arc), 0xFFFE) or warn   # (mkarchive)
+        for name in archive_names(arc):
+            warn = executable('/z/' + name, os.path.join(build, 'z-%s.rx' % name)) or warn
+    for name in programs:
+        warn = executable('/c/bin/' + name, os.path.join(build, 'z-%s.rx' % name)) or warn
     if os.path.exists(image):
-        used, room = os.path.getsize(image), L['IMAGE_MAX']
-        full = 100.0 * used / room
-        flag = '  <- over 90%' if full > 90 else ''
-        print('%-26s %7d %7d %4.0f%%%s' % ('boot image (KERNEL.BIN)', used, room, full, flag))
+        warn = row('boot image (KERNEL.BIN)', os.path.getsize(image), L['IMAGE_MAX']) or warn
+    if PAST:
+        print('sizes: past its room: %s' % ', '.join(PAST))
+        return 1
     return 0
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        sys.exit('usage: sizes BUILD_DIR')
-    sys.exit(main(sys.argv[1]))
+    if len(sys.argv) < 2:
+        sys.exit('usage: sizes BUILD_DIR [PROGRAM...]')
+    sys.exit(main(sys.argv[1], sys.argv[2:]))

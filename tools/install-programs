@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/install-programs
+# The programs a build made, onto drive C's /BIN for `make run` (roadmap
+# os-server.md P8): each z-NAME.rx as /BIN/NAME (upper case, as FAT keeps
+# names), where PATH (/z:/c/bin) finds those that /z lacks.
+#
+#   tools/install-programs HD0.IMG BUILD-DIR
+# ============================================================================
+
+import glob
+import os
+import sys
+
+import rxlib
+
+
+def main(args):
+    if len(args) != 2:
+        sys.exit('usage: install-programs HD0.IMG BUILD-DIR')
+    image, build = args
+    for source in sorted(glob.glob(os.path.join(build, 'z-*.rx'))):
+        name = os.path.basename(source)[2:-3].upper()
+        error = rxlib.install_file(image, True, '/BIN/' + name, source)
+        if error:
+            sys.exit('install-programs: %s: %s' % (source, error))
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

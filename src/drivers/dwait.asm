@@ -126,7 +126,10 @@ dw_poll:
         pop bx
         ret
 
-DW_POLL_BURST       equ 256             ; reads between sleeps: a millisecond or so
+DW_POLL_BURST       equ 512             ; reads between sleeps: two milliseconds or so,
+                                        ;    longer than a byte at 9600 baud (1.04 ms),
+                                        ;    so that a serial write sleeps a tick only
+                                        ;    when the line is slow indeed (P15)
 
 ; ----------------------------------------------------------------------------
 ; dw_tick - wait until the next tick or the interrupt, whichever is first;

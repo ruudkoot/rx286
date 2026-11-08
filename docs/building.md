@@ -16,6 +16,21 @@
 | fsck.fat | 4.2 or later | the image check | `dosfstools` |
 | DOSBox-X | 2024.03 or later | the suites on a 286 core (optional) | `dosbox-x` |
 | MAME | 0.264 or later | the suites on the IBM PC/AT itself (optional) | `mame`, and the IBM 5170 ROMs in `~/mame/roms` |
+| Open Watcom v2 | 558748e (2026-11-05) | the C (*docs/c.md*) | built from its repository (below), in `~/opt/open-watcom` or `WATCOM` |
+| gcc | any | the host tests of the C | `gcc` |
+| gcc-ia16 | 9a55395 (2026-06-12), binutils-ia16 904e46a | `make check-ia16` (optional) | built from its repository (below), in `~/opt/gcc-ia16` or `IA16` |
+
+**The C compilers** are built from their repositories (roadmap
+os-server.md E1):
+- **Open Watcom v2** (about 71 minutes; 320 MB):
+  `git clone https://github.com/open-watcom/open-watcom-v2 ~/src/open-watcom-v2`,
+  then in it `OWGUINOBUILD=1 OWDOCBUILD=0 ./build.sh && ./build.sh rel`, and
+  copy `rel` to `~/opt/open-watcom`.
+- **gcc-ia16** (about 7 minutes; 424 MB): binutils-ia16 and gcc-ia16 from
+  github.com/tkchia, configured for `--target=ia16-elf`, the C compiler
+  alone with libgcc and no newlib (the steps of tkchia's build-ia16, at
+  codeberg.org/tkchia/build-ia16); `make MAKEINFO=true` where texinfo is
+  missing.
 
 Bochs is pinned to 2.7.x because its configuration syntax changes between
 releases. Its Debian build has the internal debugger but no gdb stub; doctor
@@ -45,8 +60,11 @@ it into features:
 | `boot-sector.bin` | sector 0 of the floppy |
 | `boot-loader.bin` | sectors 1-3 |
 | `kernel.bin` | the kernel: the boot image's first part |
-| `root.bin`, `os.bin`, `user.bin`, `counter.bin` | the modules: the root, the OS server, the program, the counter |
-| `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules (*docs/memory-map.md*) |
+| `user.bin`, the drivers' | the assembled modules: the program, the drivers |
+| `root.rx`, `os.rx`, `counter.rx` | the C modules, rx286's executables (*docs/c.md*): the root, the OS server, the counter (for the tests that ask, `TEST_COUNTER*`); `user.rx` for a C test program (`PROGRAM=services`); with `PROGRAM=none` no program module at all, and the processes have the keys; with `PROGRAM=shell` (the default; `sh` too) neither, and init runs the shell in C (*docs/processes.md*) |
+| `inc/`, `c/` | the C headers made from the include files; the C's objects, libraries, maps and disassemblies |
+| `z-init.rx`, `z-sh.rx`, `z-ls.rx`, ..., `z.arc` | the programs of `/z`, and `/z` itself, their archive (`tools/mkarchive`; *docs/processes.md*); `z-codes.rx` and the shell's commands but `echo`, `cat` and `ls`, programs for the disks alone (`DISK_PROGRAMS`), which a test installs; `make run` installs them all in C's `/BIN` (`tools/install-programs`) |
+| `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules, `/z` the last (*docs/memory-map.md*) |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |
 | `*.lst`, `*.map` | NASM's listing and map of each binary |
@@ -70,8 +88,12 @@ E5):
 3. `dd` the loader into sectors 1-3.
 4. `mcopy image.bin ::KERNEL.BIN`.
 
-`SOURCE_DATE_EPOCH` is set for all of it, so every time stamp is 1989-01-01.
-`make check-repro` builds the release image twice and compares the bytes.
+`SOURCE_DATE_EPOCH` is set for all of it, and `TZ` is UTC (mtools makes the
+time stamp local time), so every time stamp is 1989-01-01 00:00 wherever the
+build runs. `make check-repro` (`tools/check-repro`) builds the release,
+debug and test flavours and the disks twice, the second time in another time
+zone, locale and umask and after the FAT's 2 s grain, and compares every
+binary, executable, archive, image and symbol file.
 
 ## Running
 
@@ -87,8 +109,9 @@ E5):
   `tools/mkdisks`: a 360 KB diskette and the two fixed disks, each with a
   FAT12 partition, holding the sample files of `disks/`
   (*docs/storage.md*). `run`, `debugger` and the tests make them when
-  needed; `make run` lets the shell write to them, and a change of `disks/`
-  or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
+  needed. Only `tools/mkdisks` writes them: each test runs on copies, and
+  `make run` on copies of its own in `build/run-disks/`, which the shell
+  may write to; a change of `disks/` or `make clean` makes them afresh. What LPT1 and LPT2 print in `make run`
   goes to `build/debug/lpt1.txt` and `lpt2.txt`, the log to
   `build/debug/com2.log`. Bochs' window gives COM1 a serial mouse: Ctrl+F10
   captures the host's mouse for it (and lets it go). `make run-release`
@@ -100,12 +123,12 @@ E5):
 | Target | What |
 |---|---|
 | `make test` | every boot test in Bochs (*docs/testing.md*) |
-| `make test-286` | the same on DOSBox-X's 286 and MAME's IBM PC/AT (*docs/emulators.md*) |
+| `make test-286` | the same on DOSBox-X's 286 and MAME's IBM PC/AT (*docs/emulators.md*); either one missing fails, unless `SKIP_DOSBOX=1` or `SKIP_MAME=1` says to go without it |
 | `make unit` | the host tests of pure routines |
 | `make check-286` | no 386 instruction in any listing |
 | `make check-image` | the floppies are what the boot code expects |
-| `make check-repro` | two builds give the same image |
+| `make check-repro` | two builds of each flavour, and of the disks, give the same bytes |
 | `make lint` | the sources follow *docs/style.md* |
-| `make check-docs` | the documents name every constant; the bochsrc matches |
-| `make check` | all of the above (about 75 s) |
-| `make sizes` | each segment against its room |
+| `make check-docs` | the documents name every constant, and their tables give its value; the bochsrc matches |
+| `make check` | all of the above, the tests first and then the static checks (*docs/testing.md* says what it costs); its last line names any suite skipped |
+| `make sizes` | each segment of the release build against its room: the boot code, the kernel, the drivers, the root, the OS server, `/z` and every program |

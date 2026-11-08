@@ -29,6 +29,27 @@ label:  shld ax, bx, 4          ; SLIP
 %endmacro
         load [bx]
         load [ebx]
+cpu any
+        fcmovb st0, st1         ; SLIP
+        fcmovnbe st0, st1       ; SLIP
+        fcomi st0, st1          ; SLIP
+        fucomi st0, st1         ; SLIP
+        fcomip st0, st1         ; SLIP
+        fucomip st0, st1        ; SLIP
+        fisttp word [bx]        ; SLIP
+        fisttp dword [bx]       ; SLIP
+        fisttp qword [bx]       ; SLIP
+        ffreep st1              ; SLIP
+        invlpg [bx]             ; SLIP
+        rdtscp                  ; SLIP
+        monitor                 ; SLIP
+        jmpe ax                 ; SLIP
+        nop
+        align 4, mov eax, eax   ; SLIP
+[list -] ; SLIP
+        mov ecx, 3
+[list +]
+cpu 386
         ; the 286's own, which must pass
         pusha
         popa
@@ -62,6 +83,58 @@ label:  shld ax, bx, 4          ; SLIP
         fsqrt
         fldpi
         fbstp [bx]
+        feni
+        fdisi
+        fclex
+        finit
+        fsave [bx]
+        frstor [bx]
+        fstenv [bx]
+        fldenv [bx]
+        fldcw [bx]
+        fild qword [bx]
+        fistp qword [bx]
+        fld tword [bx]
+        fstp tword [bx]
+        fbld [bx]
+        fxch st1
+        fcompp
+        ffree st1
+        fmul st1, st0
+        fsubrp st1
+        fdivp st1
+        fcom st1
+        fcomp st1
+        fst st1
+        fprem
+        fxtract
+        fscale
+        frndint
+        fpatan
+        fptan
+        f2xm1
+        fyl2x
+        fyl2xp1
+        fdecstp
+        fincstp
+        fnop
+        fchs
+        fabs
+        ftst
+        fxam
+        fld1
+        fldz
+        fldl2t
+        fldl2e
+        fldlg2
+        fldln2
+        sgdt [bx]
+        sidt [bx]
+        str ax
+        sldt ax
+        smsw [bx]
+        lmsw [bx]
+        align 4, db 0x66
         db 0x66, 0x67, 0x0F, 0xA0
 message db 0x66, 0x65, 0x64, 0
 table   dw 0x6766

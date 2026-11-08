@@ -1,0 +1,15 @@
+# more (roadmap os-server.md P9): C's NUMBERS.TXT a page of 23 lines at a
+# time, a key from /dev/tty between: a space for the next page, q to stop.
+program: sh
+emulators: bochs mame
+install: C /BIN/MORE z-more.rx
+keys: more /c/numbers.txt\n q
+match: contains
+---
+/a$ more /c/numbers.txt
+line 0001 of C:\NUMBERS.TXT
+line 0023 of C:\NUMBERS.TXT
+line 0024 of C:\NUMBERS.TXT
+line 0046 of C:\NUMBERS.TXT
+--More--
+/a$

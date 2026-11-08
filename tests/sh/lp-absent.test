@@ -1,0 +1,15 @@
+# A printer port with no adapter at all (roadmap os-server.md P15, the
+# review of the drivers): Bochs's LPT2 taken out, its status port reads all
+# ones; the driver fails the write at once (E_TIMEOUT), and lp says so,
+# where it used to take every byte into nothing. LPT1 prints as before.
+program: sh
+emulators: bochs
+media: LPT2 absent
+install: C /BIN/LP z-lp.rx
+keys: echo two | lp -d lpt2; echo one | lp\n
+lpt1: one
+---
+rx286, test build
+/a$ echo two | lp -d lpt2; echo one | lp
+/dev/lpt2: input/output error
+/a$

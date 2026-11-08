@@ -1,6 +1,7 @@
 # The counter above the shell (roadmap l4.md L2): a program that never waits
-# starves every thread below it, and only those. The shell never runs, while
-# the kernel goes on: its ticks end the test.
+# starves every thread below it, and only those. No process runs, init's
+# thread included, so the shell never starts (os-server.md P12), while the
+# kernel and the OS server go on: the kernel's ticks end the test.
 program: shell
 define: TEST_COUNTER_ABOVE
 define: TEST_THREAD_REPORT
@@ -17,8 +18,9 @@ rx286: thread hd ran
 rx286: thread serial ran
 rx286: thread sound ran
 rx286: thread rtc ran
-rx286: thread program did not run
 rx286: thread counter ran
 rx286: thread os ran
 rx286: thread os ran
 rx286: thread os ran
+rx286: thread os ran
+rx286: thread thread did not run

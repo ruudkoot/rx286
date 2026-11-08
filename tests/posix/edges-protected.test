@@ -1,0 +1,26 @@
+# B write-protected, at the file system's edges (roadmap os-server.md P15,
+# the second review; tests/posix/edges.c, EDGES_PROTECTED): a write within
+# a file changes data sectors alone, which its fsync and close write, and
+# they say EROFS, each time (before: EIO, then 0 once the entry was taken
+# for written); a rename of the current directory that the drive refuses
+# moves no current directory (before, the process was left in a directory
+# that did not exist).
+program: idle
+define: TEST_POSIX_EDGES
+define: EDGES_PROTECTED
+media: B protected
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+fsck: B
+timeout: 120
+emulators: bochs
+---
+edges: PAD.TXT opened to write (3): 3
+edges: 10 bytes within it (10): 10
+edges: fsync (-1, EROFS 30): -1, errno 30
+edges: fsync again (-1, EROFS 30): -1, errno 30
+edges: close (-1, EROFS 30): -1, errno 30
+edges: rename of my directory (-1, EROFS 30): -1, errno 30
+edges: getcwd after it (/b/MANY): /b/MANY
+edges: stat . (0): 0
+edges: done

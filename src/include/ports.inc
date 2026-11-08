@@ -47,6 +47,7 @@ PIC2_ICW3_ID        equ 0x02        ; ICW3 slave: cascade identity 2
 PIC_ICW4_8086       equ 0x01        ; 8086 mode, normal EOI
 PIC_EOI             equ 0x20        ; OCW2: non-specific end of interrupt
 PIC_READ_ISR        equ 0x0B        ; OCW3: the next read of the command port gives ISR
+PIC_READ_IRR        equ 0x0A        ;    and IRR (TEST_STRETCH builds, P15)
 PIC_CASCADE_IRQ     equ 2
 
 ; ---------------------------------------------------------------- 8254 timer
@@ -55,6 +56,7 @@ PIT_CH1             equ 0x041       ; DRAM refresh: never touched
 PIT_CH2             equ 0x042       ; the speaker
 PIT_MODE            equ 0x043
 PIT_CH0_LOHI_MODE3  equ 0x36        ; channel 0, low then high byte, square wave, binary
+PIT_CH0_LOHI_MODE2  equ 0x34        ;    as a rate generator (TEST_STRETCH builds, P15)
 PIT_CH2_LOHI_MODE3  equ 0xB6        ; channel 2, the same
 PIT_LATCH_CH0       equ 0x00        ; latch channel 0's count: the next two reads give it
 PIT_INPUT_HZ        equ 1193182
@@ -70,6 +72,8 @@ KBC_STATUS_IBF      equ 0x02        ; input buffer full: wait before writing
 KBC_CMD_WRITE_CB    equ 0x60        ; write the command byte (next byte at 60h)
 KBC_CMD_WRITE_OUT   equ 0xD2        ; PS/2 only: write the keyboard output buffer (test builds)
 KBC_CMD_PULSE_RESET equ 0xFE        ; pulse output port bit 0: resets the CPU
+KBC_CMD_WRITE_PORT  equ 0xD1        ; write the output port (next byte at 60h)
+KBC_PORT_A20        equ 0xDF        ; the output port with A20 on, the CPU not reset (IBM 1-41)
 KBC_COMMAND_BYTE    equ 0x45        ; translate to set 1 (bit 6), system flag (2), IRQ1 (0)
 
 ; ---------------------------------------------------------------- system port B
@@ -94,8 +98,11 @@ CMOS_REG_A          equ 0x0A
 CMOS_REG_B          equ 0x0B
 CMOS_REG_C          equ 0x0C
 CMOS_REG_D          equ 0x0D
+CMOS_REG_D_VRT      equ 0x80        ; register D: the battery is good, the time valid
 CMOS_SHUTDOWN       equ 0x0F        ; the BIOS's shutdown status byte; 0 = soft reset
 CMOS_CENTURY        equ 0x32
+CMOS_EXT_LOW        equ 0x30        ; the KB of extended memory the POST found
+CMOS_EXT_HIGH       equ 0x31
 CMOS_REG_A_UIP      equ 0x80        ; update in progress
 CMOS_REG_A_RATE_1K  equ 0x26        ; 32 kHz base, 1,024 Hz periodic rate (test probe)
 CMOS_REG_B_24H_BCD  equ 0x02        ; 24-hour, BCD, no interrupts
@@ -185,6 +192,8 @@ EGA_ATTR            equ 0x3C0       ; 3C0h-3CFh: attribute, sequencer, graphics,
 CRTC_INDEX          equ 0x3D4       ; colour CRTC
 CRTC_DATA           equ 0x3D5
 EGA_STATUS1         equ 0x3DA
+CRTC_START_HIGH     equ 0x0C        ; the page shown: where the screen starts, in words
+CRTC_START_LOW      equ 0x0D
 CRTC_CURSOR_HIGH    equ 0x0E
 CRTC_CURSOR_LOW     equ 0x0F
 
@@ -196,6 +205,7 @@ FDC_DIR             equ 0x3F7       ; read: digital input (bit 7: the diskette w
 FDC_CCR             equ 0x3F7       ; write: the data rate
 FDC_DOR_MOTORS_OFF  equ 0x0C        ; controller enabled, DMA/IRQ enabled, every motor off
 FDC_DOR_RESET       equ 0x00        ; controller in reset (IRQ6 on release)
+FDC_DOR_RUN         equ 0x04        ; the controller out of reset (its bit 2)
 FDC_DOR_MOTOR_A     equ 0x10        ; drive A's motor; drive B's is the next bit
 FDC_DOR_MOTORS      equ 0x30        ; both motors' bits
 FDC_MSR_RQM         equ 0x80        ; the data register is ready

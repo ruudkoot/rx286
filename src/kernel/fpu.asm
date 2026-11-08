@@ -6,7 +6,9 @@
 ; mode once (Intel's 80287 part); on Bochs' FPU it does nothing. MP is set
 ; and EM clear (entry.asm), so ESC and WAIT run. On the AT an unmasked 287
 ; error raises IRQ13 and latches BUSY until port F0h is written (IBM 2-4);
-; the error is the program's, since the kernel computes nothing with it.
+; the error is the program's, since the kernel computes nothing with it: a
+; program with a fault endpoint (a process) has it as its fault #MF on its
+; way back to its ring (isr_exit; os-server.md P12), another starts again.
 ; ============================================================================
 
 ; ----------------------------------------------------------------------------
@@ -52,7 +54,7 @@ fpu_switch:
 ; (or the 287 reset for its first use); Intel 11.4, roadmap l4.md D17
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      the running thread owns the 287; TS clear
-;   Destroys: AX, BX
+;   Destroys: AX, BX, ES
 ; ----------------------------------------------------------------------------
 fpu_nm:
         clts
@@ -67,13 +69,15 @@ fpu_nm:
         ; the saved state, and comes back with it.
         xor al, al
         out FPU_CLEAR_BUSY, al
-        fnsave [bx + T_FPU]
-        mov byte [bx + T_FPU_VALID], 1
+        mov es, bx
+        fnsave [es:T_FPU]
+        mov byte [es:T_FPU_VALID], 1
 .load:
         mov bx, [cur_thread]
-        cmp byte [bx + T_FPU_VALID], 0
+        mov es, bx
+        cmp byte [es:T_FPU_VALID], 0
         je .fresh
-        frstor [bx + T_FPU]
+        frstor [es:T_FPU]
         jmp .own
 .fresh:
         fninit
@@ -84,15 +88,25 @@ fpu_nm:
 
 ; ----------------------------------------------------------------------------
 ; fpu_reset_thread - the running thread's program starts again: its 287
-; starts clean
+; starts clean; at a first start, a state THREAD_FPU gave it is kept (P15)
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 fpu_reset_thread:
         push bx
+        push es
         mov bx, [cur_thread]
-        mov byte [bx + T_FPU_VALID], 0
+        mov es, bx
+        cmp byte [es:T_FPU_VALID], FPU_GIVEN
+        jne .reset
+        mov byte [es:T_FPU_VALID], 1    ; given: kept, once
+        pop es
+        pop bx
+        ret
+.reset:
+        mov byte [es:T_FPU_VALID], 0
+        pop es
         cmp bx, [fpu_owner]
         jne .done
         clts                            ; it owns the 287: TS is clear anyway
@@ -102,11 +116,58 @@ fpu_reset_thread:
         ret
 
 ; ----------------------------------------------------------------------------
+; fpu_copy - a thread's 287 state as another's (THREAD_FPU, a fork's child:
+; XSH fork's copy of the floating-point environment; os-server.md P15): the
+; source's saved state, or, if the source owns the 287, its state saved and
+; put straight back, so that it owns it still
+;   In:       BX = the target (not running); DX = the source; DS = SEL_KDATA;
+;             interrupts off
+;   Out:      nothing
+;   Destroys: AX, CX, SI, DI, ES
+; ----------------------------------------------------------------------------
+fpu_copy:
+        cmp bx, [fpu_owner]
+        jne .source
+        mov word [fpu_owner], 0         ; (its old state goes: the copy replaces it)
+.source:
+        cmp dx, [fpu_owner]
+        jne .saved
+        clts                            ; (TS is set: the caller does not own it)
+        xor al, al                      ; BUSY released first, as fpu_nm does
+        out FPU_CLEAR_BUSY, al
+        mov es, dx
+        fnsave [es:T_FPU]
+        frstor [es:T_FPU]
+        mov byte [es:T_FPU_VALID], 1
+        smsw ax                         ; TS again: the caller still does not
+        or al, 8                        ;    own it
+        lmsw ax
+.saved:
+        mov es, dx
+        mov al, [es:T_FPU_VALID]
+        push ds
+        mov ds, dx
+        mov si, T_FPU
+        mov es, bx
+        mov di, T_FPU
+        mov cx, 94 / 2                  ; (FNSAVE's 94 bytes)
+        cld
+        rep movsw
+        pop ds
+        test al, al
+        jz .valid
+        mov al, FPU_GIVEN               ; (its first start keeps it: fpu_reset_thread)
+.valid:
+        mov [es:T_FPU_VALID], al
+        ret
+
+; ----------------------------------------------------------------------------
 ; fpu_irq - IRQ13: an error of the 287's owner, whichever thread runs now
 ; (Intel 11.4: "the numerics error from one task may not be recorded until
 ; the 286 is running a different task"; roadmap l4.md X5)
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      the owner's program to restart
+;   Out:      the owner's fault to report (T_FPU_ERROR), or its program to
+;             restart
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 fpu_irq:
@@ -119,17 +180,28 @@ fpu_irq:
         test al, FPU_STATUS_ES
         jz .stale                       ; no error left: a restart's FNINIT cleared
         fnclex                          ; it after the PIC had latched the request
-%ifdef TEST_FUZZ
-        inc word [fuzz_fpu_errors]      ; the fuzzer counts, quietly
-%else
-        mov si, msg_fpu_error
-        call klog
-%endif
         mov bx, [fpu_owner]
         test bx, bx
         jnz .owner
         mov bx, [cur_thread]            ; no owner: the kernel's own test
 .owner:
+%ifdef TEST_FUZZ
+        cmp bx, [fg_thread]             ; the fuzz program's 287 errors, whichever
+        jne .counted                    ; way they go: #MF through its fault endpoint
+        inc word [fuzz_fpu_errors]
+.counted:
+%endif
+        push es
+        mov es, bx
+        cmp word [es:T_FAULT], 0
+        je .restart
+        mov byte [es:T_FPU_ERROR], 1    ; its fault endpoint's, on its way back
+        pop es
+        jmp .stale
+.restart:
+        pop es
+        mov si, msg_fpu_error
+        call klog
         call thread_restart
 .stale:
         pop ax

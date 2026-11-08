@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+# ============================================================================
+# rx286 - tools/inc2h
+# Makes a C header of a NASM include file, so that each number is written
+# once (roadmap os-server.md, *The libraries*, D22).
+#
+#   tools/inc2h src/include/syscalls.inc OUT.h
+#
+# `NAME equ EXPR` becomes `#define NAME (EXPR)`; %ifdef, %ifndef, %elifdef,
+# %else, %endif, %if, %define and %include become their C forms; macros,
+# %error, NASM's [map] and comments go. A quoted pair of characters ('MT')
+# becomes its number as NASM stores it, little-endian; a number's h, its
+# 0x. Each EXPR is then computed twice, as NASM does and as C does
+# (rxlib.nasm_value, rxlib.c_value: int 16 bits, long 32; #if's at 64), and
+# a line whose two differ stops it: C's octal 010, a 16-bit overflow
+# (300 * 200), NASM's unsigned / and logical >>, its comparisons looser than
+# & and |, a string in double quotes. So a header is never wrong in silence.
+# A %define's value is checked so too, unless it is a string ("...") or
+# another name, which means in C what it means in NASM.
+# ============================================================================
+
+import os
+import re
+import sys
+
+import rxlib
+
+
+def number_of_string(text):
+    value = 0
+    for n, ch in enumerate(text):
+        value |= ord(ch) << (8 * n)
+    return '0x%X' % value
+
+
+def expression(expr, path, lineno):
+    expr = re.sub(r"'([^']{1,4})'", lambda m: number_of_string(m.group(1)), expr)
+    expr = re.sub(r'\b([0-9][0-9A-Fa-f]*)[hH]\b', r'0x\1', expr)
+    if re.search(r'\$|\bseg\b|\bwrt\b', expr):
+        sys.exit('%s:%d: inc2h: not C: %s' % (path, lineno, expr))
+    return expr.strip()
+
+
+class Names:
+    """What the lines so far define, by NASM's rules, by C's, and by C's
+    preprocessor's (#if)."""
+    def __init__(self):
+        self.nasm, self.c, self.pp = {}, {}, {}
+
+    def update(self, other):
+        self.nasm.update(other.nasm)
+        self.c.update(other.c)
+        self.pp.update(other.pp)
+
+
+def check(name, nasm_expr, c_expr, names, path, lineno, condition=False):
+    """Stops unless NASM's and C's values of the expression agree; else
+    records them under `name` (None for a condition)."""
+    nasm_expr = re.sub(r"'([^']{1,4})'", lambda m: str(int(number_of_string(m.group(1)), 16)),
+                       nasm_expr)
+    try:
+        n = rxlib.nasm_value(nasm_expr, names.nasm)
+        pp = rxlib.c_value(c_expr, names.pp, 64, 64)
+        c = None if condition else rxlib.c_value(c_expr, names.c)
+    except rxlib.ExpressionError as e:
+        sys.exit('%s:%d: inc2h: %s: %s' % (path, lineno, nasm_expr.strip(), e))
+    if condition and bool(n) != bool(pp[0]) or \
+            not condition and not (rxlib.same_value(n, c) and rxlib.same_value(n, pp)):
+        sys.exit('%s:%d: inc2h: NASM makes %s %d, C %d: %s' % (
+            path, lineno, name or 'it', n, (pp if condition else c)[0], nasm_expr.strip()))
+    if name:
+        names.nasm[name], names.pp[name] = n, pp
+        names.c[name] = c
+
+
+def convert(path):
+    """The header of the include file at `path`, and its Names."""
+    name = os.path.basename(path)
+    out = ['/* Made by tools/inc2h from src/include/%s: do not edit. */' % name]
+    names = Names()
+    in_macro = False
+    for lineno, raw in enumerate(open(path, encoding='utf-8'), 1):
+        line = raw.split(';', 1)[0].rstrip()
+        if not line.strip():
+            continue
+        words = line.split()
+        if in_macro:
+            if words[0].lower() == '%endmacro':
+                in_macro = False
+            continue
+        head = words[0].lower()
+        if head == '%macro':
+            in_macro = True
+        elif head in ('%ifdef', '%ifndef', '%elifdef', '%elifndef'):
+            op = {'%ifdef': '#ifdef', '%ifndef': '#ifndef', '%elifdef': '#elif defined',
+                  '%elifndef': '#elif !defined'}[head]
+            out.append('%s %s' % (op, words[1]) if op.startswith('#if')
+                       else '%s(%s)' % (op, words[1]))
+        elif head == '%if':
+            text = line.split(None, 1)[1]
+            c_text = expression(text, path, lineno)
+            check(None, text, c_text, names, path, lineno, condition=True)
+            out.append('#if %s' % c_text)
+        elif head in ('%else', '%endif'):
+            out.append('#' + head[1:])
+        elif head == '%define':
+            value = ' '.join(words[2:])
+            if re.search(r"['`]", value) or value.count('"') not in (0, 2) or \
+                    '"' in value and not re.fullmatch(r'"[^"]*"', value):
+                sys.exit('%s:%d: inc2h: a %%define C would read otherwise: %s'
+                         % (path, lineno, line.strip()))
+            if value and not value.startswith('"') and not rxlib.NAME.fullmatch(value):
+                check(words[1], value, expression(value, path, lineno), names, path, lineno)
+            out.append('#define %s' % ' '.join(words[1:]))
+        elif head == '%include':
+            inc = re.search(r'"([^"]+)\.inc"', line).group(1)
+            names.update(convert(os.path.join(os.path.dirname(path), inc + '.inc'))[1])
+            out.append('#include "%s.h"' % inc)
+        elif head in ('%error', '%warning') or line.lstrip().startswith('['):
+            continue
+        elif len(words) >= 3 and words[1].lower() == 'equ':
+            text = line.split(None, 2)[2]
+            c_text = expression(text, path, lineno)
+            check(words[0], text, c_text, names, path, lineno)
+            out.append('#define %s (%s)' % (words[0], c_text))
+        else:
+            sys.exit('%s:%d: inc2h: not understood: %s' % (path, lineno, line.strip()))
+    return '\n'.join(out) + '\n', names
+
+
+def main(args):
+    if len(args) != 2:
+        sys.exit('usage: inc2h INPUT.inc OUTPUT.h')
+    text = convert(args[0])[0]
+    with open(args[1] + '.tmp', 'w', encoding='utf-8') as f:
+        f.write(text)
+    os.replace(args[1] + '.tmp', args[1])
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

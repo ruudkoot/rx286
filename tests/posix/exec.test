@@ -1,0 +1,44 @@
+# Programs from disk (roadmap os-server.md P8): init starts
+# tests/posix/exec.c from /z (TEST_POSIX_EXEC), which runs programs from C,
+# finds them along PATH (/z, then /c/bin), runs two copies of one at once
+# and finds them sharing their code, writes copies of a program with every
+# corruption of its header to B and is refused each, and times an exec from
+# C. run-test installs the programs on C first.
+program: idle
+define: TEST_POSIX_EXEC
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+emulators: bochs mame
+install: C /BIN/CHILD z-child.rx
+install: C /BIN/CODES z-codes.rx
+fsck: B
+fsck: C
+---
+child: argc 2: /c/bin/child one
+exec: a program on C (2): 2
+exec: codes, on C alone, along PATH (0): 0
+child: argc 2: child x
+exec: child along PATH, by execvp (2): 2
+exec: two copies at once share their code: yes
+exec: a magic (-1, ENOEXEC 8): -1, 8
+exec: a version (-1, ENOEXEC 8): -1, 8
+exec: a flag it does not know (-1, ENOEXEC 8): -1, 8
+exec: no code (-1, ENOEXEC 8): -1, 8
+exec: an entry past the code (-1, ENOEXEC 8): -1, 8
+exec: a file cut short (-1, ENOEXEC 8): -1, 8
+exec: a stack too small (-1, ENOEXEC 8): -1, 8
+exec: data past a segment (-1, ENOEXEC 8): -1, 8
+exec: a most below its data (-1, ENOEXEC 8): -1, 8
+exec: a directory (-1, EACCES 13): -1, 13
+exec: five from C, each within a second: yes
+exec: a file's name and a slash (-1, ENOTDIR 20): -1, 20
+exec: an empty name along PATH (-1, ENOENT 2): -1, 2
+exec: a file open for writing (-1, ETXTBSY 26): -1, 26
+exec: a PATH directory too long, never its tail (-1, ENOENT 2): -1, 2
+exec: argv and environ of 16,383 each (E2BIG 7): 7
+exec: three execs from a thread while the main one calls, each its own break (3): 3
+exec: done

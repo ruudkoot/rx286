@@ -1,0 +1,19 @@
+# A directory whose chain loops (roadmap os-server.md P15, the second
+# review; tests/posix/edges.c, EDGES_LOOP): B:\MANY's first cluster, whose
+# 32 entries are all used, links to itself. A lookup, a create and a
+# listing there are EIO after one walk along the chain, as long as the
+# volume has clusters (before, a walk from the start for each entry: 464
+# seconds of Bochs for one lookup, the server's lock held).
+program: idle
+define: TEST_POSIX_EDGES
+define: EDGES_LOOP
+media: B loop
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+emulators: bochs
+---
+edges: a name in a directory whose chain loops (-1, EIO 5): -1, errno 5
+edges: a file made there (-1, EIO 5): -1, errno 5
+edges: its listing ends, EIO (1 5): 1 5
+edges: done

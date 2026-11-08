@@ -1,20 +1,38 @@
 #!/usr/bin/env python3
 # ============================================================================
 # rx286 - tools/lint
-# Holds the assembly sources to docs/style.md.
+# Holds the sources to docs/style.md: the assembly, and the C (roadmap
+# os-server.md P1, D22).
 #
-#   tools/lint                every source of src/ and tests/programs/
+#   tools/lint                every source of src/, tests/programs/,
+#                             tests/posix/, tests/unit/, and mame/rx286.lua
 #   tools/lint FILE...
 #
-# Rules:
+# Rules for C (.c, .h):
+#   header    the file starts with the banner and " * rx286 - <its path>"
+#   function  a function's definition (a `)` and then `{` outside any braces,
+#             however its lines break) follows a comment of its own that
+#             starts `/* name -` (or names it among others: `/* a, b -`)
+#   compiler  no compiler's own word (far, near, huge, and the _ and __ forms
+#             of them and of based, segment, self, loadds, saveregs, export,
+#             stdcall, fastcall, inline...; __declspec, __attribute__,
+#             __builtin_*, __extension__, __typeof__, asm, _Pragma, any
+#             #pragma) outside src/include/rx/compiler.h
+#   layout    as for assembly
+# Rules for assembly:
 #   header    the file starts with the banner and "; rx286 - <its path>"
-#   cpu       a file that includes build.inc (a top-level source) says `cpu 286`
+#   cpu       a file that includes build.inc (a top-level source) says
+#             `cpu 286`, and no file says any other cpu
 #   routine   in code, every label that is not local (.x) follows a routine
 #             header that names it, with In:, Out: and Destroys: (data labels
 #             have no colon; a label ending in _start or _end that no code
-#             follows marks a place, not a routine)
-#   port      `in`, `out` and `mov dx` name their port with a constant
+#             follows marks a place, not a routine); `section`, `[section]`,
+#             `segment` and cabi.inc's macros change the section
+#   port      `in`, `out` and `mov dx` name their port with a constant: a
+#             number in DX reaching an `in` or `out` before DX changes, or a
+#             port in the instruction itself
 #   layout    no tabs, no trailing spaces, at most 100 characters a line
+# Lua (mame/rx286.lua): its header ("-- rx286 - <its path>") and layout.
 # ============================================================================
 
 import glob
@@ -26,6 +44,15 @@ import rxlib
 
 ROOT = rxlib.ROOT
 CODE_SECTIONS = {'entry', 'ktext', 'utext', '.text'}
+COMPILER_H = os.path.join(ROOT, 'src', 'include', 'rx', 'compiler.h')
+COMPILER_WORDS = re.compile(
+    r'\b_{1,2}(far|near|huge|based|segment|segname|self|loadds|saveregs|export|stdcall|'
+    r'fastcall|cdecl|pascal|watcall|interrupt|syscall|fortran)\b|\b(far|near|huge)\b|'
+    r'\b_{1,2}inline\b|\b__(declspec|attribute__|extension__|typeof__|typeof|asm__|asm|'
+    r'builtin_\w+|restrict__|volatile__|const__|signed__)\b|\b_asm\b|\basm\b|\b_Pragma\b|'
+    r'^\s*#\s*pragma\b', re.M)
+CPU_LINE = re.compile(r'^\s*\[?\s*cpu\s+(\w+)', re.I | re.M)
+SECTION_LINE = re.compile(r'^\s*\[?\s*(?:section|segment)\s+([^\s\]]+)', re.I)
 
 
 def data_includes():
@@ -35,7 +62,7 @@ def data_includes():
     section = None
     path = os.path.join(ROOT, 'src', 'kernel', 'kernel.asm')
     for line in open(path, encoding='utf-8'):
-        m = re.match(r'^\s*section\s+(\S+)', line)
+        m = SECTION_LINE.match(line)
         if m:
             section = m.group(1)
         m = re.match(r'^\s*%include\s+"([^"]+)"', line)
@@ -49,8 +76,17 @@ LABEL = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):')
 PORT_NUMBER = re.compile(
     r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:out\s+(\d\w*)\s*,|in\s+\w+\s*,\s*(\d\w*)\s*(?:;|$))',
     re.I)
+PORT_IN_INSTRUCTION = re.compile(
+    r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:out\s+(?:byte\s+|word\s+)?\(?\s*(\d\w*)\s*\)?\s*,|'
+    r'in\s+\w+\s*,\s*(?:byte\s+|word\s+)?\(?\s*(\d\w*)\s*\)?\s*(?:;|$))', re.I)
 DX_NUMBER = re.compile(r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*mov\s+dx\s*,\s*\d\w*\s*(?:;|$)', re.I)
 DX_PORT = re.compile(r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:in\s+\w+\s*,\s*dx|out\s+dx\s*,)', re.I)
+# What writes DX (or DH, DL), or ends the straight line of code a port
+# number in DX would reach an `in` or `out` along
+DX_WRITTEN = re.compile(
+    r'^\s*(?:[A-Za-z_.][\w.]*:)?\s*(?:(?:mov|add|sub|inc|dec|and|or|xor|pop|lea|xchg|adc|sbb|'
+    r'neg|not|shl|shr|sal|sar|rol|ror|rcl|rcr)\s+d[xhl]\b|xchg\s+\w+\s*,\s*d[xhl]\b|'
+    r'(?:mul|div|imul|idiv|cwd|call|jmp|ret|retf|iret|int)\b)|^[A-Za-z_][\w]*:', re.I)
 DIRECTIVE = re.compile(r'^\s*(?:times|db|dw|dd|dq|dt|incbin|section|\[section|%|[A-Za-z_][\w]*:|'
                        r'[A-Za-z_][\w]*\s+(?:db|dw|dd|equ|times))', re.I)
 
@@ -67,7 +103,103 @@ def is_marker(label, lines, n):
     return True
 
 
+def c_definitions(code_text):
+    """(index of its name, name) of each function definition in C with its
+    comments and strings blanked: outside any braces, a `)` whose next
+    character but blanks is `{`; the name the word before its `(`.
+    Preprocessor lines are not code."""
+    text = re.sub(r'^[ \t]*#(?:[^\n]*\\\n)*[^\n]*', lambda m: re.sub(r'[^\n]', ' ', m.group(0)),
+                  code_text, flags=re.M)
+    found, braces, opens = [], 0, []
+    for i, ch in enumerate(text):
+        if ch == '{':
+            braces += 1
+        elif ch == '}':
+            braces -= 1
+        elif braces == 0 and ch == '(':
+            opens.append(i)
+        elif braces == 0 and ch == ')' and opens:
+            start = opens.pop()
+            rest = text[i + 1:].lstrip()
+            if not opens and rest.startswith('{'):
+                m = re.search(r'([A-Za-z_]\w*)\s*$', text[:start])
+                if m:
+                    found.append((m.start(1), m.group(1)))
+    return found
+
+
+def lint_c(path):
+    problems = []
+    rel = os.path.relpath(path, ROOT)
+    lines = open(path, encoding='utf-8').read().split('\n')
+
+    def report(n, rule, text):
+        problems.append('%s:%d: %s: %s' % (rel, n, rule, text))
+
+    if len(lines) < 2 or not lines[0].startswith('/* ====') or \
+            lines[1].strip() != '* rx286 - ' + rel:
+        report(1, 'header', 'the file must start with the banner and " * rx286 - %s"' % rel)
+    # the code without its comments and strings, line for line
+    text = '\n'.join(lines)
+    code_text = re.sub(r'/\*.*?\*/|//[^\n]*|"(?:[^"\\\n]|\\.)*"',
+                       lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text, flags=re.S)
+    code_lines = code_text.split('\n')
+    for n, line in enumerate(lines, 1):
+        if '\t' in line:
+            report(n, 'layout', 'a tab')
+        if line != line.rstrip():
+            report(n, 'layout', 'trailing spaces')
+        if len(line) > 100:
+            report(n, 'layout', 'longer than 100 characters')
+        code = code_lines[n - 1]
+        if path != COMPILER_H and COMPILER_WORDS.search(code):
+            report(n, 'compiler', 'a compiler\'s own word outside compiler.h: ' + line.strip())
+    for at, name in c_definitions(code_text):
+        n = code_text.count('\n', 0, at) + 1          # the name's line
+        # the definition starts at the first line of its declaration: back
+        # over the lines that end neither a statement, a block nor a comment
+        first = n
+        while first > 1 and code_lines[first - 2].strip() and \
+                not code_lines[first - 2].rstrip().endswith((';', '}', '{')) and \
+                not lines[first - 2].rstrip().endswith('*/'):
+            first -= 1
+        k = first - 2
+        while k >= 0 and lines[k].strip() == '':
+            k -= 1
+        start = k
+        while start >= 0 and '/*' not in lines[start]:
+            start -= 1
+        comment = '\n'.join(lines[start:k + 1]) if start >= 0 else ''
+        words = re.sub(r'^\s*/\*+|^\s*\*+', ' ', comment, flags=re.M).split()
+        names = [w.rstrip(',') for w in words[:words.index('-')]] if '-' in words else []
+        if k < 0 or not lines[k].rstrip().endswith('*/') or \
+                lines[start].split('/*', 1)[0].strip() or name not in names:
+            report(n, 'function', '%s needs a comment of its own before it, '
+                   '"/* %s - what it does */"' % (name, name))
+    return problems
+
+
+def lint_lua(path):
+    """A Lua file: its header and layout."""
+    problems = []
+    rel = os.path.relpath(path, ROOT)
+    lines = open(path, encoding='utf-8').read().split('\n')
+    if len(lines) < 2 or not lines[0].startswith('-- ====') or \
+            lines[1].strip() != '-- rx286 - ' + rel:
+        problems.append('%s:1: header: the file must start with the banner and '
+                        '"-- rx286 - %s"' % (rel, rel))
+    for n, line in enumerate(lines, 1):
+        if '\t' in line or line != line.rstrip() or len(line) > 100:
+            problems.append('%s:%d: layout: a tab, trailing spaces or over 100 characters'
+                            % (rel, n))
+    return problems
+
+
 def lint(path):
+    if path.endswith(('.c', '.h')):
+        return lint_c(path)
+    if path.endswith('.lua'):
+        return lint_lua(path)
     problems = []
     rel = os.path.relpath(path, ROOT)
     lines = open(path, encoding='utf-8').read().split('\n')
@@ -79,9 +211,14 @@ def lint(path):
             lines[1].strip() != '; rx286 - ' + rel:
         report(1, 'header', 'the file must start with the banner and "; rx286 - %s"' % rel)
     text = '\n'.join(lines)
-    if re.search(r'^%include "build.inc"', text, re.M) and \
-            not re.search(r'^\s*cpu 286\b', text, re.M):
+    code_only = re.sub(r';[^\n]*', '', text)
+    if re.search(r'^\s*%include\s+"build.inc"', code_only, re.M) and \
+            not re.search(r'^\s*cpu 286\b', code_only, re.M):
         report(1, 'cpu', 'a top-level source must say `cpu 286`')
+    for m in CPU_LINE.finditer(code_only):
+        if m.group(1) != '286':
+            report(code_only.count('\n', 0, m.start()) + 1, 'cpu',
+                   'cpu %s: a 286 is all there is' % m.group(1))
 
     section = 'kdata' if path in DATA_FILES else '.text'
     saved = []
@@ -92,20 +229,27 @@ def lint(path):
             report(n, 'layout', 'trailing spaces')
         if len(line) > 100:
             report(n, 'layout', 'longer than 100 characters')
-        m = re.match(r'^\s*section\s+(\S+)', line)
+        m = SECTION_LINE.match(line)
         if m:
             section = m.group(1)
+        m = re.match(r'^\s*(code|data|bss)_section\b', line)     # cabi.inc's
+        if m:
+            section = '.text' if m.group(1) == 'code' else 'kdata'
         if re.match(r'^\s*begin_[ku]data\b', line):
             saved.append(section)
             section = 'kdata'
         elif re.match(r'^\s*end_[ku]data\b', line) and saved:
             section = saved.pop()
-        if PORT_NUMBER.match(line):
+        if PORT_NUMBER.match(line) or PORT_IN_INSTRUCTION.match(line):
             report(n, 'port', 'name the port with a constant: ' + line.strip())
         if DX_NUMBER.match(line):
-            following = next((l for l in lines[n:] if l.split(';', 1)[0].strip()), '')
-            if DX_PORT.match(following):
-                report(n, 'port', 'name the port with a constant: ' + line.strip())
+            for later in lines[n:]:
+                code = later.split(';', 1)[0]
+                if DX_PORT.match(code):
+                    report(n, 'port', 'name the port with a constant: ' + line.strip())
+                    break
+                if DX_WRITTEN.match(code):
+                    break
         m = LABEL.match(line)
         if m and section in CODE_SECTIONS and not is_marker(m.group(1), lines, n):
             k = n - 2
@@ -130,8 +274,15 @@ def main(args):
     paths = args or sorted(
         glob.glob(os.path.join(ROOT, 'src', '**', '*.asm'), recursive=True) +
         glob.glob(os.path.join(ROOT, 'src', '**', '*.inc'), recursive=True) +
+        glob.glob(os.path.join(ROOT, 'src', '**', '*.c'), recursive=True) +
+        glob.glob(os.path.join(ROOT, 'src', '**', '*.h'), recursive=True) +
         glob.glob(os.path.join(ROOT, 'tests', 'programs', '*.asm')) +
-        glob.glob(os.path.join(ROOT, 'tests', 'unit', '*.asm')))
+        glob.glob(os.path.join(ROOT, 'tests', 'programs', '*.c')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'posix', '*.[ch]')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'posix', '*.asm')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'unit', '*.asm')) +
+        glob.glob(os.path.join(ROOT, 'tests', 'unit', 'c', '*.[ch]')) +
+        glob.glob(os.path.join(ROOT, 'mame', '*.lua')))
     problems = []
     for p in paths:
         problems += lint(os.path.abspath(p))

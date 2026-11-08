@@ -1,5 +1,7 @@
-# Every attack of the program tests/programs/attack.asm, and what the kernel
-# makes of it (on Bochs: docs/emulators.md lists where a 286 differs).
+# Every attack of the program tests/programs/attack.asm, and what comes of
+# it: a fault's report (the OS server's, in the kernel's form), a refusal,
+# or what the program found (on Bochs: docs/emulators.md lists where a 286
+# differs). Full match: any other line fails it.
 program: attack
 # DOSBox-X stops itself at the jump to the TSS (docs/emulators.md).
 emulators: bochs mame
@@ -35,7 +37,7 @@ rx286: program fault #GP(0018) at 0007:{attacks.kstack_f}
 attack: video
 rx286: program fault #GP(0038) at 0007:{attacks.video_f}
 attack: beyond the GDT
-rx286: program fault #GP(01D0) at 0007:{attacks.beyond_f}
+rx286: program fault #GP(2000) at 0007:{attacks.beyond_f}
 attack: a selector past the LDT
 rx286: program fault #GP(0084) at 0007:{attacks.ldt_f}
 attack: call the kernel
@@ -44,6 +46,8 @@ attack: jump to the TSS
 rx286: program fault #GP(0020) at 0007:{attacks.tss}
 attack: call the double-fault TSS
 rx286: program fault #GP(0028) at 0007:{attacks.dftss}
+attack: every selector of the GDT
+attack: every selector of the GDT refused
 attack: int 32h
 rx286: program fault #GP(0192) at 0007:{attacks.int32}
 attack: int 30h, the system call that was
@@ -85,10 +89,10 @@ attack: loadall
 @bochs rx286: program fault #UD at 0007:{attacks.loadall}
 @mame rx286: program fault #GP(0000) at 0007:{attacks.loadall}
 attack: 287 error
-@bochs rx286: the 287 reported an error (IRQ13)
+@bochs rx286: program fault #MF at 0007:{attacks.fpu_f}
 @mame attack: no 287 error arrived (no 287 emulated?)
 attack: write past the limit
-attack: refused, error 1
+attack: refused, errno 14
 attack: insb
 rx286: program fault #GP(0000) at 0007:{attacks.ins_f}
 attack: outsb
@@ -102,48 +106,32 @@ rx286: program fault #SS(0000) at 0007:{attacks.pop_f}
 attack: a 287 operand across the limit
 @bochs rx286: program fault #GP(0000) at 0007:{attacks.fpuop}
 @mame attack: the 287 read across the limit (no 287 emulated?)
-attack: write from a null selector
-attack: refused, error 1
+attack: a 287 overrun in the kernel (vector 9)
+rx286: the 287 overran a segment (vector 9)
 attack: write past FFFFh
+attack: refused, errno 14
+attack: log bytes across the data's limit
+attack: refused, error 1
+attack: log bytes across the stack's limit
+attack: refused, error 1
+attack: log bytes past FFFFh
 attack: refused, error 1
 attack: unprivileged reads
-attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed
+attack: sidt, str, sldt, lar, lsl, verr, verw, arpl allowed; the IDT's limit 018F
 attack: int 31h at the end of the code
 rx286: program fault #GP(0000) at 0007:2000
 attack: sgdt
-attack: sgdt allowed
+attack: sgdt allowed; the GDT's limit 1FFF
 attack: smsw
 attack: smsw allowed
-attack: read a sector into the code
-attack: refused, error 1
-attack: read a sector through a null ES
-attack: refused, error 1
-attack: read a sector across the limit
-attack: refused, error 1
-attack: read a sector at FF00h
-attack: refused, error 1
-attack: write a sector from a null selector
-attack: refused, error 1
-attack: print from a null selector
-attack: refused, error 1
-attack: read drive 80h
-attack: refused, error 3
-attack: read sector FFFFh of A
-attack: refused, error 3
-attack: find a path through a null DS
-attack: refused, error 1
-attack: find into the code
-attack: refused, error 1
-attack: a directory's path across the limit
-attack: refused, error 1
-attack: find on drive 80h
-attack: refused, error 3
-attack: a path with no end
-attack: refused, error 19
-attack: a file's sector, nothing found
-attack: refused, error 3
-attack: a file's sector into the code
-attack: refused, error 1
+attack: read a key past the limit
+attack: refused, errno 14
+attack: write to a descriptor it has not
+attack: refused, errno 9
+attack: open, a process's call
+attack: refused, errno 38
+attack: a call on the server that does not exist
+attack: refused, errno 38
 attack: an empty slot of the LDT
 rx286: program fault #GP(007C) at 0007:{attacks.empty_f}
 attack: every slot of the LDT
@@ -156,7 +144,7 @@ attack: slot 002F lar FFFF lsl FFFF --
 attack: slot 0037 lar FFFF lsl FFFF --
 attack: slot 003F lar FFFF lsl FFFF --
 attack: slot 0047 lar FFFF lsl FFFF --
-attack: slot 004F lar F300 lsl 100F rw
+attack: slot 004F lar FFFF lsl FFFF --
 attack: slot 0057 lar FFFF lsl FFFF --
 attack: slot 005F lar FFFF lsl FFFF --
 attack: slot 0067 lar FFFF lsl FFFF --
@@ -189,4 +177,29 @@ attack: start its data, as a thread
 attack: refused, error 1
 attack: a kernel call that does not exist
 attack: refused, error 7
+attack: seal its own data, to run it
+attack: refused, error 6
+attack: seal its stack
+attack: refused, error 6
+attack: seal its code
+attack: refused, error 2
+attack: seal a GDT selector
+attack: refused, error 1
+attack: every slot of the LDT, after the kernel's calls
+attack: slot 0007 lar FB00 lsl 1FFF r-
+attack: slot 000F lar F300 lsl 1FFF rw
+attack: slot 0017 lar F300 lsl 07FF rw
+attack: slot 001F lar FFFF lsl FFFF --
+attack: slot 0027 lar FFFF lsl FFFF --
+attack: slot 002F lar FFFF lsl FFFF --
+attack: slot 0037 lar FFFF lsl FFFF --
+attack: slot 003F lar FFFF lsl FFFF --
+attack: slot 0047 lar FFFF lsl FFFF --
+attack: slot 004F lar FFFF lsl FFFF --
+attack: slot 0057 lar FFFF lsl FFFF --
+attack: slot 005F lar FFFF lsl FFFF --
+attack: slot 0067 lar FFFF lsl FFFF --
+attack: slot 006F lar FFFF lsl FFFF --
+attack: slot 0077 lar FFFF lsl FFFF --
+attack: slot 007F lar FFFF lsl FFFF --
 attack: done

@@ -1,0 +1,23 @@
+# uptime, date and clear as programs (roadmap os-server.md P12): the time
+# since the start (CLOCK_MONOTONIC); the real-time clock's (PX_TIME), which
+# Bochs starts at 1989-01-01 00:00:00, a Sunday, in date's own format and
+# in formats given; clear's form feed.
+program: sh
+emulators: bochs mame
+install: C /BIN/UPTIME z-uptime.rx
+install: C /BIN/DATE z-date.rx
+install: C /BIN/CLEAR z-clear.rx
+match: contains
+keys: uptime\ndate\ndate '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'\ndate x\nclear\n
+---
+/a$ uptime
+up 0:00:{...}
+/a$ date
+@bochs Sun Jan  1 00:00:{...} UTC 1989
+/a$ date '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'
+@bochs 1989-01-01 Sunday January 001 19 89 7 0 AM 12 UTC % 00:00:{...}
+/a$ date x
+usage: date [-u] [+FORMAT]
+/a$ clear
+[form feed]
+/a$

@@ -5,18 +5,21 @@
 ;
 ; It drives a printer as IBM's BIOS does (5-122): for each byte, wait until
 ; the printer is not busy, put the byte on the data lines, and pulse
-; STROBE. The wait looks at the status port once a tick, on the kernel's
-; timer, for LPT_BUSY_TICKS at most. The printer's interrupt (-ACK) stays
-; off. A port with no printer reads busy and out of paper, as on the AT:
-; the call fails with E_PAPER after LPT_BUSY_TICKS. A call that fails says
-; how many bytes the printer took first. The OS server asks it for
-; SYS_PRINT (DRV_PRINT, drivers.inc), passing the program's transfer
-; segment, which the driver deletes once it has printed from it.
+; STROBE. The wait reads the status port LPT_BURST times, then once a
+; tick, on the kernel's timer, for LPT_BUSY_TICKS at most: a printer is
+; busy for a moment after each strobe, and a tick a byte would be 50 bytes a
+; second (P15). The printer's interrupt (-ACK) stays off. A port with no
+; printer reads busy and out of paper, as on the AT: the call fails with
+; E_PAPER after LPT_BUSY_TICKS. A port with no adapter at all reads all ones,
+; which no printer does (not busy, and out of paper): the call fails at once
+; with E_TIMEOUT (P15). A call that fails says how many bytes the printer
+; took first. The OS server asks it for a write
+; to /dev/lpt1 or /dev/lpt2 (DRV_PRINT, drivers.inc), passing the process's
+; data segment, which the driver deletes once it has printed from it.
 ; ============================================================================
 
 cpu 286
 bits 16
-%define KERNEL_LOG                      ; its lines: the kernel's log
 %include "build.inc"
 %include "program.inc"
 %include "ports.inc"
@@ -30,6 +33,8 @@ NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
 RECV                equ SLOT(DRV_SLOT_RECV)
 LPT_BUSY_TICKS      equ 100 + 1         ; 2 s for the printer to take a byte
 LPT_INIT_READS      equ 64              ; -INIT held low that long: 50 us at the least
+LPT_BURST           equ 256             ; status reads before a tick's sleep: a ms or so
+LPT_NO_ADAPTER      equ 0xFF            ; the status of a port no adapter answers
 
 begin_udata
 printer_ports       dw LPT1_BASE, LPT2_BASE
@@ -112,6 +117,10 @@ print:
         jae .invalid
         test bp, bp
         jz .fault
+        verr bp
+        jnz .fault
+        call dw_fits                    ; its bytes within its limit (P15)
+        jc .fault
         shl bx, 1
         mov di, [printer_ports + bx]
         xor bx, bx                      ; BX = bytes printed
@@ -119,6 +128,9 @@ print:
         jcxz .done
         verr bp                         ; still there after the last wait? (a
         jnz .gone                       ; program killed meanwhile: l4.md L12)
+        lsl dx, bp
+        cmp si, dx
+        ja .gone                        ; or shorter now (P15)
         mov es, bp
         mov al, [es:si]
         call lpt_byte
@@ -156,14 +168,21 @@ print:
 ; ----------------------------------------------------------------------------
 lpt_byte:
         push cx
+        push si
         mov ah, al                      ; AH = the byte
         mov cx, LPT_BUSY_TICKS
-.poll:
         mov dx, di
         add dx, LPT_STATUS
+.poll:
+        mov si, LPT_BURST
+.read:
         in al, dx
+        cmp al, LPT_NO_ADAPTER
+        je .absent
         test al, LPT_STATUS_NOT_BUSY
         jnz .ready
+        dec si
+        jnz .read
         call tick_wait
         loop .poll
         test al, LPT_STATUS_PAPER_END   ; busy for good
@@ -171,9 +190,13 @@ lpt_byte:
         jnz .failed
         mov ax, E_TIMEOUT
 .failed:
+        pop si
         pop cx
         stc
         ret
+.absent:
+        mov ax, E_TIMEOUT               ; no adapter: no wait
+        jmp .failed
 .ready:
         mov al, ah
         mov dx, di
@@ -184,6 +207,7 @@ lpt_byte:
         out dx, al
         mov al, LPT_CONTROL_READY
         out dx, al
+        pop si
         pop cx
         clc
         ret
@@ -209,3 +233,5 @@ tick_wait:
         pop bx
         pop ax
         ret
+
+%include "dfits.asm"

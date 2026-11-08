@@ -105,8 +105,7 @@ entry:
         call check_copies
         PRINT "revoke: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------
@@ -232,7 +231,7 @@ check_space:
         mov dx, UT_ARENA
         mov al, CAP_UNTYPED
         mov si, UT_WORKER
-        mov cx, 1024 >> 4
+        mov cx, 2048 >> 4               ; a space of 16 slots (528 bytes), a thread
         kcall KCALL_RETYPE
         must
         mov al, ROLE_WAITER

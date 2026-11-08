@@ -6,10 +6,12 @@
 #   tools/check-docs
 #
 # - every constant of an include file named in COVERED appears, by name, in
-#   its document;
+#   its document; and where a row of a document's table names one of them
+#   (`NAME`) and holds one number (0100h, 0x100, 256), that is its value;
 # - the bochsrc template describes the machine of ports.inc and layout.inc:
-#   1 MB, the fixed-disk controller's ports and IRQ, the drive geometries,
-#   the floppy formats of roadmap D2;
+#   4 MB (megs: 4), the fixed-disk controller's ports and IRQ, each fixed
+#   disk's geometry on its own line (ata0-master C, ata0-slave D), the
+#   floppy formats of roadmap D2;
 # - every document that docs/README.md lists exists, and every docs/*.md is
 #   listed there.
 # ============================================================================
@@ -23,17 +25,21 @@ import rxlib
 
 ROOT = rxlib.ROOT
 
-# include file -> the document that must name each of its constants
+# include file -> the document (or documents, one of which) that must name
+# each of its constants
 COVERED = {
     'ports.inc': 'docs/hardware.md',
     'layout.inc': 'docs/memory-map.md',
     'selectors.inc': 'docs/protected-mode.md',
+    'descriptors.inc': 'docs/protected-mode.md',
     'vectors.inc': 'docs/interrupts.md',
-    'syscalls.inc': 'docs/syscalls.md',
     'kcalls.inc': 'docs/kernel-calls.md',
-    'os.inc': 'docs/syscalls.md',
+    'os.inc': 'docs/os-server.md',
     'drivers.inc': 'docs/drivers.md',
     'disks.inc': 'docs/storage.md',
+    'exe.inc': 'docs/c.md',
+    'posix.inc': ('docs/processes.md', 'docs/terminals.md', 'docs/posix.md'),
+    'archive.inc': 'docs/processes.md',
 }
 
 
@@ -42,29 +48,69 @@ def constants(name):
     return re.findall(r'^([A-Z_][A-Z0-9_]*)\s+equ\b', open(path, encoding='utf-8').read(), re.M)
 
 
+NUMBER_CELL = re.compile(r'^`?(0x[0-9A-Fa-f]+|[0-9][0-9A-Fa-f]*h|[0-9]+)`?$')
+NAME_CELL = re.compile(r'^`([A-Z_][A-Z0-9_]*)`$')
+
+
+def cell_number(text):
+    text = NUMBER_CELL.match(text).group(1)
+    if text.startswith('0x'):
+        return int(text, 16)
+    return int(text[:-1], 16) if text.endswith('h') else int(text)
+
+
+def table_values(doc, text, values):
+    """A table row's constant against its number: problems."""
+    problems = []
+    for n, line in enumerate(text.split('\n'), 1):
+        if not line.startswith('|'):
+            continue
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        names = [NAME_CELL.match(c).group(1) for c in cells
+                 if NAME_CELL.match(c) and NAME_CELL.match(c).group(1) in values]
+        numbers = [cell_number(c) for c in cells if NUMBER_CELL.match(c)]
+        if len(names) == 1 and len(numbers) == 1 and numbers[0] != values[names[0]] and \
+                numbers[0] != values[names[0]] & 0xFFFF:
+            problems.append('%s:%d: %s is %d (%Xh), not %d' % (
+                doc, n, names[0], values[names[0]], values[names[0]], numbers[0]))
+    return problems
+
+
 def main():
     problems = []
-    for inc, doc in COVERED.items():
-        doc_path = os.path.join(ROOT, doc)
-        if not os.path.exists(doc_path):
-            problems.append('%s: missing (it documents %s)' % (doc, inc))
-            continue
-        text = open(doc_path, encoding='utf-8').read()
+    for inc, docs in COVERED.items():
+        docs = docs if isinstance(docs, tuple) else (docs,)
+        text = ''
+        for doc in docs:
+            doc_path = os.path.join(ROOT, doc)
+            if not os.path.exists(doc_path):
+                problems.append('%s: missing (it documents %s)' % (doc, inc))
+                continue
+            text += open(doc_path, encoding='utf-8').read()
         for name in constants(inc):
             if not re.search(r'\b%s\b' % re.escape(name), text):
-                problems.append('%s: does not name %s (src/include/%s)' % (doc, name, inc))
+                problems.append('%s: does not name %s (src/include/%s)'
+                                % (' or '.join(docs), name, inc))
+        values = rxlib.include_constants(inc)
+        for doc in docs:
+            doc_path = os.path.join(ROOT, doc)
+            if os.path.exists(doc_path):
+                problems += table_values(doc, open(doc_path, encoding='utf-8').read(),
+                                         {k: values[k] for k in constants(inc)})
 
     ports = rxlib.include_constants('ports.inc')
     disks = rxlib.include_constants('disks.inc')
     rc = open(rxlib.BOCHSRC_TEMPLATE, encoding='utf-8').read()
     wants = [
-        (r'^megs: 1$', 'megs: 1 (roadmap D6)'),
+        (r'^megs: 4$', 'megs: 4 (roadmap os-server.md P3: 3 MB above 1 MB)'),
         (r'^ata0: enabled=1, ioaddr1=0x%x, ioaddr2=0x3f0, irq=14$' % ports['HDC_DATA'],
          'the fixed-disk controller at HDC_DATA, IRQ14'),
-        (r'cylinders=%d, heads=%d, spt=%d' % (disks['DISK_C_CYLINDERS'], disks['DISK_C_HEADS'],
-                                             disks['DISK_C_SECTORS']), 'drive C of disks.inc'),
-        (r'cylinders=%d, heads=%d, spt=%d' % (disks['DISK_D_CYLINDERS'], disks['DISK_D_HEADS'],
-                                             disks['DISK_D_SECTORS']), 'drive D of disks.inc'),
+        (r'^ata0-master:.*\bcylinders=%d, heads=%d, spt=%d$' % (
+            disks['DISK_C_CYLINDERS'], disks['DISK_C_HEADS'], disks['DISK_C_SECTORS']),
+         'drive C of disks.inc, the master'),
+        (r'^ata0-slave:.*\bcylinders=%d, heads=%d, spt=%d$' % (
+            disks['DISK_D_CYLINDERS'], disks['DISK_D_HEADS'], disks['DISK_D_SECTORS']),
+         'drive D of disks.inc, the slave'),
         (r'^floppya: 1_2=', 'drive A 1.2 MB (D2)'),
         (r'^floppyb: 360k=', 'drive B 360 KB (D2)'),
         (r'^keyboard: type=at$', 'the AT keyboard'),

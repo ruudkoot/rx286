@@ -11,7 +11,8 @@
 ; read. The loader set text mode 3 through the BIOS (roadmap D14); this
 ; module programs only the cursor. Once the threads start, the screen is
 ; the console driver's (con_off): the kernel's lines go to the log alone,
-; and only a panic writes the screen again.
+; and only a panic writes the screen again, page 0, which it shows whatever
+; page the driver showed (con_page0).
 ; ============================================================================
 
 CON_TAB_WIDTH       equ 8
@@ -28,6 +29,32 @@ con_pos             dw 0                ; the next cell, 0 .. CON_CELLS - 1
 con_attr            db ATTR_NORMAL
 con_off             db 0                ; 1: the screen is the console driver's
 end_kdata
+
+; ----------------------------------------------------------------------------
+; con_page0 - page 0 shown: the CRTC's start address 0, whatever page the
+; console driver showed (a panic's; os-server.md P11)
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+con_page0:
+        push ax
+        push dx
+        mov dx, CRTC_INDEX
+        mov al, CRTC_START_HIGH
+        out dx, al
+        mov dx, CRTC_DATA
+        xor al, al
+        out dx, al
+        mov dx, CRTC_INDEX
+        mov al, CRTC_START_LOW
+        out dx, al
+        mov dx, CRTC_DATA
+        xor al, al
+        out dx, al
+        pop dx
+        pop ax
+        ret
 
 ; ----------------------------------------------------------------------------
 ; con_init - the console's attribute, an empty screen, the cursor home

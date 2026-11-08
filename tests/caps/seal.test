@@ -1,0 +1,19 @@
+# The kernel's additions (roadmap os-server.md P2): tests/programs/additions.asm.
+program: additions
+define: TEST_CAPS
+define: TEST_ADD_SEAL
+emulators: bochs mame
+match: contains
+timeout: 120
+---
+additions: seal a fresh segment (0): 0
+additions: the sealed code ran, AX (4660): 4660
+additions: its access byte (251: readable code of DPL 3): 251
+additions: seal it again (2): 2
+additions: seal a segment a copy of which lives (6): 6
+additions: seal the copy (6): 6
+additions: seal a segment of DPL 2 (2): 2
+additions: seal an endpoint (1): 1
+child: running from a sealed segment
+rx286: program fault #GP(0000) at 0007:{seal_part.write_f}
+additions: done

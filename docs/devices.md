@@ -1,8 +1,9 @@
 # The speaker, game port, mouse and modem
 
 The devices of `roadmaps/devices.md`, as their drivers drive them, in
-ring 1 since roadmap l4.md L7-L10 (*docs/drivers.md*), and as the program
-reaches them through the OS server (*docs/syscalls.md*).
+ring 1 since roadmap l4.md L7-L10 (*docs/drivers.md*), and as a process
+reaches them through `/dev` (roadmap os-server.md P12; *docs/processes.md*,
+*The devices*).
 
 ## The serial ports
 
@@ -34,9 +35,9 @@ bit 6 set:
 
 The driver adds the movement to a position it keeps, from 0 to `MOUSE_X_MAX`
 (639) and 0 to `MOUSE_Y_MAX` (199), eight to a character cell, starting in
-the middle; and keeps the buttons. `SYS_MOUSE`, through the OS server,
-gives them, and whether the
-mouse said "M" (`MOUSE_PRESENT`). A Logitech mouse's fourth byte is passed
+the middle; and keeps the buttons. A read of `/dev/mouse` waits for a
+packet and gives them, `ioctl`'s `RXIO_MOUSE` at once; without a mouse
+that said "M" (`MOUSE_PRESENT`) its open is `ENXIO`. A Logitech mouse's fourth byte is passed
 over, and so is a Plug and Play mouse's identity, which follows its "M"
 between parentheses. Nothing is drawn: the console is the program's.
 
@@ -45,23 +46,27 @@ between parentheses. Nothing is drawn: the console is the program's.
 In release builds, COM2 at 9600 baud, 8N1, DTR, RTS and OUT2 up, a 16550's
 FIFO on where there is one. A byte that comes raises IRQ3; the serial
 driver keeps it in a ring of 256 bytes, dropping (and counting) what a full
-ring cannot take. `SYS_SERIAL_READ` takes what is there, without waiting;
-`SYS_WAIT` waits for it. `SYS_SERIAL_WRITE` sends as the printer prints:
+ring cannot take. A read of `/dev/com2` waits for bytes and takes what is
+there; `poll` waits for them too. A write sends as the printer prints:
 each byte once the UART can take it, 2 s at most. In debug and test builds
-both calls fail with `E_BUSY`: COM2 is the log.
+`/dev/com2`'s open fails with `EBUSY`: COM2 is the log.
 
 A 16450 holds one byte, and at 9600 baud one comes every 1.04 ms. The
 longest stretches with interrupts off, the game port's timing (4 ms) and
 the kernel's work for a kernel call (3.5 ms at most on MAME's AT, 6.5 ms
 for a pass of a kill: roadmap realtime.md R0), can lose bytes there; the
-driver counts them (`overruns`). A 16550's FIFO rides them all out.
-Every tick the serial and mouse drivers also fetch what COM2 and COM1 hold,
-so an interrupt that was lost costs a tick at most: an emulator can lose
+driver counts them, with those a full ring drops, and `DRV_SERIAL_NEWS`
+answers how many since it was asked last (roadmap os-server.md P15). A
+16550's FIFO rides them all out. A port that reads all ones has no UART:
+a write fails at once. Every tick the serial driver also fetches what COM2
+holds, and every 5 ticks the mouse driver what COM1 holds, so an interrupt
+that was lost costs a tick at most, or 5: an emulator can lose
 one, as Bochs does when another UART on the same line is touched.
 
 ## The speaker
 
-`SYS_SOUND`: the sound driver programs timer channel 2 as a square wave of
+`/dev/speaker`'s `ioctl` (`RXIO_TONE`): the sound driver programs timer
+channel 2 as a square wave of
 the frequency asked (`SOUND_MIN_HZ` to `SOUND_MAX_HZ`), opens its gate and
 the speaker's bit in port B, sleeps on its timer for the ticks asked
 (`SOUND_MAX_TICKS` at most), and closes them. A frequency of 0 is a rest.
@@ -74,7 +79,8 @@ rest.
 
 ## The game port
 
-`SYS_JOYSTICK`: the sound driver reads the four buttons, then writes the
+A read of `/dev/joystick`: the sound driver reads the four buttons, then
+writes the
 port, which starts the four axes' one-shots, and times each with timer
 channel 0's latched count (`pit_elapsed`: in mode 3 the count falls two a
 clock, so half the difference of two counts is the clocks between them).
@@ -84,10 +90,8 @@ driver turns them off for. An axis is given in microseconds, or
 
 ## Waiting for several things
 
-`SYS_WAIT`: the OS server asks each event's driver once a tick, sleeping
-between on its thread's own timer, until one of the events asked for is
-there: `WAIT_KEY` (a key in the keyboard driver's ring), `WAIT_MOUSE` (a
-packet since the last `SYS_MOUSE`), `WAIT_SERIAL` (bytes from the modem, in
-a build that has it); or until the ticks asked have passed; or until the
-program is to restart. It returns the events that
-are there, 0 if none. With no event and a limit, it is a sleep.
+A process waits for several devices at once with `poll` (roadmap
+os-server.md P12; *docs/processes.md*): its terminal, whose line discipline
+wakes it, and the mouse and the modem's line, whose drivers do not signal
+their news, so the OS server asks them again each tick. Until P14 a
+program's `SYS_WAIT` did the same for keys, the mouse and the modem.

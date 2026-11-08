@@ -6,8 +6,10 @@
 ;
 ; rtc_init sets register B to 24-hour BCD with every interrupt off, so the
 ; clock never raises IRQ8 and its format is known, not detected. The clock
-; is read by polling: wait until no update is in progress, read every field,
-; and read again if the seconds moved meanwhile. Every write to the index
+; is read by polling: wait until no update is in progress, read the seconds,
+; then every other field, then the seconds again, and read it all again if
+; they moved meanwhile: every update moves them, so one after any field is
+; caught (P15; the seconds read last alone missed one before them). Every write to the index
 ; port keeps bit 7 clear, which keeps NMI enabled. Only one reader at a
 ; time: the index port and the data port are a pair.
 ; ============================================================================
@@ -48,6 +50,9 @@ rtc_read:
         test al, CMOS_REG_A_UIP
         loopnz .uip
         pop cx
+        mov al, CMOS_SECONDS
+        call rtc_get
+        mov ah, al                      ; AH = the seconds, first
         mov al, CMOS_CENTURY
         call rtc_get
         mov ch, al
@@ -66,9 +71,6 @@ rtc_read:
         mov al, CMOS_MINUTES
         call rtc_get
         mov bl, al
-        mov al, CMOS_SECONDS
-        call rtc_get
-        mov ah, al
         mov al, CMOS_SECONDS            ; an update in between: read it all again
         call rtc_get
         cmp al, ah

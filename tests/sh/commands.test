@@ -1,0 +1,34 @@
+# The first commands as programs (roadmap os-server.md P9), on drive C
+# since P12: mkdir, cp into a directory, mv, cat of two files, wc and its
+# options, rm, rmdir, and their refusals. fsck.fat finds B sound after.
+program: sh
+emulators: bochs mame
+install: C /BIN/CP z-cp.rx
+install: C /BIN/MV z-mv.rx
+install: C /BIN/RM z-rm.rx
+install: C /BIN/MKDIR z-mkdir.rx
+install: C /BIN/RMDIR z-rmdir.rx
+install: C /BIN/WC z-wc.rx
+keys: cd /b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d\n
+keys: cat a.txt d/b.txt | wc; wc -l -c a.txt\nrm d/b.txt; rmdir d; ls\n
+keys: rmdir /b/many; cp nothing x; mv a.txt /c/a.txt\n
+match: full
+fsck: B
+---
+rx286, test build
+/a$ cd /b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d
+B.TXT
+/b$ cat a.txt d/b.txt | wc; wc -l -c a.txt
+2 2 10
+1 5 a.txt
+/b$ rm d/b.txt; rmdir d; ls
+README.TXT
+FRAG.TXT
+PAD.TXT
+MANY
+A.TXT
+/b$ rmdir /b/many; cp nothing x; mv a.txt /c/a.txt
+/b/many: directory not empty
+nothing: no such file or directory
+a.txt: across drives
+/b$

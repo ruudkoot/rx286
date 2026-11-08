@@ -1,0 +1,19 @@
+# Drive B write-protected (roadmap os-server.md P14): tests/posix/drives.c
+# reads a file of B, and its writes are refused, EROFS, from the diskettes'
+# driver's E_PROTECTED. The sectors the server could not write are
+# dropped: B is as it was, and the other drives work on.
+program: idle
+define: TEST_POSIX_DRIVES
+define: DRIVES_PROTECTED
+media: B protected
+keys: {wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+emulators: bochs
+---
+drives: B: PAD.TXT read: 50 bytes
+drives: B: a file written: errno 30, read back: not the same
+drives: B: 1500 bytes written: errno 30, read back: not the same
+drives: B: no DRIVES.TXT after (-1, ENOENT 2): -1, errno 2
+drives: C: HELLO.TXT read after: 21 bytes
+drives: done

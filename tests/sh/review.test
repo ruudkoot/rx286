@@ -1,0 +1,35 @@
+# What P15's review found in the shell and its commands (roadmap
+# os-server.md P15): an unquoted expansion of nothing is no word; \" in a
+# double quote ends nothing, for the lists' split too; cp of a file onto
+# itself is refused, not emptied; cp takes a DOS path's last name after
+# its drive; sleep refuses what would wrap; sh reads a file of commands a
+# byte at a time, no line's start lost, and without a prompt or an echo
+# (P15's second review).
+program: sh
+emulators: bochs mame
+install: C /BIN/CP z-cp.rx
+install: C /BIN/SLEEP z-sleep.rx
+keys: echo a $EMPTY b; echo "say \\"hi; bye\\""; echo "a\\"b" && echo two\n
+keys: cd /b; echo hello > s.txt; cp s.txt s.txt; echo [$?]; cat s.txt\n
+keys: cp c:readme.txt /b; ls /b/readme.txt; sleep 65536; echo [$?]\n
+keys: echo echo first > /b/s; echo echo second >> /b/s; echo echo third >> /b/s; sh < /b/s\n
+---
+rx286, test build
+/a$ echo a $EMPTY b; echo "say \"hi; bye\""; echo "a\"b" && echo two
+a b
+say "hi; bye"
+a"b
+two
+/a$ cd /b; echo hello > s.txt; cp s.txt s.txt; echo [$?]; cat s.txt
+cp: a file onto itself
+[1]
+hello
+/b$ cp c:readme.txt /b; ls /b/readme.txt; sleep 65536; echo [$?]
+/b/readme.txt
+usage: sleep SECONDS
+[1]
+/b$ echo echo first > /b/s; echo echo second >> /b/s; echo echo third >> /b/s; sh < /b/s
+first
+second
+third
+/b$

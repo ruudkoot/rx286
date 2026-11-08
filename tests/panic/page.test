@@ -1,0 +1,9 @@
+# A panic while another page than the first is shown (roadmap os-server.md
+# P11): the kernel's test build shows page 3, as the console driver shows
+# a terminal's, then fails an assertion; the panic shows page 0 again
+# (the CRTC's start address 0, read back) and writes its text there.
+define: TEST_PANIC_PAGE
+---
+rx286, test build
+rx286 PANIC: assertion failed: page 3 is shown
+test: the screen starts at 0000h; page 0 shows the panic: yes

@@ -1,24 +1,27 @@
 # The kernel's calls on capabilities (roadmap l4.md L3): every kind of
 # object retyped, every refusal, a space built for a new thread from copies,
 # moves and a mint, the thread started; a capability that is not a segment,
-# loaded into ES, is the program's fault. tests/programs/caps.asm.
+# loaded into ES, is the program's fault. tests/programs/caps.asm. Where
+# a segment lies is checked as relations that hold on every emulator, with
+# extended memory or without: past the image, and the next one 256 bytes
+# on (os-server.md P15).
 program: caps
 define: TEST_CAPS
 ---
 rx286, test build
 caps: retype a segment: 0
 caps: the segment, zeroed, reads back (4660): 4660
-caps: its base, high byte (5): 5
-caps: its base, low word (5136): 5136
+caps: its base, past the program's code in the image (1): 1
 caps: its limit (255): 255
+caps: the next segment's base, from its (256): 256
 caps: retype a space: 0
 caps: retype a thread: 0
 caps: retype an endpoint: 0
 caps: retype a notification: 0
 caps: retype from a segment (1): 1
 caps: retype into a full slot (4): 4
-caps: a segment from the arena (1): 1
-caps: a thread from the memory for segments (1): 1
+caps: a segment from the arena (0): 0
+caps: a thread from the memory for segments (0): 0
 caps: a code segment (2): 2
 caps: a segment of DPL 0 (2): 2
 caps: a space of 12 slots (2): 2

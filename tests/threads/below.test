@@ -1,14 +1,22 @@
 # The shell and the counter, the counter below it (roadmap l4.md L2): the
-# shell answers as ever, and the counter runs whenever the shell waits.
+# shell answers as ever, and the counter runs whenever the shell waits. The
+# shell is the shell in C, a process, among init's (os-server.md P12; each
+# with a thread of the OS server's), and the counter the module the root
+# builds (TEST_COUNTER). DOSBox-X's shell starts in /: it cannot read the
+# drives (docs/emulators.md).
 program: shell
+define: TEST_COUNTER
 define: TEST_THREAD_REPORT
 keys: echo hello\n
 ---
 rx286, test build
-rx286 shell: type help for the commands
-A:\>echo hello
+@bochs /a$ echo hello
+@mame /a$ echo hello
+@dosbox-x /$ echo hello
 hello
-A:\>
+@bochs /a$
+@mame /a$
+@dosbox-x /$
 rx286: thread root ran
 rx286: thread printer ran
 rx286: thread mouse ran
@@ -19,8 +27,26 @@ rx286: thread hd ran
 rx286: thread serial ran
 rx286: thread sound ran
 rx286: thread rtc ran
-rx286: thread program ran
 rx286: thread counter ran
 rx286: thread os ran
 rx286: thread os ran
+rx286: thread os ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread os ran
+rx286: thread thread ran
+rx286: thread thread ran
 rx286: thread os ran

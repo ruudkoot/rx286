@@ -9,14 +9,24 @@
 # The kernel's part is padded to MODULE_TABLE_OFF. Each module is a program
 # assembled on its own, with its code and data in sections of its NASM map:
 # utext and udata (a program's rooms: UDATA_ROOM of data, USTACK_SIZE of
-# stack), or ctext and cdata (the counter's). Its code goes in whole; its
-# data without the zeros it ends with, which a fresh segment has anyway;
-# each on a paragraph. The flags: `fg` the program the keys are for,
-# `driver` a driver, `iopl` a program that asks for IOPL, `irq=N` a
+# stack). A C module is an rx286 executable (NAME.rx,
+# tools/mkexe; roadmap os-server.md P1): its header gives its code, its
+# data, its rooms and its entry. A module's code goes in whole; its data
+# without the zeros it ends with, which a fresh segment has anyway, nor
+# those it starts with (a C module's stack: M_DATA_AT says where in its
+# segment the rest goes); each on a paragraph. The flags: `fg` the program
+# the keys are for, `driver` a driver, `iopl` a program that asks for IOPL, `irq=N` a
 # driver's interrupt line, `service=N` what it serves, `stack=N` a stack of
-# N bytes instead of its rooms'. The image
+# N bytes instead of its rooms', `archive` an archive of programs
+# (tools/mkarchive; roadmap os-server.md P6), whose bytes are its data, and
+# whose code is a paragraph of zeros, never run. The image
 # ends with a paragraph whose last word is KERNEL_END_MARK, which the
 # loader checks; the table gives its length (layout.inc, docs/memory-map.md).
+# A spec is checked as the loader and the root would take it: the root
+# first, `os` second, names unique, a ring of 1 to 3, a priority of 0 to
+# PRIORITY_MAX, an IRQ of 0 to 15, a service of drivers.inc's, no flag it
+# does not know; an executable's header too (its version, no RXF_MEDIUM,
+# its length).
 # ============================================================================
 
 import os
@@ -30,7 +40,6 @@ L = rxlib.LAYOUT
 # section names -> (data room, stack)
 ROOMS = {
     ('utext', 'udata'): (L['UDATA_ROOM'], L['USTACK_SIZE']),
-    ('ctext', 'cdata'): (L['CDATA_ROOM'], L['CSTACK_SIZE']),
 }
 
 
@@ -38,8 +47,48 @@ def paragraph(data):
     return data + bytes(-len(data) % 16)
 
 
+E = rxlib.include_constants('exe.inc')
+K = rxlib.include_constants('kcalls.inc')
+SERVICES = {v for k, v in rxlib.include_constants('drivers.inc').items()
+            if k.startswith('SERVICE_')}
+FLAGS = {'fg': 'MF_FOREGROUND', 'driver': 'MF_DRIVER', 'iopl': 'MF_IOPL',
+         'archive': 'MF_ARCHIVE'}
+NUMBERS = {'irq': range(16), 'service': SERVICES, 'stack': range(2, 0x10000, 2)}
+ROOT = 'root'                           # layout.inc's ROOT_NAME, ROOT_NAME_2
+RX_START_STACK = 64     # a C module's stack from the root (slot 2): crt0 leaves it at once
+
+
+def rx_parts(binary):
+    """A C module (tools/mkexe, exe.inc): its code, its data from the data
+    segment's offset 0 (the stack's zeros, then the initialised data), its
+    data room, its stack and its entry."""
+    blob = open(binary, 'rb').read()
+    if blob[0:2] != b'RX' or len(blob) < E['RX_HEADER_SIZE']:
+        sys.exit('mkimage: %s: not an rx286 executable' % binary)
+
+    def word(field):
+        return struct.unpack_from('<H', blob, E[field])[0]
+    if word('RXH_VERSION') != E['RX_VERSION'] or word('RXH_FLAGS') & ~E['RXF_287']:
+        sys.exit('mkimage: %s: version %d, flags %04Xh: not a module mkimage knows'
+                 % (binary, word('RXH_VERSION'), word('RXH_FLAGS')))
+    if len(blob) != E['RX_HEADER_SIZE'] + word('RXH_CODE') + word('RXH_DATA'):
+        sys.exit('mkimage: %s: %d bytes, not the %d its header says' % (
+            binary, len(blob), E['RX_HEADER_SIZE'] + word('RXH_CODE') + word('RXH_DATA')))
+    code_at = E['RX_HEADER_SIZE']
+    code = blob[code_at:code_at + word('RXH_CODE')]
+    data = blob[code_at + len(code):code_at + len(code) + word('RXH_DATA')]
+    initial = (bytes(word('RXH_STACK')) + data).rstrip(b'\0')
+    initial += bytes(len(initial) % 2)
+    room = word('RXH_STACK') + word('RXH_DATA') + word('RXH_BSS')
+    room += room % 2
+    return code, initial, room, RX_START_STACK, word('RXH_ENTRY')
+
+
 def module_parts(binary):
-    """A module's code and data as assembled, its data room and its stack."""
+    """A module's code and data as assembled, its data room, its stack and
+    its entry."""
+    if binary.endswith('.rx'):
+        return rx_parts(binary)
     blob = open(binary, 'rb').read()
     sections = rxlib.map_sections(os.path.splitext(binary)[0] + '.map')
     for (text, data), (room, stack) in ROOMS.items():
@@ -51,7 +100,7 @@ def module_parts(binary):
             initial += bytes(len(initial) % 2)
             if len(initial) > room:
                 sys.exit('mkimage: %s: its data outgrew its room' % binary)
-            return code, initial, room, stack
+            return code, initial, room, stack, 0
     sys.exit('mkimage: %s: no code section that it knows' % binary)
 
 
@@ -65,20 +114,35 @@ def main(args):
     if len(specs) > L['MODULE_MAX']:
         sys.exit('mkimage: more than MODULE_MAX modules')
     names = [spec.partition('=')[0] for spec in specs]
+    if names[0] != ROOT:
+        sys.exit('mkimage: the first module must be the root, %s' % ROOT)
+    if len(set(names)) != len(names):
+        sys.exit('mkimage: a module named twice')
     if 'os' in names and names.index('os') != 1:
         # its programs' slots are 8n to 8n + 7 of its space: n = 1 would be
-        # its own fixed slots (src/os/os.asm; roadmap l4.md L13)
+        # its own fixed slots (src/os/os.c; roadmap l4.md L13)
         sys.exit('mkimage: the OS server, os, must be the second module, after the root')
     image = bytearray(kernel + bytes(L['MODULES_OFF'] - len(kernel)))
     entries = []
     for spec in specs:
         name, _, rest = spec.partition('=')
         fields = rest.split(':')
+        if len(fields) < 3:
+            sys.exit('mkimage: %s: not NAME=BINARY:RING:PRIORITY[:FLAG...]' % spec)
         binary, ring, priority = fields[0], int(fields[1]), int(fields[2])
-        options = dict(f.partition('=')[::2] for f in fields[3:])
+        if not 1 <= ring <= 3 or not 0 <= priority <= K['PRIORITY_MAX']:
+            sys.exit('mkimage: %s: ring %d, priority %d: a ring of 1 to 3, a priority of '
+                     '0 to %d' % (name, ring, priority, K['PRIORITY_MAX']))
+        options = {}
+        for f in fields[3:]:
+            option, equals, value = f.partition('=')
+            if option in options or (option in FLAGS) == bool(equals) or \
+                    option not in FLAGS and option not in NUMBERS or \
+                    equals and (not value.isdigit() or int(value) not in NUMBERS[option]):
+                sys.exit('mkimage: %s: the flag %r' % (name, f))
+            options[option] = value
         flags = 0
-        for option, flag in (('fg', 'MF_FOREGROUND'), ('driver', 'MF_DRIVER'),
-                             ('iopl', 'MF_IOPL')):
+        for option, flag in FLAGS.items():
             if option in options:
                 flags |= L[flag]
         irq = int(options['irq']) + 1 if 'irq' in options else 0
@@ -86,8 +150,17 @@ def main(args):
         if len(name) >= L['M_NAME_SIZE'] or name != name.lower():
             sys.exit('mkimage: %s: a name of lower case, at most %d characters'
                      % (name, L['M_NAME_SIZE'] - 1))
-        code, initial, room, stack = module_parts(binary)
+        if 'archive' in options:
+            initial = open(binary, 'rb').read()
+            if initial[0:2] != b'RZ':
+                sys.exit('mkimage: %s: not an archive (tools/mkarchive)' % binary)
+            initial += bytes(len(initial) % 2)
+            code, room, stack, entry_ip = bytes(16), len(initial), RX_START_STACK, 0
+        else:
+            code, initial, room, stack, entry_ip = module_parts(binary)
         stack = int(options.get('stack', stack))
+        data_skip = (len(initial) - len(initial.lstrip(b'\0'))) & ~15   # (M_DATA_AT)
+        initial = initial[data_skip:]
         code_at = len(image)
         image += paragraph(code)
         data_at = len(image)
@@ -96,7 +169,8 @@ def main(args):
         entry[0:len(name)] = name.encode('ascii')
         for field, value in (('M_CODE', code_at // 16), ('M_CODE_SIZE', len(code)),
                              ('M_DATA', data_at // 16), ('M_DATA_SIZE', len(initial)),
-                             ('M_DATA_ROOM', room), ('M_STACK', stack), ('M_ENTRY', 0)):
+                             ('M_DATA_ROOM', room), ('M_STACK', stack),
+                             ('M_ENTRY', entry_ip), ('M_DATA_AT', data_skip)):
             struct.pack_into('<H', entry, L[field], value)
         entry[L['M_RING']] = ring
         entry[L['M_PRIORITY']] = priority

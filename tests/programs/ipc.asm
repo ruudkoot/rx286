@@ -26,8 +26,8 @@ bits 16
 %include "program.inc"
 %include "kcalls.inc"
 
-; Its slots, as selectors (slot n: n * 8 + 4 + 3); slots 8 and 9 are its
-; endpoint to the OS server and its transfer segment
+; Its slots, as selectors (slot n: n * 8 + 4 + 3); slot 8 is its endpoint
+; to the OS server
 MY_CODE             equ 0x07
 MY_DATA             equ 0x0F
 LOW_SPACE           equ 0x1F            ; 3, 4: a server below this program
@@ -176,7 +176,7 @@ entry:
         call start_thread
         PRINT "ipc: the server runs", CHAR_LF
         ; ---- a thousand calls
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         mov [t0], ax
         xor si, si
 .call:
@@ -194,7 +194,7 @@ entry:
 .right:
         cmp si, CALLS
         jb .call
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         sub ax, [t0]
 %ifdef TEST_IPC_TIMING
         jmp timing
@@ -262,11 +262,11 @@ entry:
         mov dx, A_THREAD
         mov di, 0x000A
         call make_client
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         mov [t0], ax
         mov cx, 3
         call sleep
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         sub ax, [t0]
         cmp ax, 3
         mov ax, 1
@@ -413,8 +413,7 @@ entry:
 done:
         PRINT "ipc: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------
@@ -425,7 +424,7 @@ done:
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 timing:
-        mov bx, BOCHS_IPS / SYS_TICKS_HZ / CALLS
+        mov bx, BOCHS_IPS / TICKS_HZ / CALLS
         mul bx
         push ax
         report "instructions a round trip on Bochs, about"
@@ -627,14 +626,14 @@ busy_call:
         mov dx, NTF_SIG
         kcall KCALL_SIGNAL
         must
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         mov [t0], ax
         pop dx
         mov al, 1
         xor bp, bp
         kcall KCALL_CALL
         must
-        sys SYS_TICKS
+        kcall KCALL_TICKS
         sub ax, [t0]
         cmp ax, BUSY_TICKS
         mov ax, 1
@@ -817,7 +816,7 @@ spin:
         jmp spin
 
 ; ----------------------------------------------------------------------------
-; wline - a worker's line, in one SYS_WRITE: a text from the code, a word
+; wline - a worker's line, in one KCALL_LOG: a text from the code, a word
 ; in hexadecimal, a line feed (built in its own data at W_LINE)
 ;   In:       SI = the text (in the code: zero-terminated); AX = the word
 ;   Out:      nothing

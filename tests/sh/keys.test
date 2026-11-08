@@ -1,0 +1,39 @@
+# keys as a program (roadmap os-server.md P12): what the terminal gives for
+# each key, raw: ASCII, ^C as a byte (no signal), and the escapes of the
+# keys without ASCII, as an xterm sends them, the keypad's and an enhanced
+# keyboard's grey ones after E0h alike (P15); ^D ends it, and the terminal
+# is as it was.
+program: sh
+emulators: bochs mame
+install: C /BIN/KEYS z-keys.rx
+keys: keys\na{ctrl-c}{up}{home}{end}{ins}{del}{pgup}{pgdn}{f1}{f4}{f5}{f10}\n{grey up}{grey home}{grey end}{grey ins}{grey del}{grey pgup}{grey pgdn}{grey enter}{ctrl-d}echo back\n
+---
+rx286, test build
+/a$ keys
+Press keys; ^D ends.
+61h: a
+03h: ^C
+1Bh 5Bh 41h: ESC [ A
+1Bh 5Bh 48h: ESC [ H
+1Bh 5Bh 46h: ESC [ F
+1Bh 5Bh 32h 7Eh: ESC [ 2 ~
+1Bh 5Bh 33h 7Eh: ESC [ 3 ~
+1Bh 5Bh 35h 7Eh: ESC [ 5 ~
+1Bh 5Bh 36h 7Eh: ESC [ 6 ~
+1Bh 4Fh 50h: ESC O P
+1Bh 4Fh 53h: ESC O S
+1Bh 5Bh 31h 35h 7Eh: ESC [ 1 5 ~
+1Bh 5Bh 32h 31h 7Eh: ESC [ 2 1 ~
+0Dh: ^M
+1Bh 5Bh 41h: ESC [ A
+1Bh 5Bh 48h: ESC [ H
+1Bh 5Bh 46h: ESC [ F
+1Bh 5Bh 32h 7Eh: ESC [ 2 ~
+1Bh 5Bh 33h 7Eh: ESC [ 3 ~
+1Bh 5Bh 35h 7Eh: ESC [ 5 ~
+1Bh 5Bh 36h 7Eh: ESC [ 6 ~
+0Dh: ^M
+04h: ^D
+/a$ echo back
+back
+/a$

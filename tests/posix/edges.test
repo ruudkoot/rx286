@@ -1,0 +1,26 @@
+# The file system at its edges (roadmap os-server.md P15, the second
+# review): init starts tests/posix/edges.c (TEST_POSIX_EDGES), which fills
+# B but three clusters; a byte written past a hole of ten clusters into an
+# empty file is ENOSPC, and gives back the clusters it took (before, it
+# kept them: lost, and the next 3 KB found no room); then the root is
+# filled with empty files, and a rename in it takes no slot (before,
+# ENOSPC). fsck.fat finds B sound after.
+program: idle
+define: TEST_POSIX_EDGES
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+fsck: B
+timeout: 300
+emulators: bochs
+---
+edges: B full, then 3 clusters freed (0): 0
+edges: a byte past a hole of 10 clusters (-1, ENOSPC 28): -1, errno 28
+edges: its size after (0): 0
+edges: then 3 KB in another file (3072): 3072
+edges: the root full (ENOSPC 28): 28
+edges: a rename in it (0): 0
+edges: done

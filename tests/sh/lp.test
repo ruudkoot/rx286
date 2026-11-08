@@ -1,0 +1,17 @@
+# lp (roadmap os-server.md P9): files to LPT1 through /dev/lpt1, every byte
+# of C's PRINTME.TXT, and the standard input to LPT2. MAME's printers are not
+# captured (docs/emulators.md).
+program: sh
+emulators: bochs
+install: C /BIN/LP z-lp.rx
+keys: echo one > /b/p.txt; lp /b/p.txt c:/docs/printme.txt; echo two | lp -d lpt2\n
+lpt1: one
+lpt1: rx286 printer test page\r
+lpt1: -----------------------\r
+lpt1: The kernel sent each of these bytes to the printer port,\r
+lpt1: polling the printer's BUSY line, one strobe a byte.\r
+lpt2: two
+---
+rx286, test build
+/a$ echo one > /b/p.txt; lp /b/p.txt c:/docs/printme.txt; echo two | lp -d lpt2
+/a$

@@ -49,7 +49,13 @@ KCALL_LOG           equ 17  ; DS:SI bytes, CX how many (LOG_MAX at most): to the
                             ;    log (l4.md L10, D15) -> AX the bytes written (fewer if
                             ;    the thread is to restart); CF and AX KE_ARG or KE_CAP
 KCALL_TICKS         equ 18  ; -> DX:AX the ticks since the start (TICKS_HZ a second)
-KCALL_COUNT         equ 19
+KCALL_SEAL          equ 19  ; DX a data segment of DPL 3 that no copy of remains, retyped
+                            ;    from untyped: it becomes readable code of DPL 3
+                            ;    (os-server.md P2, E5)
+KCALL_RESIZE        equ 20  ; DX a data segment retyped from an untyped of the caller's,
+                            ;    the last carved there; CX bytes (1 to 65,535): it and
+                            ;    every copy so long, in place, new bytes zeroed (P15)
+KCALL_COUNT         equ 21
 LOG_MAX             equ 4096
 TICKS_HZ            equ 50
 
@@ -71,6 +77,13 @@ TEST_PROBE          equ 7   ;    TEST_ATTACK builds: BL PROBE_*: change one of t
                             ;    own descriptors as a revocation would, so the way back
                             ;    to its ring can be tested (l4.md L1); its next start
                             ;    undoes it
+TEST_GIVE_WAY       equ 8   ;    CX: the next CX interrupt windows of any kernel call give
+                            ;    way, a more urgent thread ready or not, so that the
+                            ;    calls resume (os-server.md P3) -> CX the windows that
+                            ;    were still to
+TEST_OVERRUN        equ 9   ;    TEST_ATTACK builds: INT 9 in ring 0, as the 287's
+                            ;    overrun of a segment after the CPU moved on: the
+                            ;    caller restarted, as the program's (fault.asm; P15)
 PROBE_DS_ABSENT     equ 1   ; the data segment's descriptor not present
 PROBE_DS_EXEC       equ 2   ; the data segment's slot refilled with execute-only code
 PROBE_SS_ABSENT     equ 3   ; the stack's descriptor not present
@@ -114,6 +127,35 @@ THREAD_STOP         equ 5   ;    it stops: off every queue, its wait given up; T
                             ;    starts it again, at its entry (l4.md L11)
 THREAD_INFO         equ 6   ;    -> BL its state (STATE_*), BH its priority, CX the times it
                             ;    was switched to
+THREAD_SUSPEND      equ 7   ;    SI a notification, or 0: it stops, its registers kept, on its
+                            ;    way back to its ring, and the notification is signalled;
+                            ;    THREAD_START resumes it where it was (os-server.md P2)
+THREAD_FRAME        equ 8   ;    of a suspended thread: BL FRAME_READ or FRAME_WRITE, SI a
+                            ;    segment of the caller's, DI an offset: TFR_SIZE bytes
+THREAD_FPU          equ 9   ;    SI a thread: its 287's state copied into this one, which has
+                            ;    not started or is stopped (a fork's child: os-server.md P15)
+FRAME_READ          equ 0   ; THREAD_FRAME's BL: the thread's frame into the caller's bytes
+FRAME_WRITE         equ 1   ;    the caller's bytes into the frame (not TFR_VECTOR, TFR_ERROR;
+                            ;    FLAGS: IF set, NT clear, IOPL the thread's)
+; A thread's frame, as THREAD_FRAME moves it: its registers when it stopped
+TFR_ES              equ 0
+TFR_DS              equ 2
+TFR_DI              equ 4
+TFR_SI              equ 6
+TFR_BP              equ 8
+TFR_SP_POPA         equ 10      ; PUSHA's copy of SP, which POPA skips
+TFR_BX              equ 12
+TFR_DX              equ 14
+TFR_CX              equ 16
+TFR_AX              equ 18
+TFR_VECTOR          equ 20      ; the kernel's: not written
+TFR_ERROR           equ 22
+TFR_IP              equ 24
+TFR_CS              equ 26
+TFR_FLAGS           equ 28
+TFR_SP              equ 30
+TFR_SS              equ 32
+TFR_SIZE            equ 34
 STATE_FREE          equ 0   ; THREAD_INFO's states: not started
 STATE_READY         equ 1
 STATE_RUNNING       equ 2
@@ -138,21 +180,27 @@ FAULT_COUNTED       equ 1   ; DI: a test build counted it (the fuzzer): say noth
 
 PRIORITY_MAX        equ 7
 SPACE_SLOTS_MIN     equ 8   ; a space's slots: a power of two between these
-SPACE_SLOTS_MAX     equ 256
+SPACE_SLOTS_MAX     equ 512
 
 ; The root's slots at its start (roadmap l4.md L5): slots 0, 1 and 2 its
 ; code, data and stack, as every program's; then the kernel's gifts.
-ROOT_SLOT_UNTYPED   equ 3   ; the memory for segments, as untyped: what is left
-ROOT_SLOT_ARENA     equ 4   ; the arena, as untyped: what is left
+ROOT_SLOT_UNTYPED   equ 3   ; the memory for segments, as untyped: what is left (with
+                            ;    extended memory, most of that: os-server.md P3)
+ROOT_SLOT_ARENA     equ 4   ; the arena, as untyped: what is left (with extended memory,
+                            ;    the rest of that)
 ROOT_SLOT_MODULES   equ 5   ; the module table (layout.inc), read-only
 ROOT_SLOT_SPACE     equ 6   ; its own space
 ROOT_SLOT_THREAD    equ 7   ; its own thread
 ROOT_SLOT_MODULE    equ 8   ; module n's code (n from 1) at ROOT_SLOT_MODULE + 2 (n - 1),
                             ;    and its data as assembled, read-only, in the next
+ROOT_SLOT_LOW_UNTYPED equ 100 ; with extended memory: the memory for segments below 1 MB,
+ROOT_SLOT_LOW_ARENA equ 101 ;    and the arena (slots 3 and 4 then hold extended memory)
 ROOT_SLOT_VIDEO     equ 111 ; the screen's text page, a segment of DPL 1 (l4.md L8)
 ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
                             ;    does not keep (its own are left empty)
-ROOT_SLOTS          equ 256 ; its space's slots: past the kernel's gifts, its own (l4.md L10)
+ROOT_SLOTS          equ 512 ; its space's slots: past the kernel's gifts, its own (l4.md
+                            ;    L10); 256 on, those it makes and gives back (os-server.md P4)
+ROOT_SLOT_DYNAMIC   equ 256
 
 KE_OK               equ 0
 KE_CAP              equ 1   ; not a capability of the type the call needs

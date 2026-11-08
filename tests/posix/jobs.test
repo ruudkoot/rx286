@@ -1,0 +1,45 @@
+# Job control's calls (roadmap os-server.md P11): with no program the root
+# builds (program: none), init starts tests/posix/jobs.c (TEST_POSIX_JOBS):
+# a session whose terminal it is, groups and their refusals, kill to a
+# group, SIGSTOP and SIGCONT as waitpid (WUNTRACED, WCONTINUED) and SIGCHLD
+# see them, SA_NOCLDSTOP, a stop in a pipe's read, ^Z for the foreground's
+# reader, SIGTTIN and EIO for a background reader, SIGTTOU for a
+# background writer with TOSTOP and for tcsetpgrp; then (P15) a thread's
+# background write while its process ignores SIGTTOU, setpgid into a group
+# gone whose entry a thread took, and a stop pending for a sigsuspend.
+program: none
+define: TEST_POSIX_JOBS
+keys: {ctrl-z}
+match: contains
+---
+jobs: setsid (my pid): 1
+jobs: setsid again (-1, EPERM 1): -1, 1
+jobs: getsid(0), getpgrp (mine): 1 1
+jobs: tcgetpgrp before the terminal is ours (-1, ENOTTY 1): -1, 1
+jobs: tcgetpgrp once opened (mine 1): 1
+jobs: setpgid to no group (-1, EPERM 1): -1, 1
+jobs: kill a group of two (0): 0
+jobs: its first: signal 15
+jobs: its second: signal 15
+jobs: SIGSTOP, WUNTRACED: stopped 19; SIGCHLD 1
+jobs: SIGCONT, WCONTINUED: continued
+jobs: its handler ran, then it ended: exit 7
+jobs: SA_NOCLDSTOP: stopped 19; SIGCHLD 0
+jobs: stopped in a read, continued, it read on: exit 8
+^Z
+jobs: ^Z: stopped 20
+jobs: a background read: stopped 21
+jobs: ... SIGTTIN ignored, EIO: exit 9
+jobs: a background write without TOSTOP
+jobs: ... it went: exit 10
+jobs: a background write with TOSTOP: stopped 22
+jobs: tcsetpgrp from the background: stopped 22
+jobs: a thread's background write, SIGTTOU ignored
+jobs: ... it went: exit 11
+jobs: setpgid into a group gone (-1, EPERM 1): -1, 1
+jobs: a stop pending for a sigsuspend: stopped 20
+jobs: ... continued, it waited on for a handler, its mask back: exit 12
+jobs: a thread's background read, SIGTTIN caught: EINTR: exit 13
+jobs: an orphaned group's SIGTSTP and background read (dec): dec
+jobs: an orphaned group's stopped member, SIGHUP and SIGCONT (hc): hc
+jobs: done

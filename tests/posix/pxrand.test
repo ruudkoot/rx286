@@ -1,0 +1,19 @@
+# Random calls on the OS server from a process (roadmap os-server.md P15):
+# init starts tests/posix/pxrand.c (TEST_POSIX_PXRAND), 8,000 seeded calls
+# among the files' and the information calls, with random descriptors,
+# paths, buffers (now and then past the data segment), lengths and flags.
+# The test build's server checks its tables after every file call, so a
+# count left wrong is a panic; at the end fsck.fat finds B sound. This
+# seed found three faults of a write past a file's end (P15): its cluster
+# index wrapped past 64 MB, a write that ran out of space left its
+# clusters on the chain past the size, and a hole was not zeroed.
+program: idle
+define: TEST_POSIX_PXRAND
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+emulators: bochs
+fsck: B
+---
+pxrand: done

@@ -1,0 +1,14 @@
+# The kernel's review (roadmap os-server.md P15), finding 9: a dead space still to be emptied is emptied before a revoke
+# gives its untyped's memory back (before: the flush read a segment's bytes
+# as the space's, a panic). tests/programs/
+# additions.asm, TEST_RV_FLUSH; Bochs, whose timing the races need.
+program: additions
+define: TEST_CAPS
+define: TEST_RV_FLUSH
+emulators: bochs
+match: contains
+timeout: 60
+---
+additions: A's revoke of U: 0
+additions: X back from its delete: 1
+additions: done

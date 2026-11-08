@@ -31,6 +31,7 @@ exception:
         test byte [bp + FRAME_CS], CPL_MASK
         jnz fpu_nm                      ; a program's first 287 instruction since TS
 .not_nm:
+        mov al, CONT_FAULT
         test byte [bp + FRAME_CS], CPL_MASK
         jnz fault_program
         cmp word [bp + FRAME_VECTOR], VEC_DB

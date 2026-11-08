@@ -33,7 +33,7 @@ It reads the BPB the boot sector left at 7C00h and:
 2. reads the first FAT into its buffer at 8400h and the root directory into
    its buffer at 9800h;
 3. finds `KERNEL  BIN` (not a volume label or a directory), and checks its
-   size: at most `IMAGE_MAX`, 128 KB;
+   size: at most `IMAGE_MAX`, 192 KB;
 4. follows its cluster chain (`fat12.asm`: `fat12_next`), reading **one
    sector at a time** to 1000:0000h onwards, so no INT 13h read crosses a
    64 KB boundary; a cluster outside the disk ends the load with an error;

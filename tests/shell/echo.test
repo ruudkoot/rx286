@@ -1,9 +1,0 @@
-# The shell starts, takes a line, runs it.
-program: shell
-keys: echo hello, world\n
----
-rx286, test build
-rx286 shell: type help for the commands
-A:\>echo hello, world
-hello, world
-A:\>

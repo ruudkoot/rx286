@@ -11,10 +11,14 @@
 # serial numbers, files copied in sorted order). Besides disks/<drive>/, B
 # gets a file in two pieces (FRAG.TXT) and a directory of two clusters
 # (MANY), and C a file of several clusters (NUMBERS.TXT), so that the shell's
-# FAT12 code follows real chains. disks/README.md lists what is where.
+# FAT12 code follows real chains. disks/README.md lists what is where. What
+# the tests rely on is checked after, not left to mtools' way of allocating:
+# FRAG.TXT's and MANY's chains jump, every volume is FAT12, and every name
+# under disks/ is DOS's (8.3, upper case).
 # ============================================================================
 
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -40,8 +44,27 @@ MBR_SIGNATURE = b'\x55\xAA'
 
 
 def mtools(*args):
+    """An mtools command; never a question on the terminal (a name clash)."""
     env = dict(os.environ, SOURCE_DATE_EPOCH=EPOCH, MTOOLS_SKIP_CHECK='1')
-    subprocess.run(args, check=True, env=env, stdout=subprocess.DEVNULL)
+    return subprocess.run(args, check=True, env=env, stdout=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL, text=True).stdout
+
+
+DOS_NAME = re.compile(r'^[A-Z0-9_$~!#%&\-{}@^\'`]{1,8}(\.[A-Z0-9_$~!#%&\-{}@^\'`]{1,3})?$')
+
+
+def runs(image, path):
+    """The runs of a file's or directory's chain, by mshowfat: <3-4> <6-7>."""
+    return re.findall(r'<\d+(?:-\d+)?>', mtools('mshowfat', '-i', image, '::' + path))
+
+
+def check_volume(image, fat_offset):
+    """Stops unless the volume's boot sector says FAT12."""
+    with open(image.split('@@')[0], 'rb') as f:
+        f.seek(fat_offset)
+        boot = f.read(SECTOR)
+    if boot[0x36:0x3E] != b'FAT12   ':
+        sys.exit('mkdisks: %s: not FAT12 (%r)' % (image, boot[0x36:0x3E]))
 
 
 def copy_tree(image, source, scratch):
@@ -49,6 +72,10 @@ def copy_tree(image, source, scratch):
     no Ctrl+Z after, which mcopy -t would add)."""
     for directory, subdirs, files in os.walk(source):
         subdirs.sort()
+        for name in subdirs + files:
+            if not DOS_NAME.match(name):
+                sys.exit('mkdisks: %s: not a DOS name (8.3, upper case)'
+                         % os.path.join(directory, name))
         rel = os.path.relpath(directory, source)
         if rel != '.':
             mtools('mmd', '-i', image, '::/' + rel.replace(os.sep, '/'))
@@ -92,6 +119,10 @@ def make_floppy_b(out, scratch):
     mtools('mmd', '-i', image, '::MANY')
     for n in range(1, 41):
         put(image, 'MANY/FILE%02d.TXT' % n, 'This is file %02d of B:\\MANY.\n' % n, scratch)
+    check_volume(image, 0)
+    if len(runs(image, 'FRAG.TXT')) != 2 or len(runs(image, 'MANY')) != 2:
+        sys.exit('mkdisks: FRAG.TXT (%s) and MANY (%s) must each be in two pieces' % (
+            ' '.join(runs(image, 'FRAG.TXT')), ' '.join(runs(image, 'MANY'))))
 
 
 def make_fixed(out, disk, scratch):
@@ -113,6 +144,7 @@ def make_fixed(out, disk, scratch):
     mtools('mformat', '-i', volume, '-T', str(size), '-h', str(disk['heads']),
            '-s', str(disk['spt']), '-H', str(start), '-c', str(disk['cluster']),
            '-m', '0xF8', '-N', '%08X' % disk['serial'], '-v', disk['label'], '::')
+    check_volume(volume, start * SECTOR)
     copy_tree(volume, os.path.join(ROOT, 'disks', disk['drive']), scratch)
     if disk['drive'] == 'c':
         put(volume, 'NUMBERS.TXT', ''.join('line %04d of C:\\NUMBERS.TXT\n' % n

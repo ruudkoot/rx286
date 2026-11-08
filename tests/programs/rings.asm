@@ -62,8 +62,7 @@ entry:
 .done:
         PRINT "rings: done", CHAR_LF
 .wait:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp .wait
 
 ; ----------------------------------------------------------------------------

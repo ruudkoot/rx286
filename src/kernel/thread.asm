@@ -3,37 +3,42 @@
 ; Threads: their control blocks, the switch, the scheduler, the idle loop,
 ; waiting, and the lock around the log (roadmap l4.md L2, L10).
 ;
-; Each thread runs a program in ring 3 with an LDT of its own, and has a
-; kernel stack of its own (from SEL_STACK_POOL): SP0 points at its top while the
-; thread runs, so every interrupt from ring 3 builds its frame there, and a
-; thread that waits inside the kernel keeps its place on it (D3). switch_to
-; saves the running thread's registers on its kernel stack, keeps SS:SP in
-; its control block, and takes up the next one's: one TSS, a software switch
-; (D2). Eight fixed priorities, round robin within each on SLICE_TICKS (D9);
-; a table gives the highest non-empty queue, since the 286 has no BSF. When
-; no thread is ready the kernel idles on its own stack (SEL_KSTACK), never on
-; a thread's (l4.md X8).
+; Each thread runs a program in rings 1-3 with an LDT of its own. A thread
+; is a kernel object anywhere in memory, named by its own descriptor's
+; selector, which ES holds while the kernel works on it (os-server.md P3,
+; D9 C). The kernel has one stack (D9 B; l4.md D3 B): SP0 is its top, where
+; every interrupt from a thread's ring builds the frame, and the running
+; thread's frame stays there (KFRAME); a thread that stops running keeps its
+; frame in its control block (T_FRAME) until it runs again. Nothing else of
+; a thread's stays on the stack: schedule never returns to its caller, and
+; what a thread still has to do in the kernel when it runs again is its
+; T_CONT - nothing but the way back, its program's first start, the rest of
+; its fault's call, or the rest of a kernel call (dispatch). One TSS, a
+; software switch (D2). Eight fixed priorities, round robin within each on
+; SLICE_TICKS (D9); a table gives the highest non-empty queue, since the 286
+; has no BSF. When no thread is ready the kernel idles on its stack.
 ;
 ; A thread waits inside the kernel only for its turn at the log, and then
-; only until the next interrupt (kwait): every IRQ wakes every waiting
-; thread, which looks again (call_enter; l4.md X15). Every other wait is
-; IPC's. Preemption happens on the way back to ring 3 and at the kernel's
-; own interrupt windows (kpreempt, between a line's bytes), never in the
+; only until the next tick: every tick, and every IRQ not a driver's, wakes
+; every waiting thread, which calls again (call_enter; l4.md X15). Every other wait is IPC's, whose
+; results its waker writes into its frame. Preemption happens on the way
+; back to its ring and at the kernel's own interrupt windows (kpreempt),
+; where the call gives way and is resumed later (CONT_KCALL), never in the
 ; middle of a handler.
 ; ============================================================================
 
 begin_kdata
-; The kernel's own context: the start, then the idle loop, on SEL_KSTACK.
-; (Threads are objects of the arena: cap.asm makes them.)
+; The kernel's own context: the start, then the idle loop, on SEL_KSTACK;
+; named SEL_IDLE. (Threads are objects: cap.asm makes them.)
 idle_tcb:
-        dw 0, 0                         ; T_SS, T_SP
+        dw 0, 0                         ; T_CONT, T_LOG_DONE
         db TS_RUNNING, 0                ; T_STATE, T_PRIO
-        dw 0, SEL_NULL, SEL_KSTACK, 0   ; T_NEXT, T_LDT (none), T_STACK, T_USTACK_TOP
+        dw 0, SEL_NULL, 0, 0            ; T_NEXT, T_LDT (none), T_ZERO_PARAS, T_USTACK_TOP
         db 0, 0                         ; T_RESTART, T_FPU_VALID
         dw msg_thread_idle              ; T_NAME
         times TCB_SIZE - T_SLICE db 0
-cur_thread          dw idle_tcb         ; the thread running
-fg_thread           dw idle_tcb         ; START_FOREGROUND's: the test hooks follow it
+cur_thread          dw SEL_IDLE         ; the thread running
+fg_thread           dw SEL_IDLE         ; START_FOREGROUND's: the test hooks follow it
 call_owner          dw 0                ; the thread writing to the log, or 0
 resched             db 0                ; a thread should give way: at the next chance
 ready_mask          db 0                ; bit n: queue n is not empty
@@ -74,77 +79,57 @@ threads_start:
 
 ; ----------------------------------------------------------------------------
 ; idle_loop - run the best ready thread; when there is none, halt with
-; interrupts on until one is (on the kernel's own stack: l4.md X8)
-;   In:       cur_thread = idle_tcb; interrupts off; DS = SEL_KDATA
+; interrupts on until one is (on the kernel's stack, which nothing of a
+; thread's is on: l4.md X8)
+;   In:       cur_thread = SEL_IDLE; interrupts off; DS = SEL_KDATA
 ;   Out:      does not return
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 idle_loop:
+        mov sp, KSTACK_TOP
         mov byte [resched], 0
         call ready_pop
         test bx, bx
-        jnz .run
+        jnz dispatch
         STRETCH_END
         sti
         hlt
         cli
         STRETCH_BEGIN 0xFFFF
         jmp idle_loop
-.run:
-        call switch_to
-        jmp idle_loop
-
-; Where a new thread's frame and its first switch_to's pushes lie
-THREAD_FRAME        equ TCB_STACK_SIZE - FRAME_SIZE_USER
-THREAD_START_SP     equ THREAD_FRAME - 2 - 16 - 4      ; a return address, PUSHA, DS, ES
 
 ; ----------------------------------------------------------------------------
 ; thread_init - make a thread ready to start its program at its entry: its
-; kernel stack as an interrupt from ring 3 would leave it, under what
-; switch_to pops
+; frame as an interrupt from its ring would leave it, its first start to do
 ;   In:       BX = the thread; DS = SEL_KDATA; interrupts off
 ;   Out:      the thread in its ready queue
-;   Destroys: AX, CX, DI, ES
+;   Destroys: AX, CX, DI
 ; ----------------------------------------------------------------------------
 thread_init:
-        mov es, [bx + T_STACK]
-        xor di, di
-%ifdef WITH_CHECKS
-        mov ax, STACK_FILL              ; the watermark: how deep the stack ever gets
-%else
+        push es
+        mov es, bx
+        mov di, T_FRAME
         xor ax, ax
-%endif
-        mov cx, TCB_STACK_SIZE / 2
+        mov cx, FRAME_SIZE_USER / 2
         cld
         rep stosw
-        xor ax, ax
-        mov di, THREAD_START_SP
-        mov cx, (TCB_STACK_SIZE - THREAD_START_SP) / 2
-        rep stosw
-        ; switch_to's: ES, DS, PUSHA's registers (zero), the return address
-        mov word [es:THREAD_START_SP], SEL_KDATA
-        mov word [es:THREAD_START_SP + 2], SEL_KDATA
-        mov word [es:THREAD_START_SP + 20], thread_first
-        ; the frame of an interrupt from ring 3, at the program's entry
         ; slots 0, 1, 2 of its space: code, data, stack, at its ring
-        mov al, [bx + T_RING]
+        mov al, [es:T_RING]
         xor ah, ah
         or ax, SEL_UDATA & ~CPL_MASK
-        mov [es:THREAD_FRAME + FRAME_ES], ax
-        mov [es:THREAD_FRAME + FRAME_DS], ax
+        mov [es:T_FRAME + FRAME_ES], ax
+        mov [es:T_FRAME + FRAME_DS], ax
         add ax, SEL_USTACK - SEL_UDATA
-        mov [es:THREAD_FRAME + FRAME_USER_SS], ax
+        mov [es:T_FRAME + FRAME_USER_SS], ax
         sub ax, SEL_USTACK - SEL_UCODE
-        mov [es:THREAD_FRAME + FRAME_CS], ax
-        mov ax, [bx + T_ENTRY]
-        mov [es:THREAD_FRAME + FRAME_IP], ax
+        mov [es:T_FRAME + FRAME_CS], ax
+        mov ax, [es:T_ENTRY]
+        mov [es:T_FRAME + FRAME_IP], ax
         call thread_flags
-        mov [es:THREAD_FRAME + FRAME_FLAGS], ax
-        mov ax, [bx + T_USTACK_TOP]
-        mov [es:THREAD_FRAME + FRAME_USER_SP], ax
-        mov [bx + T_SS], es
-        mov word [bx + T_SP], THREAD_START_SP
-        push ds
+        mov [es:T_FRAME + FRAME_FLAGS], ax
+        mov ax, [es:T_USTACK_TOP]
+        mov [es:T_FRAME + FRAME_USER_SP], ax
+        mov byte [es:T_CONT], CONT_FIRST
         pop es
         jmp ready_push
 
@@ -156,168 +141,230 @@ thread_init:
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 thread_flags:
+        push es
+        mov es, bx
         mov ax, FLAGS_USER_START
-        test byte [bx + T_FLAGS], TF_IOPL
+        test byte [es:T_FLAGS], TF_IOPL
         jz .done
         or ax, FLAGS_IOPL1
 .done:
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
-; thread_first - where a new thread's first switch_to returns: start its
-; program, through the way back to ring 3
-;   In:       SP at the frame; DS = ES = SEL_KDATA; interrupts off
+; thread_first - a new thread's first run (CONT_FIRST): start its program,
+; through the way back to its ring
+;   In:       BP = its frame; DS = ES = SEL_KDATA; interrupts off
 ;   Out:      does not return: IRET to the program
 ;   Destroys: everything
 ; ----------------------------------------------------------------------------
 thread_first:
-        mov bp, sp
         TRACE "kernel: a thread starts its program"
         call program_reset
         jmp isr_exit
 
 ; ----------------------------------------------------------------------------
-; switch_to - run another thread; the running one's kernel context stays on
-; its own stack until it is chosen again
-;   In:       BX = the thread to run (not the running one); DS = SEL_KDATA;
-;             interrupts off
-;   Out:      returns when the running thread runs again
-;   Destroys: nothing
+; dispatch - run a thread: the kernel's stack emptied, the thread's frame
+; at its top, its context taken up, then what it still has to do in the
+; kernel (T_CONT), then the way back to its ring
+;   In:       BX = the thread (not SEL_IDLE); DS = SEL_KDATA; interrupts off
+;   Out:      does not return
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
-switch_to:
-        pusha
-        push ds
-        push es
-        mov si, [cur_thread]
-        mov [si + T_SS], ss
-        mov [si + T_SP], sp
-        mov al, [restart_pending]       ; the running thread's own, kept
-        mov [si + T_RESTART], al
-        mov al, [bx + T_RESTART]
-        mov [restart_pending], al
+dispatch:
+        mov sp, KFRAME
         mov [cur_thread], bx
-        mov byte [bx + T_STATE], TS_RUNNING
-        mov byte [bx + T_SLICE], SLICE_TICKS
-        inc word [bx + T_RUNS]
-        mov ax, [bx + T_STACK]          ; SS0:SP0: the top of its kernel stack
-        mov [tss + TSS286_SS0], ax
-        mov word [tss + TSS286_SP0], TCB_STACK_SIZE
-        lldt [bx + T_LDT]
-        call fpu_switch                 ; TS set unless it owns the 287
-        mov ss, [bx + T_SS]
-        mov sp, [bx + T_SP]
-        pop es
+        mov es, bx
+        mov byte [es:T_STATE], TS_RUNNING
+        mov byte [es:T_SLICE], SLICE_TICKS
+        inc word [es:T_RUNS]
+        mov al, [es:T_RESTART]
+        mov [restart_pending], al
+        lldt [es:T_LDT]
+        push ds                         ; its frame to the stack's top (KFRAME)
+        push es
         pop ds
-        popa
-        ret
+        mov ax, SEL_KDATA
+        mov es, ax
+        mov si, T_FRAME
+        mov di, KFRAME
+        mov cx, FRAME_SIZE_USER / 2
+        cld
+        rep movsw
+        pop ds
+        mov bp, KFRAME
+        call fpu_switch                 ; TS set unless it owns the 287
+        mov es, bx
+        mov al, [es:T_CONT]
+        mov byte [es:T_CONT], CONT_NONE
+        push ds
+        pop es
+        cmp al, CONT_KCALL
+        je .kcall
+        cmp al, CONT_FIRST
+        je thread_first
+        cmp al, CONT_FAULT
+        jae fault_resume                ; AL: CONT_FAULT or CONT_FAULT_WAY
+        jmp isr_exit
+.kcall:
+        ; the rest of a kernel call: dead spaces it left half emptied first,
+        ; then the call again, which finds its progress (T_CONT says so)
+        call dead_flush
+        mov es, [cur_thread]
+        mov byte [es:T_CONT], CONT_RESUMED
+        push ds
+        pop es
+        call kcall_handler
+        mov es, [cur_thread]
+        mov byte [es:T_CONT], CONT_NONE
+        push ds
+        pop es
+        jmp isr_exit
 
 ; ----------------------------------------------------------------------------
-; schedule - the running thread stops (it waits, or is back in its ready
-; queue): run the best ready thread, or the idle loop
+; schedule - the running thread stops running (it waits, gives way, or
+; stops): its frame back into its control block, then run the best ready
+; thread, or the idle loop. What the thread still has to do in the kernel
+; is its T_CONT, and its results its frame's
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      returns when the running thread runs again
-;   Destroys: nothing
+;   Out:      does not return
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
 schedule:
-        push bx
+        mov bx, [cur_thread]
+        cmp bx, SEL_IDLE
+        je schedule_gone
+        mov es, bx
+        mov al, [restart_pending]       ; its own, kept
+        mov [es:T_RESTART], al
+        mov si, KFRAME
+        mov di, T_FRAME
+        mov cx, FRAME_SIZE_USER / 2
+        cld
+        rep movsw
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; schedule_gone - as schedule, for a thread that is gone (thread_die): its
+; control block is not touched
+;   In:       DS = SEL_KDATA; interrupts off
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+schedule_gone:
         mov byte [resched], 0
         call ready_pop
         test bx, bx
-        jnz .chosen
-        mov bx, idle_tcb
-.chosen:
-        cmp bx, [cur_thread]
-        je .same
-        call switch_to
-.done:
-        pop bx
-        ret
-.same:
-        mov byte [bx + T_STATE], TS_RUNNING
-        jmp .done
+        jnz dispatch
+        mov bx, SEL_IDLE
+        mov [cur_thread], bx
+        mov byte [restart_pending], 0
+        xor ax, ax
+        lldt ax
+        call fpu_switch
+        jmp idle_loop
 
 ; ----------------------------------------------------------------------------
 ; preempt - the running thread gives way to the best ready one, and
 ; schedule: to the tail of its queue if its time slice is over, else to the
 ; head, keeping its place, since a more urgent thread took the CPU from it
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      returns when the running thread runs again
-;   Destroys: nothing
+;   Out:      does not return (returns at once for the idle loop)
+;   Destroys: everything
 ; ----------------------------------------------------------------------------
 preempt:
-        push bx
         mov bx, [cur_thread]
-        cmp bx, idle_tcb
+        cmp bx, SEL_IDLE
         je .done
-        cmp byte [bx + T_SLICE], 0
+        mov es, bx
+        cmp byte [es:T_SLICE], 0
         je .slice_over
         call ready_first
-        jmp .switch
+        jmp schedule
 .slice_over:
         call ready_push
-.switch:
-        call schedule
+        jmp schedule
 .done:
-        pop bx
         ret
 
 ; ----------------------------------------------------------------------------
-; kpreempt - a point inside the kernel, between interrupt windows, where the
-; running thread may give way if a more urgent one is ready
+; kpreempt - a point inside a kernel call, between interrupt windows, where
+; the running thread gives way if a more urgent one is ready. The call is
+; resumed when the thread runs again (CONT_KCALL): every caller keeps its
+; progress where the call finds it again (os-server.md P3)
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      nothing
-;   Destroys: nothing
+;   Out:      nothing, if it does not give way
+;   Destroys: nothing (everything, if it gives way)
 ; ----------------------------------------------------------------------------
 kpreempt:
+%ifdef WITH_TEST_HOOKS
+        cmp word [test_give_way], 0     ; TEST_GIVE_WAY: these windows give way
+        je .urgent
+        dec word [test_give_way]
+        jmp .give_way
+.urgent:
+%endif
         cmp byte [resched], 0
         je .done
-        call preempt
+.give_way:
+        push bx
+        mov bx, [cur_thread]
+        cmp bx, SEL_IDLE
+        je .idle
+        mov es, bx
+        test byte [es:T_FLAGS], TF_DEAD ; dead, or its space dead: never off the CPU
+        jnz .die                        ;    with its call half done, where its object
+        test byte [es:T_FLAGS], TF_ORPHAN   ; could be given out again: it ends here,
+        jnz .orphan                     ;    as at its way back (os-server.md P15)
+        mov byte [es:T_CONT], CONT_KCALL
+        jmp preempt
+.die:
+        jmp thread_die
+.orphan:
+        jmp thread_orphan
+.idle:
+        pop bx
 .done:
         ret
 
 ; ----------------------------------------------------------------------------
-; kwait - wait inside the kernel until the next interrupt, letting other
-; threads run meanwhile (before any thread runs: halt)
-;   In:       DS = SEL_KDATA; interrupts off
+; kwait - before any thread runs: wait with interrupts on until the next
+; interrupt (the probes and the kernel's own 287 test, ksleep)
+;   In:       DS = SEL_KDATA; interrupts off; the idle loop's context
 ;   Out:      nothing, after an interrupt
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 kwait:
-        push bx
-        mov bx, [cur_thread]
-        cmp bx, idle_tcb
-        je .halt
-        mov byte [bx + T_STATE], TS_WAITING
-        call schedule
-        pop bx
-        ret
-.halt:
         STRETCH_END
         sti                             ; STI acts after HLT has begun: an
         hlt                             ; interrupt already pending still wakes it
         cli
         STRETCH_BEGIN 0xFFFF
-        pop bx
         ret
 
 ; ----------------------------------------------------------------------------
 ; call_enter - into the log's writes (KCALL_LOG): one thread at a time, so
-; that lines never mix (l4.md X15)
-;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      the running thread holds the log
+; that lines never mix (l4.md X15); a thread that finds another writing
+; waits until the next interrupt, and calls again (CONT_KCALL)
+;   In:       DS = SEL_KDATA; interrupts off; in a kernel call
+;   Out:      the running thread holds the log (or it waits: no return)
 ;   Destroys: nothing
 ; ----------------------------------------------------------------------------
 call_enter:
         push ax
-.check:
         mov ax, [call_owner]
         test ax, ax
         jz .take
-        call kwait                      ; until the next interrupt, then again
-        jmp .check
+        cmp ax, [cur_thread]
+        je .held                        ; its own, kept while it gave way
+        mov es, [cur_thread]
+        mov byte [es:T_CONT], CONT_KCALL
+        mov byte [es:T_STATE], TS_WAITING
+        jmp schedule                    ; wake_waiters readies it
 .take:
         mov ax, [cur_thread]
         mov [call_owner], ax
+.held:
         pop ax
         ret
 
@@ -348,18 +395,21 @@ wake_waiters:
         push bx
         push cx
         push si
+        push es
         mov si, thread_list
         mov cx, [thread_count]
         jcxz .done
 .thread:
         mov bx, [si]
-        cmp byte [bx + T_STATE], TS_WAITING
+        mov es, bx
+        cmp byte [es:T_STATE], TS_WAITING
         jne .next
         call ready_push
 .next:
         add si, 2
         loop .thread
 .done:
+        pop es
         pop si
         pop cx
         pop bx
@@ -376,21 +426,24 @@ thread_tick:
         push ax
         push bx
         push cx
+        push es
         mov bx, [cur_thread]
-        cmp bx, idle_tcb
+        cmp bx, SEL_IDLE
         je .done
-        inc word [bx + T_RUN_TICKS]
-        dec byte [bx + T_SLICE]
+        mov es, bx
+        inc word [es:T_RUN_TICKS]
+        dec byte [es:T_SLICE]
         jnz .done
-        mov cl, [bx + T_PRIO]
+        mov cl, [es:T_PRIO]
         mov al, [ready_mask]
         shr al, cl                      ; queues of its priority and above
         jz .again
         mov byte [resched], 1           ; (its slice 0: to the back of its queue)
         jmp .done
 .again:
-        mov byte [bx + T_SLICE], SLICE_TICKS    ; nobody to give way to
+        mov byte [es:T_SLICE], SLICE_TICKS      ; nobody to give way to
 .done:
+        pop es
         pop cx
         pop bx
         pop ax
@@ -412,18 +465,50 @@ thread_restart:
         mov byte [restart_pending], 1
         ret
 .other:
-        mov byte [bx + T_RESTART], 1
-        cmp byte [bx + T_STATE], TS_REPLY
+        push es
+        mov es, bx
+        mov byte [es:T_RESTART], 1
+        cmp byte [es:T_STATE], TS_REPLY
         jne .cancel
         push bx
-        mov bx, [bx + T_WAIT_OBJ]       ; the server
-        test byte [bx + T_FLAGS], TF_SESSION
+        mov bx, [es:T_WAIT_OBJ]         ; the server
+        mov es, bx
+        test byte [es:T_FLAGS], TF_SESSION
         jz .alone
         call thread_restart
 .alone:
         pop bx
 .cancel:
+        pop es
         jmp ipc_cancel                  ; waiting in IPC: it wakes, to restart
+
+; ----------------------------------------------------------------------------
+; thread_suspended - the running thread stops on its way back to its ring
+; (THREAD_SUSPEND; os-server.md P2): its registers kept in its frame, which
+; THREAD_FRAME may read and write meanwhile; its suspender's notification
+; signalled; THREAD_START resumes it, through the way back afresh
+;   In:       BX = the running thread; BP = its frame; DS = SEL_KDATA;
+;             interrupts off
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+thread_suspended:
+        mov es, bx
+        and byte [es:T_FLAGS], ~TF_SUSPEND & 0xFF
+        or byte [es:T_FLAGS], TF_SUSPENDED
+        mov byte [es:T_STATE], TS_STOPPED
+        mov si, [es:T_SUSPEND_NOTIFY]
+        test si, si
+        jz .stopped
+        mov word [es:T_SUSPEND_NOTIFY], 0
+        mov ax, [es:T_SUSPEND_BADGE]
+        test ax, ax
+        jnz .bits
+        inc ax                          ; a capability without a badge signals 1
+.bits:
+        call ntf_signal
+.stopped:
+        jmp schedule                    ; THREAD_START readies it: the way back
 
 ; ----------------------------------------------------------------------------
 ; thread_stop - a thread stopped (KCALL_THREAD's THREAD_STOP; roadmap l4.md
@@ -442,11 +527,14 @@ thread_stop:
         jne .queue
         mov word [call_owner], 0
 .queue:
-        cmp byte [bx + T_STATE], TS_READY
+        push es
+        mov es, bx
+        cmp byte [es:T_STATE], TS_READY
         jne .stopped
         call ready_remove
 .stopped:
-        mov byte [bx + T_STATE], TS_STOPPED
+        mov byte [es:T_STATE], TS_STOPPED
+        pop es
         ret
 
 ; ----------------------------------------------------------------------------
@@ -460,7 +548,9 @@ ready_remove:
         push cx
         push si
         push di
-        mov cl, [bx + T_PRIO]
+        push es
+        mov es, bx
+        mov cl, [es:T_PRIO]
         xor ch, ch
         mov si, cx
         shl si, 1
@@ -472,13 +562,16 @@ ready_remove:
         cmp ax, bx
         je .found
         mov di, ax
-        mov ax, [di + T_NEXT]
+        mov es, ax
+        mov ax, [es:T_NEXT]
         jmp .find
 .found:
-        mov ax, [bx + T_NEXT]
+        mov es, bx
+        mov ax, [es:T_NEXT]
         test di, di
         jz .head
-        mov [di + T_NEXT], ax
+        mov es, di
+        mov [es:T_NEXT], ax
         jmp .tail
 .head:
         mov [rq_head + si], ax
@@ -493,6 +586,7 @@ ready_remove:
         not al
         and [ready_mask], al
 .done:
+        pop es
         pop di
         pop si
         pop cx
@@ -510,19 +604,19 @@ ready_push:
         push ax
         push cx
         push si
-        mov byte [bx + T_STATE], TS_READY
-        mov word [bx + T_NEXT], 0
-        mov cl, [bx + T_PRIO]
+        push es
+        mov es, bx
+        mov byte [es:T_STATE], TS_READY
+        mov word [es:T_NEXT], 0
+        mov cl, [es:T_PRIO]
         xor ch, ch
         mov si, cx
         shl si, 1
         mov ax, [rq_tail + si]
         test ax, ax
         jz .first
-        push di
-        mov di, ax
-        mov [di + T_NEXT], bx
-        pop di
+        mov es, ax
+        mov [es:T_NEXT], bx
         jmp .tail
 .first:
         mov [rq_head + si], bx
@@ -533,13 +627,15 @@ ready_push:
         shl al, cl
         or [ready_mask], al
         mov si, [cur_thread]
-        cmp si, idle_tcb
+        cmp si, SEL_IDLE
         je .urgent
-        cmp cl, [si + T_PRIO]
+        mov es, si
+        cmp cl, [es:T_PRIO]
         jbe .done
 .urgent:
         mov byte [resched], 1
 .done:
+        pop es
         pop si
         pop cx
         pop ax
@@ -556,13 +652,15 @@ ready_first:
         push ax
         push cx
         push si
-        mov byte [bx + T_STATE], TS_READY
-        mov cl, [bx + T_PRIO]
+        push es
+        mov es, bx
+        mov byte [es:T_STATE], TS_READY
+        mov cl, [es:T_PRIO]
         xor ch, ch
         mov si, cx
         shl si, 1
         mov ax, [rq_head + si]
-        mov [bx + T_NEXT], ax
+        mov [es:T_NEXT], ax
         mov [rq_head + si], bx
         test ax, ax
         jnz ready_push.mark
@@ -579,6 +677,7 @@ ready_pop:
         push ax
         push cx
         push si
+        push es
         xor bx, bx
         mov al, [ready_mask]
         test al, al
@@ -590,7 +689,8 @@ ready_pop:
         mov si, ax
         shl si, 1
         mov bx, [rq_head + si]
-        mov ax, [bx + T_NEXT]
+        mov es, bx
+        mov ax, [es:T_NEXT]
         mov [rq_head + si], ax
         test ax, ax
         jnz .done
@@ -600,6 +700,7 @@ ready_pop:
         not al
         and [ready_mask], al
 .done:
+        pop es
         pop si
         pop cx
         pop ax
@@ -609,16 +710,16 @@ ready_pop:
 begin_kdata
 msg_dump_thread     db "thread ", 0
 msg_dump_priority   db " priority ", 0
-msg_dump_stack      db ", kernel stack used ", 0
+msg_dump_stack      db "the kernel's stack used ", 0
 msg_dump_states     db " free", 0, " ready", 0, " running", 0, " waiting", 0
                     db " sending", 0, " receiving", 0, " awaiting its reply", 0
                     db " awaiting a notification", 0, " stopped", 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; thread_dump - debug and test builds: every thread, its state, priority and
-; how deep its kernel stack has ever been (the watermark of thread_init);
-; on the AT's Sys Req key, and on a panic
+; thread_dump - debug and test builds: every thread, its state and
+; priority; then how deep the kernel's one stack has ever been (the
+; watermark pm_start fills it with); on the AT's Sys Req key, and on a panic
 ;   In:       DS = SEL_KDATA; interrupts off
 ;   Out:      nothing
 ;   Destroys: AX, BX, CX, DX, SI, DI, ES
@@ -637,10 +738,12 @@ thread_dump:
         call kputs
         mov si, msg_dump_thread
         call kputs
-        mov si, [bx + T_NAME]
+        mov es, bx
+        mov si, [es:T_NAME]
         call kputs
         mov si, msg_dump_states         ; the state's name: skip T_STATE strings
-        mov cl, [bx + T_STATE]
+        mov es, bx
+        mov cl, [es:T_STATE]
 .state:
         test cl, cl
         jz .named
@@ -654,15 +757,9 @@ thread_dump:
         call kputs
         mov si, msg_dump_priority
         call kputs
-        mov al, [bx + T_PRIO]
+        mov es, bx
+        mov al, [es:T_PRIO]
         xor ah, ah
-        xor dx, dx
-        call kput_dec32
-        mov si, msg_dump_stack
-        call kputs
-        push di
-        call thread_stack_used          ; AX = bytes
-        pop di
         xor dx, dx
         call kput_dec32
         mov al, CHAR_LF
@@ -673,24 +770,35 @@ thread_dump:
         inc di
         jmp .thread
 .done:
-        push ds                         ; ES held a thread's stack: not across a switch
+        push ds
         pop es
-        ret
+        mov al, ATTR_KERNEL
+        call con_set_attr
+        mov si, msg_log_prefix
+        call kputs
+        mov si, msg_dump_stack
+        call kputs
+        call kstack_used                ; AX = bytes
+        xor dx, dx
+        call kput_dec32
+        mov al, CHAR_LF
+        call kputc
+        mov al, ATTR_NORMAL
+        jmp con_set_attr
 
 ; ----------------------------------------------------------------------------
-; thread_stack_used - how much of a thread's kernel stack was ever used
-;   In:       BX = the thread; DS = SEL_KDATA
+; kstack_used - how much of the kernel's stack was ever used
+;   In:       DS = ES = SEL_KDATA
 ;   Out:      AX = bytes, from its top to the deepest word written
-;   Destroys: CX, DI, ES
+;   Destroys: CX, DI
 ; ----------------------------------------------------------------------------
-thread_stack_used:
-        mov es, [bx + T_STACK]
-        xor di, di
+kstack_used:
+        mov di, KSTACK_BOTTOM
         mov ax, STACK_FILL
-        mov cx, TCB_STACK_SIZE / 2
+        mov cx, KSTACK_SIZE / 2
         cld
         repe scasw                      ; past the untouched words
-        mov ax, TCB_STACK_SIZE
+        mov ax, KSTACK_TOP
         sub ax, di
         add ax, 2                       ; DI is past the first word written
         ret

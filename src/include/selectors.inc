@@ -16,27 +16,30 @@
 
 RPL_KERNEL          equ 0
 RPL_USER            equ 3
+RPL_MASK            equ 3           ; a selector's RPL bits (os-server.md P15)
 SEL_TI_LDT          equ 0x04        ; the table indicator: an LDT selector
 
 SEL_NULL            equ 0x00
 SEL_KCODE           equ 0x08        ; kernel code
 SEL_KDATA           equ 0x10        ; kernel data: tables, variables, messages
-SEL_KSTACK          equ 0x18        ; kernel stack (SS0)
+SEL_KSTACK          equ 0x18        ; the kernel's one stack (SS0): SEL_KDATA, expand-down
 SEL_TSS             equ 0x20        ; the one task
 SEL_DFTSS           equ 0x28        ; the double-fault task
 SEL_DFSTACK         equ 0x30        ; the double-fault task's stack
 SEL_VIDEO           equ 0x38        ; colour text, page 0
-; Pools the kernel takes descriptors from (roadmap l4.md L3): one LDT
-; descriptor for each space, one kernel stack for each thread; a free one
-; is all zeros. Then the kernel's two windows on any memory, for zeroing
-; and copying it.
-SEL_LDT_POOL        equ 0x40                                ; SPACE_MAX of them
-SEL_STACK_POOL      equ SEL_LDT_POOL + SPACE_MAX * 8        ; THREAD_MAX of them
-SEL_SCRATCH         equ SEL_STACK_POOL + THREAD_MAX * 8
-SEL_SCRATCH2        equ SEL_SCRATCH + 8
-
-GDT_ENTRIES         equ SEL_SCRATCH2 / 8 + 1
+; The kernel's two windows on any memory, for zeroing and copying it; the
+; idle loop's control block; then the pool of descriptors each kernel object
+; and each space's LDT takes one of (roadmap os-server.md P3): an object's
+; selector is its name. A free one is not present, and holds the next free
+; one in its limit (cap.asm). The image holds the GDT up to the pool; the
+; kernel builds the whole at GDT_PHYS when it starts (gdt_init).
+SEL_SCRATCH         equ 0x40
+SEL_SCRATCH2        equ 0x48
+SEL_IDLE            equ 0x50        ; the idle loop's thread (thread.asm)
+SEL_OBJ_POOL        equ 0x58
+OBJ_MAX             equ GDT_ENTRIES - SEL_OBJ_POOL / 8
 GDT_LIMIT           equ GDT_ENTRIES * 8 - 1
+GDT_BOOT_LIMIT      equ SEL_OBJ_POOL - 1
 
 ; A program's LDT: its three segments, the fuzzer's alias in test builds
 ; with the fuzzer, and empty slots (all zeros: invisible to ring 3). Every

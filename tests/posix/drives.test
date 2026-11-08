@@ -1,0 +1,38 @@
+# The drives through their drivers (roadmap os-server.md P14): init starts
+# tests/posix/drives.c (TEST_POSIX_DRIVES). On each of A to D a file is
+# written, fsync'd and read back, one of three sectors too; the boot
+# diskette's KERNEL.BIN is read whole; no drive E, and a buffer past the
+# data's end, are refused. After the run fsck.fat finds every volume
+# sound, and mtools reads each file as the program left it. On MAME, whose
+# diskettes take the AT's time, a sector a turn, KERNEL.BIN takes half a
+# minute: the run ends once the lines are all there. DOSBox-X has no drive
+# C, and no interrupt from its diskette controller (docs/emulators.md).
+program: idle
+define: TEST_POSIX_DRIVES
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: prefix
+timeout: 300
+emulators: bochs mame
+fsck: A
+fsck: B
+fsck: C
+fsck: D
+file: A /DRIVES.TXT rx286 wrote this to A\n
+file: B /DRIVES.TXT rx286 wrote this to B\n
+file: C /DRIVES.TXT rx286 wrote this to C\n
+file: D /DRIVES.TXT rx286 wrote this to D\n
+---
+rx286, test build
+drives: A: KERNEL.BIN read: {image_size} bytes
+drives: A: a file written: errno 0, read back: the same
+drives: A: 1500 bytes written: errno 0, read back: the same
+drives: B: a file written: errno 0, read back: the same
+drives: B: 1500 bytes written: errno 0, read back: the same
+drives: C: a file written: errno 0, read back: the same
+drives: C: 1500 bytes written: errno 0, read back: the same
+drives: D: a file written: errno 0, read back: the same
+drives: D: 1500 bytes written: errno 0, read back: the same
+drives: no drive E (-1, ENOENT 2): -1, errno 2
+drives: a read past the data's end (-1, EFAULT 14): -1, errno 14
+drives: done

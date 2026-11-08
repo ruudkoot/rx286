@@ -1,0 +1,23 @@
+# Pipes (roadmap os-server.md P9): init starts tests/posix/pipe.c
+# (TEST_POSIX_PIPE), which sends bytes through a pipe, 5,000 of them from a
+# child past the buffer's 1 KB, a child's standard output, writes of
+# PIPE_BUF bytes from two children that are never split, and is ended by
+# SIGPIPE writing with no reader.
+program: idle
+define: TEST_POSIX_PIPE
+keys: {wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 240
+emulators: bochs mame
+---
+pipe: made (0): 0, ends 3 and 4
+pipe: through it (5): 5, the same
+pipe: lseek (-1, ESPIPE 29): -1, 29
+pipe: 5000 bytes from a child, then the end (0): 5000, 0 wrong
+pipe: a child's standard output through it: 3 lines, exited 3
+pipe: four writes of PIPE_BUF from two children: 2048 bytes, none split: yes
+pipe: a write with no reader (SIGPIPE 13): 13
+pipe: a read of none, none there (0): 0
+pipe: its fsync (-1, EINVAL 22): -1, 22
+pipe: two readers, 10 bytes and the end (10 and 0): 10 and 0
+pipe: done

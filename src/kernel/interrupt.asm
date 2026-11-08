@@ -31,7 +31,8 @@ isr_stub_ %+ vector:
 
 ; ----------------------------------------------------------------------------
 ; isr_common - the frame, the handler, the way back
-;   In:       the stub's and the CPU's pushes on the current stack (ring 0)
+;   In:       the stub's and the CPU's pushes on the kernel's stack: from
+;             rings 1-3 at its top (SP0: KFRAME), from ring 0 below
 ;   Out:      returns to the interrupted code with IRET
 ;   Destroys: nothing of the interrupted code's but what the handler changed
 ;             in the frame
@@ -61,20 +62,23 @@ isr_common:
 
 ; ----------------------------------------------------------------------------
 ; isr_exit - the way back: to the kernel, or to ring 3 through a switch to a
-; more urgent thread, a pending restart and the checks of the frame
-;   In:       BP = the frame; DS = SEL_KDATA; interrupts off
+; more urgent thread, a pending restart, a 287's error and the checks of
+; the frame. A thread that stops or gives way here goes the way back afresh
+; when it runs again (dispatch)
+;   In:       BP = the frame (the running thread's, from rings 1-3: KFRAME);
+;             DS = SEL_KDATA; interrupts off
 ;   Out:      IRET to the frame
 ;   Destroys: everything but what the frame restores
 ; ----------------------------------------------------------------------------
 isr_exit:
         test byte [bp + FRAME_CS], CPL_MASK
         jz .restore
-        mov bx, [cur_thread]            ; its last capability gone (l4.md L12):
-        test byte [bx + T_FLAGS], TF_DEAD   ; it never goes back
+        mov es, [cur_thread]            ; its last capability gone (l4.md L12):
+        test byte [es:T_FLAGS], TF_DEAD ; it never goes back
         jz .alive
         call thread_die
 .alive:
-        test byte [bx + T_FLAGS], TF_ORPHAN ; its space gone: it stops
+        test byte [es:T_FLAGS], TF_ORPHAN   ; its space gone: it stops
         jz .whole
         call thread_orphan
 .whole:
@@ -87,11 +91,34 @@ isr_exit:
         ; Back to ring 3 with a restart pending (Ctrl+Break or a 287 error
         ; during a system call): restart the program instead.
         cmp byte [restart_pending], 0
-        je .checks
+        je .suspend
         call restart_program
-.checks:
+.suspend:
+        ; THREAD_SUSPEND: it stops here, where its kernel call has ended and
+        ; its frame is whole (os-server.md P2, E11); resumed, it goes the way
+        ; back afresh, since much may have changed meanwhile
         mov bx, [cur_thread]
-        mov byte [bx + T_WAY_BACK], 0
+        mov es, bx
+        test byte [es:T_FLAGS], TF_SUSPEND
+        jz .checks
+        jmp thread_suspended            ; resumed: the way back afresh
+.checks:
+        mov es, [cur_thread]
+        mov byte [es:T_WAY_BACK], 0
+        cmp byte [es:T_FPU_ERROR], 0
+        je .segments
+        ; Its 287's error (IRQ13, fpu_irq): its fault #MF, at where it is now,
+        ; for its fault endpoint, which only a thread with one has
+        mov byte [es:T_FPU_ERROR], 0
+        push ds
+        pop es
+        mov word [bp + FRAME_VECTOR], VEC_MF
+        mov word [bp + FRAME_ERROR], 0
+        mov al, CONT_FAULT_WAY
+        call fault_program              ; does not return (with no endpoint after
+.segments:                              ;    all: reported, and restarted)
+        push ds
+        pop es
 .check_segments:
         call way_back_check             ; may report a fault: the frame restarts,
         jnc .check_ip                   ; and its segments are checked in turn
@@ -105,14 +132,28 @@ isr_exit:
         mov ax, [bp + FRAME_CS]
         lsl dx, ax
         cmp [bp + FRAME_IP], dx
+%ifdef TEST_ATTACK
+  %define TEST_WAY_BACK
+%elifdef TEST_FUZZ
+  %define TEST_WAY_BACK
+%endif
+%ifdef TEST_WAY_BACK
+        ja .past_limit
+        call test_way_back              ; a 386's FS and GS null (test.asm)
+        jmp .restore
+.past_limit:
+%else
         jbe .restore
+%endif
         mov word [bp + FRAME_VECTOR], VEC_GP
         mov word [bp + FRAME_ERROR], 0
+        mov al, CONT_FAULT_WAY
         call fault_program
         call way_back_again
         jmp .check_segments
 .restore:
         STRETCH_END
+        mov sp, bp                      ; (a frame from rings 1-3: off the kernel's stack)
         pop es
         pop ds
         popa
@@ -126,19 +167,24 @@ isr_exit:
 ; thread stops, said once, instead of the kernel trying for ever with
 ; interrupts off (l4.md L13); THREAD_START tries again
 ;   In:       DS = SEL_KDATA; interrupts off
-;   Out:      nothing (perhaps after a stop)
+;   Out:      nothing (or, stopped, does not return)
 ;   Destroys: AX, BX, SI
 ; ----------------------------------------------------------------------------
 way_back_again:
-        mov bx, [cur_thread]
-        inc byte [bx + T_WAY_BACK]
-        cmp byte [bx + T_WAY_BACK], WAY_BACK_TRIES
+        push es
+        mov es, [cur_thread]
+        inc byte [es:T_WAY_BACK]
+        cmp byte [es:T_WAY_BACK], WAY_BACK_TRIES
+        pop es
         jb .done
-        mov byte [bx + T_WAY_BACK], 0
+        mov es, [cur_thread]
+        mov byte [es:T_WAY_BACK], 0
+        mov byte [es:T_STATE], TS_STOPPED
+        push ds
+        pop es
         mov si, msg_way_back
         call klog
-        mov byte [bx + T_STATE], TS_STOPPED
-        call schedule                   ; back here only once started again
+        jmp schedule                    ; started again: the way back afresh
 .done:
         ret
 
@@ -188,6 +234,7 @@ way_back_check:
         mov [bp + FRAME_VECTOR], si
         and bx, ~CPL_MASK               ; the error code: the selector, as the CPU gives it
         mov [bp + FRAME_ERROR], bx
+        mov al, CONT_FAULT_WAY
         call fault_program
         stc
         ret

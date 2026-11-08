@@ -12,6 +12,7 @@ autolock = false
 
 [dosbox]
 machine = ega
+# 1 MB: no extended memory, an AT without any (roadmap os-server.md P3)
 memsize = 1
 fastbioslogo = true
 startbanner = false
@@ -25,6 +26,9 @@ double fault = true
 reset on triple fault = true
 allow lmsw to exit protected mode = false
 cycles = max
+# fast-forward: DOSBox-X keeps to real time, and the tests measure only the
+# machine's time (os-server.md P15)
+turbo = true
 isapnpbios = false
 apmbios = false
 

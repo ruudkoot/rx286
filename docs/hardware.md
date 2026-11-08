@@ -25,8 +25,8 @@ numbers below are the Technical Reference's.
 | Fixed disk | controller at 1F0h-1F7h, IRQ14; drive 0 type 2 (615/4/17, 20 MB), drive 1 type 1 (306/4/17, 10 MB) | the fixed disk driver |
 | Serial | COM1 3F8h IRQ4, COM2 2F8h IRQ3, COM3 3E8h IRQ4, COM4 2E8h IRQ3 | COM1 the mouse; COM2 the log (debug and test builds) or the modem (release builds); COM3, COM4 kept quiet (*docs/devices.md*) |
 | Parallel | LPT1 378h IRQ7, LPT2 278h IRQ5 | the printer driver, polled |
-| Speaker | timer channel 2, gated through port B | `SYS_SOUND` |
-| Game port | 201h: two joysticks, four buttons, four axes | `SYS_JOYSTICK` |
+| Speaker | timer channel 2, gated through port B | the sound driver: `/dev/speaker` |
+| Game port | 201h: two joysticks, four buttons, four axes | the sound driver: `/dev/joystick` |
 | Video | IBM EGA, colour display, 80x25 text at B8000h | the console |
 
 ## I/O ports
@@ -45,7 +45,7 @@ numbers below are the Technical Reference's.
 | 0F0h | clear the 287's busy latch | `FPU_CLEAR_BUSY` | the IRQ13 handler |
 | 0F1h | reset the 287 | `FPU_RESET` | never |
 | 1F0h-1F7h, 3F6h | fixed disk controller | `HDC_DATA`, `HDC_ERROR`, `HDC_PRECOMP`, `HDC_SECTOR_COUNT`, `HDC_SECTOR`, `HDC_CYLINDER_LOW`, `HDC_CYLINDER_HIGH`, `HDC_DRIVE_HEAD`, `HDC_STATUS`, `HDC_COMMAND`, `HDC_CONTROL` | the fixed disk driver |
-| 201h | game port | `GAME_PORT` | `SYS_JOYSTICK` |
+| 201h | game port | `GAME_PORT` | the sound driver |
 | 278h-27Ah | LPT2 | `LPT2_BASE` | the printer driver |
 | 2E8h-2EFh | COM4 | `COM4_BASE` | kept quiet |
 | 2F8h-2FFh | COM2 | `COM2_BASE` | the log in debug and test builds; the modem in release builds |
@@ -66,9 +66,11 @@ numbers below are the Technical Reference's.
   the slave to IR2 (`PIC_CASCADE_IRQ`); `PIC_ICW4_8086` is ICW4; `PIC_EOI` is
   the non-specific end of interrupt; `PIC_READ_ISR` makes the next read of the
   command port return the in-service register, which tells a spurious IRQ7 or
-  IRQ15 from a real one.
+  IRQ15 from a real one; `PIC_READ_IRR` the request register, where a
+  tick waits while interrupts are off (`TEST_STRETCH` builds, P15).
 - **8254** (`PIT_*`): `PIT_CH0_LOHI_MODE3` programs channel 0 as a square wave,
-  low byte then high byte. `PIT_INPUT_HZ` is the input clock, `PIT_HZ` the
+  low byte then high byte; `PIT_CH0_LOHI_MODE2` as a rate generator, in
+  `TEST_STRETCH` builds, whose count falls by one a clock (P15). `PIT_INPUT_HZ` is the input clock, `PIT_HZ` the
   rate rx286 wants and `PIT_DIVISOR` the divisor that gives it (23864).
   `PIT_LATCH_CH0` latches channel 0's count for the game port's timing;
   `PIT_CH2_LOHI_MODE3` makes channel 2 the speaker's square wave. Channel 1
@@ -78,7 +80,9 @@ numbers below are the Technical Reference's.
   command byte, `KBC_COMMAND_BYTE` = 45h: translation to set 1 (bit 6), the
   system flag (bit 2), the keyboard interrupt (bit 0), as IBM defines them
   (1-40). `KBC_CMD_PULSE_RESET` (FEh) pulses output-port bit 0, which resets
-  the CPU (1-42). `KBC_CMD_WRITE_OUT` (D2h) is not the AT's: it is the PS/2
+  the CPU (1-42). `KBC_CMD_WRITE_PORT` (D1h) writes the output port: the
+  kernel's entry writes `KBC_PORT_A20` (DFh), A20 on and the CPU not reset
+  (1-41), so that memory above 1 MB is reached (roadmap os-server.md P3). `KBC_CMD_WRITE_OUT` (D2h) is not the AT's: it is the PS/2
   controller's "write keyboard output buffer", which Bochs has; test builds
   use it to type keys.
 - **System port B** (`SYS_PORT_B`): `SYS_PORT_B_PARITY` and
@@ -95,9 +99,13 @@ numbers below are the Technical Reference's.
   `CMOS_REG_A_UIP`, update in progress, and `CMOS_REG_A_RATE_1K` for the
   test probe), `CMOS_REG_B` (`CMOS_REG_B_24H_BCD`, which rx286 sets;
   `CMOS_REG_B_PIE`, the probe's periodic interrupt), `CMOS_REG_C` (reading
-  it acknowledges the clock's interrupt) and `CMOS_REG_D`; `CMOS_SHUTDOWN` is
+  it acknowledges the clock's interrupt) and `CMOS_REG_D`, whose
+  `CMOS_REG_D_VRT` says the battery is good and the time valid (the RTC
+  driver answers no time without it); `CMOS_SHUTDOWN` is
   the BIOS's shutdown status byte (1-49), 0 for a soft reset (the BIOS
-  listing's table of shutdown codes).
+  listing's table of shutdown codes). `CMOS_EXT_LOW` and `CMOS_EXT_HIGH`
+  hold the KB of extended memory the POST found (1-45), which the kernel
+  gives the root (roadmap os-server.md P3).
   `CMOS_NMI_DISABLE` is bit 7 of the index port: set, NMI is masked (1-28).
 - **80287**: `FPU_CLEAR_BUSY` (F0h) clears the busy latch an error leaves;
   `FPU_RESET` (F1h) would reset the 287 into real mode (2-4).
@@ -114,7 +122,9 @@ numbers below are the Technical Reference's.
   controller enabled with DMA and IRQ6 on and every motor off;
   `FDC_DOR_MOTOR_A` is drive A's motor and the next bit drive B's
   (`FDC_DOR_MOTORS` both); bit 0 selects the drive. `FDC_DOR_RESET` holds the
-  controller in reset; releasing it raises IRQ6. In the main status,
+  controller in reset; releasing it raises IRQ6. `FDC_DOR_RUN` is its bit
+  2, the controller out of reset: the driver's reset clears it alone,
+  keeping the motors and DMA and IRQ6 on, as the BIOS does. In the main status,
   `FDC_MSR_RQM` says the data register is ready and `FDC_MSR_DIO` which way.
   `FDC_CCR` sets the data rate: `FDC_RATE_500K` for A's 1.2 MB, `FDC_RATE_250K`
   for B's 360 KB. The commands: `FDC_CMD_SPECIFY` with the BIOS's
@@ -159,7 +169,9 @@ numbers below are the Technical Reference's.
   is empty; `UART_DIVISOR_115200` (the log), `UART_DIVISOR_9600` (the
   modem), `UART_DIVISOR_1200` (the mouse).
 - **EGA**: `CRTC_CURSOR_HIGH` and `CRTC_CURSOR_LOW` hold the cursor's
-  position.
+  position, `CRTC_START_HIGH` and `CRTC_START_LOW` where the screen starts,
+  both in words from the video memory's start: a page shown is a start
+  (os-server.md P11). Both read back, on the EGA as on VGA.
 
 ## Interrupts
 

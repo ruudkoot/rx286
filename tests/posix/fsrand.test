@@ -1,0 +1,23 @@
+# The file system against a model (roadmap os-server.md P15): init starts
+# tests/posix/fsrand.c (TEST_POSIX_FSRAND), 400 seeded random operations
+# on B - writes at random offsets across clusters, truncations, appends
+# through two descriptions of one file at once, renames over files and
+# between directories, unlinks - each checked against a model of what
+# every file holds, and every 25 every file read back and every directory
+# listed. After the run fsck.fat finds B sound. It found the two
+# descriptions' separate chains from operation 50 before P15's fix; other
+# seeds, of 1,000 operations, found nothing more. On Bochs: MAME's
+# diskette, at the AT's speed, would take minutes, and files.test and
+# drives.test run the drives there.
+program: idle
+define: TEST_POSIX_FSRAND
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: prefix
+timeout: 300
+emulators: bochs
+fsck: B
+---
+rx286, test build
+fsrand: 400 operations, 266 checks, 0 mismatches
+fsrand: done

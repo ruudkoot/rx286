@@ -15,13 +15,19 @@ ticks               dd 0
 end_kdata
 
 ; ----------------------------------------------------------------------------
-; timer_init - channel 0 as a square wave of PIT_HZ
+; timer_init - channel 0 as a square wave of PIT_HZ; in TEST_STRETCH builds
+; a rate generator of PIT_HZ, whose count falls by one a clock and wraps
+; once a period, so that a stretch is measured past half a period (P15)
 ;   In:       interrupts off
 ;   Out:      nothing
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 timer_init:
+%ifdef TEST_STRETCH
+        mov al, PIT_CH0_LOHI_MODE2
+%else
         mov al, PIT_CH0_LOHI_MODE3
+%endif
         out PIT_MODE, al
         mov ax, PIT_DIVISOR
         out PIT_CH0, al

@@ -18,8 +18,7 @@ bits 16
 ;   Destroys: AX
 ; ----------------------------------------------------------------------------
 entry:
-        mov al, KEY_WAIT
-        sys SYS_READ_KEY
+        call read_key
         jmp entry
 
-%include "stub.asm"
+%include "px.asm"

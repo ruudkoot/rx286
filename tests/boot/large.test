@@ -1,6 +1,7 @@
-# A boot image past 64 KB (padded before its end mark): the loader brings
-# all of it, every word: the kernel sums the image before anything writes
-# to it (roadmap l4.md L5, E8).
+# A boot image at its most, IMAGE_MAX (padded before its end mark): the
+# loader brings all of it, every word: the kernel sums the image before
+# anything writes to it (roadmap l4.md L5, E8); the memory for programs
+# starts past it (os-server.md P15).
 image: large
 define: TEST_IMAGE_SUM
 ---

@@ -8,4 +8,4 @@ emulators: bochs mame
 ---
 rx286, test build
 rx286 PANIC: double fault
-#DF error 0000 at 0008:
+#DF error 0000 at 0008:{...}

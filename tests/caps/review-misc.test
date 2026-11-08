@@ -1,0 +1,15 @@
+# The kernel's review (roadmap os-server.md P15), finding 8: a thread whose space died keeps nothing of that life:
+# THREAD_FRAME of it running is KE_STATE; a suspend's mark and its
+# notification are gone (before: both kept). tests/programs/
+# additions.asm, TEST_RV_MISC; Bochs, whose timing the races need.
+program: additions
+define: TEST_CAPS
+define: TEST_RV_MISC
+emulators: bochs
+match: contains
+timeout: 60
+---
+additions: (a) THREAD_FRAME of it, running (KE_STATE expected: 6): 6
+additions: (b) its state (2 or 1 expected; 8: stopped by the old mark): 1
+additions: (b) the old notification signalled (8: KE_EMPTY expected): 8
+additions: done
