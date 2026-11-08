@@ -12,8 +12,9 @@ autolock = false
 
 [dosbox]
 machine = ega
-# 1 MB: no extended memory, an AT without any (roadmap os-server.md P3)
-memsize = 1
+# 1 MB: no extended memory, an AT without any (roadmap os-server.md P3),
+# unless a test's memory: line chooses (memory.md M2)
+@MEMORY@
 fastbioslogo = true
 startbanner = false
 

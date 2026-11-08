@@ -52,6 +52,10 @@ ext_untyped_b:
         db CAP_UNTYPED, 0
         times SHADOW_SIZE - 2 db 0
 ext_kb              dw 0                ; the extended memory found, in KB
+boot_info           times BOOT_INFO_SIZE db 0   ; the loader's (layout.inc; entry.asm), then
+                                        ;    the kernel's sizing: the root's to read (slot 102)
+msg_no_boot_info    db "the loader left no boot information: an older loader?", 0
+msg_too_little      db "too little memory for programs below 1 MB (UMEM_LEAST)", 0
 thread_list         times THREAD_MAX dw 0   ; every thread, in the order made
 thread_count        dw 0
 obj_free_count      dw 0                ; the GDT pool's free descriptors (OBJ_FREE_OFF)
@@ -811,6 +815,15 @@ boot_root:
         call root_read_access
         mov bx, ROOT_SLOT_MODULES
         call boot_slot_segment
+        ; slot 102: the boot information, read-only (memory.md M2)
+        mov ax, boot_info
+        xor dl, dl
+        add ax, KDATA_BASE & 0xFFFF
+        adc dl, KDATA_BASE >> 16
+        mov cx, BOOT_INFO_SIZE - 1
+        call root_read_access
+        mov bx, ROOT_SLOT_BOOT_INFO
+        call boot_slot_segment
         ; slots 6, 7: its own space and thread
         mov bx, [boot_space]
         mov ax, ROOT_SLOT_SPACE
@@ -884,25 +897,51 @@ boot_root:
 ; ----------------------------------------------------------------------------
 ; umem_size - the memory for programs' segments: from the image's end - the
 ; module table's length, which the loader checked against the file - on a
-; kilobyte, to the EGA's memory (os-server.md P15: the image may grow
-; without taking memory from programs until it does)
+; kilobyte (os-server.md P15: the image may grow without taking memory from
+; programs until it does), to the base memory's end as the BIOS said it to
+; the loader, at most the EGA's memory (memory.md M2); written into the boot
+; information for the root. Without the boot information, or with less than
+; UMEM_LEAST, the kernel stops: it does not guess (D4)
 ;   In:       DS = SEL_KDATA
-;   Out:      memory_untyped's base and size
-;   Destroys: AX
+;   Out:      memory_untyped's base and size; boot_info's BI_UMEM_*
+;   Destroys: AX, SI
 ; ----------------------------------------------------------------------------
 umem_size:
+        mov si, msg_no_boot_info
+        cmp word [boot_info + BI_MAGIC], BOOT_INFO_MAGIC
+        jne .stop
+        push bx
+        push cx
+        mov bx, [boot_info + BI_BASE_KB]    ; INT 12h's KB (memory.md M2), at most 640
+        cmp bx, UMEM_END >> 10
+        jbe .base
+        mov bx, UMEM_END >> 10
+.base:
+        shl bx, 6                       ; KB to paragraphs: the end
         mov ax, [MODULE_TABLE_VOFF + MH_PARAGRAPHS]
         add ax, KERNEL_SEG + (UMEM_ALIGN >> 4) - 1
-        and ax, ~((UMEM_ALIGN >> 4) - 1)
+        and ax, ~((UMEM_ALIGN >> 4) - 1)    ; the start
         mov [memory_untyped + SH_OBJECT], ax
-        neg ax
-        add ax, UMEM_END >> 4
-        mov [memory_untyped + SH_SIZE], ax
+        mov [boot_info + BI_UMEM_START], ax
+        mov [boot_info + BI_UMEM_END], bx
+        mov cx, bx
+        sub cx, ax
+        mov si, msg_too_little
+        jbe .stop                       ; (the image past the end)
+        cmp cx, UMEM_LEAST >> 4
+        jb .stop
+        mov [memory_untyped + SH_SIZE], cx
+        pop cx
+        pop bx
         ret
+.stop:
+        xor bp, bp
+        jmp panic
 
 ; ----------------------------------------------------------------------------
 ; ext_detect - extended memory (roadmap os-server.md P3, D18 B): its size
-; as the POST found it (CMOS 30h-31h), if A20 is on - the entry turned it
+; as the BIOS said it to the loader (INT 15h AH=88h, which is the POST's
+; CMOS 30h-31h; memory.md M2), if A20 is on - the entry turned it
 ; on, and a word written at 1 MB must not show at 0 - split in two untyped
 ; under 1 MB each from 1 MB on: a quarter for objects (ext_untyped_b), the
 ; rest for segments (ext_untyped_a)
@@ -911,17 +950,7 @@ umem_size:
 ;   Destroys: AX, BX, CX, DX, DI, ES
 ; ----------------------------------------------------------------------------
 ext_detect:
-        mov al, CMOS_EXT_HIGH | CMOS_NMI_DISABLE
-        out CMOS_INDEX, al
-        in al, CMOS_DATA
-        mov ah, al
-        mov al, CMOS_EXT_LOW | CMOS_NMI_DISABLE
-        out CMOS_INDEX, al
-        in al, CMOS_DATA
-        push ax
-        mov al, CMOS_REG_D              ; NMI on again, as pm_start left it (P15)
-        out CMOS_INDEX, al
-        pop ax
+        mov ax, [boot_info + BI_EXT_KB]     ; the BIOS's, from the loader (memory.md M2)
         cmp ax, EXT_KB_MAX
         jbe .sized
         mov ax, EXT_KB_MAX

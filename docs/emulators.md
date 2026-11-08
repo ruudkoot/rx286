@@ -29,7 +29,7 @@ Bochs is told everything about the machine it can be told. What it cannot be:
 | Video | EGA | VGA, a superset of the EGA registers rx286 uses |
 | LDTR at start | Intel: load it | a live LDT at 0, limit FFFFh (rx286 loads LDTR with 0) |
 | A20 after the BIOS | | on |
-| Memory with `megs: 4` | | 639 KB base, 3 MB extended (roadmap os-server.md P3) |
+| Memory | as fitted, up to 15,232 KB above 1 MB (the POST stops at FE0000h) | `megs`: whole megabytes, 639 KB base (the BIOS's EBDA at 9FC00h); 4 by default: 3 MB extended (roadmap os-server.md P3, memory.md E1) |
 | `LOCK` at CPL 3 | #GP(0000) (seen on MAME) | runs |
 | `LOADALL` (0Fh 05h) at CPL 3 | #GP(0000) (seen on MAME) | #UD: it is `SYSCALL` |
 | `IRET` with NT and a null back link | #TS(0000) (seen on MAME; Intel's text says #GP, its pseudocode #TS) | #TS(0000) |
@@ -56,7 +56,11 @@ proves its paths free of 386 instructions. Its protection is not a 286's,
 which is why the attack suite and the fuzzer run on Bochs and MAME instead.
 Its memory is 1 MB (`memsize = 1`): no extended memory, so its suites are
 the ones that prove an AT without any still boots and runs, the root's
-memory below 1 MB (roadmap os-server.md P3).
+memory below 1 MB (roadmap os-server.md P3). It is the only emulator that
+can be any size (`memsizekb`; `dos mem limit` for 639 KB; `isa memory hole
+at 512kb` for 512 KB with extended memory), and so the one that runs the
+small machines of `tests/memory` (memory.md E1). Its CMOS says 640 KB of
+base memory whatever it is: INT 12h is right.
 
 
 | Seen | A 286 |
@@ -90,12 +94,14 @@ firmware, IBM's EGA. What it needs:
 - **A valid CMOS**: the IBM BIOS stops its power-on test without one, as on a
   real AT nobody has run SETUP on. `rxlib.at_cmos()` writes the 64 bytes of
   rx286's AT (drive A 1.2 MB, B 360 KB, no fixed disk, two diskette drives, a
-  287, an EGA, 640 KB and 1 MB extended, the checksum) into a fresh nvram
-  directory per run. The extended memory it says must be what `-ramsize`
-  fits, or the POST stops at error 164 (memory size) and waits for F1.
+  287, an EGA, 640 KB and the extended memory, the checksum) into a fresh
+  nvram directory per run. The extended memory it says must be what
+  `-ramsize` fits, or the POST stops at error 164 (memory size) and waits
+  for F1; a base memory it says below 640 KB is error 164 too, and the BIOS
+  still reports 640 KB (memory.md E1).
 - **The machine's slots**: drive A `525hd`, drive B `525dd`, `-ramsize 1664K`
-  (`rxlib.MAME_RAM`: 640 KB and 1 MB extended; with `4M` the BIOS gets no
-  further than its power-on test),
+  by default (640 KB and 1 MB extended; `rxlib.MAME_RAMSIZES` has its other
+  sizes, from `640K` to `15M`, 14,720 KB above 1 MB),
   a null modem on COM2 writing to a file (`-bitb`), and MAME's IDE card,
   which has the AT's task file at 1F0h.
 - **The null modem at 115200 baud**: `mame/rx286.lua` sets it at start.

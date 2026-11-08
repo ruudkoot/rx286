@@ -72,7 +72,7 @@ DOSBox-X; none of their code is in the repository.
 | D11 | decided (2026-11-08): B, servers Watcom's alone; gcc-ia16 builds the rest |
 | D1-D9, D12, D13 | decided (2026-11-08): as recommended |
 | M1: the masks of entries past entry 15 | done (2026-11-08): with a third bug, the kernel's timers |
-| M2: the boot information, and the base memory from the BIOS | not started |
+| M2: the boot information, and the base memory from the BIOS | done (2026-11-08) |
 | M3: every byte of extended memory to the root | not started |
 | M4: the processes' memory from all of it, and the root's room | not started |
 | M5: the libraries for far data | not started |
@@ -1310,6 +1310,18 @@ less, M a few, L a week.
   15 MB, where today's code does not reach init (E3); Bochs's memory for programs ends at
   9FC00h.
 - **Decisions:** D1, D2, D3, D4, D13.
+- **Done** (2026-11-08). The loader's `boot_info` (65 bytes: the test loader 1,371 of 1,536
+  bytes), the structure at 600h, the kernel's copy, its checks and sizing, slot 102;
+  `run-test`'s `memory:` lines and `rxlib.machine_can`; `tests/memory/sizes.test` passes on
+  every machine each emulator can be (4 on Bochs, 5 on MAME, 14 on DOSBox-X, 512 KB with 15 MB
+  among them) and `least.test` on DOSBox-X at 320 KB. Not as planned:
+  - **Bochs stays at 4 MB by default until M3,** which changes how the extended memory is cut,
+    so that the tests that print where it lies change once, not twice;
+  - **the kernel's data room** had grown already, in M1;
+  - **`least.test`** expects the kernel's panic, "too little memory for programs below 1 MB
+    (UMEM_LEAST)"; `UMEM_LEAST` is 192 KB, so a release image of 120 KB needs about 376 KB of
+    base memory (64 + 120 + 192; E3's 171 KB too little and 235 KB enough were a test
+    image's).
 
 ### M3. Every byte of extended memory to the root (M)
 

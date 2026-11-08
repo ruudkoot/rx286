@@ -117,6 +117,29 @@ void say(const char *text)
     rx_log(text, (unsigned)strlen(text));
 }
 
+#ifdef TEST_MEMORY
+/* memory_report - TEST_MEMORY builds (tests/memory): what the loader found
+ * of the memory and how the kernel sized it, from the boot information
+ * (slot 102; layout.inc's BI_*; memory.md M2) */
+static void memory_report(void)
+{
+    const rx_u16 RX_FAR *w = (const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
+    char line[96];
+
+    snprintf(line, sizeof line, "root: memory: base %u KB, extended %u KB%s\n",
+             w[BI_BASE_KB / 2], w[BI_EXT_KB / 2],
+             (w[BI_FLAGS / 2] & BIF_EXT_CMOS) ? ", the CMOS's" : "");
+    say(line);
+    if (w[BI_EBDA / 2]) {
+        snprintf(line, sizeof line, "root: an EBDA at %04X0h\n", w[BI_EBDA / 2]);
+        say(line);
+    }
+    snprintf(line, sizeof line, "root: memory for programs below 1 MB: %04X0h to %04X0h\n",
+             w[BI_UMEM_START / 2], w[BI_UMEM_END / 2]);
+    say(line);
+}
+#endif
+
 /* failed - a kernel call the root needs failed: say so, and stop */
 static void failed(int status)
 {
@@ -717,6 +740,9 @@ int RX_MAIN_CALL main(void)
     struct rx_kregs r;
     entry_ptr e;
 
+#ifdef TEST_MEMORY
+    memory_report();
+#endif
     must(retype(ARENA, CAP_ENDPOINT, FAULT_EP, 0, 0));
     /* the OS server's control notification, which the keyboard driver signals */
     must(retype(ARENA, CAP_NOTIFY, CONTROL, 0, 0));

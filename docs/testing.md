@@ -68,6 +68,17 @@ hello
 /a$
 ```
 
+A test runs on each emulator's own machine (`rxlib.MACHINES_DEFAULT`: Bochs
+639 KB and 3 MB above 1 MB, MAME 640 KB and 1 MB, DOSBox-X 640 KB and
+none) unless it names machines with `memory: BASE EXTENDED` lines (roadmap
+memory.md M2). Then it runs once on each machine the emulator can be
+(`rxlib.machine_can`; memory.md E1): each run has a directory of its own,
+`run-EMULATOR-BASEK-EXTK`, and a line of its own in the report, and a test
+none of whose machines an emulator can be is skipped there. Its expected
+lines may name the run's machine: `{mem_base}`, `{mem_ext}` and `{mem_end}`.
+`tests/memory` runs every size the owner named on the emulators that can be
+it.
+
 Header lines (`tools/run-test` documents them all): `program` (`sh` or
 `shell`, the shell in C on the terminals; `none`, no program module, the
 processes having the keys; else a test program the root builds:

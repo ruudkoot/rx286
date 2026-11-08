@@ -3,7 +3,8 @@
 ; The kernel's real-mode entry: into protected mode, and nothing else.
 ;
 ; The loader jumps to KERNEL_SEG:0000 with interrupts and NMI off. This code
-; turns A20 on (roadmap os-server.md P3), loads the GDT and IDT from constant
+; copies the loader's boot information into the kernel's data (memory.md
+; M2), turns A20 on (roadmap os-server.md P3), loads the GDT and IDT from constant
 ; pseudo-descriptors, sets PE and MP in the MSW, and jumps far to the
 ; protected-mode start; nothing returns to real
 ; mode but a reset (Intel 10.4.2). The 8259As, the LDT and everything else
@@ -14,8 +15,8 @@
 ; entry - enter protected mode
 ;   In:       CS = KERNEL_SEG; interrupts off (the loader)
 ;   Out:      does not return: jumps to SEL_KCODE:pm_start
-;   Destroys: AX, DS (and BX, CX, DX, SI, DI in test images that sum the
-;             image)
+;   Destroys: AX, CX, SI, DI, DS, ES (and BX, DX in test images that sum
+;             the image)
 ; ----------------------------------------------------------------------------
 entry:
         cli
@@ -46,6 +47,27 @@ entry:
         mov ds, ax
         mov [KDATA_OFF + test_image_sum - KDATA_VSTART], dx
 %endif
+        ; The boot information, from where the loader left it, into the
+        ; kernel's data (memory.md M2), after the sum: as much as BI_SIZE
+        ; says, the rest of the copy zero, "not given"
+        push ds
+        pop es
+        xor ax, ax
+        mov ds, ax
+        cmp word [BOOT_INFO_PHYS + BI_MAGIC], BOOT_INFO_MAGIC
+        jne .no_info                    ; (the kernel stops at its start)
+        mov cx, [BOOT_INFO_PHYS + BI_SIZE]
+        cmp cx, BOOT_INFO_SIZE
+        jbe .size
+        mov cx, BOOT_INFO_SIZE
+.size:
+        mov si, BOOT_INFO_PHYS
+        mov di, KDATA_OFF + boot_info - KDATA_VSTART
+        cld
+        rep movsb
+.no_info:
+        push es
+        pop ds
         ; A20 on, through the 8042's output port (IBM 1-41): the memory
         ; above 1 MB is the root's (roadmap os-server.md P3); never off again
         call a20_wait

@@ -448,9 +448,50 @@ DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
 DEEP_TOO_LONG = 'ABCDEFGH.XY'    # 66
 
 
+# The machines each emulator can be (roadmap memory.md M2, E1): base and
+# extended memory in KB. Bochs' BIOS keeps a 1 KB EBDA (639 KB) and counts
+# megabytes; MAME's AT is 640 KB, its RAM one of its -ramsize options, the
+# CMOS to match or the POST stops at error 164; DOSBox-X is any size, 512 KB
+# with extended memory by its ISA memory hole.
+MACHINES_DEFAULT = {'bochs': (639, 3072), 'mame': (640, 1024), 'dosbox-x': (640, 0)}
+MAME_RAMSIZES = {0: '640K', 384: '1024K', 1024: '1664K', 1408: '2M', 3456: '4M',
+                 7552: '8M', 14720: '15M'}
+EXTENDED_KB_MOST = 15360
+
+
+def machine_can(emulator, base, ext):
+    """Can the emulator be a machine of so much base and extended memory?"""
+    if emulator == 'bochs':
+        return base == 639 and ext % 1024 == 0 and 0 <= ext <= EXTENDED_KB_MOST
+    if emulator == 'mame':
+        return base == 640 and ext in MAME_RAMSIZES
+    if emulator == 'dosbox-x':
+        if ext == 0:
+            return 0 < base <= 640
+        if base == 512:
+            return ext % 1024 == 0 and ext <= EXTENDED_KB_MOST
+        return base in (639, 640) and 0 < ext <= EXTENDED_KB_MOST
+    return False
+
+
+def dosbox_memory(machine):
+    """DOSBox-X's [dosbox] lines for a machine (base, extended KB)."""
+    base, ext = machine
+    if ext == 0 and base == 640:
+        return 'memsize = 1'
+    if ext == 0 and base == 639:
+        return 'memsize = 1\ndos mem limit = 639'
+    if ext == 0:
+        return 'memsize = 0\nmemsizekb = %d' % base
+    if base == 512:
+        return 'memsize = %d\nisa memory hole at 512kb = true' % (1 + ext // 1024)
+    lines = 'memsize = %d\nmemsizekb = %d' % (1 + ext // 1024, ext % 1024)
+    return lines + ('\ndos mem limit = 639' if base == 639 else '')
+
+
 def write_bochsrc(path, image, serial, log, display, disks, debugger_log=None, magic=False,
                   printers=('/dev/null', '/dev/null'), media=(),
-                  log_port='com2', modem=None):
+                  log_port='com2', modem=None, machine=None):
     """Write a bochsrc for one run from bochs/rx286.bochsrc.in. Bochs locks
     the hard-disk images, so runs at the same time need their own `disks`,
     and writes to them: never DISKS, which the runs copy.
@@ -458,7 +499,8 @@ def write_bochsrc(path, image, serial, log, display, disks, debugger_log=None, m
     test builds), 'com3' (a test build whose COM2 is the modem, MODEM_COM2),
     or None (a release build, whose COM2 is the modem); `modem` the host:port
     the modem on COM2 connects to, if any. `printers` are the files LPT1 and LPT2 print into; `media`
-    a list of MEDIA."""
+    a list of MEDIA; `machine` the (base, extended) KB, Bochs' by default
+    (machine_can)."""
     for m in media:
         if m not in MEDIA:
             raise ValueError('unknown media change %r' % m)
@@ -483,6 +525,7 @@ def write_bochsrc(path, image, serial, log, display, disks, debugger_log=None, m
         '@CONFIG_INTERFACE@': 'wx' if display == 'wx' else 'textconfig',
         '@DEBUGGER_LOG@': debugger_log or '/dev/null',
         '@MAGIC@': '1' if magic else '0',
+        '@MEGS@': '%d' % (1 + (machine or MACHINES_DEFAULT['bochs'])[1] // 1024),
     }
     for key, value in subs.items():
         text = text.replace(key, value)
@@ -844,7 +887,7 @@ DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
 
 
 def run_dosbox(directory, image, serial, timeout, until,
-               printers=('/dev/null', '/dev/null'), log_port='com2', modem=None):
+               printers=('/dev/null', '/dev/null'), log_port='com2', modem=None, machine=None):
     """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
     `until(lines)` holds of the transcript, the log in `serial` (from
     `log_port`, as write_bochsrc's), or `timeout` seconds; LPT1 and LPT2
@@ -859,6 +902,7 @@ def run_dosbox(directory, image, serial, timeout, until,
                         else 'dummy')
     text = text.replace('@COM3@', log if log_port == 'com3' else 'disabled')
     text = text.replace('@LPT1@', printers[0]).replace('@LPT2@', printers[1])
+    text = text.replace('@MEMORY@', dosbox_memory(machine or MACHINES_DEFAULT['dosbox-x']))
     conf = os.path.join(directory, 'dosbox-x.conf')
     with open(conf, 'w', encoding='utf-8') as f:
         f.write(text)
@@ -889,11 +933,15 @@ MAME_SCRIPT = os.path.join(ROOT, 'mame', 'rx286.lua')
 MAME_ROMS = os.path.expanduser('~/mame/roms')     # the IBM 5170 ROM set (docs/emulators.md)
 
 
-def at_cmos():
+def at_cmos(extended_kb=None):
     """The 64 bytes of CMOS of rx286's AT, as IBM's SETUP would leave them, so
     the real BIOS's power-on test passes in MAME: drive A 1.2 MB, B 360 KB, no
-    fixed disk, two diskette drives, a 287, an EGA, 640 KB, the checksum of
-    10h-2Dh (IBM, Technical Reference, 1-45 to 1-50)."""
+    fixed disk, two diskette drives, a 287, an EGA, 640 KB and `extended_kb`
+    above 1 MB (MAME's default machine's), the checksum of 10h-2Dh (IBM,
+    Technical Reference, 1-45 to 1-50). The extended memory must be what the
+    POST finds, or it stops at error 164 (memory.md E1)."""
+    if extended_kb is None:
+        extended_kb = MACHINES_DEFAULT['mame'][1]
     c = bytearray(64)
     c[0x00:0x0A] = bytes([0, 0, 0, 0, 0, 0, 0x01, 0x01, 0x01, 0x89])   # MAME sets the time
     c[0x0A] = 0x26              # 32 kHz base, 1,024 Hz rate
@@ -903,7 +951,7 @@ def at_cmos():
     c[0x12] = 0x00              # no fixed disk
     c[0x14] = 0x43              # two diskette drives, primary display with its own BIOS (EGA), 287
     c[0x15], c[0x16] = 0x80, 0x02   # 640 KB base memory
-    c[0x17], c[0x18] = MAME_EXTENDED_KB & 0xFF, MAME_EXTENDED_KB >> 8   # and above 1 MB
+    c[0x17], c[0x18] = extended_kb & 0xFF, extended_kb >> 8   # and above 1 MB
     total = sum(c[0x10:0x2E])
     c[0x2E], c[0x2F] = total >> 8, total & 0xFF
     c[0x32] = 0x19              # the century
@@ -912,11 +960,9 @@ def at_cmos():
 
 
 MAME_STOP_SECONDS = 10       # for MAME to exit when mame/rx286.lua is asked, before a kill
-MAME_RAM = '1664K'           # 640 KB, and 1 MB above 1 MB (roadmap os-server.md P3)
-MAME_EXTENDED_KB = 1024      # which the CMOS says, or the POST stops at error 164
 
 
-def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
+def run_mame(directory, image, serial, timeout, until, disks=None, media=(), machine=None):
     """Run MAME's IBM PC/AT (a real 80286 core, IBM's BIOS; roadmap M9) on an
     image without a window, until `until(lines)` holds of the serial
     transcript or `timeout` seconds. `disks` is the run's own directory of
@@ -936,7 +982,7 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     nvram = os.path.join(directory, 'mame-nvram')
     os.makedirs(os.path.join(nvram, 'ibm5170'), exist_ok=True)
     with open(os.path.join(nvram, 'ibm5170', 'mb_rtc'), 'wb') as f:
-        f.write(at_cmos())
+        f.write(at_cmos((machine or MACHINES_DEFAULT['mame'])[1]))
     open(serial, 'wb').close()      # the null modem's file must exist
     args = []
     if disks:
@@ -956,7 +1002,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     log = open(os.path.join(directory, 'mame.log'), 'w')
     started = time.monotonic()
     proc = subprocess.Popen(
-        ['mame', 'ibm5170', '-rompath', MAME_ROMS, '-ramsize', MAME_RAM,
+        ['mame', 'ibm5170', '-rompath', MAME_ROMS, '-ramsize',
+         MAME_RAMSIZES[(machine or MACHINES_DEFAULT['mame'])[1]],
          '-isa2:fdc:fdc:0', '525hd', '-isa2:fdc:fdc:1', '525dd',
          '-isa3:comat:serport0', 'microsoft_mouse',     # COM1: the mouse
          '-isa3:comat:serport1', 'null_modem', '-bitb', serial,   # COM2: the log

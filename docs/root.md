@@ -21,6 +21,7 @@ waiting.
 | 6, 7 | its own space and thread |
 | 8 on | each module's code, and its data as assembled, read-only, two slots a module |
 | 100, 101 | with extended memory: the memory for segments below 1 MB and the arena's, as untyped (slots 3 and 4 then hold extended memory) |
+| 102 | the boot information, read-only (`ROOT_SLOT_BOOT_INFO`; `layout.inc`'s `BI_*`): what the loader found of the memory (INT 12h, INT 15h AH=88h), and where the kernel made the memory for programs below 1 MB start and end (roadmap memory.md M2) |
 | 111 | the screen's text page, for the console driver |
 | 112-127 | every interrupt line the kernel does not keep, line n at 112 + n |
 

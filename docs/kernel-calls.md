@@ -441,6 +441,7 @@ has `ROOT_SLOTS` slots:
 | 8 on | `ROOT_SLOT_MODULE` | for module n (n from 1): its code, as a segment of the module's ring, at 8 + 2 (n - 1); its data as assembled, read-only, in the next |
 | 100 | `ROOT_SLOT_LOW_UNTYPED` | with extended memory: the memory for programs below 1 MB, what its data and stack left |
 | 101 | `ROOT_SLOT_LOW_ARENA` | with extended memory: the arena, what its space and thread left |
+| 102 | `ROOT_SLOT_BOOT_INFO` | the boot information, read-only: what the loader found of the memory, and the kernel's sizing (roadmap memory.md M2; *docs/memory-map.md*) |
 | 111 | `ROOT_SLOT_VIDEO` | the screen's text page, a segment of DPL 1, for the console driver |
 | 112-127 | `ROOT_SLOT_IRQ` | interrupt line n at 112 + n: every line the kernel does not keep (*docs/interrupts.md*) |
 

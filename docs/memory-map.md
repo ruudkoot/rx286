@@ -11,6 +11,7 @@ D7). This document explains each one.
 | 00400h-004FFh | BIOS data area | | never read |
 | 00500h-07BFFh | the boot code's stack, down from 7C00h | `LOADER_STACK_TOP` | boot sector and loader |
 | 00500h-006FFh | the double-fault task's stack, once the kernel runs | `DFSTACK_PHYS`, `DFSTACK_SIZE` | the kernel (`SEL_DFSTACK`) |
+| 00600h-0061Fh | the boot information, until the kernel's entry copies it into its data (roadmap memory.md M2) | `BOOT_INFO_PHYS`, `BOOT_INFO_SIZE` | the loader writes, the kernel copies |
 | 00700h-0BFFFh | the arena, once the kernel runs: untyped memory, the root's | `ARENA_PHYS`, `ARENA_SIZE` | the root, and what it gives |
 | 0C000h | where the kernel's data segment starts | `KDATA_BASE` | the kernel (`SEL_KDATA`) |
 | 0C100h-0C4FFh | the kernel's one stack (roadmap os-server.md P3) | `KSTACK_PHYS`, `KSTACK_SIZE`; its offsets in `SEL_KDATA`, `KSTACK_BOTTOM` to `KSTACK_TOP` | the kernel (`SEL_KSTACK`, expand-down over `SEL_KDATA`'s memory) |
@@ -21,7 +22,7 @@ D7). This document explains each one.
 | 08400h-097FFh | the loader's FAT buffer | `LOADER_FAT_BUF` | the loader |
 | 09800h-0FFFFh | the loader's root-directory buffer | `LOADER_ROOT_BUF`, `LOADER_BUF_END` | the loader |
 | 10000h on | the boot image, `KERNEL.BIN`: up to `IMAGE_MAX` bytes, 192 KB (to 3FFFFh at most) | `KERNEL_PHYS` | the loader loads, the kernel and the modules run |
-| from the image's end, on a KB, to 9FFFFh | memory for programs' segments, as untyped: at least `UMEM_LEAST`, 384 KB (roadmap os-server.md P15) | `UMEM_ALIGN`, `UMEM_END` | the root, and what it gives |
+| from the image's end, on a KB, to the base memory's end | memory for programs' segments, as untyped: to where INT 12h says the base memory ends (9FC00h on Bochs, its BIOS's EBDA past it), at most 9FFFFh; the kernel stops if it is less than `UMEM_LEAST`, 192 KB (roadmap os-server.md P15, memory.md M2) | `UMEM_ALIGN`, `UMEM_END` | the root, and what it gives |
 | A0000h-AFFFFh | EGA graphics memory | | nobody |
 | B8000h-B8F9Fh | colour text, page 0 | `VIDEO_PHYS`, `VIDEO_SIZE` | the kernel's console |
 | B8000h-BFFFFh | colour text, `VIDEO_PAGES` pages of `VIDEO_PAGE` bytes (`VIDEO_PAGE_SHIFT`) | | the console driver (os-server.md P11) |
@@ -41,6 +42,34 @@ with up to `BOOT_TRIES` attempts, and runs it only if the word at
 instruction jumps over.
 
 The console is `VIDEO_COLUMNS` by `VIDEO_ROWS` characters of two bytes each.
+
+## The boot information
+
+The loader asks the BIOS for the memory and leaves the answer at
+`BOOT_INFO_PHYS` 600h, past the BIOS's own byte at 500h (its print-screen
+status), in the double fault's stack, which nothing uses until the kernel
+runs (roadmap memory.md M2). The kernel's entry, in real mode and before
+anything else touches low memory, copies as much as `BI_SIZE` says into
+`boot_info` in its data, the rest zero; its start stops if `BI_MAGIC` is not
+`BOOT_INFO_MAGIC` ("BI"). The root reads the copy, read-only, in slot 102.
+The structure is `BOOT_INFO_SIZE`, 32 bytes, words unless said:
+
+| Offset | Field | What |
+|---|---|---|
+| 0 | `BI_MAGIC` | `BOOT_INFO_MAGIC`, "BI" |
+| 2 | `BI_SIZE` | the bytes the loader gave: 32 |
+| 4 | `BI_FLAGS` | `BIF_EXT_CMOS`: INT 15h AH=88h failed, and `BI_EXT_KB` is CMOS 30h-31h's |
+| 6 | `BI_BASE_KB` | INT 12h: the base memory in KB, an EBDA left out |
+| 8 | `BI_EXT_KB` | INT 15h AH=88h: the extended memory in KB |
+| 10 | `BI_EBDA` | the EBDA's segment, if BDA 40:0Eh holds INT 12h's end; else 0 |
+| 12 | `BI_DRIVE` | the boot drive (a byte) |
+| 16 | `BI_UMEM_START` | the kernel's: where the memory for programs below 1 MB starts (a paragraph) |
+| 18 | `BI_UMEM_END` | and where it ends: the base memory's end, at most A000h |
+
+A later roadmap adds what else the loader finds of the hardware: 0 is "not
+given" in every field. The memory for programs below 1 MB must hold at
+least `UMEM_LEAST`, or the kernel stops; the build checks that a machine of
+`BASE_LEAST`, 512 KB, leaves that much with the image at its most.
 
 ## The boot image
 
