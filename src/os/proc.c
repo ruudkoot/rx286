@@ -79,8 +79,8 @@ struct proc {
     char name[AR_NAME_SIZE];
 };
 
-#if PROCS > 31
-#error "a badge holds an entry in 5 bits"
+#if PROCS > 63
+#error "a badge holds an entry in 6 bits"
 #endif
 
 /* A new image, between exec's checks and the process it becomes */
@@ -577,13 +577,13 @@ static int entry_new(void)
 }
 
 /* badge_new - entry c's badge for the endpoint of a new image or thread
- * of its: the entry + 1 in bits 0-4, its generation in bits 5-14 (below
+ * of its: the entry + 1 in bits 0-5, its generation in bits 6-14 (below
  * FAULT_BADGE), so that a call received from an image or thread gone
- * since is known by its badge (handle; P15) */
+ * since is known by its badge (handle; P15; 6 bits since memory.md M7) */
 static rx_u16 badge_new(int c)
 {
-    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x3FF);
-    procs[c].badge = (rx_u16)(procs[c].gen << 5 | (unsigned)(c + 1));
+    procs[c].gen = (rx_u16)((procs[c].gen + 1) & 0x1FF);
+    procs[c].badge = (rx_u16)(procs[c].gen << 6 | (unsigned)(c + 1));
     return procs[c].badge;
 }
 
@@ -675,10 +675,10 @@ static int group_stopped(pid_t pgid);
  * waits, and sent SIGCHLD (lock held) */
 static void end(int i, int status, int revoke)
 {
+    static pid_t pgids[PROCS + 1], sids[PROCS + 1];     /* (the lock is held: static, off */
+    static rx_u8 was[PROCS + 1];                        /*    the thread's stack, M7) */
     struct proc *p = &procs[i];
     int k, init = entry_of(INIT_PID, P_ALIVE), parent, groups = 0;
-    pid_t pgids[PROCS + 1], sids[PROCS + 1];
-    rx_u8 was[PROCS + 1];
     char line[48];
 
     for (k = 0; k < PROCS; k++)         /* its group, its children's: orphaned */

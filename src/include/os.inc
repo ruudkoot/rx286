@@ -34,7 +34,7 @@ OS_STACK            equ 4
 OS_SESSIONS         equ 2
 OS_CONTROL_N        equ 16
 OS_PROC_N0          equ 17
-OS_PROCS            equ 25
+OS_PROCS            equ 48      ; (25 until memory.md M7)
 OS_TTY_N            equ OS_PROC_N0 + OS_PROCS
 OS_STACK_SIZE       equ (OS_TTY_N + 1) * OS_STACK  ; the server's stack segment at least
 OS_THREAD_STACK     equ 1024    ; each thread's stack segment

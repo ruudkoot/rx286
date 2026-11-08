@@ -8,8 +8,8 @@
  * Memory for segments is the buddy allocator's (buddy.c), from the first
  * request on: when there is extended memory, the memory below 1 MB (the
  * kernel's ROOT_SLOT_LOW_UNTYPED) and every byte of the extended memory, as
- * reserves carved as blocks are needed (memory.md M4); else 128 KB of the
- * memory for segments.
+ * reserves carved as blocks are needed (memory.md M4); else what the boot
+ * modules left of the memory for segments, all of it (128 KB until M7).
  * A process's kernel objects - its space, thread and endpoint, 800 bytes -
  * are a block of 1 KB of their own, since any untyped makes objects (P3):
  * its exit revokes the block, and they die with it; each more thread is a
@@ -28,14 +28,13 @@
 #include "root.h"
 #include "buddy.h"
 
-#define PROCS_MAX 32                    /* processes at once */
-#define CODES_MAX 32                    /* codes in the table at once: the server's loads,
+#define PROCS_MAX 64                    /* processes at once (32 until memory.md M7) */
+#define CODES_MAX 64                    /* codes in the table at once: the server's loads,
                                            and a code for each process at most (P15) */
 #define OBJECT_PARAS 64                 /* a process's objects: 528 + 256 + 16 bytes */
 #define LOW_UNTYPED SLOT(ROOT_SLOT_LOW_UNTYPED)
 #define UNTYPED SLOT(ROOT_SLOT_UNTYPED)
 #define ARENA SLOT(ROOT_SLOT_ARENA)     /* the arena: the server's own threads (serve) */
-#define MEMORY_WITHOUT_EXTENDED 0x2000  /* paragraphs of the memory for segments: 128 KB */
 #define SCRATCH SLOT(ROOT_SLOT_DYNAMIC - 1)     /* a badged copy on its way */
 
 /* A process's slots in its space, as selectors */
@@ -46,7 +45,7 @@
 
 #define ACC_DATA3 0xF2                  /* present, DPL 3, data, writable */
 #define ACC_DATA 0x92                   /* present, data, writable: DPL to add */
-#define STACK_BLOCK_PARAS 0x800         /* a server's stacks come from blocks of 32 KB */
+#define STACK_BLOCK_PARAS 0x200         /* a server's stacks come from blocks of 8 KB (M7) */
 
 enum { NONE, LOADING, SEALED };
 
@@ -100,15 +99,17 @@ static rx_u16 free_paras(rx_u16 untyped)
 /* memory - the allocator's memory, at the first request: with extended
  * memory, the memory below 1 MB as blocks, and every piece of the extended
  * memory, then what the boot modules left of slot 3's, as reserves carved
- * as blocks are needed (memory.md M4); without, a part of the memory for
- * segments */
+ * as blocks are needed (memory.md M4); without, what the boot modules left
+ * of the memory for segments, as blocks: nothing else retypes it after the
+ * boot (128 KB until M7, which left no 64 KB block for a brk once the
+ * server's segments grew with its 48 entries) */
 static void memory(void)
 {
     unsigned n;
 
     buddy_init();
     if (buddy_add(LOW_UNTYPED, 0xFFFF) == 0) {
-        buddy_add(UNTYPED, MEMORY_WITHOUT_EXTENDED);
+        buddy_add(UNTYPED, 0xFFFF);
     } else {
         for (n = 0; n < ROOT_SLOTS_EXTENDED; n++)
             buddy_reserve(SLOT(ROOT_SLOT_EXTENDED + n), free_paras(SLOT(ROOT_SLOT_EXTENDED + n)));
@@ -438,7 +439,7 @@ static void slot_drop(rx_u16 slot)
     slot_give(slot);
 }
 
-/* stack_block - an untyped of the root's for a server's stacks, 32 KB:
+/* stack_block - an untyped of the root's for a server's stacks, 8 KB:
  * from the memory for segments while the root builds the modules, from the
  * allocator after; a slot of the root's, or 0 */
 static rx_u16 stack_block(void)
@@ -456,6 +457,27 @@ static rx_u16 stack_block(void)
         slot = 0;
     }
     return slot;
+}
+
+/* server_stacks_keep - a block for a server's stacks, of so many
+ * paragraphs, from the memory for segments, while the root builds the
+ * modules: the OS server's, for the threads the root starts then (root.h;
+ * M7) */
+int server_stacks_keep(unsigned module, rx_u16 paragraphs)
+{
+    rx_u16 slot;
+
+    if (ready || module >= MODULE_MAX || stack_blocks[module])
+        return E_INVAL;
+    slot = slot_take();
+    if (slot == 0)
+        return E_NOMEM;
+    if (retype(UNTYPED, CAP_UNTYPED, slot, paragraphs, 0)) {
+        slot_give(slot);
+        return E_NOMEM;
+    }
+    stack_blocks[module] = slot;
+    return 0;
 }
 
 /* server_stack - a stack segment of so many bytes for a thread of a server
@@ -496,8 +518,8 @@ static int serve(rx_u16 bytes, rx_u16 sp, rx_u16 stack_to, rx_u16 to)
     int block = -1, status = E_NOMEM;
     rx_u16 thread, notify;
 
-    if (services_module == 0)
-        return E_INVAL;                 /* a server's alone */
+    if (services_module == 0 || sp < 2 || sp & 1 || sp > server_room(services_module))
+        return E_INVAL;                 /* a server's alone, its SP in its stack segment */
     thread = slot_take();
     notify = slot_take();
     if (thread && notify && (retype(ARENA, CAP_THREAD, thread, 0, 0)

@@ -87,7 +87,12 @@ PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
 # the OS server, the programs. The drivers run above the root (os-server.md
 # P4), whose copy of a fork's data must not keep a serial line's bytes
 # waiting.
-MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=256 \
+# The OS server's stack segment is its threads' starts' room alone,
+# os.inc's OS_STACK_SIZE (memory.md M6, M7): each thread runs on a stack
+# segment of its own
+OS_STACK_BYTES := $(shell $(PYTHON) -c "import sys; sys.path.insert(0, 'tools'); import rxlib; \
+    print(rxlib.include_constants('os.inc')['OS_STACK_SIZE'])")
+MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=$(OS_STACK_BYTES) \
     printer=$(B)/printer.bin:1:7:driver:service=1 mouse=$(B)/mouse.bin:1:7:driver:irq=4:service=2 \
     console=$(B)/console.bin:1:7:driver:service=3 kbd=$(B)/keyboard.bin:1:7:driver:irq=1:service=4 \
     fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \

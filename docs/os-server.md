@@ -16,7 +16,7 @@ it.
 | program n's | slot 8n + `OS_K_THREAD_STACK`, from the root, for `OS_SESSIONS` programs (two at most), n the program's module number | serves program n, a program the root builds, alone: its calls and its faults |
 | the control thread | slot `OS_SLOT_CONTROL_STACK` (n = 16, `OS_CONTROL_N`), from the root | at boot, init (*docs/processes.md*); then Ctrl+Break: the keyboard driver signals the control notification; the thread ends a sound, drops the keys waiting and restarts the foreground program. The processes' timers ring on the same notification, badged `CONTROL_TIMER` (P10) |
 | process entry i's | entry i's slot `PK_STACK` (n = 17 + i, `OS_PROC_N0` + i), from `ROOT_SERVE` | serves the process in entry i alone, and sleeps while there is none (roadmap os-server.md P6); its notification bound to it, it runs the process's signals' handlers (P10) |
-| the tty thread | slot `OS_SLOT_TTY_STACK` (n = 42, `OS_TTY_N`), from `ROOT_SERVE`, when the processes have the keys | each key through the shown terminal's line discipline (P11; *docs/processes.md*) |
+| the tty thread | slot `OS_SLOT_TTY_STACK` (n = 65, `OS_TTY_N`), from `ROOT_SERVE`, when the processes have the keys | each key through the shown terminal's line discipline (P11; *docs/processes.md*) |
 
 The server is built in C's compact model on the far libraries (roadmap
 memory.md M6, D10 B; *docs/c.md*), and each of its threads runs on a stack
@@ -25,7 +25,7 @@ starts each thread with SP = 4n (`OS_STACK` n) in the server's small stack
 segment, `OS_STACK_SIZE` bytes at least, which is only the starts' room;
 that is how a thread knows its program (`os.inc` numbers them:
 `OS_SESSIONS` programs at most, `OS_CONTROL_N`, `OS_PROC_N0` on for the
-`OS_PROCS` entries, `OS_TTY_N`). A server's start
+`OS_PROCS` entries, 48, `OS_TTY_N`). A server's start
 (`src/lib/crt/server.asm`), in place of C's crt0, finds its stack in the
 server's table, `server_stacks` (`src/os/os.c`), moves to it and calls
 `server_thread(n)`. An overflow faults at the segment's limit (#SS) before
@@ -35,8 +35,10 @@ message: a thread that used all of its stack says so on the log and serves
 no more. On a thread's first start its stack is filled with the guard's
 word, so that `server_stack_used` can tell how deep it has gone
 (`tests/sh/stacks.test`). The server's data segment holds its tables
-alone, 26.9 KB (the build stops past 32 KB, `c.mk`'s
-`SERVER_DGROUP_MAX`).
+alone, 35.1 KB at 48 entries (the build stops past 40 KB, `c.mk`'s
+`SERVER_DGROUP_MAX`). Its stack segment, the starts' room, is
+`OS_STACK_SIZE` bytes, 264, which the Makefile reads from `os.inc` for the
+module's `stack=`; the root refuses a `ROOT_SERVE` whose SP lies past it.
 
 Each thread serves one program, so one program's wait for a key or a tick holds up no
 other (roadmap l4.md X13); and since it was started with `START_SESSION`, a
@@ -71,9 +73,13 @@ program's thread's notification whenever the keyboard sent it something
 | 162 | the processes' keys' notification, when no program the root builds has the keys (`OS_SLOT_KEYS`) |
 | 163 | the control notification, badged `CONTROL_TIMER`: the processes' timers (`OS_SLOT_TIMER`) |
 | 164, 165 | the tty thread and its notification (`ROOT_SERVE`; P11) |
-| 166 + 7i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it, that thread's notification and its stack (`PROC_SLOT0`, `PROC_SLOTS_EACH`; 25, to 340) |
+| 166 + 7i on | process entry i's: its endpoint, thread, space and data segment, the server's thread for it, that thread's notification and its stack (`PROC_SLOT0`, `PROC_SLOTS_EACH`; 48, to 501) |
 
-Its space has 512 slots (256 until P15, when the table grew).
+Its space has 512 slots (256 until P15, when the table grew); its 48
+entries take 502. Not D12's 1,024 (memory.md M7): the root's retype would
+zero 32 KB at once with interrupts off, 12.9 ms on MAME, past the 10 ms
+`tests/kernel/stretch.test` holds, and a machine of 512 KB without
+extended memory cannot spare the 16 KB more.
 
 ## A program's call
 

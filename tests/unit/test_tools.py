@@ -449,6 +449,28 @@ def test_lint_finds_a_data_selector_and_a_cast_offset(tmp_path, call):
     assert 'selector' in lint_probe(tmp_path, 'probe.c', '\n' + call + '\n')
 
 
+def entry_probe(tmp_path, monkeypatch, body, where='src/os'):
+    """lint's rules for a file of a tree at tmp_path, in `where`"""
+    monkeypatch.setattr(LINT, 'ROOT', str(tmp_path))
+    os.makedirs(tmp_path / where, exist_ok=True)
+    path = tmp_path / where / 'probe.c'
+    path.write_text('/* ====\n * rx286 - %s/probe.c\n * ==== */\n%s' % (where, body))
+    return [p.split(': ', 2)[1] for p in LINT.lint(str(path))]
+
+
+@pytest.mark.parametrize('body', ['\nx |= (rx_u16)(1u << i);\n', '\nif (m & (1u << k))\n',
+                                  '\nm &= ~(1 << entry);\n'])
+def test_lint_finds_an_entrys_bit_in_a_narrow_mask(tmp_path, monkeypatch, body):
+    assert 'entry-bit' in entry_probe(tmp_path, monkeypatch, body)
+
+
+def test_lint_takes_an_entrys_bit_in_a_byte(tmp_path, monkeypatch):
+    body = '\nb[i >> 3] |= (rx_u8)(1u << (i & 7));\nw |= 1u << unit;\n'
+    assert 'entry-bit' not in entry_probe(tmp_path, monkeypatch, body)
+    assert 'entry-bit' not in entry_probe(tmp_path, monkeypatch, '\nm |= 1u << i;\n',
+                                          'src/bin')
+
+
 def test_lint_takes_a_pointers_own_selector(tmp_path):
     body = '\nf(RX_SEG(line), RX_OFF(line), n);\nf(OS_DATA, offset);\n/* OS_DATA, (rx_u16)x */\n'
     assert 'selector' not in lint_probe(tmp_path, 'probe.c', body)

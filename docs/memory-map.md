@@ -163,6 +163,16 @@ by every process of the file; its space, thread and endpoint, a block of
 1 KB. *docs/root.md* says which memory the allocator has, with extended
 memory and without.
 
+**The OS server's memory** (roadmap memory.md M6, M7): its data segment
+holds its tables alone, 35 KB at 48 entries, since it is built in C's
+compact model; each of its threads runs on a stack segment of its own, 1
+KB, from blocks the root keeps for good for the server's stacks: one at
+boot for the threads it starts then, then blocks of 8 KB of the
+allocator's as `ROOT_SERVE` asks. Its stack segment proper is only its
+threads' starts' room, `OS_STACK_SIZE` bytes. Its files' cache, its pipes'
+buffers and its current directories are segments of the allocator's too
+(*docs/processes.md*).
+
 ## The kernel's objects, the arena, and memory for programs
 
 The kernel allocates nothing after its start (roadmap l4.md D7, L3). Its
@@ -185,7 +195,7 @@ fixed room taking memory from programs before it does.
 | Object | Bytes | What |
 |---|---|---|
 | a thread | 256 | its control block (220), whose bytes 184 to 217 keep its frame while it does not run; the running thread's is at the top of the kernel's one stack, where SP0 puts every interrupt's from rings 1-3 (roadmap os-server.md P3) |
-| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its first child and to its next and previous in its parent's ring of children, the first's to the parent too: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's and the root's of 512 16,400 |
+| a space | 16 + 32 a slot | its header, its LDT (8 a slot), a shadow entry a slot (24, with its links to its first child and to its next and previous in its parent's ring of children, the first's to the parent too: roadmap os-server.md D9, P15): a driver's of 8 slots 272 bytes, a program's of 16 528, the OS server's of 512 16,400, the root's of 1,024 32,784 (memory.md M4) |
 | an endpoint, a notification | 16 | |
 
 An object lies at a paragraph, zeroed: every retype is aligned to a
@@ -204,7 +214,8 @@ takes another if one crosses a 64 KB boundary (*docs/storage.md*).
 `make sizes` prints how full each room is, for the release build
 (roadmap os-server.md P14): the boot sector and loader, the kernel's entry,
 code and data, each driver's code and data, the root's and the OS server's
-code and data segments (64 KB each, the data with its stacks), `/z` against
+code and data segments (64 KB each; the root's data with its stack, the
+OS server's with its tables alone), `/z` against
 the 64 KB a module's data holds and each of its programs, each program of
 C's `/BIN`, and the boot image against `IMAGE_MAX`. A program's sizes come
 from its executable's header (`exe.inc`). It warns at 90%.

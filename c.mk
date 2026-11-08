@@ -220,12 +220,12 @@ $(C_B)/root/%.$(OBJ): $(wildcard src/root/*.h)
 # compact model on the far libraries, Watcom's in every build (memory.md
 # M6, D10 B, D11 B), with a server's start (lib/crt/server.asm): each
 # thread on a stack segment of its own. Its DGROUP holds its tables alone:
-# the build stops past SERVER_DGROUP_MAX, which the linker would say only
-# at 64 KB
+# the build stops past SERVER_DGROUP_MAX (40 KB: 35 KB at 48 entries, M7),
+# which the linker would say only at 64 KB
 SERVER_START := $(FAR_B)/lib/crt/server.obj
 SERVER_OBJS := $(addprefix $(FAR_B)/os/,os.obj proc.obj cache.obj vol.obj vfs.obj signal.obj \
     tty.obj dev.obj)
-SERVER_DGROUP_MAX := 32768
+SERVER_DGROUP_MAX := 40960
 $(B)/os.rx: $(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.py
 	$(call wlink_exe,os,$(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS), \
 	    --ring 2 --dgroup-max $(SERVER_DGROUP_MAX))

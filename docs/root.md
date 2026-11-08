@@ -69,10 +69,12 @@ programs below 1 MB, 32 KB, so that the kernel's arena keeps its room
    notification to sleep on in slot 128 + n, and a thread of its own that
    serves that program alone (`START_SESSION`), on a stack segment of its
    own in slot 8n + `OS_K_THREAD_STACK` (*docs/os-server.md*). Every stack
-   of a server's threads comes from a block of 32 KB the root keeps for
-   that server's stacks, from the memory for segments while it builds, from
-   the allocator after; a block is kept for good, as the threads are, and a
-   full one is followed by another (roadmap memory.md M6).
+   of a server's threads comes from a block the root keeps for that
+   server's stacks: for the OS server's threads it starts now, one from the
+   memory for segments; for `ROOT_SERVE`'s, blocks of 8 KB from the
+   allocator as the server asks, so that a small machine keeps no stacks of
+   entries it never uses; a block is kept for good, as the threads are, and
+   a full one is followed by another (roadmap memory.md M6, M7).
 
 A kernel call the root's building needs, refused, stops it with "rx286:
 the root could not build the system", as does an OS server that is not the
@@ -154,8 +156,10 @@ first request on: with extended memory, all the memory below 1 MB
 extended memory, each piece of slots 64-95 and what the boot modules left
 of slot 3's, kept as reserves: a block of 256 KB is carved from one only
 when no free block fits, each piece's size as the kernel says it
-(`KCALL_SEGMENT`; roadmap memory.md M4, D7 B). Without extended memory, 128
-KB of the memory for segments (`MEMORY_WITHOUT_EXTENDED`). Its block records
+(`KCALL_SEGMENT`; roadmap memory.md M4, D7 B). Without extended memory,
+all the memory for segments the boot modules left, as blocks (128 KB until
+memory.md M7, which left no 64 KB block for a process's `brk` once the OS
+server's segments grew with its 48 entries). Its block records
 are `BUDDY_BLOCKS`, 320, and its dynamic slots 768: a process of 60 KB costs
 about eight slots and three to five records (memory.md E5). A block carved
 from a piece of extended memory is aligned to its size, so it never crosses

@@ -104,7 +104,7 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
 | a pipe's room; pipes at once | 1 KB; 8 | |
 | `PATH_MAX`: a path's bytes, its zero too | 256 (`PX_PATH_MAX`) | 256 |
 | `ARG_MAX`: `argv` and `environ` | 4,096 (`PX_ARG_MAX`) | 4,096 |
-| `CHILD_MAX`: processes and threads at once | 25 (`PROCS`, `OS_PROCS`), init and the shells among them | 25 |
+| `CHILD_MAX`: processes and threads at once | 48 (`PROCS`, `OS_PROCS`; 25 until memory.md M7), init and the shells among them | 25 |
 | `PTHREAD_THREADS_MAX`: a process's threads | 8 | 64 |
 | `MAX_CANON`: a terminal's line | 255 | 255 |
 | `NCCS` | 12 | |

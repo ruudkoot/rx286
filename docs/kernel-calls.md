@@ -288,12 +288,12 @@ A notification is a word of bits, for events and interrupts:
 to timeouts: a driver waits on one notification, bound or not, for its
 interrupt or its timer, whichever comes first. A notification has one
 timer at most: arming it again replaces the one armed, so a wait's timer
-left behind cannot use the kernel's up (roadmap l4.md L9). 48
+left behind cannot use the kernel's up (roadmap l4.md L9). 80
 notifications (`TIMER_MAX`) can have a timer armed at once across the
 system: `KE_POOL` after that. Every thread of the OS server's arms one while
-it waits for the server's lock, a tick at a time: with sixteen, the waits of
-more than sixteen threads at once found none and slept for ever (roadmap
-memory.md M1). A timer is at most 7FFFh ticks away, about
+it waits for the server's lock, a tick at a time, 52 of them at 48 entries:
+with sixteen, the waits of more than sixteen threads at once found none and
+slept for ever (roadmap memory.md M1; 48 then, 80 since M7). A timer is at most 7FFFh ticks away, about
 11 minutes.
 
 ### Stopping a thread

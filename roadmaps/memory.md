@@ -77,7 +77,7 @@ DOSBox-X; none of their code is in the repository.
 | M4: the processes' memory from all of it, and the root's room | done (2026-11-08) |
 | M5: the libraries for far data | done (2026-11-08) |
 | M6: the OS server in the compact model | done (2026-11-08): the faulted thread runs the policy itself |
-| M7: 48 processes | not started |
+| M7: 48 processes | done (2026-11-08): the server's space stays at 512 slots, not D12's 1,024 |
 | M8: the documents, a review, and the close | not started; os-server.md's *At the close* (P2, P3) put right on 2026-11-08 |
 ## The request
 
@@ -1233,7 +1233,9 @@ layout to keep in step, and the very build that D10 B is meant to rule out.
 ### D12. How many processes
 
 **Decided: A** (2026-11-08), as recommended: 48 entries, with the server's space at 1,024
-slots.
+slots. **In M7** the space stayed at 512 slots, which 48 entries fit (502): the 1,024 slots
+kept interrupts off for 12.9 ms on MAME at boot and left a 512 KB machine too little (M7's
+*Done*).
 
 - **A. 48:** with the changes of *More processes*, the next limit is the server's 512 slots. With
   D10 B, decided, an entry takes a seventh slot, for its stack: the limit is then 49 entries,
@@ -1490,6 +1492,38 @@ less, M a few, L a week.
   entries with a quarter of each stack to spare; `proc.test` on DOSBox-X's 1 MB at 48 entries;
   `make check-ia16` green; every suite green.
 - **Decisions:** D12.
+- **Done** (2026-11-08). `OS_PROCS` and `CHILD_MAX` 48; a badge's entry in bits 0-5, its
+  generation in 6-14; `PROCS_MAX` and `CODES_MAX` 64; `end()`'s arrays static; the kernel's
+  `TIMER_MAX` 80 (52 server threads may wait for the lock at once); the server's stack
+  segment, the starts' room, `OS_STACK_SIZE` (264 bytes), read from `os.inc` by the
+  Makefile for the module's `stack=`, and `ROOT_SERVE` refuses an SP past it; the server's
+  DGROUP 35,922 bytes, the build's most for it 40 KB. `tools/lint`'s `entry-bit` rule (a
+  mask's bit by an entry alone, in `src/os` and `src/root`) finds the eight masks M1 fixed,
+  on eb4eda5's code, and none now. `held.test` holds 46 children, then the table refuses
+  (`EAGAIN`) on Bochs and MAME; `late.test`'s and `tone.test`'s third stage at entry 47;
+  `stacks.test` keeps a quarter of each stack at 48 entries; `proc.test`'s fork bomb reads
+  `CHILD_MAX` and stops at 46 on all three emulators, DOSBox-X's 1 MB too. Not as planned:
+  - **the server's space stays at 512 slots,** not D12's 1,024; 48 entries take 502. The
+    1,024 slots cost two things the roadmap did not see: the root's retype of the space
+    zeroes 32 KB at once with interrupts off, 4.25 ms on Bochs and 12.9 ms on MAME, past
+    the 10 ms that `tests/kernel/stretch.test`, `stretch-kill.test` and
+    `tests/caps/pools.test` hold (realtime.md R0); and on a machine of 512 KB without
+    extended memory (`sizes.test`, `many-small.test`) the 16 KB more left the shell too
+    little ("sh: echo: too many processes") and no 60 KB child. Past 49 entries (*Later*)
+    the space must grow, and the kernel must first zero a space in pieces;
+  - **the stacks:** the root keeps a block at boot only for the threads it starts then
+    (the programs' and the control thread's, 3 KB), and `ROOT_SERVE`'s come from blocks of
+    8 KB of the allocator's as the server asks: one block for all 52 took 52 KB of that
+    machine at boot, for entries it never uses;
+  - **without extended memory the allocator takes all the memory for segments the boot
+    left,** not 128 KB of it: the current directories' segment grew to a 16 KB block (48
+    times 256 bytes), and `proc.test`'s `brk` of 28 KB on DOSBox-X's 1 MB then found no
+    64 KB block free. Nothing else retypes that memory after the boot;
+  - **`proc.test` waits four times 250 ticks,** not two: MAME's fork bomb of 46 outlasted
+    the keys;
+  - **`tests/sh/spin.test`** takes the kernel's trace of a thread's start inside the prompt
+    on the log, where the new timing put it;
+  - the roadmap's "`rtt.test` holds 46 children" is `held.test` (M4) here.
 
 ### M8. The documents, a review, and the close (S)
 

@@ -76,7 +76,7 @@ RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, progra
 #define W_CONTROL (14 * 8 + 4)                  /* its control notification, */
 #define W_FOREGROUND (15 * 8 + 4)               /* the foreground program's thread */
 #define OS_SLOTS 512                            /* the OS server's space: 8n + k for program
-                                                   n, */
+                                                   n, (its 48 entries take 502, M7) */
 #define OS_SLOT_SLEEP 128                       /* and n's thread's notification at 128 + n;
                                                    its threads' SP at a start: OS_STACK n
                                                    (os.inc, src/lib/crt/server.asm) */
@@ -671,6 +671,12 @@ int server_ring(unsigned module)
     return ENTRY_B(entry_of(module), M_RING);
 }
 
+/* server_room - a module's stack segment's bytes (root.h) */
+rx_u16 server_room(unsigned module)
+{
+    return ENTRY_W(entry_of(module), M_STACK);
+}
+
 /* give_service - a driver's endpoint to the OS server, in the slot its
  * service names (OS_SLOT_SERVICE + service; drivers.inc); and the sound
  * driver's notification, badged DRV_STOP_BIT, for Ctrl+Break */
@@ -697,6 +703,10 @@ static void build_server(void)
     program_slots(server);
     server_space = s.space;
     server_params();
+    /* a block for the stacks of the threads it starts now, the programs'
+     * and the control thread's; ROOT_SERVE's come from blocks of the
+     * allocator's as the server asks (memory.md M7) */
+    must(server_stacks_keep(server, (rx_u16)((OS_SESSIONS + 1) * (OS_THREAD_STACK / 16))));
     give_server(MODULES, W_MODULES);    /* the module table */
     server_control();
     /* its requests for processes, on the fault endpoint, badged so */

@@ -39,8 +39,10 @@ void say(const char *text);
  * module's), in its space, at its entry with SP sp and its priority, its
  * faults the root's, badged SERVE_BADGE: 0 or KE_* (root.c; ROOT_SERVE) */
 int serve_thread(unsigned module, rx_u16 thread, rx_u16 sp);
-/* server_ring - a module's ring (root.c) */
+/* server_ring, server_room - a module's ring, and its stack segment's
+ * bytes, where its threads start (root.c) */
 int server_ring(unsigned module);
+rx_u16 server_room(unsigned module);
 /* server_panic - ROOT_PANIC: a server's thread n cannot go on: said, and
  * the root's own fault stops the system (root.c; memory.md M6) */
 void server_panic(unsigned module, rx_u16 n);
@@ -58,5 +60,9 @@ void service(int what, struct rx_kregs *r);
  * (a module) of a ring, moved into its space's slot: 0 or the error
  * (services.c; memory.md M6) */
 int server_stack(unsigned module, int ring, rx_u16 space, rx_u16 bytes, rx_u16 to);
+/* server_stacks_keep - a block of so many paragraphs for a server's stacks,
+ * from the memory for segments, while the root builds the modules, before
+ * the blocks of the allocator's: 0 or the error (services.c; memory.md M7) */
+int server_stacks_keep(unsigned module, rx_u16 paragraphs);
 
 #endif

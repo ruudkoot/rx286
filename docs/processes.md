@@ -356,14 +356,18 @@ shell and its commands in those with the shell in C (`Z_PROGRAMS`,
 
 ## The table
 
-The server has room for `PROCS` (25, `OS_PROCS`) processes and threads at once; a fork,
-a spawn or a `pthread_create` past that is `EAGAIN`. A thread's entry
+The server has room for `PROCS` (48, `OS_PROCS`; 25 until memory.md M7)
+processes and threads at once; a fork, a spawn or a `pthread_create` past
+that is `EAGAIN`. What holds a mark for each entry is a byte array, a bit
+an entry (`bits[i >> 3]`, `1u << (i & 7)`): a 16-bit mask held 16 entries
+and lost the rest (memory.md M1), and `tools/lint`'s `entry-bit` rule finds
+such a mask in the server's and the root's C. A thread's entry
 (`P_THREAD`) names its process's entry, the leader; `ps`, `waitpid` and the
 walks over the processes pass over it, and its signal state is its
 process's. A new process's pid is the next after the last given, from 2
 again after 32,767, passing over any a process, a zombie, a group or a
 session still has, or a terminal's session or foreground group (P15). An
-entry's endpoint is badged with the entry and a count of the images and
+entry's endpoint is badged with the entry (bits 0-5, since M7) and a count of the images and
 threads it has held, so that a call that was received before an exec or the
 entry's reuse, and waited for the lock meanwhile, is dropped, not served to
 the new one (P15). Entry i has its slots of the server's, `PROC_SLOT0`
