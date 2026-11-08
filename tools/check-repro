@@ -26,6 +26,8 @@ ROOT = rxlib.ROOT
 FLAVOURS = ('release', 'debug', 'test')
 COMPARED = ('*.bin', '*.rx', '*.arc', '*.img', '*.sym')
 OTHER_HOST = {'TZ': 'Pacific/Kiritimati', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'}
+JOBS = os.cpu_count() or 1              # each build on every CPU: an order that
+                                        # crept into the output would show too
 
 
 def build(side, env, umask):
@@ -34,9 +36,9 @@ def build(side, env, umask):
         os.umask(umask)
     for flavour in FLAVOURS:
         out = os.path.join('build', 'repro-%s-%s' % (side, flavour))
-        subprocess.run(['make', '--no-print-directory', '-C', ROOT, 'FLAVOUR=' + flavour,
-                        'B=' + out, 'image', 'symbols'], check=True, env=env,
-                       preexec_fn=preexec, stdout=subprocess.DEVNULL)
+        subprocess.run(['make', '--no-print-directory', '-C', ROOT, '-j%d' % JOBS,
+                        'FLAVOUR=' + flavour, 'B=' + out, 'image', 'symbols'],
+                       check=True, env=env, preexec_fn=preexec, stdout=subprocess.DEVNULL)
     subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'mkdisks'),
                     os.path.join(ROOT, 'build', 'repro-%s-disks' % side)], check=True,
                    env=env, preexec_fn=preexec)

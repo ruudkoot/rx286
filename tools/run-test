@@ -123,12 +123,14 @@ DRIVE_IMAGES = {'A': 'run.img', 'B': 'disks/fdb.img', 'C': 'disks/hd0.img',
 SECTOR_SIZE = rxlib.LAYOUT['SECTOR_SIZE']
 EMULATORS = ('bochs', 'dosbox-x', 'mame')
 # A test's timeout is written for Bochs; the others boot slower (MAME runs
-# IBM's power-on test, about 6 s alone) and are heavier to run side by side.
+# IBM's power-on test, about 6 s alone). Every emulator runs a test to a CPU
+# at once: each is one thread, unthrottled (Bochs' and MAME's time is
+# emulated) or paced to real time (DOSBox-X), and the tests' own measures
+# are of emulated time, so a busier host costs only wall time.
 TIMEOUT_SCALE = {'bochs': 1, 'dosbox-x': 2, 'mame': 4}
 # The boot floppy's data area (the Makefile's 1.2 MB disk: 2,400 sectors, 4
 # reserved, two FATs of 7, a root directory of 14), in bytes
 FLOPPY_DATA_BYTES = (2400 - 4 - 2 * 7 - 14) * 512
-JOBS_DIVISOR = {'bochs': 1, 'dosbox-x': 2, 'mame': 3}
 # What each emulator can do of what a test asks (docs/emulators.md): the
 # drives it has (fsck:, file:, install:, media:), the media changes it makes,
 # its printers and the modem. DOSBox-X mounts drive A alone; MAME's AT has no
@@ -803,7 +805,7 @@ def run_one(test):
 def main():
     parser = argparse.ArgumentParser(description='Run rx286 tests in Bochs.')
     parser.add_argument('tests', nargs='*')
-    parser.add_argument('--jobs', type=int, default=0, help='default: CPUs (fewer for MAME)')
+    parser.add_argument('--jobs', type=int, default=0, help='default: the CPUs')
     parser.add_argument('--emulator', choices=EMULATORS, default='bochs')
     parser.add_argument('--cc', choices=('watcom', 'ia16'), default='watcom')
     args = parser.parse_args()
@@ -811,7 +813,7 @@ def main():
     EMULATOR = args.emulator
     CC_KIND = args.cc
     if not args.jobs:
-        args.jobs = max(2, (os.cpu_count() or 2) // JOBS_DIVISOR[EMULATOR])
+        args.jobs = max(2, os.cpu_count() or 2)
     paths = args.tests or sorted(glob.glob(os.path.join(ROOT, 'tests', '*', '*.test')))
     paths = list(dict.fromkeys(os.path.realpath(p) for p in paths))   # each once: one run dir
     if not paths:

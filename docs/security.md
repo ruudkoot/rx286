@@ -279,7 +279,8 @@ own.
 ### Showing that the suites can fail
 
 Bugs seeded into the kernel by hand (roadmap M8; the review of the two
-suites, os-server.md P15, behind `PROBE_*` defines), each caught:
+suites, os-server.md P15, in a copy of the tree behind `PROBE_*` defines,
+which were not kept), each caught:
 
 | Seeded bug | Caught by |
 |---|---|

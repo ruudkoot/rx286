@@ -48,7 +48,11 @@ of untyped memory, 20,000 allocations and frees (`test_buddy.py`).
 `tools/run-test` builds a test image for every `tests/*/*.test`, boots it in
 Bochs without a window (`rfb`, the clock fixed) and compares what the log (COM2) shows
 with the test's expected transcript. A boot costs about half a second, and
-tests run in parallel. Bochs instances that start at the same moment can race
+tests run in parallel, one a CPU, on every emulator: each is one thread,
+and Bochs and MAME run unthrottled, their time the machine's (Bochs:
+`clock: sync=none`, 4 million instructions a second; MAME: `-nothrottle`),
+DOSBox-X fast-forwarded (`turbo`); every timing a test checks is the
+machine's, so a busy host costs only wall time. Bochs instances that start at the same moment can race
 for an `rfb` port, and the loser stops before its machine starts ("RFB could
 not bind any port"); the runner starts such a run again.
 
@@ -161,7 +165,7 @@ The suites:
 | `tests/caps` | the kernel's calls on capabilities: every kind of object retyped, every refusal, a space built for a new thread by copy, move and mint, the thread started (*docs/kernel-calls.md*); the seal, a thread suspended and its frame moved, the pools, and calls that give way and resume (`tests/programs/additions.asm`; roadmap os-server.md P2, P3); a segment resized in place with its copies, and every refusal (`resize.test`, P15); the children's rings, deleted and moved in every place, then revoked (`rings.test`, P15) |
 | `tests/ipc` | IPC between threads the program makes: 1,000 calls; a segment passed, deleted, passed again, kept and refused; the kernel's timer; a saved reply; three callers queued, served in order with their badges; notifications, bound and not; a client above its server and below it; every refusal; a call nobody answers, ended by Ctrl+Break (Bochs and MAME) |
 | `tests/timing` | the instructions of an IPC round trip, on Bochs, against a budget: a regression check, since no emulator gives an AT's clocks |
-| `tests/attack` | 74 attacks (*docs/security.md*) |
+| `tests/attack` | 80 attacks (*docs/security.md*) |
 | `tests/fuzz` | 10,000 iterations of random code in ring 3, with random calls on the OS server (`os_px`) and random kernel calls on `INT 31h` |
 | `tests/unit` | the host tests (layer 3) |
 

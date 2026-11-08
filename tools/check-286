@@ -35,6 +35,7 @@
 # reads the bytes of `align N, instruction`, which are that instruction's.
 # ============================================================================
 
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -250,6 +251,10 @@ def self_test():
     return 0
 
 
+def check_file(path):
+    return check_disassembly(path) if path.endswith('.dis') else check_listing(path)
+
+
 def main(args):
     if args == ['--self-test']:
         return self_test()
@@ -257,8 +262,10 @@ def main(args):
         print('check-286: no listing given')
         return 1
     problems = []
-    for path in args:
-        problems += check_disassembly(path) if path.endswith('.dis') else check_listing(path)
+    # the files read on every CPU, their problems in the files' order
+    with concurrent.futures.ProcessPoolExecutor() as pool:
+        for found in pool.map(check_file, args, chunksize=64):
+            problems += found
     for path, line, addr, reason, source in problems:
         print('%s:%d: %s at %s: %s' % (path, line, reason, addr, source))
     if problems:

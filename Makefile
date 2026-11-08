@@ -117,15 +117,20 @@ BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.rx \
         check-286 check-image check-repro lint check-docs unit doctor sizes clean disks \
         check-ia16
 
+# A flavour's build on every CPU, unless make already runs with -j (whose
+# jobserver the sub-make then shares)
+NPROC := $(shell nproc 2>/dev/null || echo 1)
+BUILD_JOBS = $(if $(filter -j%,$(MAKEFLAGS)),,-j$(NPROC))
+
 all:
-	$(MAKE) FLAVOUR=release image symbols
-	$(MAKE) FLAVOUR=debug image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=release image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=debug image symbols
 
 release debug:
-	$(MAKE) FLAVOUR=$@ image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=$@ image symbols
 
 test-build:
-	$(MAKE) FLAVOUR=test image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=test image symbols
 
 image: $(IMAGE)
 symbols: $(B)/rx286.sym
@@ -196,11 +201,13 @@ $(B)/rx286.sym: $(BINARIES) tools/map2sym tools/rxlib.py
 # shell may write to; `make clean` or a change of disks/ makes them afresh.
 DISKS := build/disks
 RUN_DISKS := build/run-disks
-# (the list of disks/'s files a prerequisite too, rewritten when it changes,
-# so that a file removed or renamed makes them afresh)
+# (the list of disks/'s files a prerequisite too, replaced only when it
+# changes, so that a file removed or renamed makes them afresh: every make
+# parses this, the tests' many at once, so each writes a file of its own,
+# in one order whatever the locale, and moves it into place whole)
 DISK_LIST := build/disks.list
-$(shell mkdir -p build && find disks -type f | sort > $(DISK_LIST).new && \
-    { cmp -s $(DISK_LIST).new $(DISK_LIST) || cp $(DISK_LIST).new $(DISK_LIST); })
+$(shell mkdir -p build && t=$(DISK_LIST).$$$$ && find disks -type f | LC_ALL=C sort > $$t && \
+    { if cmp -s $$t $(DISK_LIST); then rm -f $$t; else mv -f $$t $(DISK_LIST); fi; })
 DISK_SOURCES := $(shell find disks -type f) $(DISK_LIST) tools/mkdisks tools/rxlib.py
 disks: $(DISKS)/fdb.img
 
@@ -220,17 +227,17 @@ $(RUN_DISKS)/fdb.img $(RUN_DISKS)/hd0.img $(RUN_DISKS)/hd1.img &: \
 
 # ---------------------------------------------------------------- running
 run: $(RUN_DISKS)/fdb.img
-	$(MAKE) FLAVOUR=debug image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=debug image symbols
 	$(PYTHON) tools/install-programs $(RUN_DISKS)/hd0.img build/debug
 	$(PYTHON) tools/bochs-run --mode run --build build/debug
 
 debugger: $(RUN_DISKS)/fdb.img
-	$(MAKE) FLAVOUR=debug image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=debug image symbols
 	$(PYTHON) tools/bochs-run --mode debugger --build build/debug
 
 # The release image, whose COM2 is the modem's line (term), not the log.
 run-release: $(RUN_DISKS)/fdb.img
-	$(MAKE) FLAVOUR=release image symbols
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=release image symbols
 	$(PYTHON) tools/install-programs $(RUN_DISKS)/hd0.img build/release
 	$(PYTHON) tools/bochs-run --mode run --build build/release --release
 
@@ -299,7 +306,7 @@ check:
 # part of make check, since it needs gcc-ia16 in $(IA16) (docs/building.md).
 check-ia16: disks
 	$(PYTHON) tools/run-test --cc ia16
-	$(MAKE) FLAVOUR=release B=build/release-ia16 CC_KIND=ia16 image
+	$(MAKE) $(BUILD_JOBS) FLAVOUR=release B=build/release-ia16 CC_KIND=ia16 image
 	$(PYTHON) tools/check-286 $$(find build/tests-ia16 build/release-ia16 -name '*.dis' | sort)
 	@echo "make check-ia16: the C built with gcc-ia16 passed"
 

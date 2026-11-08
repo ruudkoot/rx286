@@ -138,7 +138,11 @@ C_LIB_OBJS := $(START_OBJS) $(C_LIBS)
 PROCESS_LIBS := $(START_OBJS) $(addprefix $(C_B)/,crt.lib c.lib rx286.lib posix.lib)
 
 ifeq ($(CC_KIND),watcom)
-make_lib = rm -f $(1) && $(WLIB) -q -n -b $(1) $(addprefix +,$(2))
+# (each made in a directory of its own, then moved into place: two wlibs at
+# once in one directory, under make -j, spoil each other's work file)
+make_lib = rm -f $(1) && rm -rf $(1).dir && mkdir $(1).dir && \
+    $(WLIB) -q -n -b $(1).dir/$(notdir $(1)) $(addprefix +,$(2)) && \
+    mv $(1).dir/$(notdir $(1)) $(1) && rm -rf $(1).dir
 else
 make_lib = rm -f $(1) && $(IA16)/bin/ia16-elf-ar rcs $(1) $(2)
 endif

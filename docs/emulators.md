@@ -74,6 +74,9 @@ memory below 1 MB (roadmap os-server.md P3).
 Running it: `tools/run-test --emulator dosbox-x` writes `dosbox-x.conf` from
 the template, runs DOSBox-X with `SDL_VIDEODRIVER=dummy`, and kills it once
 the log shows `TEST END` (it has no shutdown port, and ignores SIGTERM).
+DOSBox-X keeps to real time (`cycles = max` runs what fits in each
+millisecond), so the template sets `turbo = true`: its fast-forward, which
+halves the suite's time; the tests measure only the machine's time.
 
 ## MAME's IBM PC/AT
 
@@ -125,9 +128,11 @@ The drives' tests (`tests/posix/drives.test`, `protected.test`;
   it drive B and both
   fixed disks, the fixed disks as raw `.hd` images (links to the run's
   copies). MAME, run so, takes no signal to stop (SIGTERM and SIGINT are
-  ignored), and writes a diskette's image back while it runs: the runner
-  gives it 10 s after the end for the last writes, kills it, and fails a
-  test whose checked diskette came out as it went in. The AT's four
+  ignored): at the end the runner makes a file `mame/rx286.lua` watches for
+  each frame, and the machine exits as at its own end, its diskettes
+  written back, at once (until os-server.md P15 every MAME test waited 10 s
+  for a kill). The runner fails a test whose checked diskette came out as
+  it went in. The AT's four
   slots hold the EGA, the diskette controller, the serial card the tests
   read and the IDE card, and the IDE card cannot make way for a printer
   card: it also answers port 3F7h, which IBM's BIOS reads to boot from a

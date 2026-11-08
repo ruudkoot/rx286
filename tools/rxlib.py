@@ -911,7 +911,7 @@ def at_cmos():
     return bytes(c)
 
 
-MAME_STOP_SECONDS = 10       # for a diskette's last writes to reach its image, after the end
+MAME_STOP_SECONDS = 10       # for MAME to exit when mame/rx286.lua is asked, before a kill
 MAME_RAM = '1664K'           # 640 KB, and 1 MB above 1 MB (roadmap os-server.md P3)
 MAME_EXTENDED_KB = 1024      # which the CMOS says, or the POST stops at error 164
 
@@ -925,11 +925,12 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
     command line). The AT has no printer port here: its
     four slots hold the EGA, the diskette controller, the serial card and
     the IDE card, which the diskettes need too (docs/emulators.md). MAME
-    run so takes no signal to stop (SIGTERM and SIGINT alike are ignored),
-    but writes a diskette's image back while it runs: it is asked to stop,
-    given MAME_STOP_SECONDS for the diskettes' last writes, and killed.
-    (tools/run-test fails a test whose diskette it checks if MAME left its
-    image as it was.) SDL's dummy drivers keep MAME
+    run so takes no signal to stop (SIGTERM and SIGINT alike are ignored):
+    to stop, the runner makes a file that mame/rx286.lua watches for, and
+    the machine exits as at its own end, its diskettes written back;
+    MAME_STOP_SECONDS later it is killed. (tools/run-test fails a test whose
+    diskette it checks if MAME left its image as it was.) SDL's dummy
+    drivers keep MAME
     from opening any window: `-video none` alone still opens one under
     WSLg."""
     nvram = os.path.join(directory, 'mame-nvram')
@@ -949,6 +950,9 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
         args += ['-hard1', os.path.join(disks, 'c.hd')]
         if 'D absent' not in media:
             args += ['-isa4:ide:ide:1', 'hdd', '-hard2', os.path.join(disks, 'd.hd')]
+    stop = os.path.join(directory, 'mame-stop')
+    if os.path.exists(stop):
+        os.remove(stop)
     log = open(os.path.join(directory, 'mame.log'), 'w')
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -962,7 +966,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
          '-autoboot_script', MAME_SCRIPT, '-autoboot_delay', '0',
          '-seconds_to_run', str(int(timeout * 10))] + args,
         stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory,
-        env=dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy'))
+        env=dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy',
+                 RX286_MAME_STOP=stop))
     status = 'exit'
     while proc.poll() is None:
         if time.monotonic() - started > timeout:
@@ -973,7 +978,7 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=()):
             break
         time.sleep(0.05)
     if proc.poll() is None:
-        proc.terminate()
+        open(stop, 'w').close()         # mame/rx286.lua: the machine exits
         try:
             proc.wait(MAME_STOP_SECONDS)
         except subprocess.TimeoutExpired:
