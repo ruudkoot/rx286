@@ -175,8 +175,24 @@ static rx_u32 physical(rx_u16 segment, rx_u16 *limit)
     return ((rx_u32)(r.dx & 0xFF) << 16 | r.ax) >> 4;
 }
 
-/* bigs - loads of 64 KB, as many as the memory holds, their addresses;
- * then unloaded */
+/* sort - addresses in order: the buddy allocator gives the same blocks
+ * after a workload, not in the same order, its free lists last in, first
+ * out, and its reserves carved as needed (memory.md M4) */
+static void sort(rx_u32 *a, unsigned n)
+{
+    unsigned i, j;
+    rx_u32 t;
+
+    for (i = 1; i < n; i++)
+        for (j = i; j > 0 && a[j - 1] > a[j]; j--) {
+            t = a[j];
+            a[j] = a[j - 1];
+            a[j - 1] = t;
+        }
+}
+
+/* bigs - loads of 64 KB, as many as the memory holds, their addresses in
+ * order; then unloaded */
 static unsigned bigs(rx_u32 *where)
 {
     rx_u16 n[BIG_MAX];
@@ -189,6 +205,7 @@ static unsigned bigs(rx_u32 *where)
     }
     for (i = 0; i < count; i++)
         root(ROOT_UNLOAD, n[i], 0, 0, 0, 0);
+    sort(where, count);
     return count;
 }
 
@@ -318,9 +335,9 @@ static void rounds(void)
             failures++;
     }
     again = bigs(after);
-    same = again == count;
-    for (i = 0; i < count && same; i++)
-        same = before[i] == after[i];
+    same = again == count;              /* (with more memory than BIG_MAX loads take, */
+    for (i = 0; i < count && same && count < BIG_MAX; i++)  /* another set of the free */
+        same = before[i] == after[i];   /*    blocks may come: the count says, M4) */
     snprintf(line, sizeof line, "services: %u spawns and exits: %u failures\n", ROUNDS,
              failures);
     say(line);

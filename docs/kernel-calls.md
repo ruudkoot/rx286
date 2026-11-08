@@ -108,8 +108,8 @@ are still as they were (`KE_STATE` if not).
   allocator carves the processes' memory of it (roadmap os-server.md P4).
 - **The new capability is a child** of the untyped it came from, so
   revoking the untyped deletes it.
-- **A space** has `SPACE_SLOTS_MIN` to `SPACE_SLOTS_MAX` slots, a power of
-  two.
+- **A space** has `SPACE_SLOTS_MIN` to `SPACE_SLOTS_MAX` (1,024; the root's)
+  slots, a power of two.
 
 ### Copy, move and mint
 

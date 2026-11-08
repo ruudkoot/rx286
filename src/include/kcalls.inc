@@ -180,7 +180,7 @@ FAULT_COUNTED       equ 1   ; DI: a test build counted it (the fuzzer): say noth
 
 PRIORITY_MAX        equ 7
 SPACE_SLOTS_MIN     equ 8   ; a space's slots: a power of two between these
-SPACE_SLOTS_MAX     equ 512
+SPACE_SLOTS_MAX     equ 1024    ; (512 until memory.md M4: the root's)
 
 ; The root's slots at its start (roadmap l4.md L5): slots 0, 1 and 2 its
 ; code, data and stack, as every program's; then the kernel's gifts.
@@ -202,7 +202,7 @@ ROOT_SLOT_BOOT_INFO equ 102 ; the loader's boot information and the kernel's siz
 ROOT_SLOT_VIDEO     equ 111 ; the screen's text page, a segment of DPL 1 (l4.md L8)
 ROOT_SLOT_IRQ       equ 112 ; interrupt line n at ROOT_SLOT_IRQ + n: every line the kernel
                             ;    does not keep (its own are left empty)
-ROOT_SLOTS          equ 512 ; its space's slots: past the kernel's gifts, its own (l4.md
+ROOT_SLOTS          equ 1024 ; its space's slots: past the kernel's gifts, its own (l4.md
                             ;    L10); 256 on, those it makes and gives back (os-server.md P4)
 ROOT_SLOT_DYNAMIC   equ 256
 

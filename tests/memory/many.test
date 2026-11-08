@@ -1,0 +1,17 @@
+# The processes' memory from all of it (roadmap memory.md M4, E3, E5): init
+# starts tests/posix/many.c (TEST_POSIX_MANY), whose 16 children each grow
+# a data segment of about 60 KB and check every byte of it once all are
+# alive: 1 MB of processes. With the memory below 1 MB alone, as before M4,
+# six fitted; now the root's buddy allocator carves the rest from the
+# extended memory as it needs it. On a full AT, MAME's most, and a 512 KB
+# AT with 15 MB.
+program: idle
+define: TEST_POSIX_MANY
+memory: 639K 15M
+memory: 640K 14720K
+memory: 512K 15M
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 120
+---
+many: 16 children of 60 KB: forked 16, refused 0, sound 16, no memory 0, other 0

@@ -6,7 +6,9 @@
  * retyped from it, and two free halves merge again when their parent's
  * children are revoked. Whatever is made of a block (a process's data
  * segment) is revoked before the block is given back, so a block is always
- * whole when it is free.
+ * whole when it is free. The memory below 1 MB is carved into blocks at
+ * once (buddy_add); the extended memory is kept as reserves, from which a
+ * block of the largest order is carved only when none fits (memory.md M4).
  *
  * The allocator calls the kernel through the four functions below: root.c's
  * on rx286, a simulation of untyped memory in tests/unit/c/test_buddy.c on
@@ -20,7 +22,9 @@
 
 #define BUDDY_MIN_PARAS 64              /* the smallest block: 1 KB */
 #define BUDDY_ORDERS 9                  /* 1 KB to 256 KB */
-#define BUDDY_BLOCKS 160                /* blocks at once, free, used or split */
+#define BUDDY_BLOCKS 320                /* blocks at once, free, used or split (memory.md
+                                           M4: 160 bound at about 30 processes, E5) */
+#define BUDDY_RESERVES 40               /* untypeds carved as blocks are needed (M4) */
 
 /* The kernel's calls (root.c; a simulation on the host) */
 int buddy_carve(rx_u16 from, rx_u16 to, rx_u16 paragraphs);    /* an untyped from an
@@ -35,6 +39,12 @@ void buddy_init(void);
  * paragraphs in all, each as large as it still has room for: how many it
  * made (0 if it is no untyped) */
 int buddy_add(rx_u16 untyped, rx_u16 paragraphs);
+/* buddy_reserve - an untyped of the root's of so many free paragraphs, to
+ * carve blocks of the largest order from only when the free lists have none
+ * that fits (memory.md M4, D7 B): 1, or 0 if there is no room for it */
+int buddy_reserve(rx_u16 untyped, rx_u16 paragraphs);
+/* buddy_reserved - the reserves' paragraphs not yet carved */
+rx_u32 buddy_reserved(void);
 /* buddy_alloc - a block of at least so many paragraphs: its number, or -1 */
 int buddy_alloc(rx_u16 paragraphs);
 /* buddy_free - a block given back: nothing made of it may remain */

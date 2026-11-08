@@ -5,8 +5,10 @@
  * allocate from.
  *
  * Memory for segments is the buddy allocator's (buddy.c), from the first
- * request on: the memory below 1 MB when there is extended memory (the
- * kernel's ROOT_SLOT_LOW_UNTYPED), else 128 KB of the memory for segments.
+ * request on: when there is extended memory, the memory below 1 MB (the
+ * kernel's ROOT_SLOT_LOW_UNTYPED) and every byte of the extended memory, as
+ * reserves carved as blocks are needed (memory.md M4); else 128 KB of the
+ * memory for segments.
  * A process's kernel objects - its space, thread and endpoint, 800 bytes -
  * are a block of 1 KB of their own, since any untyped makes objects (P3):
  * its exit revokes the block, and they die with it; each more thread is a
@@ -75,13 +77,37 @@ static int ready;                       /* the allocator has its memory */
 static struct code codes[CODES_MAX];
 static struct process procs[PROCS_MAX];
 
-/* memory - the allocator's memory, at the first request: below 1 MB if
- * there is extended memory, else a part of the memory for segments */
+/* free_paras - an untyped's paragraphs not yet retyped, as the kernel says
+ * (KCALL_SEGMENT, memory.md M3); 0 for a slot that holds none */
+static rx_u16 free_paras(rx_u16 untyped)
+{
+    struct rx_kregs r;
+
+    r.ax = KCALL_SEGMENT << 8;
+    r.dx = untyped;
+    r.bp = 0;
+    if (rx_kcall(&r) || r.si > r.cx)
+        return 0;
+    return (rx_u16)(r.cx - r.si);
+}
+
+/* memory - the allocator's memory, at the first request: with extended
+ * memory, the memory below 1 MB as blocks, and every piece of the extended
+ * memory, then what the boot modules left of slot 3's, as reserves carved
+ * as blocks are needed (memory.md M4); without, a part of the memory for
+ * segments */
 static void memory(void)
 {
+    unsigned n;
+
     buddy_init();
-    if (buddy_add(LOW_UNTYPED, 0xFFFF) == 0)
+    if (buddy_add(LOW_UNTYPED, 0xFFFF) == 0) {
         buddy_add(UNTYPED, MEMORY_WITHOUT_EXTENDED);
+    } else {
+        for (n = 0; n < ROOT_SLOTS_EXTENDED; n++)
+            buddy_reserve(SLOT(ROOT_SLOT_EXTENDED + n), free_paras(SLOT(ROOT_SLOT_EXTENDED + n)));
+        buddy_reserve(UNTYPED, free_paras(UNTYPED));
+    }
     ready = 1;
 }
 

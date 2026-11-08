@@ -7,13 +7,15 @@
  * there was never woken, and a tone of a process there killed went on. It
  * holds children on a pipe until the next process takes entry 16, which
  * reads a line (or plays a long tone and is killed); then holds six more, to
- * entry 22, the most the root's slots allow today, and does it again. At
- * the end it reads the terminal once more, so that the test ends.
+ * entry 22, the most the root's slots allowed before M4, and does it again;
+ * then at the table's last entry, CHILD_MAX - 1 (M4). At the end it reads
+ * the terminal once more, so that the test ends.
  * ============================================================================ */
 
 #include <stdio.h>
 #include "errno.h"
 #include "fcntl.h"
+#include "limits.h"
 #include "signal.h"
 #include "time.h"
 #include "unistd.h"
@@ -30,6 +32,16 @@
 
 static int fds[2];                      /* the held children wait on its read end */
 static int held;
+
+/* where - how an entry is said: the table's last by its place, the others
+ * by their number */
+static void where(char *text, unsigned size, int entry)
+{
+    if (entry == CHILD_MAX - 1)
+        snprintf(text, size, "the table's last entry");
+    else
+        snprintf(text, size, "entry %d", entry);
+}
 
 /* hold - n children more, each waiting on the pipe (a lowest free entry each) */
 static void hold(int n)
@@ -63,6 +75,7 @@ static void late(int entry)
     unsigned long start;
     int fd, status;
     pid_t pid;
+    char at[32];
 
     pid = fork();
     if (pid == 0) {
@@ -84,14 +97,14 @@ static void late(int entry)
     ioctl(fd, RXIO_TONE, &t);
     start = rx_ticks() - start;
     close(fd);
-    printf("late: the tone of entry %d, killed, cut short: %s\n", entry,
-           start < 50 ? "yes" : "no");
+    where(at, sizeof at, entry);
+    printf("late: the tone of %s, killed, cut short: %s\n", at, start < 50 ? "yes" : "no");
 }
 #else
 /* late - the next entry reads a line from the terminal */
 static void late(int entry)
 {
-    char c[16];
+    char c[16], at[32];
     int n, status;
     pid_t pid;
 
@@ -102,7 +115,8 @@ static void late(int entry)
     }
     if (pid == 0) {
         n = (int)read(0, c, sizeof c);
-        printf("late: the reader at entry %d read %d bytes\n", entry, n);
+        where(at, sizeof at, entry);
+        printf("late: the reader at %s read %d bytes\n", at, n);
         _exit(0);
     }
     waitpid(pid, &status, 0);
@@ -122,6 +136,8 @@ int main(void)
     late(FIRST_HELD + 2);
     hold(MORE_HELD);
     late(FIRST_HELD + MORE_HELD + 2);
+    hold(CHILD_MAX - 1 - (FIRST_HELD + MORE_HELD + 2));
+    late(CHILD_MAX - 1);
     close(fds[1]);                      /* the held children's reads end */
     while (held-- > 0)
         wait(&status);

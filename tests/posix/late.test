@@ -3,14 +3,16 @@
 # holds children until the next process takes entry 16, then entry 22, and
 # has it read a line each time. The server kept the readers as a 16-bit
 # mask, a bit an entry: a reader past entry 15 had no bit, was never woken,
-# and the test's typing never came (E6, E8). At the end it reads again, so
-# that the test ends.
+# and the test's typing never came (E6, E8). Then the table's last entry,
+# which the root's slots kept out of reach until M4 (E8). At the end it
+# reads again, so that the test ends.
 program: none
 define: TEST_POSIX_LATE
-keys: ab\ncde\n
+keys: ab\ncde\nfghi\n
 match: contains
 timeout: 120
 ---
 late: the reader at entry 16 read 3 bytes
 late: the reader at entry 22 read 4 bytes
+late: the reader at the table's last entry read 5 bytes
 late: done

@@ -13,4 +13,5 @@ timeout: 120
 ---
 late: the tone of entry 16, killed, cut short: yes
 late: the tone of entry 22, killed, cut short: yes
+late: the tone of the table's last entry, killed, cut short: yes
 late: done

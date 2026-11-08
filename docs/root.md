@@ -26,8 +26,9 @@ waiting.
 | 111 | the screen's text page, for the console driver |
 | 112-127 | every interrupt line the kernel does not keep, line n at 112 + n |
 
-Its space has `ROOT_SLOTS` (512) slots. Past the kernel's gifts it keeps
-its own:
+Its space has `ROOT_SLOTS` (1,024) slots, made from the memory for
+programs below 1 MB, 32 KB, so that the kernel's arena keeps its room
+(roadmap memory.md M4, D8). Past the kernel's gifts it keeps its own:
 
 | Slots | What |
 |---|---|
@@ -133,8 +134,16 @@ names:
 
 The memory is a buddy allocator's (`src/root/buddy.c`; D10), from the
 first request on: with extended memory, all the memory below 1 MB
-(`ROOT_SLOT_LOW_UNTYPED`); without, 128 KB of the memory for segments.
-Every block is an untyped of the root's, from 1 KB to 256 KB, split in
+(`ROOT_SLOT_LOW_UNTYPED`), carved into blocks at once, and every byte of the
+extended memory, each piece of slots 64-95 and what the boot modules left
+of slot 3's, kept as reserves: a block of 256 KB is carved from one only
+when no free block fits, each piece's size as the kernel says it
+(`KCALL_SEGMENT`; roadmap memory.md M4, D7 B). Without extended memory, 128
+KB of the memory for segments (`MEMORY_WITHOUT_EXTENDED`). Its block records
+are `BUDDY_BLOCKS`, 320, and its dynamic slots 768: a process of 60 KB costs
+about eight slots and three to five records (memory.md E5). A block carved
+from a piece of extended memory is aligned to its size, so it never crosses
+a DMA page; one from below 1 MB may. Every block is an untyped of the root's, from 1 KB to 256 KB, split in
 halves retyped from it and merged by a revoke of their parent; a block is
 whole whenever it is free, since what was made of it is revoked first. A
 process's space, thread and endpoint (800 bytes) are a block of 1 KB of
@@ -142,7 +151,11 @@ their own, since any untyped makes objects (os-server.md P3), and each
 thread more is another; its data is a block, its code a code table's
 entry with a count of the processes that run it. The allocator is tested
 on the host against a simulation of untyped memory
-(`tests/unit/c/test_buddy.c`).
+(`tests/unit/c/test_buddy.c`), its reserves too. In `TEST_MEMORY` builds the
+root says what the boot information holds, the extended memory it holds,
+and where the diskette's DMA buffer lies (`tests/memory`); `TEST_DMA_HIGH`
+builds retype that buffer from the highest piece of extended memory
+(`tests/memory/dma.test`).
 
 ## In test builds
 

@@ -30,4 +30,5 @@ timeout: 60
 root: memory: base {mem_base} KB, extended {mem_ext} KB
 root: memory for programs below 1 MB: {...} to {mem_end}h
 root: extended memory held: {mem_ext} KB in {...} pieces
+root: the diskette's DMA buffer above 1 MB: {mem_extended}
 hello

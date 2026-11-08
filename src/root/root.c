@@ -367,6 +367,22 @@ void far_copy(rx_u16 to, rx_u16 from, rx_u16 bytes)
     far_copy_at(to, 0, from, bytes);
 }
 
+#ifdef TEST_DMA_HIGH
+/* dma_high - tests/memory/dma.test: the diskette's DMA buffer from the
+ * highest piece of extended memory there is (memory.md M4, E4), so that its
+ * sectors cross the page register's bits 20-23 */
+static void dma_high(rx_u16 slot)
+{
+    int n;
+
+    for (n = ROOT_SLOTS_EXTENDED - 1; n >= 0; n--)
+        if (retype(SLOT(ROOT_SLOT_EXTENDED + n), CAP_SEGMENT, slot, SECTOR_SIZE,
+                   (1 << 5) | ACC_DATA) == 0)
+            return;
+    new_segment(slot, SECTOR_SIZE, 1);
+}
+#endif
+
 /* driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
  * the console's, the screen's text page; the keyboard's, the OS server's
  * control notification to signal Ctrl+Break with; the diskette's, a DMA
@@ -381,7 +397,11 @@ static void driver_device(int service)
         must(copy(s.space, CONTROL, W_DRV_DEVICE, COPY_MINT, CONTROL_BREAK, RIGHT_SEND));
     } else if (service == SERVICE_DISKETTE) {
         for (;;) {                      /* (a driver has no OS thread: the slot is free) */
+#ifdef TEST_DMA_HIGH
+            dma_high(s.server);         /* tests/memory/dma.test: near the top (M4) */
+#else
             new_segment(s.server, SECTOR_SIZE, 1);
+#endif
             r.ax = KCALL_SEGMENT << 8;  /* DL:AX = its physical address */
             r.dx = s.server;
             r.bp = 0;
@@ -390,6 +410,17 @@ static void driver_device(int service)
                 break;                  /* the 8237 does not carry past 64 KB */
             kcall(KCALL_DELETE, 0, 0, 0, s.server, 0, 0);  /* its memory stays */
         }
+#ifdef TEST_MEMORY
+        {                               /* where DMA runs (memory.md M4, E4) */
+            char line[64];
+            snprintf(line, sizeof line, "root: the diskette's DMA buffer above 1 MB: %s\n",
+                     (r.dx & 0xFF) >= 0x10 ? "yes" : "no");
+            say(line);
+            snprintf(line, sizeof line, "root: the diskette's DMA buffer at %02X%04Xh\n",
+                     r.dx & 0xFF, r.ax);
+            say(line);
+        }
+#endif
         give(s.server, W_DRV_DEVICE);
     }
 }

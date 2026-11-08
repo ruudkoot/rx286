@@ -74,7 +74,7 @@ DOSBox-X; none of their code is in the repository.
 | M1: the masks of entries past entry 15 | done (2026-11-08): with a third bug, the kernel's timers |
 | M2: the boot information, and the base memory from the BIOS | done (2026-11-08) |
 | M3: every byte of extended memory to the root | done (2026-11-08) |
-| M4: the processes' memory from all of it, and the root's room | not started |
+| M4: the processes' memory from all of it, and the root's room | done (2026-11-08) |
 | M5: the libraries for far data | not started |
 | M6: the OS server in the compact model | not started |
 | M7: 48 processes | not started |
@@ -1355,6 +1355,16 @@ less, M a few, L a week.
   `late.test`'s reader at entry 24, the table's last (E8 ran it with 1,024 slots); the suite
   of DOSBox-X, which has no extended memory, passes with the root's 1,024 slots (E8).
 - **Decisions:** D7, D8, D9.
+- **Done** (2026-11-08). The buddy's reserves (`buddy_reserve`, `grow`), each piece's free
+  paragraphs as `KCALL_SEGMENT` says; 1,024 slots for the root, its space from the memory for
+  programs; 320 block records. `many.test` (16 sound on Bochs at 16 MB, MAME at 15M, DOSBox-X
+  at 512 KB with 15 MB), `many-small.test` (1, without extended memory), `held.test` (23
+  children: the table full, not the root), `dma.test` (the buffer at F40000h on Bochs,
+  E80000h on MAME, the files sound), `late.test` and `tone.test` at the table's last entry,
+  and the reserves on the host. Not as planned: `tests/services/calls.test` compared the 64 KB
+  loads' addresses before and after a thousand spawns; with more free memory than its 16
+  loads take, another set of the free blocks may come, so it compares their number then, and
+  their addresses only when the loads take all the memory.
 
 ### M5. The libraries for far data (M)
 

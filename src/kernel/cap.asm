@@ -734,9 +734,10 @@ slot_put_descriptor:
 
 ; ----------------------------------------------------------------------------
 ; boot_root - at start: the root's space and thread, from the image's first
-; module and the kernel's own untyped memory (roadmap l4.md L5), with the
-; capabilities the root starts with (kcalls.inc, ROOT_SLOT_*): its code,
-; its data (initialised from the module) and its stack; what is left of the
+; module: its space of ROOT_SLOTS from the memory for programs (memory.md
+; M4), its thread from the kernel's own untyped memory (roadmap l4.md L5),
+; with the capabilities the root starts with (kcalls.inc, ROOT_SLOT_*): its
+; code, its data (initialised from the module) and its stack; what is left of the
 ; memory for segments and of the arena, as untyped; the module table and
 ; each other module's code and data, read-only; its own space and thread;
 ; the screen's text page; every interrupt line the kernel does not keep
@@ -749,7 +750,7 @@ boot_root:
         call ext_detect
         push ds
         pop es
-        mov si, boot_untyped
+        mov si, memory_untyped          ; (its 32 KB: not the arena's, memory.md M4)
         mov cx, ROOT_SLOTS
         call space_make                 ; BX = the space
         ASSERT nc, "boot_root: no room for a space"

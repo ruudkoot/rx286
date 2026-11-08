@@ -4,7 +4,9 @@
  * P4, D10, E10; buddy.h). A block of order k is 2^k KB. Free blocks of each
  * order are a list; a request takes the smallest free block that fits,
  * splitting a larger one in halves as it must, and a block given back merges
- * with its buddy while the buddy is free, up to the blocks buddy_add made.
+ * with its buddy while the buddy is free, up to the blocks buddy_add or a
+ * reserve made. With no free block that fits, a reserve gives one more of
+ * the largest order it has room for (memory.md M4).
  * ============================================================================ */
 
 #include "buddy.h"
@@ -25,6 +27,10 @@ struct block {
 static struct block blocks[BUDDY_BLOCKS];
 static short free_list[BUDDY_ORDERS];
 static short unused;                    /* the records not in use, linked by next */
+static struct {                         /* untypeds carved as needed (memory.md M4) */
+    rx_u16 slot, paras;                 /* its slot; its paragraphs not yet carved */
+} reserves[BUDDY_RESERVES];
+static int reserve_count;
 
 /* paras_of - an order's paragraphs */
 static rx_u16 paras_of(int order)
@@ -39,6 +45,7 @@ void buddy_init(void)
 
     for (i = 0; i < BUDDY_ORDERS; i++)
         free_list[i] = -1;
+    reserve_count = 0;
     for (i = 0; i < BUDDY_BLOCKS; i++) {
         blocks[i].state = UNUSED;
         blocks[i].next = (short)(i + 1 < BUDDY_BLOCKS ? i + 1 : -1);
@@ -134,6 +141,54 @@ int buddy_add(rx_u16 untyped, rx_u16 paragraphs)
     return count;
 }
 
+/* buddy_reserve - an untyped kept to carve blocks from as they are needed */
+int buddy_reserve(rx_u16 untyped, rx_u16 paragraphs)
+{
+    if (reserve_count == BUDDY_RESERVES || paragraphs < paras_of(0))
+        return 0;
+    reserves[reserve_count].slot = untyped;
+    reserves[reserve_count].paras = paragraphs;
+    reserve_count++;
+    return 1;
+}
+
+/* grow - one block more from the reserves, the first with room: of the
+ * largest order it has room for; 1, or 0 if none has room, or no slot or
+ * record is left. A reserve whose carve fails with a slot and a record to
+ * spare has less room than it said: it is used up */
+static int grow(void)
+{
+    rx_u16 spare;
+    int r, order;
+
+    for (r = 0; r < reserve_count; r++)
+        for (order = BUDDY_ORDERS - 1; order >= 0; order--) {
+            if (reserves[r].paras < paras_of(order))
+                continue;
+            if (unused < 0 || (spare = buddy_slot_take()) == 0)
+                return 0;               /* no record or no slot: nothing grows */
+            buddy_slot_give(spare);
+            if (carve(reserves[r].slot, order, -1) < 0) {
+                reserves[r].paras = 0;  /* (its room less than it said) */
+                break;
+            }
+            reserves[r].paras = (rx_u16)(reserves[r].paras - paras_of(order));
+            return 1;
+        }
+    return 0;
+}
+
+/* buddy_reserved - the reserves' paragraphs not yet carved */
+rx_u32 buddy_reserved(void)
+{
+    rx_u32 total = 0;
+    int r;
+
+    for (r = 0; r < reserve_count; r++)
+        total += reserves[r].paras;
+    return total;
+}
+
 /* split - a free block in halves, both free; 0, or -1 if it cannot be */
 static int split(int b)
 {
@@ -169,10 +224,14 @@ int buddy_alloc(rx_u16 paragraphs)
         order++;
     if (order == BUDDY_ORDERS)
         return -1;
-    for (k = order; k < BUDDY_ORDERS && free_list[k] < 0; k++)
-        ;
-    if (k == BUDDY_ORDERS)
-        return -1;
+    for (;;) {
+        for (k = order; k < BUDDY_ORDERS && free_list[k] < 0; k++)
+            ;
+        if (k < BUDDY_ORDERS)
+            break;
+        if (!grow())                    /* none fits: one more from the reserves (M4) */
+            return -1;
+    }
     while (k > order) {                 /* the smallest free block: halved down */
         b = free_list[k];
         if (split(b) != 0) {
