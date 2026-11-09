@@ -7,7 +7,12 @@
 # it grows with each milestone; B's 45 KB written and read back within 8 s
 # each; C's NUMBERS.TXT within 0.6 s in calls of 15 KB and 3 s in calls of
 # 512 bytes; and a sector of a run within 3 ms. M3's disk server holds
-# them all.
+# them all. M6 tightens them to what it reaches, with a tenth or more to
+# spare: B read back (from the disk server's cache) within 1 s, C's
+# NUMBERS.TXT within 0.5 s in calls of 15 KB and 1.1 s in calls of 512
+# bytes, a sector of a run within 2.6 ms (M6: 260, 420, 980 ms, 2.37 ms).
+# D's write in calls of 4 KB, 920 ms, keeps its 1 s; B's, 7.2-8.0 s with
+# the diskette's rotation, its 8 s.
 program: idle
 define: TEST_POSIX_RDTIME
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
@@ -19,8 +24,8 @@ emulators: mame
 rdtime: D, 32 KB written in calls of 4 KB: within 1000 ms: yes
 rdtime: A, KERNEL.BIN read in calls of 15 KB: within {...} ms: yes
 rdtime: B, 45 KB written in calls of 15 KB: within 8000 ms: yes
-rdtime: B, 45 KB read back in calls of 15 KB: within 8000 ms: yes
-rdtime: C, NUMBERS.TXT read in calls of 15 KB: within 600 ms: yes
-rdtime: C, NUMBERS.TXT read in calls of 512 bytes: within 3000 ms: yes
-rdtime: C, NUMBERS.TXT 20 times in calls of 15 KB: within 3000 us a sector: yes
+rdtime: B, 45 KB read back in calls of 15 KB: within 1000 ms: yes
+rdtime: C, NUMBERS.TXT read in calls of 15 KB: within 500 ms: yes
+rdtime: C, NUMBERS.TXT read in calls of 512 bytes: within 1100 ms: yes
+rdtime: C, NUMBERS.TXT 20 times in calls of 15 KB: within 2600 us a sector: yes
 rdtime: done

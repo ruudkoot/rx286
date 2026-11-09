@@ -162,17 +162,22 @@ static int owned(unsigned c, unsigned owner)
 }
 
 /* next_owner - the controller's next process with requests after the one
- * whose turn ended, in turn, or SCHED_NONE */
+ * whose turn ended, in turn, or SCHED_NONE: one look at each request, the
+ * owner nearest after it (a look at each owner's cost the AT 60 ms) */
 static unsigned next_owner(unsigned c, unsigned after)
 {
-    unsigned k, o;
+    unsigned k, gap, least = SCHED_OWNERS, best = SCHED_NONE;
+    unsigned base = after == SCHED_NONE ? SCHED_OWNERS - 1 : after;
 
-    for (k = 1; k <= SCHED_OWNERS; k++) {
-        o = (after == SCHED_NONE ? k - 1 : after + k) % SCHED_OWNERS;
-        if (owned(c, o))
-            return o;
-    }
-    return SCHED_NONE;
+    for (k = 0; k < SCHED_JOBS; k++)
+        if (jobs[k].used && jobs[k].drive / 2 == c) {
+            gap = (jobs[k].owner + SCHED_OWNERS - base - 1) % SCHED_OWNERS;
+            if (gap < least) {
+                least = gap;
+                best = jobs[k].owner;
+            }
+        }
+    return best;
 }
 
 /* sched_pick - the controller's next (sched.h) */

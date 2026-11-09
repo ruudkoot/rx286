@@ -67,6 +67,8 @@ rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segm
                 rx_u16 offset);
 /* disk_volume - a drive's volume, as the disk server says it: 0 or the error */
 rx_u16 disk_volume(unsigned drive);
+/* disk_sync - a drive's volume's sectors the disk server holds written */
+rx_u16 disk_sync(unsigned drive);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:
@@ -99,9 +101,8 @@ void test_reader(int how);
  * terminal's foreground group, its input dropped (proc.c; P11) */
 int proc_alive(int i);
 void proc_interrupt(void);
-/* proc_break_seen - a Ctrl+Break the control thread's wait for the lock
- * took, since it last asked? (proc.c; P15) */
-int proc_break_seen(void);
+/* proc_control_seen - the control bits the control thread's lock waits took */
+rx_u16 proc_control_seen(void);
 /* proc_lend - entry i's call lends its data segment to a driver, the lock
  * given up (1), or no longer (0): a brk that would replace it waits
  * (proc.c; lock held; P15) */

@@ -1,0 +1,19 @@
+# Write-behind and the test's end (roadmap disk-scheduler.md M6, D8):
+# tests/posix/behind.c without its wait (TEST_BEHIND_NOWAIT). The test ends
+# two seconds in, before the disk server's write-behind could have written
+# the file (two to five seconds after), and its end's sync puts it on the
+# host's image: the kernel asks the OS server to write what it and the disk
+# server hold before it ends the test.
+program: idle
+define: TEST_POSIX_BEHIND
+emulators: bochs mame
+define: TEST_BEHIND_NOWAIT
+keys: {wait 100}
+match: contains
+timeout: 300
+file: C /BEHIND.TXT behind\n
+file: C /SYNCED.TXT synced\n
+---
+behind: written and fsync'd (0): 0
+behind: written, not fsync'd (0): 0
+behind: done

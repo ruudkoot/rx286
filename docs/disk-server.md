@@ -27,8 +27,8 @@ write passes a segment: the process's data, or the OS server's cache.
 |---|---|---|
 | `DS_VOLUME` | BL a volume | BX 0 or the error; CX the low word of its sectors, SI the high word; DI `DSV_REMOVABLE` for a diskette |
 | `DS_READ` | BL a volume; BH the sectors, 1 to `DS_RUN_MAX` (64); CX the low word of the first; SI's low byte its bits 16-23, its high byte the process (the OS server's entry + 1, 0 its own; M5's shares); DI the offset in the segment passed | BX 0 or the error; CX the sectors moved |
-| `DS_WRITE` | the same, the sectors from the segment | the same, the sectors on the disk when the reply comes |
-| `DS_SYNC` | BL a volume, or `DS_ALL` | BX 0, or the first error of its dirty sectors' writes |
+| `DS_WRITE` | the same, the sectors from the segment | the same: the sectors on a diskette when the reply comes, in the cache for a fixed disk (M6) |
+| `DS_SYNC` | BL a volume, or `DS_ALL` | BX 0, or the first error of its dirty sectors' writes, once they are written |
 | `DS_EJECT` | BL a volume | BX 0: its sectors no longer cached, except the dirty ones |
 
 A volume's sectors are numbered from 0, in 32 bits. There are
@@ -40,9 +40,9 @@ The disk server reads a fixed disk's master boot record at its first
 `DS_VOLUME`. If the disk has no FAT12 partition, the answer is
 `E_NOT_FAT12`; if there is no disk, `E_TIMEOUT`. Until M3 the OS server
 read the boot record itself (`vol.c`), and only up to 64K sectors. The
-process's byte is for M5's fair shares. Writes go through to the disk until
-M6 brings write-behind, so `DS_SYNC` has nothing to write yet. `DS_EJECT`
-gets its meaning with M8's removable volumes.
+process's byte is for M5's fair shares. A fixed disk's writes are written
+behind (*Write-behind and read-ahead*), so a write's error may come only at
+a later `DS_SYNC`. `DS_EJECT` gets its meaning with M8's removable volumes.
 
 ## Its threads
 
@@ -58,7 +58,8 @@ of `DS_STACK_SIZE` bytes. Each then runs on a stack segment of its own of
    - A read that the cache holds whole is copied and answered at once.
    - Any other request is queued. Its reply is saved (`KCALL_SAVE_REPLY`)
      and its controller's thread is woken.
-2. **The fixed disks' thread** (`DS_N_FIXED`) serves C and D.
+2. **The fixed disks' thread** (`DS_N_FIXED`) serves C and D, and writes
+   their dirty sectors behind.
 3. **The diskettes' thread** (`DS_N_DISKETTE`) serves A and B.
 
 A controller's thread loops:
@@ -144,6 +145,61 @@ one another in the order they asked. The host's test runs the choices
 together against a model of C (E6's): two sequential readers far apart
 get 113 KB/s against C-LOOK's 41, Jain's index 0.997; an interactive reader
 beside a greedy scan waits no longer than under C-LOOK.
+
+## Write-behind and read-ahead
+
+Since roadmap disk-scheduler.md M6 (D7, D8):
+- **A fixed disk's write** is answered once its sectors are in the cache,
+  dirty. Every `WB_TICKS` (2.5 s) the fixed disks' thread writes the
+  sectors that were dirty at its last pass, and marks those dirty now
+  (`DC_AGED`). A sector is thus on the disk within 5 s, and a sector written
+  again meanwhile keeps its age. A pass writes in the sectors' order, as
+  runs of neighbouring blocks of neighbouring sectors, `DRV_DISK_RUN_MAX` at
+  most.
+- **A diskette's write** goes to the disk at once, while its motor runs:
+  a diskette can be taken out at any time, and its change line is not read
+  until M8.
+- **`DS_SYNC`** is queued as a request. The fixed disks' thread writes all
+  the volume's dirty sectors, or both fixed disks' for `DS_ALL`, and then
+  answers. A diskette's volume has nothing to write, and is answered at
+  once.
+- **Read-ahead:** a read that missed the cache and began where the same
+  process's last read of the drive ended has the rest of its cylinder read
+  after it, into the cache, as the server's own request (`READ_AHEAD`), one
+  at a time a drive. It is the reader's, so that it comes next in the
+  reader's turn and is charged to its share: as anyone else's, the turn's
+  wait for the reader's next read let that read come first and fetch the
+  sectors itself. It takes a free request's record, no more than
+  `DS_RUN_MAX` sectors, and the blocks the cache can spare; it copies
+  nothing and answers no one.
+
+The writes this saves were counted on E5's workloads, against M5, on
+Bochs: the fixed disks' write commands fell from 26 to 4 in `rdtime` and
+from 100 to 18 in `trace-copy`, and their sectors written from 82 to 67 and
+from 105 to 82. Most of the saving is the FAT and the directory, which the
+OS server writes at the end of each call that changes them.
+
+The sectors a fixed disk holds dirty are lost if the machine stops before
+they are written. Three things write them:
+- **`fsync`**, which the OS server turns into a `DS_SYNC` of the file's
+  volume after writing the file's sectors (*docs/processes.md*);
+- **Ctrl+Alt+Del**, after which the keyboard driver signals the OS server's
+  control thread (`CONTROL_REBOOT`). The thread writes all it holds, calls
+  `DS_SYNC` with `DS_ALL`, and asks the driver to reset (`DRV_KBD_RESET`).
+  The driver resets anyway 10 s after the keys, or at once at a second
+  Ctrl+Alt+Del;
+- **a test's end** (*docs/testing.md*), in the same way (`CONTROL_SYNC`).
+
+A dirty block is not evicted. Once a fixed disk's write leaves more than
+half the cache dirty, both fixed disks' dirty blocks are written at once,
+so that reads, and the diskettes, keep room. If every block is still dirty
+or busy, a write goes from the process's segment straight to the disk, and
+a read straight into it, a sector at a time.
+
+A sector that a write-behind pass fails to write is dropped from the cache,
+as any refused write is, and the failure is said on the log. The error is
+kept for the volume: its next `DS_SYNC`, and so the next `fsync` of a file
+on it, returns it.
 
 ## Retries
 

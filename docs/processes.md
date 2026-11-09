@@ -218,7 +218,7 @@ fails. `stat` of an open file gives its size as its descriptions have it
 | Call | Arguments | What the server does |
 |---|---|---|
 | `PX_OPEN` | SI the path, BX the flags | a descriptor, the lowest free: `O_RDONLY`, `O_WRONLY` or `O_RDWR` (`O_ACCMODE`); `O_CREAT` makes a volume's file, `O_EXCL` refuses one there (`EEXIST`), `O_TRUNC` empties it, `O_APPEND` writes at its end, `O_DIRECTORY` refuses a file (`ENOTDIR`), `O_CLOEXEC` marks it; access mode 3 is `EINVAL`, a create in `/`, `/dev` or `/z` `EROFS` |
-| `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written; the error if they are not (`EROFS` for a diskette protected), and they are tried again by a later `fsync` or close of another description |
+| `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written to the disk server (which writes a fixed disk's within 5 s); the error if they are not (`EROFS` for a diskette protected), and they are tried again by a later `fsync` or close of another description |
 | `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many (32,767 at most, `SSIZE_MAX`: more moves that many) | by the kind: a volume's file, through the cache (a write past its end leaves a hole of zeros; one past what the volume could hold is `EFBIG`; one that fails leaves the file as it was); a terminal (*docs/terminals.md*; a read 0 where the processes have no keys); `/dev/null`; a printer; a device (*The devices* below); a pipe; a file of `/z`, read only |
 | `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset's bits 0-14, its bits 15-30 in SI (so that no result is negative); `ESPIPE` for a pipe, a terminal or a device; past 2 GB, `EOVERFLOW` |
 | `PX_DUP`, `PX_DUP2` | BX the descriptor (CX the one it becomes) | another descriptor of the same description |
@@ -229,7 +229,7 @@ fails. `stat` of an open file gives its size as its descriptions have it
 | `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): within one directory the entry's name changed in its place; else the entry made anew in the new directory, the old deleted, a directory's ".." its new parent. A file of the new name is replaced (`EBUSY` while it is open). Its sectors are written before its open descriptions and every current directory in it follow it. A directory into itself or one inside it, or "." or "..", is `EINVAL`; a file to "name/" `ENOTDIR`; over a current directory, `EBUSY`; one that would take a current directory in it past `PX_PATH_MAX` or 12 names, `ENAMETOOLONG` (the files deep in a directory moved deeper may pass those limits: nothing reaches them until it is moved back). A long name's entries, from a disk written elsewhere, go with the old entry, as with `unlink` |
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short, `EINVAL` if there is none) |
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, a dword as `ST_INO` ("." and ".." their directories'; in `/`, a drive's the server's own number, as a mount point's is), and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end; room for less than a record, `EINVAL`. libc's `opendir` and `readdir` read through it (`dirent.h`) |
-| `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk, or the error (`EROFS` for a diskette protected); a pipe, a terminal or a device is `EINVAL` |
+| `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk, and every other sector of its volume the disk server held dirty (`DS_SYNC`), or the error (`EROFS` for a diskette protected); a pipe, a terminal or a device is `EINVAL` |
 | `PX_PIPE` | | a pipe (P9): its read end's descriptor, and its write end's in SI |
 | `PX_IOCTL` | BX the descriptor, CX a request (`RXIO_*`), SI its argument | a device's request (*The devices* below); `ENOTTY` for any other descriptor or request, `EFAULT` for an argument past the data (P12) |
 | `PX_POLL` | SI the `struct pollfd`s (`PF_FD`, `PF_EVENTS`, `PF_REVENTS`; `PF_BYTES` each), CX how many (`OPEN_MAX` at most), BX the timeout in ms (-1: none; 0: at once) | how many have news, each one's `PF_REVENTS` set: `POLLIN` (bytes, or a pipe's end; a terminal where the processes have no keys, whose read is 0 at once), `POLLOUT` (room: `PIPE_BUF` bytes in a pipe), `POLLERR` (a pipe without a reader), `POLLHUP` (without a writer), `POLLNVAL` (not open; `POLLPRI` never). It waits in the server thread: the terminals it asks about wake it, as their reader; the rest it looks at each tick. A signal's handler ends it with `EINTR`, `SA_RESTART` or not (XSH poll); a stop makes it again (P12) |
@@ -246,7 +246,11 @@ of the server's, 4 without extended memory (`src/os/cache.c`,
 (*docs/disk-server.md*): the FAT, in every copy,
 and the directories are written at the end of each call that changed them;
 a file's data at its close, its `fsync`, or when its sector leaves the
-cache. A sector the driver refuses to write is dropped from the cache: the
+cache. On a fixed disk, the disk server holds what it is given for up to
+5 s before writing it (roadmap disk-scheduler.md M6), so a process that
+must know its file is on the disk calls `fsync`, which waits for the
+volume's `DS_SYNC`. Ctrl+Alt+Del and a test's end write everything first
+(*docs/disk-server.md*). A sector the driver refuses to write is dropped from the cache: the
 call that changed it gets the error, `EROFS` for a write-protected
 diskette, and the disk's copy counts again. A write within a file's
 clusters changes data sectors alone, whose error its `fsync` or close

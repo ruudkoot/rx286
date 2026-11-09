@@ -17,6 +17,16 @@
  * the cache and the disk in runs of neighbouring blocks, copies them to or
  * from the segment passed, and answers. The lock guards the cache, the
  * queues and the requests, and none holds it across a driver's call.
+ *
+ * Since M6 (D7, D8): a fixed disk's write is answered once it is in the
+ * cache, and the fixed disks' thread writes what has been dirty for a pass
+ * or two (WB_TICKS each: within 5 s) in sorted runs, all of a volume's at
+ * DS_SYNC, and all of both disks' once half the cache is dirty (a failure
+ * kept for the volume's next DS_SYNC); a diskette's is written at once,
+ * while its motor runs. A
+ * read that goes on from where the same process's last read ended, and
+ * missed, has the rest of its cylinder read after it (read-ahead), as the
+ * server's own request.
  * ============================================================================ */
 
 #include <string.h>
@@ -44,6 +54,11 @@
                                            then a reset and one more (D14) */
 #define DISKETTE_TRIES 3                /* a diskette's: the BIOS's three, each after a
                                            recalibration (the driver forgets its cylinder) */
+#define WB_TICKS 125                    /* a write-behind pass each 2.5 s: a sector dirty
+                                           at one is written at the next (D8: within 5 s) */
+#define READ_AHEAD 0x80                 /* a request's kind: the server's own read-ahead */
+
+#define FLUSH_RUNS 16                   /* the runs a flush's walk of the cache finds */
 
 RX_STATIC_ASSERT(SCHED_JOBS >= DS_REQUESTS, jobs);
 RX_STATIC_ASSERT(DS_SLOT_REQUEST + 2 * DS_REQUESTS <= DS_SLOTS, request_slots);
@@ -78,6 +93,17 @@ static struct {
     rx_u16 offset;
 } requests[DS_REQUESTS];
 static rx_u8 job_request[SCHED_JOBS];  /* each job's request */
+static rx_u32 next_read[DS_VOLUMES];   /* each drive's last read's end, and whose: a */
+static rx_u8 next_owner[DS_VOLUMES];   /*    read from there goes on (M6, D7) */
+static rx_u16 wb_last;                  /* the last write-behind pass's tick */
+static struct dc_run flush_runs[FLUSH_RUNS];    /* (the fixed disks' thread's alone) */
+static int receiving = -1;              /* the request's record thread 1 receives into: not
+                                           free for a read-ahead, though unused */
+static rx_u16 wb_error[DS_VOLUMES];     /* a write behind's failure, for the volume's next
+                                           DS_SYNC */
+static const char msg_behind[] = "disk: write-behind failed\n";
+
+static void drain(int aged_only);
 
 /* dc_segment - the cache's segment k (cache.h) */
 rx_u8 RX_FAR *dc_segment(unsigned k)
@@ -271,24 +297,29 @@ static void answer(unsigned q, rx_u16 error, rx_u16 cx, rx_u16 si, rx_u16 di)
 
 /* serve_read - a request's sectors from the cache, those it lacks read in
  * runs into windows of neighbouring blocks, all copied to the segment
- * passed: 0 or the error, *moved the sectors copied */
-static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved)
+ * passed: 0 or the error, *moved the sectors copied. The server's own
+ * read-ahead (READ_AHEAD, M6) reads into the cache alone, passes over what
+ * it holds, and stops where no block is free */
+static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved, int *missed)
 {
     unsigned count = requests[q].count, i = 0, n, got, done, k;
     rx_u16 b, first, error = 0;
-    int gone;
+    int gone, copy = requests[q].kind == DS_READ;
 
+    *missed = 0;
     while (i < count) {
         take();
         b = dc_find(key(drive, lba + i));
-        if (b != DC_NONE && !(dc_state(b) & DC_BUSY)) {
-            dc_hit(b);
-            if (!fits(q)) {             /* revoked since the last run (M4) */
-                give();
-                error = E_FAULT;
-                break;
+        if (b != DC_NONE && (!copy || !(dc_state(b) & DC_BUSY))) {
+            if (copy) {
+                dc_hit(b);
+                if (!fits(q)) {         /* revoked since the last run (M4) */
+                    give();
+                    error = E_FAULT;
+                    break;
+                }
+                memcpy(place(q, i), dc_bytes(b), SECTOR_SIZE);
             }
-            memcpy(place(q, i), dc_bytes(b), SECTOR_SIZE);
             give();
             i++;
             continue;
@@ -297,6 +328,8 @@ static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved
             ;
         got = b == DC_NONE ? dc_window(key(drive, lba + i), n, &first) : 0;
         give();
+        if (got == 0 && !copy)
+            break;                      /* (a read-ahead: not worth a block another wants) */
         if (got == 0) {                 /* no block free: straight into the segment */
             error = tried(DRV_DISK_READ, drive, lba + i, 1, REQUEST_SEGMENT(q),
                           (rx_u16)(requests[q].offset + i * SECTOR_SIZE), &done);
@@ -307,8 +340,9 @@ static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved
         }
         error = tried(DRV_DISK_READ, drive, lba + i, got, window_segment(first),
                       window_offset(first), &done);
+        *missed = 1;
         take();
-        gone = !fits(q);                /* the segment revoked while the driver read (a */
+        gone = !copy || !fits(q);       /* the segment revoked while the driver read (a */
         for (k = 0; k < got; k++) {     /*    process ended): nothing copied into it (M4) */
             b = (rx_u16)(first + k);
             if (k < done) {
@@ -319,7 +353,7 @@ static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved
                 dc_drop(b);
             }
         }
-        if (gone) {
+        if (gone && copy) {
             error = E_FAULT;
             done = 0;
         }
@@ -340,6 +374,7 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
 {
     unsigned count = requests[q].count, i = 0, n, done, k;
     rx_u16 b, first, error = 0;
+    int full;
 
     while (i < count) {
         take();
@@ -372,9 +407,17 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
         for (k = 0; k < n; k++) {
             b = (rx_u16)(first + k);
             memcpy(dc_bytes(b), place(q, i + k), SECTOR_SIZE);
-            dc_set(b, DC_BUSY | DC_DIRTY);
+            dc_set(b, drive >= FIXED ? (rx_u8)((dc_state(b) & DC_AGED) | DC_DIRTY)
+                                     : DC_BUSY | DC_DIRTY);
         }
+        full = dc_dirty() > dc_blocks() / 2;
         give();
+        if (drive >= FIXED) {           /* written behind, within 5 s (D8): the age it */
+            i += n;                     /*    had kept, so rewriting it delays it not; */
+            if (full)                   /*    half the cache dirty: all written now, */
+                drain(0);               /*    so that reads and A and B have room */
+            continue;
+        }
         error = tried(DRV_DISK_WRITE, drive, lba + i, n, window_segment(first),
                       window_offset(first), &done);
         take();
@@ -392,6 +435,125 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
     }
     *moved = i;
     return error;
+}
+
+/* flush - a drive's dirty blocks written, every one or only those that
+ * have aged (dirty since the pass before last), in their sectors' order,
+ * neighbouring blocks of neighbouring sectors as one run, FLUSH_RUNS runs
+ * a walk of the cache (dc_runs); a block the driver refused is dropped, the
+ * disk's copy counting again: 0 or the first error */
+static rx_u16 flush(unsigned drive, int aged_only)
+{
+    rx_u16 b, error = 0, e;
+    unsigned n, i, k, done;
+
+    for (;;) {
+        take();
+        n = dc_runs(drive, aged_only ? DC_DIRTY | DC_AGED : DC_DIRTY, DRV_DISK_RUN_MAX,
+                    flush_runs, FLUSH_RUNS);
+        for (i = 0; i < n; i++)
+            for (k = 0; k < flush_runs[i].count; k++)
+                dc_set((rx_u16)(flush_runs[i].first + k), DC_BUSY | DC_DIRTY);
+        give();
+        if (n == 0)
+            return error;
+        for (i = 0; i < n; i++) {
+            b = flush_runs[i].first;
+            e = tried(DRV_DISK_WRITE, drive, flush_runs[i].key & 0xFFFFFFUL, flush_runs[i].count,
+                      window_segment(b), window_offset(b), &done);
+            take();
+            for (k = 0; k < flush_runs[i].count; k++)
+                if (k < done)
+                    dc_set((rx_u16)(b + k), DC_CLEAN);
+                else
+                    dc_drop((rx_u16)(b + k));
+            give();
+            if (e && !error)
+                error = e;
+        }
+    }
+}
+
+/* age - a drive's dirty blocks marked as dirty since this pass */
+static void age(unsigned drive)
+{
+    take();
+    dc_mark(drive, DC_DIRTY, DC_AGED);
+    give();
+}
+
+/* drain - both fixed disks' dirty blocks written, every one or the aged; a
+ * failure said on the log and kept for the volume's next DS_SYNC */
+static void drain(int aged_only)
+{
+    unsigned d;
+    rx_u16 e;
+
+    for (d = FIXED; d < DS_VOLUMES; d++)
+        if ((e = flush(d, aged_only)) != 0) {
+            rx_log(msg_behind, sizeof msg_behind - 1);
+            if (!wb_error[d])
+                wb_error[d] = e;
+        }
+}
+
+/* behind - the fixed disks' write-behind pass, if it is time: what aged
+ * written, what is left aged (D8) */
+static void behind(rx_u16 now)
+{
+    unsigned d;
+
+    if ((rx_u16)(now - wb_last) < WB_TICKS)
+        return;
+    wb_last = now;
+    if (dc_dirty() == 0)
+        return;                         /* (nothing to write or to age: no scan) */
+    drain(1);
+    for (d = FIXED; d < DS_VOLUMES; d++)
+        age(d);
+}
+
+/* read_ahead - after a read that went on from the same process's last and
+ * missed: the rest of its cylinder queued, as the server's own request (D7),
+ * if a request's record is free, the drive has no other read-ahead queued
+ * and the volume has the sectors. It is the reader's, so that it comes next
+ * in the reader's turn and is charged to it: as another's, the turn's wait
+ * for the reader's next read (D5) let that read come first, and fetch the
+ * sectors itself */
+static void read_ahead(unsigned drive, rx_u32 end, rx_u8 owner)
+{
+    rx_u32 per = (rx_u32)drives[drive].heads * drives[drive].track, cylinder, stop;
+    unsigned q = DS_REQUESTS, k, job;
+
+    if (!drives[drive].known || per == 0)
+        return;
+    cylinder = end / per;
+    stop = (cylinder + 1) * per;
+    if (stop > volumes[drive].start + volumes[drive].sectors)
+        stop = volumes[drive].start + volumes[drive].sectors;
+    if (stop <= end || stop - end > DS_RUN_MAX)
+        return;
+    take();
+    for (k = 0; k < DS_REQUESTS; k++)
+        if (!requests[k].used) {
+            if ((int)k != receiving)
+                q = k;
+        } else if (requests[k].kind == READ_AHEAD && requests[k].volume == drive) {
+            q = DS_REQUESTS;            /* (one at a time a drive) */
+            break;
+        }
+    if (q < DS_REQUESTS && (job = sched_add(drive, end, (rx_u16)cylinder, (rx_u16)(stop - end), 0,
+                                            owner, (rx_u16)rx_ticks())) != SCHED_NONE) {
+        requests[q].used = 1;
+        requests[q].kind = READ_AHEAD;
+        requests[q].volume = (rx_u8)drive;
+        requests[q].count = (rx_u8)(stop - end);
+        requests[q].sector = end - volumes[drive].start;
+        requests[q].owner = owner;
+        requests[q].job = (rx_u8)job;
+        job_request[job] = (rx_u8)q;
+    }
+    give();
 }
 
 /* probe - a fixed disk's volume, from its master boot record's first FAT12
@@ -439,10 +601,30 @@ static rx_u16 probe(unsigned drive)
 /* serve - a request a controller's thread picked: done, and answered */
 static void serve(unsigned q)
 {
-    unsigned drive = requests[q].volume, moved = 0;
+    unsigned drive = requests[q].volume, moved = 0, d;
     rx_u32 lba = volumes[drive].start + requests[q].sector;
-    rx_u16 error;
+    rx_u16 error = 0;
+    int missed, on;
 
+    if (requests[q].kind == READ_AHEAD) {
+        serve_read(q, drive, lba, &moved, &missed);
+        take();
+        requests[q].used = 0;           /* (no one to answer) */
+        give();
+        return;
+    }
+    if (requests[q].kind == DS_SYNC) {  /* its drive's dirty blocks, all of them, and */
+        for (d = FIXED; d < DS_VOLUMES; d++)    /* a write behind's failure since */
+            if (requests[q].sector == DS_ALL || d == drive) {
+                if ((on = flush(d, 0)) == 0)
+                    on = wb_error[d];
+                wb_error[d] = 0;
+                if (on && !error)
+                    error = (rx_u16)on;
+            }
+        answer(q, error, 0, 0, 0);
+        return;
+    }
     if (requests[q].kind == DS_VOLUME) {
         error = probe(drive);
         if (error)
@@ -454,10 +636,16 @@ static void serve(unsigned q)
     }
     if (!fits(q))
         error = E_FAULT;
-    else if (requests[q].kind == DS_READ)
-        error = serve_read(q, drive, lba, &moved);
-    else
+    else if (requests[q].kind == DS_READ) {
+        on = requests[q].owner == next_owner[drive] && lba == next_read[drive];
+        error = serve_read(q, drive, lba, &moved, &missed);
+        next_owner[drive] = requests[q].owner;
+        next_read[drive] = lba + moved;
+        if (on && missed && !error)
+            read_ahead(drive, lba + moved, requests[q].owner);
+    } else {
         error = serve_write(q, drive, lba, &moved);
+    }
     answer(q, error, (rx_u16)moved, 0, 0);
 }
 
@@ -469,20 +657,23 @@ static void controller(unsigned c, unsigned n)
 {
     struct sched_choice ch;
     const struct sched_job *j;
-    rx_u16 unit, ep, cylinder, now;
+    rx_u16 unit, ep, cylinder, now, wait;
     unsigned q;
     int pick;
 
     for (;;) {
-        take();
         now = (rx_u16)rx_ticks();
+        if (c == 1 && ready)
+            behind(now);                /* (the fixed disks': D8) */
+        take();
         pick = ready ? sched_pick(c, now, &ch) : SCHED_EMPTY;
         if (pick != SCHED_SERVE) {
             give();
-            if (pick == SCHED_WAIT)
-                kcall(KCALL_TIMER, 0, 0,
-                      (rx_u16)((rx_i16)(ch.until - now) > 0 ? ch.until - now : 1), NOTIFY(n),
-                      0, 0, 0, 0);
+            wait = c == 1 ? (rx_u16)(WB_TICKS - (rx_u16)(now - wb_last)) : 0;
+            if (pick == SCHED_WAIT && (wait == 0 || (rx_u16)(ch.until - now) < wait))
+                wait = (rx_i16)(ch.until - now) > 0 ? (rx_u16)(ch.until - now) : 1;
+            if (wait)
+                kcall(KCALL_TIMER, 0, 0, wait, NOTIFY(n), 0, 0, 0, 0);
             kcall(KCALL_RECV, 0, 0, 0, NOTIFY(n), 0, 0, 0, 0);
             continue;
         }
@@ -532,7 +723,9 @@ static rx_u16 queue(unsigned q)
         return E_BUSY;
     take();
     job = sched_add(drive, lba, cylinder, requests[q].kind == DS_VOLUME ? 1 : requests[q].count,
-                    requests[q].kind == DS_WRITE, requests[q].owner, (rx_u16)rx_ticks());
+                    requests[q].kind == DS_WRITE || requests[q].kind == DS_SYNC,
+                    requests[q].owner, (rx_u16)rx_ticks());     /* (a sync: no wait for its
+                                                                   next read after it, D5) */
     if (job == SCHED_NONE) {
         give();
         kcall(KCALL_SEND, 0, E_BUSY, 0, REQUEST_REPLY(q), 0, 0, 0, 0);
@@ -602,6 +795,8 @@ static int take_call(unsigned q, struct rx_kregs *r)
                 dc_hit(b);
                 memcpy(place(q, k), dc_bytes(b), SECTOR_SIZE);
             }
+            next_owner[v] = requests[q].owner;  /* (where it ended: a read from */
+            next_read[v] = volumes[v].start + sector + count;  /* there goes on, M6) */
             give();
             r->cx = (rx_u16)count;
             break;
@@ -613,7 +808,21 @@ static int take_call(unsigned q, struct rx_kregs *r)
             return 0;
         requests[q].used = 0;
         break;
-    case DS_SYNC:                       /* (written through until M6: nothing dirty) */
+    case DS_SYNC:                       /* a fixed disk's dirty blocks: the fixed disks' */
+        if (v != DS_ALL && v >= DS_VOLUMES) {   /* thread writes them, then answers; */
+            error = E_INVAL;            /*    a diskette's are written at once (M6) */
+            break;
+        }
+        if (v != DS_ALL && v < FIXED)
+            break;
+        requests[q].volume = v == DS_ALL ? FIXED : (rx_u8)v;
+        requests[q].sector = v == DS_ALL ? DS_ALL : 0;
+        requests[q].count = 1;
+        requests[q].used = 1;
+        error = queue(q);
+        if (error == 0)
+            return 0;
+        requests[q].used = 0;
         break;
     case DS_EJECT:
         if (v >= DS_VOLUMES) {
@@ -634,7 +843,8 @@ static int take_call(unsigned q, struct rx_kregs *r)
     return 1;
 }
 
-/* free_request - a request's record free, or -1 */
+/* free_request - a request's record free, or -1: thread 1's to receive
+ * into, which a read-ahead must not take meanwhile (receiving) */
 static int free_request(void)
 {
     int k;
@@ -642,8 +852,9 @@ static int free_request(void)
     take();
     for (k = 0; k < DS_REQUESTS && requests[k].used; k++)
         ;
+    receiving = k < DS_REQUESTS ? k : -1;
     give();
-    return k < DS_REQUESTS ? k : -1;
+    return receiving;
 }
 
 /* setup - thread 1, at the start: each drive's geometry from its driver,

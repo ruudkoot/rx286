@@ -128,7 +128,7 @@ simulator; none of their code is in the repository.
 | M3: the disk server | done (2026-11-09) |
 | M4: waiting without the lock | done (2026-11-09) |
 | M5: fairness | done (2026-11-09) |
-| M6: read-ahead and write-behind | not started |
+| M6: read-ahead and write-behind | done (2026-11-09) |
 | M7: the cache's memory | not started |
 | M8: removable volumes and `/mnt` | not started |
 | M9: the formatter | not started |
@@ -1904,6 +1904,84 @@ less, M a few, L a week.
     more and the write commands by four times or more (E10: 14-22% and 4-10 times);
   - speed.test's budgets are tightened to what M6 reaches.
 - **Decisions:** D7, D8.
+- **Done** (2026-11-09). The disk server answers a fixed disk's write once its sectors are in
+  the cache. Every 2.5 s the fixed disks' thread writes what was dirty at its last pass, so a
+  sector is on the disk within 5 s, in the sectors' order and as runs of neighbouring blocks.
+  `DS_SYNC` is queued, and is answered once the volume's dirty sectors are written. A
+  diskette's write still goes to the disk at once. `fsync` ends with a `DS_SYNC` of the
+  file's volume. A read that misses and goes on from the same process's last has the rest of
+  its cylinder read after it, as the server's own request. Ctrl+Alt+Del and a test's end
+  write everything first:
+  - **Ctrl+Alt+Del:** the keyboard driver signals the OS server's control thread
+    (`CONTROL_REBOOT`). The thread writes what it holds, syncs the disk server and calls
+    `DRV_KBD_RESET`. The driver resets anyway after 10 s, or at once at a second press.
+  - **A test's end:** in two steps (`TEST_END_SYNC`, `TEST_END_NOW`), and `TEST_END_NOSYNC`
+    builds leave the sync out.
+
+  The tests, on Bochs and MAME: `behind.test` (both files written behind, without the end's
+  sync), `behind-end.test` (by the end's sync), `behind-fsync.test` (the fsync'd file
+  without either) and `behind-reset.test` (by Ctrl+Alt+Del's sync, two seconds in).
+  `behind-small.test` runs fsrand2 on Bochs without extended memory, with a cache of 4 blocks.
+  Two of the tests were checked by breaking what they test: `behind-end` fails in a
+  `TEST_END_NOSYNC` build, and `behind-reset` fails once the OS server leaves out the
+  reboot's sync.
+
+  The fixed disks' writes on E5's workloads, against M5, counted at the driver's calls:
+
+  | | write commands | sectors written |
+  |---|---|---|
+  | rdtime, Bochs | 26 → 4 | 82 → 67 (-18%) |
+  | trace-copy, Bochs | 100 → 18 | 105 → 82 (-22%) |
+  | rdtime, MAME | 26 → 4 | 82 → 67 (-18%) |
+  | trace-copy, MAME | 100 → 23 | 105 → 88 (-16%) |
+
+  speed.test on MAME, M5's in brackets: D's 32 KB in calls of 4 KB 920 ms (960); A at
+  59.6 µs a byte (60.4); B's 45 KB written 7,180 ms (7,160) and read back 260 (260); C's
+  NUMBERS.TXT 420 ms (440) in calls of 15 KB and 980 (980) in calls of 512 bytes, the
+  second from the cache; a sector of a run 2.37 ms (2.37). The budgets that leave room are tightened, each with a tenth or
+  more to spare: B's read back to 1 s, C's to 0.5 s and 1.1 s, a sector to 2.6 ms. D's
+  stays at 1 s, and so does B's write at 8 s: it moves between 7.2 and 8.0 s as the
+  diskette's rotation catches or misses a sector after its FAT's seek, with the same
+  commands. `make check` passes on Bochs (148), DOSBox-X (62) and MAME (123), with 212 unit
+  tests, and `make check-ia16` passes (148).
+  - Not as planned:
+    - **Read-between and read-behind are not done:** read-ahead on a sequential miss
+      alone, which E6 gave all of D7's gain on a sequential read. They go to *Later*.
+    - **The driver does not hold the read-ahead as its next run** (D7, D2). The read-ahead
+      is the server's own request, sent after the demanded run has been answered. On a
+      diskette it may then wait for a revolution, which the process's next read would have
+      waited anyway.
+    - **Half the cache dirty writes it all.** D8's "sooner when the cache needs the room":
+      a dirty block is never evicted, so without a bound a copy from A to C would fill a
+      small cache with C's dirty blocks within the 5 s, and A's reads would go a sector at a
+      time. A fixed disk's write that leaves more than half the cache dirty has both fixed
+      disks' dirty blocks written at once.
+    - **A write-behind's failure is kept for the volume.** D8 does not say where it goes.
+      The sector is dropped, as any refused write is, and the failure is said on the log.
+      The volume's next `DS_SYNC`, and so the next fsync of a file on it, returns it.
+    - **The AT's cost of a walk.** A walk of the cache, with a division for each block,
+      cost the AT 16 ms on MAME's 500 blocks. The first flush walked it once for each run,
+      and the scheduler's turn looked at each of its 64 owners, which cost 60 ms. M6 then
+      wrote D's 32 KB 100 ms slower than M5 (1,060 ms). A flush now finds 16 runs in one
+      walk (`dc_runs`), the ageing is one more (`dc_mark`), a pass with nothing dirty walks
+      nothing, and the next owner comes from one look at each request.
+    - **The read-ahead is the reader's.** As the server's own request, the turn's wait for
+      the reader's next read (D5) let that read come first and fetch the sectors itself,
+      and each such miss queued another read-ahead, which waited for the turn's end. Now it
+      is charged to the reader and comes next in its turn, one at a time a drive. A
+      `DS_SYNC` counts as a write, so that no wait for a next read follows it.
+    - **The image's 2 KB.** M6 first grew the image by 2.6 KB, and a machine without
+      extended memory gives its processes what lies past the image's end, on a kilobyte:
+      `many-small.test`'s parent forked 10 of its 12 children. The read-ahead now goes
+      through `serve_read`, copying nothing, in place of a function of its own, and
+      `dc_check` is the host's test's alone (`DC_CHECK`). The processes' memory now begins
+      1 KB past M5's, not 2, and the 12 fork again.
+    - **A race the read-ahead brought,** found by `fsrand2.test`: the read-ahead took the
+      request's record that thread 1 was waiting to receive a call into, and the call's
+      fields then overwrote it (`EIO` on B). Thread 1's record is now kept from it.
+    - **An fsync writes all its volume holds,** not only the file's sectors. behind.c writes
+      its fsync'd file first, so that the other's sectors stay dirty until write-behind or
+      the end's sync.
 
 ### M7. The cache's memory (M)
 
@@ -1981,6 +2059,8 @@ Each needs a roadmap of its own, or a real AT:
 - **RAID and LVM** (D18).
 - **FAT16 and VFAT long names:** volumes past 32 MB, mixed case.
 - **Shares per user,** with the multi-user roadmap (D5).
+- **Read-between and read-behind** (D7; M6 did read-ahead alone), and **the driver holding
+  the read-ahead as its next run** (D2), which needs the driver's queue of runs.
 
 ### Why this order
 

@@ -43,6 +43,8 @@ void scratch_take(void);
 void scratch_give(void);
 /* scratch_text - the calling thread's scratch's text, for a path */
 char *scratch_text(void);
+/* vfs_sync - every volume's changed sectors written (the lock held) */
+void vfs_sync(void);
 /* cache_dirty_in - is any of `count` sectors from `sector` of a drive dirty? */
 int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count);
 /* cache_drop - `count` sectors from `sector` of a drive out of the cache */

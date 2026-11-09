@@ -99,10 +99,10 @@ int main(void)
     written("D, 32 KB written in calls of 4 KB", "/d/w4k.dat", 4096, 32768L, 1000L);
     read_whole("A, KERNEL.BIN read in calls of 15 KB", "/a/kernel.bin", 15360, -6000L);
     written("B, 45 KB written in calls of 15 KB", "/b/big.dat", 15360, 46080L, 8000L);
-    read_whole("B, 45 KB read back in calls of 15 KB", "/b/big.dat", 15360, 8000L);
-    read_whole("C, NUMBERS.TXT read in calls of 15 KB", "/c/numbers.txt", 15360, 600L);
-    read_whole("C, NUMBERS.TXT read in calls of 512 bytes", "/c/numbers.txt", 512, 3000L);
-    per_sector("C, NUMBERS.TXT 20 times in calls of 15 KB", "/c/numbers.txt", 20, 3000L);
+    read_whole("B, 45 KB read back in calls of 15 KB", "/b/big.dat", 15360, 1000L);
+    read_whole("C, NUMBERS.TXT read in calls of 15 KB", "/c/numbers.txt", 15360, 500L);
+    read_whole("C, NUMBERS.TXT read in calls of 512 bytes", "/c/numbers.txt", 512, 1100L);
+    per_sector("C, NUMBERS.TXT 20 times in calls of 15 KB", "/c/numbers.txt", 20, 2600L);
     printf("rdtime: done\n");
     return 0;
 }

@@ -173,8 +173,9 @@ static void signal_entry(unsigned i)
     rx_kcall(&r);
 }
 
-static rx_u8 break_seen;                /* a Ctrl+Break the control thread's lock wait
-                                           took (proc_break_seen, P15) */
+static rx_u16 control_seen;             /* the control bits (Ctrl+Break, a test's end,
+                                           Ctrl+Alt+Del) the control thread's lock waits
+                                           took (proc_control_seen, P15, M6) */
 
 /* sleep_on - until a notification is signalled; with a tick, at most one
  * (the control notification's tick through OS_TIMER: CONTROL_TIMER, never
@@ -196,8 +197,8 @@ static void sleep_on(rx_u16 notify, int tick)
     r.ax = KCALL_RECV << 8;
     r.dx = notify;
     r.bp = 0;
-    if (rx_kcall(&r) == 0 && notify == OS_CONTROL && (r.bx & CONTROL_BREAK))
-        break_seen = 1;                 /* (the bits are the receive's: kept here) */
+    if (rx_kcall(&r) == 0 && notify == OS_CONTROL)
+        control_seen |= r.bx & (CONTROL_BREAK | CONTROL_SYNC | CONTROL_REBOOT);
 }
 
 /* proc_lend - entry i's call lends its process's data segment to a driver,
@@ -208,13 +209,13 @@ void proc_lend(int i, int on)
     procs[i].lending = (rx_u8)on;
 }
 
-/* proc_break_seen - did a wait of the control thread's for the lock take a
- * Ctrl+Break, since it last asked? (server.h; P15) */
-int proc_break_seen(void)
+/* proc_control_seen - the control bits a wait of the control thread's for
+ * the lock took, since it last asked (server.h; P15, M6) */
+rx_u16 proc_control_seen(void)
 {
-    int seen = break_seen;
+    rx_u16 seen = control_seen;
 
-    break_seen = 0;
+    control_seen = 0;
     return seen;
 }
 

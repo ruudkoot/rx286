@@ -113,6 +113,8 @@ test_mouse_ring     times TR_BYTES + TEST_RING_SIZE db 0   ; the mouse driver's
 test_key_ring       times TR_BYTES + TEST_RING_SIZE db 0   ; the keyboard driver's (MAME)
 test_reader         db TEST_READER_NONE                 ; KCALL_TEST's TEST_READER
 test_keys_ready     db 0                ; the keyboard driver has started (TEST_KEYS_READY)
+test_end_notify     dw 0                ; the notification a key script's end signals
+test_end_wait       dw 0                ;    (TEST_END_SYNC), and the ticks left after
 test_fpu_cw         dw TEST_FPU_CW_ZM
 msg_test_end        db "TEST END", CHAR_LF, 0
 msg_shutdown        db "Shutdown", 0
@@ -340,7 +342,7 @@ test_tick:
 %else
         jne .now
         cmp byte [test_reader], TEST_READER_FOREVER
-        je test_end
+        je test_end_soon
         ret                             ; a wait with a limit: not the end
 %endif
 .now:
@@ -1389,6 +1391,33 @@ test_thread_report:
         jmp .thread
 .done:
         ret
+%endif
+
+; ----------------------------------------------------------------------------
+; test_end_soon - a key script's end (disk-scheduler.md M6): the server that
+; asked (TEST_END_SYNC) told to write what it holds, with TEST_END_BIT; it
+; ends the test (TEST_END_NOW), or the kernel does after TEST_SYNC_TICKS.
+; Without such a server, or in TEST_END_NOSYNC builds, the end at once
+;   In:       DS = SEL_KDATA; interrupts off (the timer's)
+;   Out:      nothing, or never (the end)
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+test_end_soon:
+%ifndef TEST_END_NOSYNC
+        cmp word [test_end_notify], 0
+        je test_end
+        cmp word [test_end_wait], 0
+        jne .waiting
+        mov word [test_end_wait], TEST_SYNC_TICKS
+        mov si, [test_end_notify]
+        mov ax, TEST_END_BIT
+        jmp ntf_signal
+.waiting:
+        dec word [test_end_wait]
+        jz test_end
+        ret
+%else
+        jmp test_end
 %endif
 
 ; ----------------------------------------------------------------------------

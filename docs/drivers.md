@@ -35,9 +35,10 @@ besides its code, data and stack:
 | 4 | `DRV_SLOT_NOTIFY` | a notification, bound to its thread: its timer signals `DRV_TIMER_BIT` |
 | 5 | `DRV_SLOT_IRQ` | its interrupt line, which the root bound to that notification with `DRV_IRQ_BIT` |
 | 6 | `DRV_SLOT_RECV` | empty: where a segment passed to it lands |
-| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` (the server's own timers for the processes ring there as `CONTROL_TIMER`); the diskettes', a DMA buffer of `FD_DMA_SECTORS` sectors, 15 KB, a 1.2 MB cylinder (`FD_DMA_SMALL_SECTORS`, 4, without extended memory), that crosses no 64 KB boundary (roadmap disk-scheduler.md M2) |
+| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` (the server's own timers for the processes ring there as `CONTROL_TIMER`, and a test's end, from the kernel, as `CONTROL_SYNC`: roadmap disk-scheduler.md M6); the diskettes', a DMA buffer of `FD_DMA_SECTORS` sectors, 15 KB, a 1.2 MB cylinder (`FD_DMA_SMALL_SECTORS`, 4, without extended memory), that crosses no 64 KB boundary (roadmap disk-scheduler.md M2) |
 | 8 | `DRV_SLOT_KEYS` | the keyboard's: the notification of the OS server's thread for the foreground program, badged `KEY_SIGNAL_BIT`, which it signals after every byte it takes, so that a wait for a key sleeps until the keyboard does something (roadmap os-server.md P5) |
 | 9 | `DRV_SLOT_BOOT_INFO` | the disk drivers': the boot information, read-only, for the drives the BIOS knows (*docs/memory-map.md*; roadmap disk-scheduler.md M2) |
+| 10 | `DRV_SLOT_REBOOT` | the keyboard's: the OS server's control notification, badged `CONTROL_REBOOT`, which it signals at Ctrl+Alt+Del (roadmap disk-scheduler.md M6) |
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
@@ -157,8 +158,12 @@ sleeps until the driver signals it (`DRV_SLOT_KEYS`), which the driver does
 after every byte the keyboard sends (roadmap os-server.md P5). Ctrl+Break is
 never a call (l4.md X13): the driver signals the OS server's control
 notification, whose control thread restarts the foreground program.
-Ctrl+Alt+Del: the driver says so on the log and resets the machine through
-the 8042. Sys Req asks the kernel for the thread dump (`TEST_DUMP`). In
+Ctrl+Alt+Del: the driver says so on the log and signals the OS server's
+control notification with `CONTROL_REBOOT` (roadmap disk-scheduler.md M6).
+The server's control thread writes what it and the disk server hold, and
+calls `DRV_KBD_RESET`, at which the driver resets the machine through the
+8042. The driver resets it anyway after `KBD_REBOOT_TICKS` (10 s), or at
+once at a second Ctrl+Alt+Del. Sys Req asks the kernel for the thread dump (`TEST_DUMP`). In
 test builds it tells the kernel when it has started (`TEST_KEYS_READY`),
 and on MAME takes the script's keys from it (`TEST_KEY_BYTE`).
 

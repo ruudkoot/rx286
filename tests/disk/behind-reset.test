@@ -1,0 +1,24 @@
+# Ctrl+Alt+Del with write-behind (roadmap disk-scheduler.md M6, D8):
+# tests/posix/behind.c without its wait (TEST_BEHIND_NOWAIT), then
+# Ctrl+Alt+Del two seconds in, before the disk server's write-behind could
+# have written the file not fsync'd. The keyboard driver asks the OS server
+# for a sync and resets once it is done, so the file is on the host's image
+# though the test ends without its sync (TEST_END_NOSYNC). The run stops at
+# the second start.
+program: idle
+define: TEST_POSIX_BEHIND
+emulators: bochs mame
+define: TEST_BEHIND_NOWAIT
+define: TEST_END_NOSYNC
+keys: {wait 100}{ctrl-alt-del}{wait 250}{wait 250}
+match: prefix
+timeout: 300
+file: C /BEHIND.TXT behind\n
+file: C /SYNCED.TXT synced\n
+---
+rx286, test build
+behind: written and fsync'd (0): 0
+behind: written, not fsync'd (0): 0
+behind: done
+rx286: Ctrl+Alt+Del: resetting
+rx286, test build

@@ -10,7 +10,7 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FLAGS = ['-std=c99', '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined',
-         '-fno-sanitize-recover=all']
+         '-fno-sanitize-recover=all', '-DDC_CHECK']    # (cache.c's invariants: the host's)
 
 
 @pytest.mark.parametrize('part', ['cache', 'sched', 'volume'])

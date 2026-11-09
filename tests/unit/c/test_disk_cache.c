@@ -6,7 +6,10 @@
  * forgotten, the invariants checked after each step, and no dirty or busy
  * block ever taken; every window neighbours in one segment, as long as it
  * can be; 2Q's point, a working set used twice that a long scan read once
- * does not wash out; and a cache of 16 blocks, the least machine's.
+ * does not wash out; a cache of 16 blocks, the least machine's; and the
+ * runs write-behind finds (M6): in their keys' order, split at a busy
+ * block and at a segment's end, the lowest kept when there is no room, the
+ * aged alone begun.
  * ============================================================================ */
 
 #include <stdio.h>
@@ -184,6 +187,65 @@ static void windows(void)
         if (got != 5)
             dc_set((rx_u16)got, DC_CLEAN);
     CHECK(dc_check() == 0, "small: invariant %d", dc_check());
+    CHECK(dc_dirty() == 1, "small: %u dirty, not 1", dc_dirty());
+    dc_set(5, DC_DIRTY | DC_AGED);      /* (again: counted once) */
+    dc_set(6, DC_BUSY | DC_DIRTY);
+    CHECK(dc_dirty() == 2, "small: %u dirty, not 2", dc_dirty());
+    dc_drop(5);
+    dc_set(6, DC_CLEAN);
+    CHECK(dc_dirty() == 0 && dc_check() == 0, "small: %u dirty, invariant %d", dc_dirty(),
+          dc_check());
+}
+
+/* dirty_window - a window of n keys from key on, made dirty: its first */
+static rx_u16 dirty_window(rx_u32 key, unsigned n)
+{
+    rx_u16 first;
+    unsigned got = dc_window(key, n, &first), i;
+
+    CHECK(got == n, "a window of %u, not %u", got, n);
+    for (i = 0; i < got; i++)
+        dc_set((rx_u16)(first + i), DC_DIRTY);
+    return first;
+}
+
+/* runs - dc_runs and dc_mark */
+static void runs(void)
+{
+    struct dc_run r[8];
+    unsigned n;
+    rx_u16 a, b, c;
+
+    init(300);
+    a = dirty_window(DC_KEY(2, 1000), 10);      /* blocks 0-9 */
+    b = dirty_window(DC_KEY(2, 500), 3);        /* 10-12, the middle one busy */
+    dc_set((rx_u16)(b + 1), DC_BUSY | DC_DIRTY);
+    dirty_window(DC_KEY(3, 0), 2);              /* another volume's */
+    c = dirty_window(DC_KEY(2, 2000), 110);     /* to the first segment's end */
+    dirty_window(DC_KEY(2, 2110), 20);          /* the next segment's */
+    n = dc_runs(2, DC_DIRTY, 64, r, 8);
+    CHECK(n == 6, "runs: %u, not 6", n);
+    CHECK(n == 6 && r[0].key == DC_KEY(2, 500) && r[0].first == b && r[0].count == 1
+          && r[1].key == DC_KEY(2, 502) && r[1].count == 1
+          && r[2].key == DC_KEY(2, 1000) && r[2].first == a && r[2].count == 10
+          && r[3].key == DC_KEY(2, 2000) && r[3].first == c && r[3].count == 64
+          && r[4].key == DC_KEY(2, 2064) && r[4].count == 46
+          && r[5].key == DC_KEY(2, 2110) && r[5].first == DC_PER_SEGMENT && r[5].count == 20,
+          "runs: in order, split at the busy block, at 64 and at the segment's end");
+    n = dc_runs(2, DC_DIRTY, 64, r, 2);
+    CHECK(n == 2 && r[0].key == DC_KEY(2, 500) && r[1].key == DC_KEY(2, 502),
+          "runs: the lowest kept: %u", n);
+    dc_mark(2, DC_DIRTY, DC_AGED);
+    CHECK(dc_state(a) == (DC_DIRTY | DC_AGED) && dc_state((rx_u16)(b + 1)) == (DC_BUSY | DC_DIRTY
+          | DC_AGED) && (dc_find(DC_KEY(3, 0)) == DC_NONE
+                         || dc_state(dc_find(DC_KEY(3, 0))) == DC_DIRTY),
+          "mark: the volume's dirty blocks aged, the other's not");
+    dc_set(a, DC_DIRTY);                        /* written again: young; its run's head */
+    n = dc_runs(2, DC_DIRTY | DC_AGED, 64, r, 8);
+    CHECK(n == 6 && r[2].key == DC_KEY(2, 1001) && r[2].count == 9,
+          "runs: the aged alone begun: %u, %lu", n, (unsigned long)r[2].key);
+    CHECK(dc_check() == 0 && dc_dirty() == 10 + 3 + 2 + 110 + 20, "runs: invariant %d, %u dirty",
+          dc_check(), dc_dirty());
 }
 
 /* main - every case; 0 if all passed */
@@ -193,6 +255,7 @@ int main(void)
 
     windows();
     scan_resistance();
+    runs();
     for (seed = 1; seed <= 6 && !failures; seed++)
         random_work(seed % 2 ? 1000 : 37, seed, 1500);
     random_work(16, 99, 3000);

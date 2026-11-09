@@ -28,6 +28,8 @@ DRV_SLOT_KEYS       equ 8       ;    the keyboard's: the notification of the OS 
                                 ;    thread for the foreground program, badged
                                 ;    KEY_SIGNAL_BIT, signalled whenever the keyboard sent
                                 ;    something (os-server.md P5)
+DRV_SLOT_REBOOT     equ 10      ;    the keyboard's: the OS server's control notification,
+                                ;    badged CONTROL_REBOOT (disk-scheduler.md M6)
 DRV_SLOT_BOOT_INFO  equ 9       ;    the disk drivers': the boot information, read-only
                                 ;    (layout.inc's BI_*; disk-scheduler.md M2)
 DRV_SLOTS           equ 16      ; a driver's space
@@ -49,6 +51,9 @@ SERVICE_CLOCK       equ 9
 OS_SLOT_SERVICE     equ 3
 CONTROL_BREAK       equ 1       ; the control notification's bits: Ctrl+Break
 CONTROL_TIMER       equ 2       ;    the processes' timers (OS_SLOT_TIMER; os-server.md P10)
+CONTROL_SYNC        equ 4       ;    a test's end: write what is held, then end it
+                                ;    (kcalls.inc's TEST_END_BIT; disk-scheduler.md M6)
+CONTROL_REBOOT      equ 8       ;    Ctrl+Alt+Del: write what is held, then DRV_KBD_RESET
 
 ; The printer driver: one call
 DRV_PRINT           equ 1       ; BX the printer, CX bytes, SI their offset in the segment
@@ -76,6 +81,8 @@ CON_FIELD           equ 20      ; a field's columns
 DRV_KBD_GET         equ 1       ; -> BX 1 and CX the key (CL ASCII, CH scancode), or BX 0
 DRV_KBD_PEEK        equ 2       ; -> BX 1 if a key waits, not taken; CX the keys a full
                                 ;    ring dropped since the last peek (P15)
+DRV_KBD_RESET       equ 4       ;    the machine reset now: the OS server, its sync done after
+                                ;    Ctrl+Alt+Del (disk-scheduler.md M6)
 DRV_KBD_CLEAR       equ 3       ;    the keys waiting, dropped (a program started again)
 ; The disk drivers: the diskettes (A, B) and the fixed disks (C, D), by
 ; cylinder, head and sector, in runs (roadmap disk-scheduler.md M2, D2)

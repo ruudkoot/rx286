@@ -40,7 +40,8 @@ A to D, Home and End ESC [ H and F, Insert, Delete, Page Up and Page Down
 ESC [ 2 ~, 3 ~, 5 ~ and 6 ~, F1 to F4 ESC O P to S, F5 to F10 ESC [ 15 ~
 and 17 ~ to 21 ~. Alt+F1 to F8 are the server's, and never reach a
 terminal. Ctrl+Break is INTR for the terminal shown; Ctrl+Alt+Del is the
-keyboard driver's, which resets the machine.
+keyboard driver's, which has the OS server write what it holds and then
+resets the machine.
 
 A queue holds `MAX_CANON` (255) bytes. A process's read waits in its
 server thread until there is enough, which the tty thread wakes it for; a

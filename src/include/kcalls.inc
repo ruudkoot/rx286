@@ -81,6 +81,14 @@ TEST_GIVE_WAY       equ 8   ;    CX: the next CX interrupt windows of any kernel
                             ;    way, a more urgent thread ready or not, so that the
                             ;    calls resume (os-server.md P3) -> CX the windows that
                             ;    were still to
+TEST_END_SYNC       equ 10  ;    DX a notification, which a key script's end signals with
+                                ;    TEST_END_BIT: its server writes what it holds, then
+                                ;    ends the test (TEST_END_NOW), or the kernel does after
+                                ;    TEST_SYNC_TICKS (disk-scheduler.md M6; not in
+                                ;    TEST_END_NOSYNC builds)
+TEST_END_NOW        equ 11  ;    the test's end: "TEST END", and the emulator stops
+TEST_END_BIT        equ 4   ; (drivers.inc's CONTROL_SYNC)
+TEST_SYNC_TICKS     equ 500 ; 10 s
 TEST_OVERRUN        equ 9   ;    TEST_ATTACK builds: INT 9 in ring 0, as the 287's
                             ;    overrun of a segment after the CPU moved on: the
                             ;    caller restarted, as the program's (fault.asm; P15)

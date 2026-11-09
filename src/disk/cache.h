@@ -38,6 +38,7 @@
 #define DC_FREE 0
 #define DC_CLEAN 1
 #define DC_DIRTY 2
+#define DC_AGED 4                       /* (dirty since the last write-behind pass: M6) */
 #define DC_BUSY 0x80
 
 /* The platform's: segment k's bytes, DC_SEGMENT_BYTES of them (or fewer
@@ -69,14 +70,34 @@ rx_u32 dc_key(rx_u16 b);
 void dc_drop(rx_u16 b);
 /* dc_bytes - a block's sector */
 rx_u8 RX_FAR *dc_bytes(rx_u16 b);
-/* dc_next - the first block from b on of a volume with every bit of `bits`
- * in its state (DC_DIRTY, say), or DC_NONE */
-rx_u16 dc_next(rx_u16 b, unsigned volume, rx_u8 bits);
+/* dc_dirty - how many blocks are dirty (M6: write-behind's bound) */
+unsigned dc_dirty(void);
+/* A run to write: neighbouring blocks of one segment, whose keys follow */
+struct dc_run {
+    rx_u32 key;                         /* the first's */
+    rx_u16 first;                       /* the first block */
+    rx_u16 count;
+};
+
+/* dc_runs - a volume's runs to write (M6), found in one walk of the
+ * records: each begins at a block with every bit of `bits` in its state
+ * (DC_DIRTY, or DC_DIRTY | DC_AGED) and goes on over the dirty blocks that
+ * follow it, none busy, `most` at most; the `room` of lowest keys in
+ * `runs`, in their keys' order: how many */
+unsigned dc_runs(unsigned volume, rx_u8 bits, unsigned most, struct dc_run *runs,
+                 unsigned room);
+/* dc_mark - `add` or'd into the state of each block of a volume with every
+ * bit of `has` in it (M6: DC_AGED into the dirty ones; never DC_DIRTY) */
+void dc_mark(unsigned volume, rx_u8 has, rx_u8 add);
 /* dc_forget - every block of a volume that is neither dirty nor busy
  * forgotten, and its ghosts */
 void dc_forget(unsigned volume);
+#ifdef DC_CHECK
 /* dc_check - the cache's invariants hold? 0, or the number of the first
- * that does not (the host's test) */
+ * that does not (the host's test alone, which defines DC_CHECK: the server
+ * never calls it, and a machine without extended memory has its image's
+ * every byte less to give its processes) */
 int dc_check(void);
+#endif
 
 #endif

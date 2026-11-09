@@ -125,6 +125,17 @@ rx_u16 disk_volume(unsigned drive)
     return 0;
 }
 
+/* disk_sync - a drive's volume's sectors the disk server holds written
+ * (DS_SYNC; disk-scheduler.md M6): 0 or the error */
+rx_u16 disk_sync(unsigned drive)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_SYNC, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;
+    return r.bx;
+}
+
 /* drive_sectors - a drive's volume's sectors, 0 until disk_volume */
 rx_u16 drive_sectors(unsigned drive)
 {
@@ -462,16 +473,42 @@ static void m_call(struct session *s, int call, struct rx_kregs *r)
 static void control(void)
 {
     struct rx_kregs r;
+    rx_u16 bits;
 
+#ifdef WITH_TEST_HOOKS
+    r.ax = (KCALL_TEST << 8) | TEST_END_SYNC;  /* a test's end: a sync first (M6) */
+    r.dx = OS_CONTROL;
+    r.bp = 0;
+    rx_kcall(&r);
+#endif
     for (;;) {
         proc_timers();                  /* the processes' (P10): at every wake */
-        if (!proc_break_seen()) {       /* (one its wait for the lock took: P15) */
+        bits = proc_control_seen();     /* (those its waits for the lock took: P15) */
+        if (!bits) {
             r.ax = KCALL_RECV << 8;
             r.dx = OS_CONTROL;
             r.bp = 0;
-            if (rx_kcall(&r) || !(r.bx & CONTROL_BREAK))
+            if (rx_kcall(&r))
                 continue;
+            bits = r.bx;
         }
+        if (bits & (CONTROL_SYNC | CONTROL_REBOOT)) {   /* everything held written: a */
+            lock_take(OS_CONTROL);      /*    test's end, Ctrl+Alt+Del (M6) */
+            vfs_sync();
+            vol_release(0);
+            lock_give();
+            if (bits & CONTROL_REBOOT)
+                call(OS_SERVICE(SERVICE_KEYBOARD), DRV_KBD_RESET, 0, 0, 0, 0, 0, 0);
+#ifdef WITH_TEST_HOOKS
+            if (bits & CONTROL_SYNC) {
+                r.ax = (KCALL_TEST << 8) | TEST_END_NOW;
+                r.bp = 0;
+                rx_kcall(&r);
+            }
+#endif
+        }
+        if (!(bits & CONTROL_BREAK))
+            continue;
         call(OS_SERVICE(SERVICE_KEYBOARD), DRV_KBD_CLEAR, 0, 0, 0, 0, 0, 0);
         r.ax = (KCALL_THREAD << 8) | THREAD_INFO;  /* a program the root builds: */
         r.dx = OS_FOREGROUND;                       /* restarted */

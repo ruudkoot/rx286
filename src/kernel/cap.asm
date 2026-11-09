@@ -2308,6 +2308,10 @@ kc_test:
         je .ready
         cmp al, TEST_GIVE_WAY
         je .give_way
+        cmp al, TEST_END_SYNC
+        je .end_sync
+        cmp al, TEST_END_NOW
+        je test_end
         mov bx, test_mouse_ring
         cmp al, TEST_MOUSE_BYTE
         je .byte
@@ -2325,6 +2329,14 @@ kc_test:
         jmp kc_done.ok
 .ready:
         mov byte [test_keys_ready], 1
+        jmp kc_done.ok
+.end_sync:
+        mov ax, [bp + FRAME_DX]         ; the server's notification, for the end
+        mov cl, CAP_NOTIFY
+        call cap_get
+        jc kc_done.cap
+        mov ax, [es:si + SH_OBJECT]
+        mov [test_end_notify], ax
         jmp kc_done.ok
 .give_way:
         mov ax, [bp + FRAME_CX]

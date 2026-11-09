@@ -2476,6 +2476,21 @@ static int px_poll(int i, rx_u16 data, struct rx_kregs *r, int *error)
     }
 }
 
+/* vfs_sync - every volume's changed sectors written: the OS server's
+ * cache's, then the disk server's (fs.h; disk-scheduler.md M6): a test's
+ * end, Ctrl+Alt+Del. The lock held; the volumes it takes the caller's to
+ * give up */
+void vfs_sync(void)
+{
+    unsigned d;
+
+    for (d = 0; d < DRIVES; d++)
+        if (drive_sectors(d)) {         /* (mounted: its volume asked of the disk server) */
+            cache_flush(d);
+            disk_sync(d);
+        }
+}
+
 /* fd_volume - a descriptor's volume's lock, held before its description's
  * offset is used: a call on a volume's file or directory waits for any
  * other on that volume, which may give the lock up while it waits for the
@@ -2656,9 +2671,9 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = EINVAL;            /* nothing to put on a disk (XSH fsync; P15) */
             return -1;
         }
-        if ((e = entry_back(o)) != 0) {
-            *error = errno_of(e);
-            return -1;
+        if ((e = entry_back(o)) != 0 || (o->kind == K_FILE && (e = disk_sync(o->drive)) != 0)) {
+            *error = errno_of(e);       /* (on the disk, not in the disk server's cache: */
+            return -1;                  /*    POSIX's fsync, disk-scheduler.md M6) */
         }
         return 0;
     }

@@ -46,11 +46,13 @@ EP                  equ SLOT(DRV_SLOT_EP)
 NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
 IRQ                 equ SLOT(DRV_SLOT_IRQ)
 CONTROL             equ SLOT(DRV_SLOT_DEVICE)
+REBOOT              equ SLOT(DRV_SLOT_REBOOT)
 KEYS                equ SLOT(DRV_SLOT_KEYS)
 KBD_RING_SIZE       equ 16              ; a power of two
 KBD_E1_SEQUENCE     equ 5               ; the bytes after E1h in Pause's sequence
 KBD_IRQ_BYTES       equ 16              ; bytes taken at most in one look
 KBD_RESET_TICKS     equ 2               ; for the log to have said so, before a reset
+KBD_REBOOT_TICKS    equ 500             ; 10 s for the OS server's sync, then the reset
 SC_RELEASE          equ 0x80            ; set in a key's release code
 SC_PREFIX_E0        equ 0xE0
 SC_PREFIX_E1        equ 0xE1
@@ -87,6 +89,7 @@ kbd_e0              db 0                ; 1 after an E0h prefix
 kbd_e1_skip         db 0                ; bytes of Pause's sequence still to skip
 kbd_dropped         dw 0                ; keys lost to a full ring since the last
                                         ;    DRV_KBD_PEEK; it stays at FFFFh
+kbd_rebooting       db 0                ; Ctrl+Alt+Del came: the OS server syncs (M6)
 msg_reset           db "rx286: Ctrl+Alt+Del: resetting", CHAR_LF
 msg_reset_end:
 end_udata
@@ -132,6 +135,8 @@ serve:
         je .get
         cmp al, DRV_KBD_PEEK
         je .peek
+        cmp al, DRV_KBD_RESET
+        je kbd_reset_now                ; (the OS server's sync done: M6)
         cmp al, DRV_KBD_CLEAR
         jne .unknown
         mov al, [kbd_tail]
@@ -164,6 +169,11 @@ serve:
         mov dx, KEYS                    ; the OS server looks again (no OS server:
         kcall KCALL_SIGNAL              ; KE_CAP, nothing)
         pop bx
+        test bx, DRV_TIMER_BIT          ; Ctrl+Alt+Del's limit: the OS server's sync
+        jz .irq                         ;    took too long, or there is none (M6)
+        cmp byte [kbd_rebooting], 0
+        jne kbd_reset_now
+.irq:
         test bx, DRV_IRQ_BIT
         jz serve
         mov dx, IRQ
@@ -400,7 +410,7 @@ kbd_scancode:
         and bl, KBD_CTRL | KBD_ALT
         cmp bl, KBD_CTRL | KBD_ALT
         jne .translate
-        jmp kbd_reset
+        jmp kbd_reboot
 .sysrq:
         mov al, TEST_DUMP
         kcall KCALL_TEST                ; (release builds: KE_NOSYS, nothing)
@@ -459,6 +469,29 @@ kbd_get:
         ret
 
 ; ----------------------------------------------------------------------------
+; kbd_reboot - Ctrl+Alt+Del (disk-scheduler.md M6): the log says so, and the
+; OS server is asked to write what it holds (CONTROL_REBOOT), after which it
+; asks for the reset (DRV_KBD_RESET); the driver's timer resets anyway after
+; KBD_REBOOT_TICKS, and a second Ctrl+Alt+Del at once
+;   In:       DS = its data
+;   Out:      nothing; or never (the reset)
+;   Destroys: AX, BX, CX, DX, SI
+; ----------------------------------------------------------------------------
+kbd_reboot:
+        cmp byte [kbd_rebooting], 0
+        jne kbd_reset_now
+        mov byte [kbd_rebooting], 1
+        mov si, msg_reset
+        mov cx, msg_reset_end - msg_reset
+        kcall KCALL_LOG
+        mov dx, REBOOT
+        kcall KCALL_SIGNAL
+        mov dx, NOTIFY
+        mov cx, KBD_REBOOT_TICKS
+        kcall KCALL_TIMER
+        ret
+
+; ----------------------------------------------------------------------------
 ; kbd_reset - Ctrl+Alt+Del: a soft reset through the 8042 (IBM 1-42), once
 ; the log has said so
 ;   In:       DS = its data
@@ -478,6 +511,15 @@ kbd_reset:
         jc .wait_log
         test bx, DRV_TIMER_BIT
         jz .wait_log
+        ; falls through
+
+; ----------------------------------------------------------------------------
+; kbd_reset_now - the reset, at once
+;   In:       nothing
+;   Out:      does not return
+;   Destroys: everything
+; ----------------------------------------------------------------------------
+kbd_reset_now:
         cli
         mov al, CMOS_SHUTDOWN
         out CMOS_INDEX, al

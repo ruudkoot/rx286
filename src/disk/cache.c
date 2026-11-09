@@ -39,6 +39,7 @@ static rx_u16 RX_FAR *ghost_next;       /*    and their links */
 static unsigned hash_mask;
 static unsigned ghost_first, ghost_count, ghost_room;  /* a ring, the oldest first */
 static unsigned blocks, in_room, last_segment, last_per;
+static unsigned dirty;                  /* the blocks dirty (dc_dirty) */
 
 /* per - the blocks of a segment */
 static unsigned per(unsigned segment)
@@ -210,7 +211,7 @@ void dc_init(unsigned n, unsigned index_bytes)
     last_segment = n ? (n - 1) / DC_PER_SEGMENT : 0;
     last_per = n - last_segment * DC_PER_SEGMENT;
     in_room = n / 4 ? n / 4 : 1;
-    ghost_first = ghost_count = 0;
+    ghost_first = ghost_count = dirty = 0;
     for (i = 0; i < hash; i++)
         bucket[i] = DC_NONE;
     for (i = 0; i < QUEUES; i++) {
@@ -340,7 +341,17 @@ rx_u8 dc_state(rx_u16 b)
 /* dc_set - a block's state set */
 void dc_set(rx_u16 b, rx_u8 state)
 {
+    if (rec(b)->state & DC_DIRTY)
+        dirty--;
+    if (state & DC_DIRTY)
+        dirty++;
     rec(b)->state = state;
+}
+
+/* dc_dirty - the blocks dirty (cache.h) */
+unsigned dc_dirty(void)
+{
+    return dirty;
 }
 
 /* dc_key - a block's key */
@@ -356,23 +367,85 @@ void dc_drop(rx_u16 b)
 
     if (r->queue != Q_FREE)
         chain_remove(b, r->key);
+    if (r->state & DC_DIRTY)
+        dirty--;
     q_unlink(b);
     r->state = DC_FREE;
     r->key = 0;
     q_push(b, Q_FREE);
 }
 
-/* dc_next - the next block of a volume in a state (cache.h) */
-rx_u16 dc_next(rx_u16 b, unsigned volume, rx_u8 bits)
+/* run_keep - a run kept among the lowest keys' `room`, in their order */
+static void run_keep(struct dc_run *runs, unsigned *got, unsigned room, const struct dc_run *run)
 {
+    unsigned k = *got;
+
+    if (k == room) {
+        if (room == 0 || run->key >= runs[room - 1].key)
+            return;                     /* (a later walk finds it) */
+        k = room - 1;                   /* (the highest put out) */
+    } else {
+        (*got)++;
+    }
+    for (; k > 0 && runs[k - 1].key > run->key; k--)
+        runs[k] = runs[k - 1];
+    runs[k] = *run;
+}
+
+/* dc_runs - a volume's runs to write (cache.h): each segment's records
+ * walked in turn, no division a block, since write-behind walks the whole
+ * cache (M6) and a block's division cost the AT 16 ms on 500 blocks */
+unsigned dc_runs(unsigned volume, rx_u8 bits, unsigned most, struct dc_run *runs,
+                 unsigned room)
+{
+    unsigned segment, i, n, got = 0;
+    struct dc_rec RX_FAR *r;
+    struct dc_run run;
+    int open;
+
+    run.key = 0;
+    run.first = run.count = 0;
+    for (segment = 0; blocks && segment <= last_segment; segment++) {
+        n = per(segment);
+        open = 0;
+        r = rec((rx_u16)(segment * DC_PER_SEGMENT));
+        for (i = 0; i <= n; i++, r++) {
+            if (open && i < n && run.count < most && r->queue != Q_FREE
+                    && (r->state & (DC_DIRTY | DC_BUSY)) == DC_DIRTY
+                    && r->key == run.key + run.count) {
+                run.count++;            /* (the run goes on) */
+                continue;
+            }
+            if (open) {
+                run_keep(runs, &got, room, &run);
+                open = 0;
+            }
+            if (i < n && (r->state & (bits | DC_BUSY)) == bits && r->queue != Q_FREE
+                    && DC_KEY_VOLUME(r->key) == volume) {
+                run.key = r->key;
+                run.first = (rx_u16)(segment * DC_PER_SEGMENT + i);
+                run.count = 1;
+                open = 1;
+            }
+        }
+    }
+    return got;
+}
+
+/* dc_mark - bits added to a volume's blocks in a state (cache.h) */
+void dc_mark(unsigned volume, rx_u8 has, rx_u8 add)
+{
+    unsigned segment, i, n;
     struct dc_rec RX_FAR *r;
 
-    for (; b < blocks; b++) {
-        r = rec(b);
-        if (r->queue != Q_FREE && DC_KEY_VOLUME(r->key) == volume && (r->state & bits) == bits)
-            return b;
+    for (segment = 0; blocks && segment <= last_segment; segment++) {
+        n = per(segment);
+        r = rec((rx_u16)(segment * DC_PER_SEGMENT));
+        for (i = 0; i < n; i++, r++)
+            if ((r->state & has) == has && r->queue != Q_FREE
+                    && DC_KEY_VOLUME(r->key) == volume)
+                r->state = (rx_u8)(r->state | (add & ~DC_DIRTY));
     }
-    return DC_NONE;
 }
 
 /* dc_forget - a volume's clean blocks and its ghosts forgotten (cache.h) */
@@ -390,12 +463,14 @@ void dc_forget(unsigned volume)
             ghost_kill((rx_u16)(GHOST_BIT | g));
 }
 
+#ifdef DC_CHECK
 /* dc_check - the invariants (cache.h): 1 a queue's links, 2 its count, 3 a
  * block's state against its queue, 4 a block not found by its key, 5 two
- * blocks of one key, 6 a ghost not found by its key, 7 the counts' sum */
+ * blocks of one key, 6 a ghost not found by its key, 7 the counts' sum, 8
+ * the dirty blocks' count */
 int dc_check(void)
 {
-    unsigned queue, n, sum = 0, g, k;
+    unsigned queue, n, sum = 0, g, k, d = 0;
     rx_u16 b, before, e;
     struct dc_rec RX_FAR *r;
 
@@ -418,6 +493,7 @@ int dc_check(void)
         sum += n;
     }
     for (b = 0; b < blocks; b++) {      /* (a block's twins share its chain) */
+        d += (rec(b)->state & DC_DIRTY) != 0;
         if (rec(b)->queue == Q_FREE)
             continue;
         n = 0;
@@ -431,5 +507,8 @@ int dc_check(void)
         if (ghost_key[g] != GHOST_DEAD && find(ghost_key[g], 1) == DC_NONE)
             return 6;
     }
-    return sum == blocks ? 0 : 7;
+    if (sum != blocks)
+        return 7;
+    return d == dirty ? 0 : 8;
 }
+#endif

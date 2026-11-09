@@ -60,7 +60,8 @@ is synchronous, and every wait inside a driver has a limit:
 A driver waits on its notification (`src/drivers/dwait.asm`): for its
 interrupt, or for the kernel's one-tick timer, after which it looks at the
 time again; meanwhile every other thread runs. A run's limit counts from
-its command (`dw_run_start`), not from each sector's interrupt. Ctrl+Alt+Del does not wait.
+its command (`dw_run_start`), not from each sector's interrupt. Ctrl+Alt+Del waits for the
+OS server's sync, 10 s at most (*docs/disk-server.md*).
 Until roadmap os-server.md P14 a program read and wrote any sector itself
 (`SYS_DISK_READ`, `SYS_DISK_WRITE`) and printed (`SYS_PRINT`) through a
 transfer segment; `tests/posix/drives.test` now writes a file on each

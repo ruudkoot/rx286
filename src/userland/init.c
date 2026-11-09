@@ -125,7 +125,8 @@ int main(void)
     || defined(TEST_POSIX_ORPHANS) || defined(TEST_POSIX_NAMES) \
     || defined(TEST_POSIX_RDTIME) || defined(TEST_POSIX_RUNS) || defined(TEST_POSIX_BESIDE) \
     || defined(TEST_POSIX_FSRAND2) || defined(TEST_POSIX_ONEDIR) \
-    || defined(TEST_POSIX_TRUNCRACE) || defined(TEST_POSIX_KILLREAD) || defined(TEST_POSIX_FAIR)
+    || defined(TEST_POSIX_TRUNCRACE) || defined(TEST_POSIX_KILLREAD) || defined(TEST_POSIX_FAIR) \
+    || defined(TEST_POSIX_BEHIND)
 #if defined(TEST_POSIX_PROC)
     static char *const argv[] = { "/z/proc", 0 };
 #elif defined(TEST_POSIX_FILES)
@@ -186,6 +187,8 @@ int main(void)
     static char *const argv[] = { "/z/killread", 0 };
 #elif defined(TEST_POSIX_FAIR)
     static char *const argv[] = { "/z/fair", 0 };
+#elif defined(TEST_POSIX_BEHIND)
+    static char *const argv[] = { "/z/behind", 0 };
 #else
     static char *const argv[] = { "/z/pipes", 0 };
 #endif

@@ -78,6 +78,7 @@ RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, progra
 #define W_DRV_DEVICE (DRV_SLOT_DEVICE * 8 + 4)
 #define W_DRV_KEYS (DRV_SLOT_KEYS * 8 + 4)
 #define W_DRV_BOOT_INFO (DRV_SLOT_BOOT_INFO * 8 + 4)
+#define W_DRV_REBOOT (DRV_SLOT_REBOOT * 8 + 4)
 #define W_SOUND_STOP (13 * 8 + 4)               /* the OS server's: the sound driver's
                                                    notification, */
 #define W_CONTROL (14 * 8 + 4)                  /* its control notification, */
@@ -453,6 +454,7 @@ static void driver_device(int service)
         give(SLOT(ROOT_SLOT_VIDEO), W_DRV_DEVICE);
     } else if (service == SERVICE_KEYBOARD) {
         must(copy(s.space, CONTROL, W_DRV_DEVICE, COPY_MINT, CONTROL_BREAK, RIGHT_SEND));
+        must(copy(s.space, CONTROL, W_DRV_REBOOT, COPY_MINT, CONTROL_REBOOT, RIGHT_SEND));
     } else if (service == SERVICE_DISKETTE) {
         for (;;) {                      /* (a driver has no OS thread: the slot is free) */
 #ifdef TEST_DMA_HIGH

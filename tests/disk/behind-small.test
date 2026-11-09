@@ -1,0 +1,26 @@
+# Write-behind's bound (roadmap disk-scheduler.md M6, D8): fsrand2.test's
+# random operations on B and C, against their models, on a machine without
+# extended memory, where the disk server's cache holds DS_CACHE_SMALL (4)
+# blocks: a fixed disk's write that leaves more than half of them dirty
+# has both fixed disks' dirty blocks written at once, and the rest go
+# straight to the disk. fsck.fat finds both volumes sound afterwards.
+program: idle
+define: TEST_POSIX_FSRAND2
+emulators: bochs
+memory: 639K 0K
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+fsck: B
+fsck: C
+---
+fsrand: C: {...} operations, {...} checks, 0 mismatches
+fsrand: B: {...} operations, {...} checks, 0 mismatches
+fsrand: done
