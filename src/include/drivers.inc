@@ -109,6 +109,17 @@ DRV_DISK_MEDIA      equ 8       ; BL the unit -> BX 0 or the error; CX the cylin
 DRV_DISK_READ_ID    equ 7       ; BL the unit, BH the head -> BX 0 or the error; CX the
                                 ;    cylinder, SI's low byte the head and its high byte the
                                 ;    sector of the first ID found (diskettes)
+DRV_DISK_FORMAT     equ 9       ; BL the unit, BH the head, CX the cylinder, DI's low byte
+                                ;    the sectors of the track, SI the offset of its table in
+                                ;    the segment passed -> BX 0 or the error; CX the
+                                ;    cylinders, SI's low byte the heads and its high byte the
+                                ;    sectors a track of what is formatted (disk-scheduler.md
+                                ;    M9, D17). A diskette's table is each sector's ID in the
+                                ;    order they pass the head: cylinder, head, sector, size
+                                ;    (2: 512 bytes); A is formatted 1.2 MB, B 360 KB. A fixed
+                                ;    disk's is the adapter's 512 bytes, 2 for each sector:
+                                ;    00h (80h: bad) and its number, and the track is
+                                ;    verified after: E_IO, a bad track
 DRV_STATUS_CHANGED  equ 1       ; DRV_DISK_STATUS's SI: the diskette's change line (A's)
 DRV_STATUS_SEEKING  equ 2       ;    a fixed disk's seek not yet complete
 DRV_DISK_RUN_MAX    equ 64      ; a fixed disk's run at most: 32 KB

@@ -132,7 +132,7 @@ simulator; none of their code is in the repository.
 | M7: the cache's memory | done (2026-11-09) |
 | M8: removable volumes and `/mnt` | done (2026-11-09) |
 | M8b: the owner's decisions after M8 | done (2026-11-09) |
-| M9: the formatter | not started |
+| M9: the formatter | done (2026-11-09) |
 | M10: the simulator in `tools/`, the documents, a review and the close | not started |
 
 ## The request
@@ -2235,6 +2235,46 @@ The owner decided on 2026-11-09, after M8, in two steps.
   - on MAME rdtime reads A's KERNEL.BIN, copied onto a skewed diskette, at least 15% faster
     than from an unskewed one (E10: 23% at a skew of 5, across settling of 20-40 ms).
 - **Decisions:** D17.
+- **Done** (2026-11-09). `DRV_DISK_FORMAT` formats a diskette's track by the 765's Format Track,
+  its IDs the caller's in the order they pass the head (A as 1.2 MB, B as 360 KB), and a fixed
+  disk's by the adapter's interleave table, then a Verify, whose failure is a bad track. The
+  disk server queues `DS_FORMAT`, and `DS_RAW_READ` and `DS_RAW_WRITE` by the drive's sectors
+  past the cache, for the drive's controller, dropping what it held of the drive first, and
+  answers `DS_GEOMETRY`. The OS server's `PX_FORMAT` (`FMT_BEGIN` to `FMT_END`) keeps the
+  drive for one process: refused while a file of it is open, `EBUSY` to the others meanwhile,
+  given back at the process's end. `format` (`src/bin/format.c`, its layouts in `fmtlay.c`)
+  lays diskettes out as DOS does with a cylinder skew, and a fixed disk, after a yes, with an
+  interleave (3:1, or `-i`), a skew for the seek and one FAT12 partition as `tools/mkdisks`
+  lays C and D out, its bad tracks' clusters marked. `format.test` passes on Bochs and MAME:
+  B formatted and written, `fsck.fat` and mtools reading it; `format c:` stops at track 0,
+  which the emulators' IDE drives refuse, C as it was. The host checks the layouts and has
+  `fsck.fat` and mtools read the volumes (`test_formatter.py`; C's BPB as `mkdisks`'). On MAME
+  KERNEL.BIN reads back from a skewed 1.2 MB diskette in 5.82 s, against 6.82 s from one
+  without (`skew.test`). `make check` passes on Bochs (150), DOSBox-X (122) and MAME (130),
+  with 212 unit tests, and `make check-ia16` passes (150).
+  - Not as planned:
+    - **The skew is 14.7%, not 15%, and A's is 7, not E10's 5.** At 5 the step to the next
+      cylinder, with the driver's 2 ticks of settling (20-40 ms) and the run's way through
+      the disk server, mostly missed the first sector (55 ms on), and the skewed diskette
+      read slower; at 7 (77 ms) it is found. And a skew can pay only where the step comes
+      between the disk server's own runs: the read-ahead read the rest of a cylinder alone,
+      so a reader's calls of 15 KB each began a turn late. A diskette's read-ahead now reads
+      the next cylinder too, and goes on when the reader reads what was read ahead. The
+      gaps between the reader's calls still cost a turn each: E10's 23% kept the drive
+      streaming, which needs the driver to hold the next run (*Later*). The boot diskette,
+      which mformat does not skew, pays for it: A's KERNEL.BIN in `speed.test` takes
+      8.06 s for 120 KB (6.94 s in M8b, 7.56 s without the change), within budgets moved
+      to 6.6 s for 96 KB; B's read back finds what was just written in the cache or reads
+      some of it again as 2Q's evictions fall with the timing (0.5 or 1.7 s, within 2 s),
+      and C's calls of 512 bytes move with the code's size (0.98-1.12 s, within 1.2 s).
+    - **The interleave is not measured.** No emulator turns a fixed disk, so a measurement
+      would measure nothing; `format` takes `-i`, or 3:1, D17's choice without one. The
+      fixed disk's part waits for a real AT, as D17 said.
+    - **A fixed disk's bad tracks are those a Verify finds:** the adapter's Format Track
+      says nothing of a failure (its p. 9).
+    - **A new diskette's free clusters are looked for from the first** (`vfs_medium`):
+      the old one's place carried over, and a file copied after a format began at
+      cylinder 9.
 
 ### M10. The simulator in `tools/`, the documents, a review and the close (M)
 

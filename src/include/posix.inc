@@ -98,7 +98,23 @@ PX_EJECT            equ 52      ; SI a path of a diskette's volume: what the ser
                                 ;    it written, then the volume forgotten, its open files
                                 ;    gone (ENXIO) -> 0, or -1, EINVAL for no diskette's
                                 ;    (rx286's own; disk-scheduler.md M8, D12)
-PX_CALLS            equ 53
+PX_FORMAT           equ 53      ; BL a drive (0-3), BH FMT_*; CX, SI and DI as it says ->
+                                ;    0 or more, or -1 (rx286's own; disk-scheduler.md M9):
+                                ;    the formatter's way to the drive, which its caller alone
+                                ;    then uses (EBUSY to the others, and to FMT_BEGIN while
+                                ;    a file of it is open)
+PX_CALLS            equ 54
+FMT_BEGIN           equ 1       ; PX_FORMAT's: the drive the caller's, its written, its volume
+                                ;    forgotten -> the cylinders, SI the heads (low byte) and
+                                ;    the sectors a track (high) as the disk server knows them
+FMT_TRACK           equ 2       ;    CX the cylinder, SI the head (low) and the track's sectors
+                                ;    (high), DI the track's table (DRV_DISK_FORMAT's) -> 0
+FMT_READ            equ 3       ;    CX the low word of the drive's sector, SI's low byte its
+                                ;    bits 16-23 and its high byte the count (DS_RUN_MAX at
+                                ;    most), DI the buffer -> the sectors read
+FMT_WRITE           equ 4       ;    the same -> the sectors written
+FMT_END             equ 5       ;    the drive given back, its volume mounted anew when next
+                                ;    named; and when the caller ends
 FUTEX_WAIT          equ 0
 FUTEX_WAKE          equ 1
 THREAD_RUNNING      equ 1       ; a thread's state word, libc's (pthread.h)

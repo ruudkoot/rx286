@@ -73,6 +73,17 @@ rx_u16 disk_sync(unsigned drive);
 int disk_trusted(unsigned drive);
 /* disk_eject - a diskette's volume forgotten by the disk server (DS_EJECT) */
 rx_u16 disk_eject(unsigned drive);
+/* disk_geometry, disk_format, disk_raw - the formatter's (disk-scheduler.md
+ * M9): a drive's cylinders and its heads and sectors a track; a track
+ * formatted; sectors from the drive's first, past the caches: 0 or the error */
+rx_u16 disk_geometry(unsigned drive, rx_u16 *cylinders, rx_u16 *heads_track);
+rx_u16 disk_format(unsigned drive, rx_u16 cylinder, unsigned head, unsigned sectors,
+                   rx_u16 segment, rx_u16 offset);
+rx_u16 disk_raw(int label, unsigned drive, rx_u32 sector, unsigned count, rx_u16 segment,
+                rx_u16 offset, rx_u16 *moved);
+/* vfs_formatter - the process (its entry + 1) whose formatter holds a
+ * drive, or 0 (vfs.c) */
+int vfs_formatter(unsigned drive);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:

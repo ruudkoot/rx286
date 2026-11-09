@@ -67,6 +67,7 @@ FD_SENSES_AFTER_RESET equ 4             ; one Sense Interrupt Status for each dr
 FD_UNKNOWN          equ 0xFF            ; a cylinder not known: recalibrate first
 FD_TRANSFER_BYTES   equ 9               ; a read's or write's command
 FD_RESULT_BYTES     equ 7               ; and its result: ST0, ST1, ST2, C, H, R, N
+FD_FORMAT_BYTES     equ 6               ; Format Track's command (M9)
 FD_SENSE_BYTES      equ 2               ; Sense Interrupt Status's result: ST0, PCN
 
 ; A drive's entry in units
@@ -115,6 +116,12 @@ fd_n                db FDC_SIZE_512
 fd_eot              db 0
 fd_gpl              db 0
 fd_dtl              db FDC_DTL
+fd_format_command   db FDC_CMD_FORMAT   ; Format Track (M9): then the head and drive, the
+fd_format_unit_head db 0                ;    size, the sectors, the gap and the filler
+fd_format_n         db FDC_SIZE_512
+fd_format_sc        db 0
+fd_format_gpl       db 0
+fd_format_d         db FDC_FILLER
 fd_seek_command     db FDC_CMD_SEEK
 fd_seek_unit_head   db 0
 fd_seek_cylinder    db 0
@@ -228,6 +235,8 @@ fd_call:
         je .read_id
         cmp al, DRV_DISK_MEDIA
         je .media
+        cmp al, DRV_DISK_FORMAT
+        je .format
 .invalid:
         mov bx, E_INVAL
         xor cx, cx
@@ -297,6 +306,10 @@ fd_call:
 .media:
         mov di, dx
         jmp fd_media
+.format:
+        mov ax, di                      ; AL = the track's sectors
+        mov di, dx
+        jmp fd_format
 
 ; ----------------------------------------------------------------------------
 ; fd_ready - the controller reset and given its timings if it needs it, the
@@ -507,6 +520,116 @@ fd_media:
 .failed:
         call fd_done
         mov bx, ax
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_format - DRV_DISK_FORMAT: a track formatted, its sectors' IDs the
+; caller's, in the order they are to pass the head (its skew: disk-
+; scheduler.md M9, D17), each sector filled with FDC_FILLER: A as 1.2 MB,
+; B as 360 KB, the drive's entry set so from now on
+;   In:       DI = the drive's entry; fd_unit, fd_head; CX = the cylinder;
+;             AL = the track's sectors; SI = the table's offset; BP = the
+;             segment passed (0: none came)
+;   Out:      BX = 0, or E_INVAL, E_FAULT, E_IO, E_TIMEOUT, E_PROTECTED; CX
+;             the cylinders, DX the heads (low) and the sectors a track (high)
+;   Destroys: AX, SI, DI, ES
+; ----------------------------------------------------------------------------
+fd_format:
+        mov [fd_format_sc], al
+        mov byte [fd_format_gpl], FDC_FORMAT_GAP_360K
+        cmp byte [fd_unit], 0
+        jne .set
+        mov byte [fd_double], 0         ; A: 1.2 MB, its 96-tpi tracks
+        mov word [di + UNIT_CYLINDERS], DISK_A_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_A_SECTORS | (FDC_RATE_500K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_1200K
+        mov byte [fd_format_gpl], FDC_FORMAT_GAP_1200K
+.set:
+        cmp cx, [di + UNIT_CYLINDERS]
+        jae .invalid
+        mov ah, [fd_head]
+        cmp ah, [di + UNIT_HEADS]
+        jae .invalid
+        cmp al, [di + UNIT_TRACK]       ; every sector of the track
+        jne .invalid
+        test bp, bp
+        jz .fault
+        mov [fd_track_cylinder], cl
+        xor ah, ah
+        shl ax, 2                       ; the table's bytes
+        mov cx, ax
+        call dw_fits
+        jc .fault
+        call dw_readable
+        jnz .fault
+        push di                         ; the table into the DMA buffer
+        push ds
+        mov ax, DMA_BUFFER
+        mov es, ax
+        mov ds, bp
+        xor di, di
+        rep movsb
+        pop ds
+        pop di
+        push ds
+        pop es
+        call fd_ready
+        jc .failed
+        call fd_seek
+        jc .failed
+        mov byte [fd_dma_mode], DMA_MODE_FROM_MEMORY
+        mov cl, [fd_format_sc]
+        xor ch, ch
+        shl cx, 2
+        dec cx
+        call fd_dma_bytes
+        mov al, [fd_head]
+        shl al, 2
+        or al, [fd_unit]
+        mov [fd_format_unit_head], al
+        mov byte [irq_seen], 0
+        mov si, fd_format_command
+        mov cx, FD_FORMAT_BYTES
+        call fd_send
+        jc .late
+        mov cx, FD_TICKS
+        call dw_wait_irq
+        jc .late
+        mov cx, FD_RESULT_BYTES
+        call fd_results
+        jc .late
+        call fd_done
+        test byte [fd_result], FDC_ST0_CODE
+        jz .done
+        mov bx, E_PROTECTED
+        test byte [fd_result + 1], FDC_ST1_NOT_WRITABLE
+        jnz .out
+        call fd_forget_cylinder         ; recalibrate before the next
+        mov bx, E_IO
+        jmp .out
+.done:
+        mov cx, [di + UNIT_CYLINDERS]
+        mov dl, [di + UNIT_HEADS]
+        mov dh, [di + UNIT_TRACK]
+        xor bx, bx
+        ret
+.late:
+        call fd_reset
+        call fd_done
+        mov bx, E_TIMEOUT
+        jmp .out
+.failed:
+        call fd_done
+        mov bx, ax
+        jmp .out
+.invalid:
+        mov bx, E_INVAL
+        jmp .out
+.fault:
+        mov bx, E_FAULT
+.out:
+        xor cx, cx
+        xor dx, dx
         ret
 
 ; ----------------------------------------------------------------------------
@@ -829,6 +952,22 @@ fd_motor_timer:
 ;   Destroys: AL
 ; ----------------------------------------------------------------------------
 fd_dma:
+        push cx
+        mov cx, [fd_count]              ; the run's bytes, less one
+        shl cx, SECTOR_SHIFT
+        dec cx
+        call fd_dma_bytes
+        pop cx
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_dma_bytes - channel 2 ready for so many bytes between the controller and
+; the DMA buffer
+;   In:       CX = the bytes, less one; fd_dma_mode
+;   Out:      nothing
+;   Destroys: AL
+; ----------------------------------------------------------------------------
+fd_dma_bytes:
         mov al, DMA_MASK_SET | DMA_CHANNEL_DISKETTE
         out DMA1_MASK, al
         out DMA1_CLEAR_FLIPFLOP, al     ; any value
@@ -841,15 +980,10 @@ fd_dma:
         out DMA1_CH2_ADDRESS, al
         mov al, [dma_page]
         out DMA_PAGE_CH2, al
-        push cx
-        mov cx, [fd_count]              ; the run's bytes, less one
-        shl cx, SECTOR_SHIFT
-        dec cx
         mov al, cl
         out DMA1_CH2_COUNT, al
         mov al, ch
         out DMA1_CH2_COUNT, al
-        pop cx
         mov al, DMA_CHANNEL_DISKETTE    ; unmasked
         out DMA1_MASK, al
         ret

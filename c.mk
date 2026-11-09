@@ -266,7 +266,8 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     beside=$(C_B)/tests/posix/beside.$(OBJ) onedir=$(C_B)/tests/posix/onedir.$(OBJ) \
     truncrace=$(C_B)/tests/posix/truncrace.$(OBJ) killread=$(C_B)/tests/posix/killread.$(OBJ) \
     fair=$(C_B)/tests/posix/fair.$(OBJ) behind=$(C_B)/tests/posix/behind.$(OBJ) \
-    diskmem=$(C_B)/tests/posix/diskmem.$(OBJ) media=$(C_B)/tests/posix/media.$(OBJ)
+    diskmem=$(C_B)/tests/posix/diskmem.$(OBJ) media=$(C_B)/tests/posix/media.$(OBJ) \
+    skew=$(C_B)/tests/posix/skew.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -299,6 +300,7 @@ Z_FOR_FAIR := fair
 Z_FOR_BEHIND := behind
 Z_FOR_DISKMEM := diskmem
 Z_FOR_MEDIA := media
+Z_FOR_SKEW := skew
 Z_FOR_PXRAND := pxrand
 Z_FOR_EDGES := edges
 Z_FOR_LATE := late
@@ -327,9 +329,12 @@ Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_US
 BIN_COMMANDS := $(foreach c,cp mv rm mkdir rmdir wc lp more clear uptime date sleep env head \
     kill ps spin keys mem beep play joy mouse term nice eject, \
     $(c)=$(C_B)/bin/$(c).$(OBJ)) crash=$(C_B)/bin/crash.$(OBJ)+$(C_B)/bin/crashes.$(OBJ) \
-    fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ)
+    fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ) \
+    format=$(C_B)/bin/format.$(OBJ)+$(C_B)/bin/fmtlay.$(OBJ)
+$(C_B)/bin/format.$(OBJ) $(C_B)/bin/fmtlay.$(OBJ): src/bin/fmtlay.h
 DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ)) \
-    $(if $(filter shell sh,$(PROGRAM)),$(BIN_COMMANDS))
+    $(if $(filter shell sh,$(PROGRAM)),$(BIN_COMMANDS),$(if $(filter -dTEST_POSIX_SKEW, \
+    $(TEST_DEFINES)),format=$(C_B)/bin/format.$(OBJ)+$(C_B)/bin/fmtlay.$(OBJ)))
 DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p))).rx)
 image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))

@@ -185,6 +185,7 @@ reply's BX is 0 or the error.
 | `DRV_DISK_RESET` | | the controller reset, every unit's cylinder forgotten |
 | `DRV_DISK_GEOMETRY` | BL the unit | CX the cylinders, SI's low byte the heads and its high byte the sectors a track (`E_INVAL`: no such unit) |
 | `DRV_DISK_READ_ID` | BL the unit, BH the head (diskettes) | CX the cylinder, SI's low byte the head and its high byte the sector of the first ID the 765 found |
+| `DRV_DISK_FORMAT` | BL the unit, BH the head, CX the cylinder, DI's low byte the track's sectors, SI the offset of its table in the segment passed | BX 0 or the error; CX the cylinders, SI's low byte the heads and its high byte the sectors a track: a diskette's track by Format Track, its IDs the table's in the order they pass the head, A as 1.2 MB and B as 360 KB; a fixed disk's by the adapter's interleave table, then verified, `E_IO` a bad track (roadmap disk-scheduler.md M9, D17; *docs/storage.md*) |
 | `DRV_DISK_MEDIA` | BL the unit (diskettes) | CX the cylinders, SI's low byte the heads and its high byte the sectors a track: A's diskette found by Read ID on cylinder 0 at 500 kbit/s (1.2 MB) and then 300 (a 360 KB one, stepped twice a cylinder if Read ID on its second track finds cylinder 1); the drive's runs use it from then on (roadmap disk-scheduler.md M8, D13) |
 
 A fixed disk's run goes on across heads and cylinders, `DRV_DISK_RUN_MAX`

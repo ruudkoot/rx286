@@ -9,6 +9,7 @@ define: TEST_POSIX_OVERFLOW
 define: TEST_OS_OVERFLOW
 keys: {wait 250}{wait 250}{wait 250}{wait 250}
 # DOSBox-X checks no stack segment's limit (docs/emulators.md).
+emulators: bochs mame
 match: contains
 timeout: 60
 ---

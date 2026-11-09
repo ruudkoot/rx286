@@ -190,6 +190,8 @@ hd_call:
         je .reset
         cmp al, DRV_DISK_GEOMETRY
         je .geometry
+        cmp al, DRV_DISK_FORMAT
+        je .format
 .invalid:
         mov bx, E_INVAL
         xor cx, cx
@@ -220,6 +222,8 @@ hd_call:
         mov dh, [di + UNIT_TRACK]
         xor bx, bx
         ret
+.format:
+        jmp hd_format
 
 ; ----------------------------------------------------------------------------
 ; hd_entry - the unit's entry in units
@@ -393,6 +397,114 @@ hd_transfer:
         jne .partly
         xor cx, cx                      ; (failed before it began)
 .partly:
+        xor dx, dx
+        ret
+
+; ----------------------------------------------------------------------------
+; hd_format - DRV_DISK_FORMAT: a track formatted by the adapter's interleave
+; table (Format Track, which says nothing of a failure), then verified: a
+; Verify that fails is a bad track, E_IO (disk-scheduler.md M9, D17). The
+; emulators' IDE drives abort Format Track (E1): E_IO at once
+;   In:       hd_unit; BH = the head; CX = the cylinder; DI's low byte = the
+;             track's sectors; SI = the table's offset; BP = the segment
+;             passed (0: none came)
+;   Out:      BX = 0, or E_INVAL, E_FAULT, E_IO, E_TIMEOUT; CX the cylinders,
+;             DX the heads (low) and the sectors a track (high)
+;   Destroys: AX, SI, DI, ES
+; ----------------------------------------------------------------------------
+hd_format:
+        mov [hd_head], bh
+        mov [hd_cylinder], cx
+        mov byte [hd_sector], 1
+        mov ax, di
+        mov [hd_count], al
+        test bp, bp
+        jz .fault
+        call hd_entry
+        cmp cx, [di + UNIT_CYLINDERS]
+        jae .invalid
+        cmp bh, [di + UNIT_HEADS]
+        jae .invalid
+        cmp al, [di + UNIT_TRACK]       ; every sector of the track
+        jne .invalid
+        mov cx, SECTOR_SIZE
+        call dw_fits
+        jc .fault
+        call hd_unit_ready
+        cmp byte [bx], 0
+        jne .ready
+        call hd_setup
+        jc .failed
+.ready:
+        call hd_task_file
+        jc .timeout
+        mov al, [hd_count]              ; the track's sectors, as the adapter asks
+        mov dx, HDC_SECTOR_COUNT
+        out dx, al
+        mov byte [irq_seen], 0
+        mov al, HDC_CMD_FORMAT
+        mov dx, HDC_COMMAND
+        out dx, al
+        call hd_wait_idle               ; it asks for the table
+        jc .timeout
+        test al, HDC_STATUS_ERR
+        jnz .error
+        test al, HDC_STATUS_DRQ
+        jz .error
+        call dw_readable
+        jnz .gone
+        push ds
+        mov ds, bp
+        mov cx, SECTOR_SIZE / 2
+        mov dx, HDC_DATA
+        rep outsw
+        pop ds
+        call hd_wait_irq                ; the track formatted
+        jc .timeout
+        test al, HDC_STATUS_ERR | HDC_STATUS_WRITE_FAULT
+        jnz .error
+        call hd_task_file               ; then read back: every sector's ECC checked
+        jc .timeout
+        mov al, [hd_count]
+        mov dx, HDC_SECTOR_COUNT
+        out dx, al
+        mov byte [irq_seen], 0
+        mov al, HDC_CMD_VERIFY
+        mov dx, HDC_COMMAND
+        out dx, al
+        call hd_wait_irq
+        jc .timeout
+        test al, HDC_STATUS_ERR
+        jnz .error
+        mov bl, [hd_unit]
+        xor bh, bh
+        shl bx, 1
+        mov ax, [hd_cylinder]
+        mov [hd_cylinder_now + bx], ax
+        mov cx, [di + UNIT_CYLINDERS]
+        mov dl, [di + UNIT_HEADS]
+        mov dh, [di + UNIT_TRACK]
+        xor bx, bx
+        ret
+.error:
+        call hd_forget                  ; reset before the next command
+        mov bx, E_IO
+        jmp .out
+.gone:
+        call hd_forget
+.fault:
+        mov bx, E_FAULT
+        jmp .out
+.timeout:
+        call hd_forget
+        mov ax, E_TIMEOUT
+.failed:
+        mov bx, ax
+        jmp .out
+.invalid:
+        mov bx, E_INVAL
+.out:
+        xor cx, cx
         xor dx, dx
         ret
 

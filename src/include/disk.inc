@@ -38,6 +38,17 @@ DS_SHRINK           equ 7       ;    BL the last segments to give back -> BX 0 o
                                 ;    them is used, their dirty sectors moved to the others,
                                 ;    or E_BUSY if not within DS_SHRINK_TICKS: the root then
                                 ;    revokes them
+DS_FORMAT           equ 8       ; BL a drive (0-3), BH the sectors of the track, CX the
+                                ;    cylinder, SI's low byte the head, DI the offset of the
+                                ;    track's table in the segment passed (DRV_DISK_FORMAT's)
+                                ;    -> BX 0 or the error. The drive's cache dropped first,
+                                ;    its diskette or boot record taken as new (M9, D17): the
+                                ;    OS server's PX_FORMAT, whose caller alone uses the drive
+DS_RAW_READ         equ 9       ; as DS_READ, but BL a drive, its sectors from the drive's
+                                ;    first, past the cache (the formatter's)
+DS_RAW_WRITE        equ 10      ;    and as DS_WRITE
+DS_GEOMETRY         equ 11      ; BL a drive -> BX 0 or E_TIMEOUT; CX the cylinders, SI's low
+                                ;    byte the heads, its high byte the sectors a track
 DS_BADGE_ROOT       equ 0x5244  ; the root's copy of the disk server's endpoint
 DS_SHRINK_TICKS     equ 500     ; 10 s: past write-behind's 5 s, and a busy block's run
 DS_RUN_MAX          equ 64      ; a read's or write's sectors at most: 32 KB

@@ -199,7 +199,16 @@ now, whose name a current directory made of it takes. A diskette's volume
 follows its diskette: another one in the drive is a new volume, and the
 old one's open files answer `ENXIO`, as a write does with no diskette in
 (*docs/disk-server.md*). `eject` (`PX_EJECT`, rx286's own) writes what is
-held of a diskette's volume and forgets it. A path is made absolute against the process's current
+held of a diskette's volume and forgets it. `format`'s way to a drive is
+`PX_FORMAT` (rx286's own; roadmap disk-scheduler.md M9, D17), BL the drive
+and BH what to do: `FMT_BEGIN` takes the drive for the caller's process,
+refused (`EBUSY`) while a file of it is open or another process has it,
+once what the server and the disk server hold of it is written, and
+answers its geometry; `FMT_TRACK` formats a track by the caller's table;
+`FMT_READ` and `FMT_WRITE` move sectors from the drive's first, past the
+caches, the process's buffer lent meanwhile; `FMT_END`, or the process's
+end, gives the drive back, its volume mounted anew when next named.
+Meanwhile any other call on the drive is `EBUSY`. A path is made absolute against the process's current
 directory, which starts at its parent's (`/` for init), and its "." and
 ".." taken out before it is followed. Names are case-sensitive (roadmap
 disk-scheduler.md M1, D19): within a volume a name is 8.3, kept upper case

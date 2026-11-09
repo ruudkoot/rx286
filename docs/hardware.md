@@ -136,7 +136,9 @@ numbers below are the Technical Reference's.
   `FDC_SPECIFY_1` and `FDC_SPECIFY_2` (5-170); `FDC_CMD_RECALIBRATE`,
   `FDC_CMD_SEEK` and `FDC_CMD_SENSE_INT` after their interrupt;
   `FDC_CMD_READ` and `FDC_CMD_WRITE` (MFM) with `FDC_SIZE_512`, `FDC_DTL` and
-  the BIOS's gap, `FDC_GAP_1200K` or `FDC_GAP_360K`. In the results,
+  the BIOS's gap, `FDC_GAP_1200K` or `FDC_GAP_360K`; `FDC_CMD_FORMAT` with
+  the BIOS's format gaps, `FDC_FORMAT_GAP_1200K` and `FDC_FORMAT_GAP_360K`,
+  and its filler, `FDC_FILLER` (5-170). In the results,
   `FDC_ST0_CODE` is 0 for success and `FDC_ST0_SEEK_END` follows a seek;
   `FDC_ST0_INVALID` is an invalid command's, Sense Interrupt Status's with
   no interrupt pending;
@@ -153,7 +155,10 @@ numbers below are the Technical Reference's.
   more than eight heads. The commands: `HDC_CMD_SET_PARAMETERS`,
   `HDC_CMD_RESTORE` (whose step rate, 35 us, implied seeks then use),
   `HDC_CMD_READ`, `HDC_CMD_WRITE`, `HDC_CMD_SEEK` (which ends once its
-  steps are sent: roadmap disk-scheduler.md M2).
+  steps are sent: roadmap disk-scheduler.md M2), and the formatter's
+  `HDC_CMD_FORMAT` (the sector count the track's sectors, the interleave
+  table its one sector of data, no error said: the adapter's p. 9) and
+  `HDC_CMD_VERIFY`, which checks a track's sectors after it (M9).
 - **Printer** (`LPT_*`, offsets `LPT_DATA`, `LPT_STATUS`, `LPT_CONTROL` from
   an `LPT*_BASE`; the Serial/Parallel Adapter's section): `LPT_STATUS_NOT_BUSY`
   set means the printer takes a byte, `LPT_STATUS_PAPER_END` that it has no

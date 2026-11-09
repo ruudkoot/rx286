@@ -169,6 +169,30 @@ than eight heads gets the control register's bit 3, as the BIOS sets it.
 `DRV_DISK_SEEK` sends a Seek, which ends once its steps are sent; the heads
 go on moving, and `DRV_DISK_STATUS` says when they are there.
 
+## Formatting
+
+`format` (roadmap disk-scheduler.md M9, D17; `src/bin/format.c`, its
+layouts in `fmtlay.c`) formats a drive through `PX_FORMAT`, which keeps the
+drive its own meanwhile, and writes a new FAT12 volume:
+- **A** as 1.2 MB and **B** as 360 KB, as DOS lays them out, a track at a
+  time by the 765's Format Track (`DRV_DISK_FORMAT`), its sectors' IDs in
+  the order they pass the head: each cylinder's sector 1 a skew of sectors
+  on from the last's, 7 on A and 3 on B (`-s`), so that after a step the
+  next cylinder's first sector comes under the head in time, not a turn
+  later. On MAME KERNEL.BIN reads back from a skewed 1.2 MB diskette in
+  5.82 s, against 6.82 s from one without (`tests/disk/skew.test`).
+- **C or D**, after a yes (or `-y`), a track at a time by the adapter's
+  Format Track, an interleave table of 3:1 (`-i`) and a skew for the seek
+  to the next cylinder, then each track verified: a track whose verify
+  fails is bad, its clusters marked so. The volume is one FAT12 partition
+  from cylinder 0's second track to the end, as `tools/mkdisks` lays C and
+  D out. The emulators' IDE drives abort Format Track (E1), so there format
+  stops at the first track, the disk as it was; a real AT will test the
+  rest.
+
+The boot sector has DOS 4's BPB, with a serial and the label (`-v`), and
+code that says it is no system disk.
+
 ## The printers
 
 LPT1 at 378h and LPT2 at 278h, driven by the printer driver in ring 1

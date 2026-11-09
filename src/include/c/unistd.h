@@ -43,6 +43,10 @@ int rmdir(const char *path);
 /* eject - a diskette's volume forgotten, what is held of it written first
  * (rx286's own: disk-scheduler.md M8) */
 int eject(const char *path);
+/* rx_format - the formatter's way to a drive (0 A to 3 D), op posix.h's
+ * FMT_*: its result, or -1 and errno; SI out in *si_out (rx286's own:
+ * disk-scheduler.md M9) */
+int rx_format(int drive, int op, unsigned cx, unsigned si, void *buffer, unsigned *si_out);
 int chdir(const char *path);
 char *getcwd(char *room, size_t n);
 int fsync(int fd);

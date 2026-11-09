@@ -13,7 +13,7 @@ define: TEST_DAEMONS
 install: C /BIN/PS z-ps.rx
 install: C /BIN/KILL z-kill.rx
 install: C /BIN/NICE z-nice.rx
-keys: {wait 100}ps -e\nkill 11\n{wait 20}clock\n{wait 100}ps -e\nnice -n 5 ps\n
+keys: {wait 250}ps -e\nkill 11\n{wait 20}clock\n{wait 100}ps -e\nnice -n 5 ps\n
 match: contains
 timeout: 60
 ---

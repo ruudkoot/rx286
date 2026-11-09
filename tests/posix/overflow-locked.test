@@ -7,7 +7,8 @@ program: idle
 define: TEST_POSIX_OVERFLOW
 define: TEST_OS_OVERFLOW_LOCKED
 keys: {wait 250}{wait 250}{wait 250}{wait 250}
-# DOSBox-X checks no stack segment's limit (docs/emulators.md).
+# DOSBox-X checks no stack segment's limit (docs/emulators.md): there the
+# overflow faults at the segment's end instead (#GP), to the same end.
 match: contains
 timeout: 60
 ---

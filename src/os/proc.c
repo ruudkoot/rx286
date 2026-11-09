@@ -1642,7 +1642,7 @@ static int handle(int i, struct rx_kregs *r)
                 || (r->ax & 0xFF) == PX_TCGETATTR || (r->ax & 0xFF) == PX_TCSETATTR
                 || (r->ax & 0xFF) == PX_TCGETPGRP || (r->ax & 0xFF) == PX_TCSETPGRP
                 || (r->ax & 0xFF) == PX_IOCTL || (r->ax & 0xFF) == PX_POLL
-                || (r->ax & 0xFF) == PX_EJECT)
+                || (r->ax & 0xFF) == PX_EJECT || (r->ax & 0xFF) == PX_FORMAT)
             result = vfs_call(i, data, r, &error, &status);
         else
             error = ENOSYS;

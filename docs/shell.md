@@ -100,6 +100,7 @@ spins the boot diskette up, and the boot diskette must stay in A.
 | `mouse` | where the mouse is, then again whenever it moves or a button changes ("x 320, y 100 (column 40, row 12), buttons: none"), until Esc or both buttons; it waits in `poll` for the terminal and the mouse |
 | `term` | a terminal on COM2: what comes is shown, what is typed is sent (Enter as CR), raw, until Esc alone; it waits in `poll`. Where COM2 is the log it says so |
 | `clock`, `counter` | the daemons, on the boot diskette (below) |
+| `format DRIVE [-s SKEW] [-i INTERLEAVE] [-v LABEL] [-y]` | a drive formatted and given a new volume: A 1.2 MB, B 360 KB; C and D after a yes (*docs/storage.md*, *Formatting*) |
 
 DOS's names are aliases from the start (D14 C): `dir` (`ls -l`), `type`
 (`cat`), `print` (`lp`), `copy`, `del`, `ren`, `md`, `rd`, `cls`, and a

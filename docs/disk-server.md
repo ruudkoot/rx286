@@ -32,6 +32,9 @@ write passes a segment: the process's data, or the OS server's cache.
 | `DS_EJECT` | BL a volume | BX 0: its sectors no longer cached, except the dirty ones |
 | `DS_GROW` | the root's alone (badged `DS_BADGE_ROOT`): BL the segments it has put in the cache's next slots | BX 0, or `E_INVAL` if one is not a whole segment of 125 blocks |
 | `DS_SHRINK` | the root's alone: BL the last segments to give back | BX 0 once none of them is used, or `E_BUSY` if not within `DS_SHRINK_TICKS` (10 s) |
+| `DS_FORMAT` | BL a drive (0-3), BH the track's sectors, CX the cylinder, SI's low byte the head, DI the offset of the track's table in the segment passed | BX 0 or the error (M9, D17) |
+| `DS_RAW_READ`, `DS_RAW_WRITE` | as `DS_READ` and `DS_WRITE`, but BL a drive, its sectors from the drive's first, past the cache | the same |
+| `DS_GEOMETRY` | BL a drive | BX 0 or `E_TIMEOUT`; CX the cylinders, SI's low byte the heads and its high byte the sectors a track |
 
 A volume's sectors are numbered from 0, in 32 bits. There are
 `DS_VOLUMES` (4) volumes:
@@ -45,6 +48,14 @@ read the boot record itself (`vol.c`), and only up to 64K sectors. The
 process's byte is for M5's fair shares. A fixed disk's writes are written
 behind (*Write-behind and read-ahead*), so a write's error may come only at
 a later `DS_SYNC`. `DS_EJECT` gets its meaning with M8's removable volumes.
+
+`DS_FORMAT`, `DS_RAW_READ` and `DS_RAW_WRITE` are the formatter's (M9,
+D17), through the OS server's `PX_FORMAT`, which keeps the drive for it
+alone. Each is queued for its drive's controller like any request; before
+it, what the cache holds of the drive is dropped, and its diskette, or its
+boot record, is taken as new at its next look. A diskette's raw run does
+not look at the diskette first: it may be blank. After `DS_FORMAT` A is a
+1.2 MB drive's, whatever it held.
 
 ## Its threads
 
@@ -199,7 +210,11 @@ Since roadmap disk-scheduler.md M6 (D7, D8):
 - **Read-ahead:** a read that missed the cache and began where the same
   process's last read of the drive ended has the rest of its cylinder read
   after it, into the cache, as the server's own request (`READ_AHEAD`), one
-  at a time a drive. It is the reader's, so that it comes next in the
+  at a time a drive. A diskette's reads its next cylinder too, so that the
+  step comes between the server's own runs, where a skew of the formatter's
+  finds the next cylinder's first sector under the head (M9); and a
+  diskette's reader that goes on in what was read ahead has the read-ahead
+  go on ahead of it. It is the reader's, so that it comes next in the
   reader's turn and is charged to its share: as anyone else's, the turn's
   wait for the reader's next read let that read come first and fetch the
   sectors itself. It takes a free request's record, no more than

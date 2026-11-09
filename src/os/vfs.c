@@ -213,8 +213,12 @@ static int errno_of(rx_u16 e)
 {
     if (e == ENOENT || e == ENOSPC)
         return e;
-    if (e == E_OFFLINE || e == E_CHANGED)
+    if (e == E_OFFLINE || e == E_CHANGED || e == E_TIMEOUT)
         return ENXIO;                   /* (the diskette is out, or another: M8, D12) */
+    if (e == E_BUSY)
+        return EBUSY;                   /* (a formatter's drive: M9) */
+    if (e == E_INVAL)
+        return EINVAL;
     return e == E_PROTECTED ? EROFS : EIO;
 }
 
@@ -308,6 +312,8 @@ void vfs_medium(unsigned drive)
             ofds[k].kind = K_GONE;
     vol_named[drive] = 0;               /* (its name learnt anew: /mnt's, D20) */
     vol_count[drive]++;
+    vols[drive].next_free = 0;          /* (its free clusters looked for from the first:
+                                           the old one's place meant nothing here, M9) */
     medium_seen = 1;
 }
 
@@ -1144,16 +1150,22 @@ void vfs_exec(int i)
             fd_close(i, fd);
 }
 
-/* vfs_exit - every descriptor closed */
+static void format_end(unsigned d);
+
+/* vfs_exit - every descriptor closed, and a drive its formatter held given
+ * back */
 void vfs_exit(int i)
 {
-    unsigned keep = vol_held();
+    unsigned keep = vol_held(), d;
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
         if (FILES(i).fd[fd] != NO_FD)
             fd_close(i, fd);
     vol_release(keep);                  /* (those its files' entries took: M4) */
+    for (d = 0; d < DRIVES; d++)
+        if (vfs_formatter(d) == i + 1)
+            format_end(d);
 }
 
 /* same_file - do two descriptions name one volume's file (its entry)? */
@@ -2517,6 +2529,102 @@ int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
     return result;
 }
 
+/* The formatter's drives (disk-scheduler.md M9, D17): each held by the
+ * process (its entry + 1) whose PX_FORMAT began, or 0 */
+static rx_u8 formatter[DRIVES];
+
+/* vfs_formatter - the process whose formatter holds a drive (server.h) */
+int vfs_formatter(unsigned drive)
+{
+    return drive < DRIVES ? formatter[drive] : 0;
+}
+
+/* format_end - a formatter's drive given back: its volume mounted anew when
+ * it is next named */
+static void format_end(unsigned d)
+{
+    formatter[d] = 0;
+    vfs_medium(d);
+}
+
+/* px_format - PX_FORMAT: the formatter's way to a drive (posix.inc's FMT_*).
+ * FMT_BEGIN takes the drive for the caller's process, refused while a file
+ * of it is open or another holds it, once what the server and the disk
+ * server hold of it is written: its geometry. The others then format a
+ * track, or read or write sectors from the drive's first, past the caches,
+ * the process's buffer lent meanwhile; FMT_END, or the process's end, gives
+ * it back. Meanwhile any other call on the drive is EBUSY (os.c) */
+static int px_format(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
+{
+    unsigned d = r->bx & 0xFF, op = r->bx >> 8, n = r->si >> 8, k;
+    rx_u8 me = (rx_u8)(proc_leader(i) + 1);
+    rx_u16 e, cylinders = 0, heads_track = 0, moved = 0;
+
+    if (d >= DRIVES || (op != FMT_BEGIN && formatter[d] != me)) {
+        *error = EINVAL;
+        return -1;
+    }
+    switch (op) {
+    case FMT_BEGIN:
+        for (k = 0; k < OFDS && !formatter[d]; k++)
+            if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == d)
+                break;                  /* (a file of it open) */
+        if (formatter[d] || k < OFDS) {
+            *error = EBUSY;
+            return -1;
+        }
+        vol_hold(d);
+        e = cache_flush(d);
+        if (e == 0 && d >= 2)
+            e = disk_sync(d);           /* (a fixed disk's write-behind: M6) */
+        if (e == 0)
+            e = disk_geometry(d, &cylinders, &heads_track);
+        if (e) {
+            *error = errno_of(e);
+            return -1;
+        }
+        formatter[d] = me;
+        vfs_medium(d);                  /* its volume forgotten: mounted anew later */
+        *si_out = heads_track;
+        return (int)cylinders;
+    case FMT_TRACK:
+        if (!in_segment(data, r->di, SECTOR_SIZE)) {
+            *error = EFAULT;            /* (the table: a sector's room) */
+            return -1;
+        }
+        proc_lend(i, 1);
+        e = disk_format(d, r->cx, r->si & 0xFF, n, data, r->di);
+        proc_lend(i, 0);
+        break;
+    case FMT_READ:
+    case FMT_WRITE:
+        if (n == 0 || n > DS_RUN_MAX) {
+            *error = EINVAL;
+            return -1;
+        }
+        if (!in_segment(data, r->di, (rx_u16)(n * SECTOR_SIZE))) {
+            *error = EFAULT;
+            return -1;
+        }
+        proc_lend(i, 1);
+        e = disk_raw(op == FMT_READ ? DS_RAW_READ : DS_RAW_WRITE, d,
+                     r->cx | ((rx_u32)(r->si & 0xFF) << 16), n, data, r->di, &moved);
+        proc_lend(i, 0);
+        break;
+    case FMT_END:
+        format_end(d);
+        return 0;
+    default:
+        *error = EINVAL;
+        return -1;
+    }
+    if (e) {
+        *error = errno_of(e);
+        return -1;
+    }
+    return (int)moved;
+}
+
 /* px_ioctl - PX_IOCTL: a device's request (dev.c), its argument checked */
 static int px_ioctl(int i, rx_u16 data, struct rx_kregs *r, int *error)
 {
@@ -2754,6 +2862,8 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
         path_text(p);                  /* each name in its own case: "/mnt/rx286c/DOCS" */
         far_put(CWD(proc_leader(i)), p->text);
         return 0;
+    case PX_FORMAT:
+        return px_format(i, data, r, error, si_out);
     case PX_EJECT:                      /* a diskette's volume forgotten (M8, D12): */
         p = &scratch()->p;              /*    what the server holds of it written; its */
         in = scratch()->in;             /*    open files gone */

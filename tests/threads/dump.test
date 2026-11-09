@@ -6,7 +6,8 @@
 # its thread of the OS server's, which awaits its notification (os-server.md
 # P6, P12); the counter, a module (TEST_COUNTER), is ready below them. The
 # mouse's driver may still be in the mouse's reset: its line is not
-# checked.
+# checked; nor is the diskette driver's state, which may still be reading
+# ahead on A, whence the shell came (disk-scheduler.md M8b, M9).
 program: shell
 define: TEST_COUNTER
 keys: {sysrq}
@@ -16,7 +17,7 @@ match: contains
 rx286: thread printer receiving priority 7
 rx286: thread console receiving priority 7
 rx286: thread kbd running priority 7
-rx286: thread fd receiving priority 7
+rx286: thread fd {...} priority 7
 rx286: thread hd receiving priority 7
 rx286: thread serial receiving priority 7
 rx286: thread sound receiving priority 7

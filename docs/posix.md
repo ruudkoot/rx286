@@ -58,6 +58,7 @@ is one past the last call's number.
 | 49, 50 | `PX_THREAD`, `PX_THREAD_EXIT` | `pthread_create`, `pthread_exit` | P13 |
 | 51 | `PX_FUTEX` | the mutexes, conditions and joins | P13 |
 | 52 | `PX_EJECT` | `eject`, rx286's own: a diskette's volume forgotten | disk-scheduler.md M8 |
+| 53 | `PX_FORMAT` | `rx_format`, rx286's own: the formatter's way to a drive (*docs/processes.md*) | disk-scheduler.md M9 |
 
 The programs the root builds, the kernel's test programs, are answered
 `PX_WRITE`, `PX_READ`, `PX_NANOSLEEP` and `PX_EXIT` alone (P14,

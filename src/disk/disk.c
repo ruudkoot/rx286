@@ -326,11 +326,64 @@ static void RX_FAR *place(unsigned r, unsigned k)
 static int fits(unsigned r)
 {
     rx_u16 segment = REQUEST_SEGMENT(r);
-    rx_u32 end = (rx_u32)requests[r].offset + (rx_u32)requests[r].count * SECTOR_SIZE;
+    rx_u32 end = (rx_u32)requests[r].offset + (requests[r].kind == DS_FORMAT ? SECTOR_SIZE
+                 : (rx_u32)requests[r].count * SECTOR_SIZE);    /* (a format's table: a sector) */
 
     if (!rx_verr(segment) || end - 1 > rx_lsl(segment))
         return 0;
-    return requests[r].kind != DS_READ || rx_verw(segment);
+    return (requests[r].kind != DS_READ && requests[r].kind != DS_RAW_READ) || rx_verw(segment);
+}
+
+/* whole - a drive's sectors, as it is known (the formatter's) */
+static rx_u32 whole(unsigned drive)
+{
+    return (rx_u32)drives[drive].cylinders * drives[drive].heads * drives[drive].track;
+}
+
+/* raw - the formatter's request (disk-scheduler.md M9, D17): a track
+ * formatted (DS_FORMAT), or sectors from the drive's first read or written
+ * past the cache (DS_RAW_READ, DS_RAW_WRITE). What the cache held of the
+ * drive goes first, and its diskette or its boot record is taken as new: the
+ * OS server has written what it held, and only the formatter uses the drive.
+ * 0 or the error; *moved the sectors moved */
+static rx_u16 raw(unsigned q, unsigned drive, unsigned *moved)
+{
+    struct rx_kregs r;
+    rx_u16 unit, ep = driver(drive, &unit), error;
+    unsigned k;
+
+    *moved = 0;
+    take();
+    dc_forget(drive);
+    if (drive < FIXED)
+        identified[drive] = 0;          /* (the next look takes it as new) */
+    else
+        volumes[drive].known = 0;       /* (its boot record read again) */
+    give();
+    if (requests[q].kind == DS_FORMAT) {
+        if (kcall(KCALL_CALL, DRV_DISK_FORMAT,
+                  (rx_u16)(unit | ((requests[q].sector >> 16) << 8)),
+                  (rx_u16)requests[q].sector, ep, requests[q].offset, requests[q].count,
+                  REQUEST_SEGMENT(q), &r))
+            return E_TIMEOUT;
+        if (r.bx == 0 && drive < FIXED) {   /* (A as 1.2 MB now, whatever it held) */
+            take();
+            drives[drive].cylinders = r.cx;
+            drives[drive].heads = (rx_u8)r.si;
+            drives[drive].track = (rx_u8)(r.si >> 8);
+            volumes[drive].sectors = whole(drive);
+            give();
+        }
+        return r.bx;
+    }
+    checking = 1;                       /* (no look at the diskette: it may be blank) */
+    error = E_CHANGED;
+    for (k = 0; k < DISKETTE_TRIES && error == E_CHANGED; k++)  /* (the line a step clears) */
+        error = run(requests[q].kind == DS_RAW_READ ? DRV_DISK_READ : DRV_DISK_WRITE, drive,
+                    requests[q].sector, requests[q].count, REQUEST_SEGMENT(q),
+                    requests[q].offset, moved);
+    checking = 0;
+    return error;
 }
 
 /* answer - a queued request's reply, on its saved reply: BX the error, CX
@@ -638,7 +691,10 @@ static void read_ahead(unsigned drive, rx_u32 end, rx_u8 owner)
     if (!drives[drive].known || per == 0)
         return;
     cylinder = end / per;
-    stop = (cylinder + 1) * per;
+    stop = (cylinder + (drive < FIXED ? 2 : 1)) * per;  /* a diskette's: the next cylinder
+                                           too, so that the step comes between the
+                                           server's own runs, where a formatter's skew
+                                           finds its first sector under the head (M9) */
     if (stop > volumes[drive].start + volumes[drive].sectors)
         stop = volumes[drive].start + volumes[drive].sectors;
     if (stop <= end || stop - end > DS_RUN_MAX)
@@ -721,6 +777,12 @@ static void serve(unsigned q)
         take();
         requests[q].used = 0;           /* (no one to answer) */
         give();
+        return;
+    }
+    if (requests[q].kind == DS_FORMAT || requests[q].kind == DS_RAW_READ
+            || requests[q].kind == DS_RAW_WRITE) {
+        error = fits(q) ? raw(q, drive, &moved) : E_FAULT;
+        answer(q, error, (rx_u16)moved, 0, 0);
         return;
     }
     if (requests[q].kind == DS_SYNC) {  /* its drive's dirty blocks, all of them, and */
@@ -839,16 +901,20 @@ static int cached(unsigned q)
  * 0, or E_BUSY if the queue is full */
 static rx_u16 queue(unsigned q)
 {
-    unsigned drive = requests[q].volume, job;
-    rx_u32 lba = volumes[drive].start + requests[q].sector;
+    unsigned drive = requests[q].volume, job, k = requests[q].kind;
+    rx_u32 lba = k == DS_FORMAT ? (rx_u32)(rx_u16)requests[q].sector * drives[drive].heads
+                                  * drives[drive].track     /* (the formatter's: by the */
+                 : k == DS_RAW_READ || k == DS_RAW_WRITE ? requests[q].sector   /* drive) */
+                 : volumes[drive].start + requests[q].sector;
     rx_u16 cylinder = drives[drive].known
         ? (rx_u16)(lba / ((rx_u32)drives[drive].heads * drives[drive].track)) : 0;
 
     if (kcall(KCALL_SAVE_REPLY, 0, 0, 0, 0, REQUEST_REPLY(q), 0, 0, 0))
         return E_BUSY;
     take();
-    job = sched_add(drive, lba, cylinder, requests[q].kind == DS_VOLUME ? 1 : requests[q].count,
-                    requests[q].kind == DS_WRITE || requests[q].kind == DS_SYNC,
+    job = sched_add(drive, lba, cylinder,
+                    k == DS_VOLUME || k == DS_FORMAT ? 1 : requests[q].count,
+                    k == DS_WRITE || k == DS_SYNC || k == DS_FORMAT || k == DS_RAW_WRITE,
                     requests[q].owner, (rx_u16)rx_ticks());     /* (a sync: no wait for its
                                                                    next read after it, D5) */
     if (job == SCHED_NONE) {
@@ -889,6 +955,7 @@ static void changed(int how)
 static int take_call(unsigned q, struct rx_kregs *r)
 {
     unsigned label = r->ax & 0xFF, v = r->bx & 0xFF, count = r->bx >> 8, k;
+    int on;
     rx_u32 sector = r->cx | ((rx_u32)(r->si & 0xFF) << 16);
     rx_u16 error = 0;
 
@@ -931,6 +998,9 @@ static int take_call(unsigned q, struct rx_kregs *r)
         if (label == DS_READ && cached(q) && (v >= FIXED || TRUSTED(v))) {  /* the cache's */
                                         /*    alone, at once; a diskette checked first after
                                               2 s of its drive's silence (M8) */
+            on = v < FIXED && requests[q].owner == next_owner[v]
+                 && volumes[v].start + sector == next_read[v]
+                 && dc_find(key(v, volumes[v].start + sector + count)) == DC_NONE;
             for (k = 0; k < count; k++) {
                 rx_u16 b = dc_find(key(v, volumes[v].start + sector + k));
 
@@ -944,6 +1014,11 @@ static int take_call(unsigned q, struct rx_kregs *r)
                 touched[v] = 0;
             }
             give();
+            if (on) {                   /* a diskette's reader on, to the end of what was
+                                           read ahead: read on ahead of it (M9) */
+                read_ahead(v, volumes[v].start + sector + count, requests[q].owner);
+                kcall(KCALL_SIGNAL, 0, 0, 0, NOTIFY(DS_N_DISKETTE), 0, 0, 0, 0);
+            }
             r->cx = (rx_u16)count;
             break;
         }
@@ -1006,6 +1081,29 @@ static int take_call(unsigned q, struct rx_kregs *r)
             nap(DS_N_REQUESTS);         /* (a run ends; write-behind writes) */
         }
         changed(-1);
+        break;
+    case DS_GEOMETRY:
+        if (v >= DS_VOLUMES || !drives[v].known) {
+            error = E_TIMEOUT;
+            break;
+        }
+        r->cx = drives[v].cylinders;
+        r->si = (rx_u16)(drives[v].heads | (drives[v].track << 8));
+        break;
+    case DS_FORMAT:                     /* the formatter's (M9, D17): by the drive, */
+    case DS_RAW_READ:                   /*    queued for its controller's thread */
+    case DS_RAW_WRITE:
+        if (v >= DS_VOLUMES || !drives[v].known || r->bp == 0 || count == 0
+                || (label != DS_FORMAT && (count > DS_RUN_MAX || sector + count > whole(v)
+                                           || sector + count < sector))) {
+            error = r->bp == 0 ? E_FAULT : E_INVAL;
+            break;
+        }
+        requests[q].used = 1;
+        error = queue(q);
+        if (error == 0)
+            return 0;
+        requests[q].used = 0;
         break;
     case DS_EJECT:
         if (v < FIXED)

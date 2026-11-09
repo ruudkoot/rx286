@@ -110,8 +110,13 @@ int disk_trusted(unsigned drive)
 static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
                         rx_u16 bp, struct rx_kregs *r)
 {
-    int had, status;
+    int had, status, by = vfs_formatter(drive), self = proc_self();
 
+    if (by && (self < 0 || proc_leader(self) + 1 != by)) {
+        r->bx = E_BUSY;                 /* a formatter's drive, its alone (M9) */
+        r->cx = r->si = r->di = 0;
+        return 0;
+    }
     vol_hold(drive);
     had = lock_mine();
     if (had)
@@ -166,6 +171,49 @@ rx_u16 disk_eject(unsigned drive)
 
     if (disk_call_ds(drive, DS_EJECT, (rx_u16)drive, 0, 0, 0, 0, &r))
         return E_TIMEOUT;
+    return r.bx;
+}
+
+/* disk_geometry - a drive's cylinders, and its heads (low byte) and sectors
+ * a track (high), as the disk server knows them (DS_GEOMETRY; M9) */
+rx_u16 disk_geometry(unsigned drive, rx_u16 *cylinders, rx_u16 *heads_track)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_GEOMETRY, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;
+    *cylinders = r.cx;
+    *heads_track = r.si;
+    return r.bx;
+}
+
+/* disk_format - a track of a drive formatted by the table at an offset of a
+ * segment, passed (DS_FORMAT; M9, D17): 0 or the error */
+rx_u16 disk_format(unsigned drive, rx_u16 cylinder, unsigned head, unsigned sectors,
+                   rx_u16 segment, rx_u16 offset)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_FORMAT, (rx_u16)(drive | (sectors << 8)), cylinder,
+                     (rx_u16)(head | ((proc_self() + 1) << 8)), offset, segment, &r))
+        return E_TIMEOUT;
+    return r.bx;
+}
+
+/* disk_raw - sectors from a drive's first, to or from a segment (passed),
+ * past the caches (DS_RAW_READ, DS_RAW_WRITE; M9): 0 or the error, *moved
+ * the sectors moved */
+rx_u16 disk_raw(int label, unsigned drive, rx_u32 sector, unsigned count, rx_u16 segment,
+                rx_u16 offset, rx_u16 *moved)
+{
+    struct rx_kregs r;
+
+    *moved = 0;
+    if (disk_call_ds(drive, label, (rx_u16)(drive | (count << 8)), (rx_u16)sector,
+                     (rx_u16)(((sector >> 16) & 0xFF) | ((proc_self() + 1) << 8)), offset,
+                     segment, &r))
+        return E_TIMEOUT;
+    *moved = r.cx;
     return r.bx;
 }
 

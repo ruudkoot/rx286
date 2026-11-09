@@ -82,6 +82,7 @@ CMOS says 640 KB of base memory whatever it is: INT 12h is right.
 | 3F7h reads FFh: the controller has no digital input register, and A no change line (the driver finds A's diskette by time, as B's) | bit 7 the change line, which a step with a diskette in drops |
 | a diskette's or fixed disk's step, seek and transfer at once | the drives' times |
 | a multi-track (MT) Read or Write ends at the first head's last sector, as ending well: the driver finds the rest by the DMA's count (*docs/storage.md*) | goes on to the second head's |
+| no Format Track (an invalid command: `tests/disk/format.test` leaves DOSBox-X out) | Format Track |
 | the clock is the host's | |
 
 Its drives (roadmap disk-scheduler.md M8): the template enables its 765

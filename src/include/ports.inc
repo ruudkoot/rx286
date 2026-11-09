@@ -139,6 +139,9 @@ HDC_CONTROL_HEADS   equ 0x08        ; more than 8 heads (head select 3)
 HDC_CMD_RESTORE     equ 0x10        ; heads to cylinder 0; implied seeks step at 35 us
 HDC_CMD_READ        equ 0x20        ; read sectors, with retries
 HDC_CMD_WRITE       equ 0x30        ; write sectors, with retries
+HDC_CMD_VERIFY      equ 0x40        ; read sectors, checking them, none transferred (retries)
+HDC_CMD_FORMAT      equ 0x50        ; format a track: the sector count its sectors, the
+                                    ;    interleave table its one sector of data (p. 9)
 HDC_CMD_SEEK        equ 0x70        ; the heads to the task file's cylinder: done once the
                                     ;    steps are sent (WD1010-05; disk-scheduler.md W2)
 HDC_CMD_SET_PARAMETERS equ 0x91     ; heads (drive/head register) and sectors a track (count)
@@ -226,12 +229,17 @@ FDC_CMD_SENSE_INT   equ 0x08
 FDC_CMD_SEEK        equ 0x0F
 FDC_CMD_READ        equ 0x46        ; read data, MFM
 FDC_CMD_WRITE       equ 0x45        ; write data, MFM
+FDC_CMD_FORMAT      equ 0x4D        ; format a track, MFM: its sectors' IDs by DMA, four bytes
+                                    ;    each (cylinder, head, sector, size)
 FDC_SPECIFY_1       equ 0xDF        ; step rate and head unload: the BIOS's (5-170)
 FDC_SPECIFY_2       equ 0x02        ; head load 2 ms, DMA
 FDC_SIZE_512        equ 2           ; N: 128 << 2 bytes a sector
 FDC_DTL             equ 0xFF        ; unused with N = 2
 FDC_GAP_1200K       equ 0x1B        ; gap 3: 1.2 MB media in a 1.2 MB drive (BIOS)
 FDC_GAP_360K        equ 0x2A        ; 360 KB media in a 360 KB drive
+FDC_FORMAT_GAP_1200K equ 0x54       ; gap 3 for formatting 1.2 MB media (the BIOS's)
+FDC_FORMAT_GAP_360K equ 0x50        ;    and 360 KB media
+FDC_FILLER          equ 0xF6        ; a formatted sector's bytes (the BIOS's)
 FDC_ST0_CODE        equ 0xC0        ; ST0's interrupt code: 0 when the command succeeded
 FDC_ST0_SEEK_END    equ 0x20
 FDC_ST0_INVALID     equ 0x80        ; ST0 of an invalid command: Sense Interrupt Status with
