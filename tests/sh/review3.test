@@ -7,7 +7,6 @@
 # directory before it makes the target; wc and rm say their usage; ^D at
 # an empty prompt ends the shell, and init starts another.
 program: sh
-emulators: bochs mame
 install: C /BIN/SLEEP z-sleep.rx
 install: C /BIN/KILL z-kill.rx
 install: C /BIN/CP z-cp.rx

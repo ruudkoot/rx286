@@ -157,7 +157,8 @@ names:
   (*docs/processes.md*), and the tty thread. The thread and the
   notification come from the arena while it has room, and then from a
   block each (P15): blocks of 1 KB kept for good, spread through the memory
-  for segments, left no 64 KB block for a process without extended memory.
+  for segments, left no 64 KB block for a process on a machine without
+  extended memory (which rx286 ran on until disk-scheduler.md M8b).
   Its faults are the root's, badged `SERVE_BADGE`. It refuses (`E_INVAL`),
   before it takes anything, a stack of no bytes, of an odd number or of
   more than 8 KB, which no block of stacks would hold, and an SP that is 0,

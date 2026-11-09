@@ -168,9 +168,10 @@ code, an entry outside the code, code and data past the file's end, a
 stack too small for `main`'s three words, data past a segment, or more data
 than its own most. A directory is `EACCES`.
 
-init's environment is `PATH=/z:/mnt/rx286c/bin` and `HOME=/mnt/a:`, which its children
-inherit; libc's `execvp` and `posix_spawnp` look for a name without a slash
-along it, or along `/z:/c/bin` without one (`src/lib/posix/path.c`, with
+init's environment is `PATH=/z:/mnt/rx286/bin:/mnt/rx286c/bin` and `HOME=/mnt/a:`, which
+its children inherit: `/z`, the boot diskette's `/bin` and C's. libc's
+`execvp` and `posix_spawnp` look for a name without a slash along it, or
+along the same without one (`src/lib/posix/path.c`, with
 `getenv`; XSH exec leaves that to the system). `make run` puts the programs
 a build made in C's `/BIN` (`tools/install-programs`), and run-test's
 `install:` lines put them on a run's drive. A process is named by its
@@ -250,7 +251,7 @@ The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 (past 8.3, or past `PX_PATH_MAX`), `ENOTEMPTY`, `EPIPE`.
 
 The volumes are read and written through a cache of 32 sectors in a segment
-of the server's, 3 without extended memory (`src/os/cache.c`,
+of the server's (`src/os/cache.c`,
 `src/os/vol.c`), whose sectors come from the disk server and its own cache
 (*docs/disk-server.md*): the FAT, in every copy,
 and the directories are written at the end of each call that changed them;
@@ -428,11 +429,17 @@ another (`tests/disk/beside.test`):
   call is over (`end`): its segments are not revoked under a transfer, nor
   its descriptions freed under a call. An exec waits for the process's
   other threads' volume calls the same way.
-- **The paths and nodes** a call works with are in one of two scratch
-  sets (`scratch_take`; three until M8, whose 1.75 KB each a machine of
-  512 KB without extended memory needed back), taken at the start of a call
-  with a path, a stat or an exec, and given back at its end; a third such
-  call waits for one. Until M4 each function kept its
+- **An entry a spawn takes is its own** from `entry_new` to its start,
+  though the spawn reads the program's file between, with the lock given
+  up; and one exec at a time builds its arguments and loads its code
+  (`exec_turn`: `args` and the load's slot are the server's one), from its
+  file's opening to its process. Both were found in M8b, once the shell's
+  commands came from the disks: a fork took a spawn's entry, and a
+  pipeline's second exec wrote over the first's arguments.
+- **The paths and nodes** a call works with are in one of three scratch
+  sets (`scratch_take`; two in M8, for a machine of 512 KB without
+  extended memory), taken at the start of a call with a path, a stat or an
+  exec, and given back at its end; a fourth such call waits for one. Until M4 each function kept its
   own statics, which another call could now write over while the first
   waits for the disk. A read, which may wait for ever on a terminal, takes
   none.
@@ -443,11 +450,13 @@ init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
 process that ends become its own. In an image built with `PROGRAM=shell`
-(`sh` too) it starts the shell, `/z/sh`, on each terminal, as getty does
-(*docs/terminals.md*, *init's terminals*): on the first at once, on the
-others once Enter is pressed there, so that a shell's memory is taken only
-where one is wanted (128 KB in all without extended memory). Once the
-shells are started it starts the daemons, `/z/clock` and `/z/counter` (P12;
+(`sh` too) it starts the shell, the boot diskette's `/mnt/rx286/bin/sh`,
+on each terminal, as getty does (*docs/terminals.md*, *init's terminals*):
+on the first at once, on the others once Enter is pressed there, so that a
+shell's memory is taken only where one is wanted. Without the shell (the
+boot diskette out), the terminal says so and waits for Enter before init
+tries again, as DOS asks for its `COMMAND.COM`. Once the shells are started
+it starts the daemons, `clock` and `counter`, from the same `/bin` (P12;
 not in a test build, unless it asks, `TEST_DAEMONS` or `TEST_DEMO`, as they
 would change every test's pids and timing). Each makes itself a daemon
 (`rx_daemon`, `rx/daemon.h`): its first process ends at once, the second

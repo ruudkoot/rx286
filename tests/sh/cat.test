@@ -2,7 +2,6 @@
 # two pieces (B:\FRAG.TXT: clusters 3-4 and 6-7), and a file of four 8 KB
 # clusters (C:\NUMBERS.TXT).
 program: sh
-emulators: bochs mame
 keys: cat c:/docs/hello.txt\ncat b:frag.txt\ncat c:/numbers.txt\n
 match: contains
 timeout: 120

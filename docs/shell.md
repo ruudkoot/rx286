@@ -3,8 +3,8 @@
 The shell (`src/bin/sh/sh.c`; roadmap os-server.md P9, P11, P12, D14) is
 a process in C, POSIX-like, which init starts on each terminal: at once on
 the first, after Enter on the others (Alt+F1 to F8 show them;
-*docs/terminals.md*). Its commands are programs (`src/bin/`), in `/z`
-beside it or in C's `/BIN` (D11). *docs/processes.md* has what the server
+*docs/terminals.md*). Its commands are programs (`src/bin/`), on the boot
+diskette's `/BIN` beside it or in C's (D11; disk-scheduler.md M8b). *docs/processes.md* has what the server
 does for them; this is what a person at the keyboard sees. Until P12 the
 shell was a program in assembly that the root built, DOS-like, with its
 commands inside it.
@@ -13,9 +13,10 @@ commands inside it.
 
 The prompt is the current directory and `$`: `/mnt/rx286$`,
 `/mnt/rx286c/docs$`. The shell starts in `HOME`, `/mnt/a:`, the boot
-drive's volume, with the environment init gave it (`PATH=/z:/mnt/rx286c/bin`,
+drive's volume, with the environment init gave it (`PATH=/z:/mnt/rx286/bin:/mnt/rx286c/bin`,
 `HOME=/mnt/a:`). The tree is one: `/mnt` holds the drives' volumes by
-their labels' names, `/dev` the devices, `/z` the boot image's programs; a
+their labels' names, `/dev` the devices, `/z` the boot image's programs
+(init, and a test build's own); a
 path may name its drive DOS's way, `c:/docs` or `C:/docs` for the volume C
 holds now (*docs/processes.md*). Names on
 a drive are 8.3 and case-sensitive: shown in lower case, a name with a
@@ -63,9 +64,12 @@ job.
 | `jobs`, `fg [%N]`, `bg [%N]` | the jobs (`%1` or `1`; without, the job stopped or started in the background last) |
 | `true`, `false`, `help` | `help`: the commands and the keys |
 
-`echo`, `cat` and `ls` are in `/z` with the shell; the others in C's
-`/BIN` (D11, P12: the boot image held 128 KB then), so a machine without drive
-C has those three alone.
+`echo`, `cat` and `ls` are on the boot diskette's `/BIN` with the shell;
+the others in C's `/BIN` (D11, P12), so a machine without drive C has
+those three alone. The four were in `/z`, the boot image, until
+disk-scheduler.md M8b, which gave their 37 KB of memory below 1 MB back to
+the processes: now, as on DOS, a command typed after two seconds' rest
+spins the boot diskette up, and the boot diskette must stay in A.
 
 | Program | What |
 |---|---|
@@ -95,7 +99,7 @@ C has those three alone.
 | `joy` | one reading of `/dev/joystick`: "buttons: none; axes: absent absent absent absent" |
 | `mouse` | where the mouse is, then again whenever it moves or a button changes ("x 320, y 100 (column 40, row 12), buttons: none"), until Esc or both buttons; it waits in `poll` for the terminal and the mouse |
 | `term` | a terminal on COM2: what comes is shown, what is typed is sent (Enter as CR), raw, until Esc alone; it waits in `poll`. Where COM2 is the log it says so |
-| `clock`, `counter` | the daemons, in `/z` (below) |
+| `clock`, `counter` | the daemons, on the boot diskette (below) |
 
 DOS's names are aliases from the start (D14 C): `dir` (`ls -l`), `type`
 (`cat`), `print` (`lp`), `copy`, `del`, `ren`, `md`, `rd`, `cls`, and a

@@ -2,7 +2,6 @@
 # -N, from files with their names, from a pipe (cat then gets SIGPIPE),
 # and its refusals.
 program: sh
-emulators: bochs mame
 install: C /BIN/HEAD z-head.rx
 keys: head b:frag.txt\nhead -n 2 b:frag.txt c:/docs/hello.txt\nhead -3 c:/numbers.txt\n
 keys: cat c:/numbers.txt | head -n2\nhead nothing; head -n x\n

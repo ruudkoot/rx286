@@ -4,9 +4,8 @@
 # all: the other terminals' children of init wait for Enter, the shell for
 # its child, sleep in its call, and one stopped. kill sends SIGTERM, or the
 # signal named; kill -l names them. env sets, empties, and runs a command
-# found along PATH, or along /z:/c/bin without one.
+# found along PATH, or along /z, A's and C's /bin without one.
 program: sh
-emulators: bochs mame
 install: C /BIN/SLEEP z-sleep.rx
 install: C /BIN/PS z-ps.rx
 install: C /BIN/KILL z-kill.rx
@@ -64,6 +63,6 @@ A=2
 env: nothing: no such file or directory
 127
 /mnt/rx286$ env | head -n 1; sleep x
-PATH=/z:/mnt/rx286c/bin
+PATH=/z:/mnt/rx286/bin:/mnt/rx286c/bin
 usage: sleep SECONDS
 /mnt/rx286$

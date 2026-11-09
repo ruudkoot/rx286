@@ -5,7 +5,6 @@
 # case-sensitive (disk-scheduler.md M1, D19): /D is no drive, and MANY a
 # name FAT cannot hold.
 program: sh
-emulators: bochs mame
 keys: cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /mnt/rx286c/docs/../docs; pwd\n
 keys: cd /D; cd /mnt/rx286d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere\n
 keys: cd /; cd ..; pwd; cd; pwd\n

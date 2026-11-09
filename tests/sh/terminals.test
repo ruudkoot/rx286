@@ -6,7 +6,6 @@
 # second while ^C drops a line on the first. At the end eight shells run.
 program: sh
 define: TEST_SCREEN
-emulators: bochs mame
 keys: echo one\n{alt-f2}\necho two\ncat\n{alt-f1}abc{ctrl-c}echo three\n
 keys: {alt-f2}hi\n{ctrl-d}{alt-f3}\n{alt-f4}\n{alt-f5}\n{alt-f6}\n{alt-f7}\n{alt-f8}\n
 keys: {alt-f3}{alt-f4}{alt-f5}{alt-f6}{alt-f7}{alt-f8}{alt-f2}{alt-f1}

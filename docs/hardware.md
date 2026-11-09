@@ -15,7 +15,7 @@ numbers below are the Technical Reference's.
 |---|---|---|
 | CPU | Intel 80286, 6 MHz (1-7) | protected mode, 16-bit, only 286 instructions |
 | Coprocessor | Intel 80287 | available to the program; errors on IRQ13 |
-| Memory | 640 KB base; extended memory unused | the base only |
+| Memory | 640 KB base, and extended memory above 1 MB; at least 639 KB and 384 KB, an AT of 1 MB (roadmap disk-scheduler.md M8b) | all of it, up to 15 MB above 1 MB; on less than the least, the kernel stops at boot |
 | Interrupt controllers | two 8259A, the slave on the master's IR2 | vectors 20h-2Fh |
 | Timer | 8254: channel 0 the system timer, 1 DRAM refresh, 2 the speaker | channel 0 at 50 Hz, also the game port's clock; channel 2 the speaker's tone |
 | Keyboard controller | 8042, AT 84-key keyboard, scan codes translated to set 1 | the keyboard driver |

@@ -2,8 +2,6 @@
 # boot drive's directory, /mnt/rx286; a command, a listing in DOS's drive syntax,
 # and the milestone's pipeline into a file and back.
 program: sh
-# DOSBox-X has no disk controller rx286 can use (docs/emulators.md).
-emulators: bochs mame
 install: C /BIN/WC z-wc.rx
 keys: echo hello\nls c:/docs\nls c:/docs | wc -l > c:/n.txt\ncat c:/n.txt\n
 ---

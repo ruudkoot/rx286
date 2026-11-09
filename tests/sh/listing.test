@@ -3,13 +3,13 @@
 # clusters (B:\MANY: 42 entries of 32 bytes, 1 KB clusters); the server's
 # own /, /dev and /z. Names are shown in lower case (disk-scheduler.md D19).
 program: sh
-emulators: bochs mame
 keys: ls -l /mnt/rx286; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /mnt/rx286d\n
 keys: ls -l b:/many\nls / /dev /z\n
 ---
 rx286, test build
 /mnt/rx286$ ls -l /mnt/rx286; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /mnt/rx286d
 -rw-r--r-- {image_size8} kernel.bin
+drwxr-xr-x        0 bin
 -rw-r--r--       79 readme.txt
 -rw-r--r--     3136 frag.txt
 -rw-r--r--       50 pad.txt
@@ -86,10 +86,4 @@ tty7
 tty8
 /z:
 init
-sh
-echo
-cat
-ls
-clock
-counter
 /mnt/rx286$

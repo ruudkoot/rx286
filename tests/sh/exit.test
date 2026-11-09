@@ -1,7 +1,6 @@
 # exit ends the shell (roadmap os-server.md P9); init starts it again, a
 # new process: in HOME again, its history and its status anew.
 program: sh
-emulators: bochs mame
 keys: cd /mnt/rx286b; echo kept\nexit 3\n{up}\necho $?\n
 ---
 rx286, test build

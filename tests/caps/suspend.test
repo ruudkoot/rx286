@@ -2,7 +2,6 @@
 program: additions
 define: TEST_CAPS
 define: TEST_ADD_SUSPEND
-emulators: bochs mame
 match: contains
 timeout: 120
 ---

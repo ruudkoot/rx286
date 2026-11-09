@@ -1,7 +1,7 @@
 # The memory as the BIOS says it (roadmap memory.md M2), on every machine an
-# emulator can be of those the owner named (E1): 512, 639 and 640 KB of
-# base memory; none, 384 KB, 1, 3 and 15 MB above 1 MB (14,720 KB, MAME's
-# most). The loader asks INT 12h and INT 15h AH=88h and leaves the answer
+# emulator can be of those the owner named (E1) from the least on
+# (disk-scheduler.md M8b): 639 and 640 KB of base memory; 384 KB, 1, 3 and
+# 15 MB above 1 MB (14,720 KB, MAME's most). The loader asks INT 12h and INT 15h AH=88h and leaves the answer
 # at 600h; the kernel copies it, ends the memory for programs below 1 MB
 # where the base memory ends, and gives the root the boot information,
 # which the root reports (TEST_MEMORY), and every byte of the extended
@@ -9,19 +9,16 @@
 # shell runs a command.
 program: sh
 define: TEST_MEMORY
-memory: 639K 0K
+memory: 639K 384K
 memory: 639K 1M
 memory: 639K 3M
 memory: 639K 15M
-memory: 640K 0K
 memory: 640K 384K
 memory: 640K 1M
 memory: 640K 3M
 memory: 640K 3456K
 memory: 640K 14720K
 memory: 640K 15M
-memory: 512K 1M
-memory: 512K 15M
 keys: echo hello\n
 match: contains
 timeout: 60

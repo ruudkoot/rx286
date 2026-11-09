@@ -193,13 +193,17 @@ $(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.rx $(B)/disk.rx $(B)/printe
     tools/rxlib.py
 	$(PYTHON) tools/mkimage $@ $(B)/kernel.bin $(MODULES)
 
-$(IMAGE): $(BINARIES)
+# The shell's programs, where init runs the shell, in /BIN beside it
+# (c.mk's A_FILES; disk-scheduler.md M8b), upper case as FAT keeps names
+$(IMAGE): $(BINARIES) $(A_FILES)
 	rm -f $@.tmp
 	dd if=/dev/zero of=$@.tmp bs=512 count=$(FLOPPY_SECTORS) status=none
 	mformat -i $@.tmp -f 1200 -R 4 -m 0xF9 -N $(FLOPPY_SERIAL) -v RX286 \
 	    -B $(B)/boot-sector.bin ::
 	dd if=$(B)/boot-loader.bin of=$@.tmp bs=512 seek=1 conv=notrunc status=none
 	mcopy -i $@.tmp $(B)/image.bin ::KERNEL.BIN
+	$(if $(A_FILES),mmd -i $@.tmp ::BIN)
+	$(foreach n,$(A_NAMES),mcopy -i $@.tmp $(B)/z-$(n).rx ::BIN/$(shell echo $(n) | tr a-z A-Z) &&) true
 	mv $@.tmp $@
 
 $(B)/rx286.sym: $(BINARIES) tools/map2sym tools/rxlib.py

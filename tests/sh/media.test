@@ -5,6 +5,7 @@
 program: sh
 media: B ejected
 media: D blank
+# DOSBox-X takes no diskette out and blanks no disk (media:).
 emulators: bochs mame
 keys: ls b:; ls d:; echo x > b:/x.txt\n
 ---

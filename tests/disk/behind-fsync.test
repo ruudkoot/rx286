@@ -4,7 +4,6 @@
 # image, since fsync returns once the disk server has written it.
 program: idle
 define: TEST_POSIX_BEHIND
-emulators: bochs mame
 define: TEST_BEHIND_NOWAIT
 define: TEST_END_NOSYNC
 keys: {wait 100}

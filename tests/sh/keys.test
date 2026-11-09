@@ -4,7 +4,6 @@
 # keyboard's grey ones after E0h alike (P15); ^D ends it, and the terminal
 # is as it was.
 program: sh
-emulators: bochs mame
 install: C /BIN/KEYS z-keys.rx
 keys: keys\na{ctrl-c}{up}{home}{end}{ins}{del}{pgup}{pgdn}{f1}{f4}{f5}{f10}\n{grey up}{grey home}{grey end}{grey ins}{grey del}{grey pgup}{grey pgdn}{grey enter}{ctrl-d}echo back\n
 ---

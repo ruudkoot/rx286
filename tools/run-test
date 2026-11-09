@@ -151,12 +151,14 @@ TIMEOUT_SCALE = {'bochs': 1, 'dosbox-x': 2, 'mame': 4}
 FLOPPY_DATA_BYTES = (2400 - 4 - 2 * 7 - 14) * 512
 # What each emulator can do of what a test asks (docs/emulators.md): the
 # drives it has (fsck:, file:, install:, media:), the media changes it makes,
-# its printers and the modem. DOSBox-X mounts drive A alone; MAME's AT has no
+# its printers and the modem. DOSBox-X takes the changes made to the images
+# alone (rxlib.IMAGE_MEDIA); MAME's AT has no
 # printer port, no COM3 for the log, and no write protection from its
 # command line (rxlib.run_mame).
 CAN = {'bochs': {'drives': 'ABCD', 'media': set(rxlib.MEDIA), 'printers': True,
                  'modem': True},
-       'dosbox-x': {'drives': 'ABCD', 'media': set(), 'printers': True, 'modem': True},
+       'dosbox-x': {'drives': 'ABCD', 'media': set(rxlib.IMAGE_MEDIA), 'printers': True,
+                    'modem': True},
        'mame': {'drives': 'ABCD', 'media': set(rxlib.MEDIA) - {'B protected', 'LPT2 absent'},
                 'printers': False, 'modem': False}}
 MATCHES = ('full', 'prefix', 'contains')

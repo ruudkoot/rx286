@@ -128,17 +128,17 @@ static struct vol vols[DRIVES];
  * last name may be lower case. A call takes one of SCRATCHES before it
  * needs it and keeps it to its end (proc.c's handle): it may give the lock
  * up while it waits for the disk (disk-scheduler.md M4), and another call
- * would write over statics meanwhile. Two (three until disk-scheduler.md
- * M8, whose code left the shell no fork at 512 KB without extended memory:
- * each is 1.75 KB of the server's data) cost less than the statics each
- * function kept until M4; a third call waits for one */
+ * would write over statics meanwhile. Three, of 1.75 KB of the server's data
+ * each (two in disk-scheduler.md M8, for 512 KB without extended memory),
+ * cost less than the statics each function kept until M4; a fourth call
+ * waits for one */
 struct scratch {
     char in[PX_PATH_MAX], text[PX_PATH_MAX];
     struct path p, q;
     struct node a, b;
     rx_u8 loose_last;                   /* unlink, rename: the last name may be lower case */
 };
-#define SCRATCHES 2
+#define SCRATCHES 3
 static struct scratch scratches[SCRATCHES];
 static rx_u8 scratch_user[SCRATCHES];  /* the thread (its number + 1) whose it is, or 0 */
 

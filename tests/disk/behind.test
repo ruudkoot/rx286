@@ -6,7 +6,6 @@
 # five seconds.
 program: idle
 define: TEST_POSIX_BEHIND
-emulators: bochs mame
 define: TEST_END_NOSYNC
 keys: {wait 250}{wait 250}{wait 100}
 match: contains

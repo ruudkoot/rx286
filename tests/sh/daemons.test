@@ -5,10 +5,11 @@
 # build puts on the log too ("status, NAME: TEXT"); the counter runs at the
 # lowest nice value. Killed, the clock is started again by its name; nice
 # runs a command lower. (The clock's state is checked nowhere: it may be
-# reading the time as ps looks. MAME's RTC keeps the host's time.)
+# reading the time as ps looks. MAME's RTC keeps the host's time. The
+# counter's pid is left open: both start from the boot diskette, and the
+# shell's ps may fork before the counter's daemon does.)
 program: sh
 define: TEST_DAEMONS
-emulators: bochs mame
 install: C /BIN/PS z-ps.rx
 install: C /BIN/KILL z-kill.rx
 install: C /BIN/NICE z-nice.rx
@@ -21,12 +22,12 @@ status, clock: {...}
   PID  PPID  PGID   SID TTY  S NI COMMAND
     1     0     1     1 -    S 20 init
    11     1    11    11 -    {...} clock
-   13     1    13    13 -    R 39 counter
+{...}     1 {...} -    R 39 counter
 /mnt/rx286$ kill 11
 /mnt/rx286$ clock
 /mnt/rx286$ ps -e
 status, counter: idle {...}k/s
    17     1    17    17 -    {...} clock
-   13     1    13    13 -    R 39 counter
+{...}     1 {...} -    R 39 counter
 /mnt/rx286$ nice -n 5 ps
    19     2    19     2 tty1 R 25 ps

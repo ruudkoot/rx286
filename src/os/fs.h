@@ -14,9 +14,6 @@
 
 #define CACHE_SEG SLOT(149)             /* the cache's segment (ROOT_LOAD at boot) */
 #define CACHE_SECTORS 32
-#define CACHE_SECTORS_SMALL 3          /* without extended memory (disk-scheduler.md M3; 4
-                                           until M8, whose code left the shell no fork at 512
-                                           KB): a FAT entry across two sectors, and a third */
 
 int cache_init(void);
 int cache_ready(void);

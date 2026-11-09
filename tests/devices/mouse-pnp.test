@@ -3,7 +3,6 @@
 # the mouse. The driver passes over it: only the packet after counts
 # (mouse, roadmap os-server.md P12).
 program: sh
-emulators: bochs mame
 install: C /BIN/MOUSE z-mouse.rx
 keys: {wait 20}{mouse-bytes 28 4D 53}{mouse-bytes 48 30 30}{mouse-bytes 30 31 29}mouse\n{wait 5}{mouse 8 0 -}{wait 2}{mouse 0 0 LR}
 ---

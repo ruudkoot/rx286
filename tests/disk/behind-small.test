@@ -1,13 +1,14 @@
 # Write-behind's bound (roadmap disk-scheduler.md M6, D8): fsrand2.test's
-# random operations on B and C, against their models, on a machine without
-# extended memory, where the disk server's cache holds DS_CACHE_SMALL (1)
-# block: a fixed disk's write that leaves more than half of it dirty
-# has both fixed disks' dirty blocks written at once, and the rest go
-# straight to the disk. fsck.fat finds both volumes sound afterwards.
+# random operations on B and C, against their models, with the disk
+# server's cache held to DS_CACHE_FEW (1) block and none lent
+# (TEST_DISK_FEW; until M8b, the cache of a machine without extended
+# memory): a fixed disk's write that leaves more than half of it dirty has
+# both fixed disks' dirty blocks written at once, and the rest go straight
+# to the disk. fsck.fat finds both volumes sound afterwards.
 program: idle
 define: TEST_POSIX_FSRAND2
+define: TEST_DISK_FEW
 emulators: bochs
-memory: 639K 0K
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}

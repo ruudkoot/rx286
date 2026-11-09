@@ -63,7 +63,7 @@ it into features:
 | `user.bin`, the drivers' | the assembled modules: the program, the drivers |
 | `root.rx`, `os.rx`, `counter.rx` | the C modules, rx286's executables (*docs/c.md*): the root, the OS server, the counter (for the tests that ask, `TEST_COUNTER*`); `user.rx` for a C test program (`PROGRAM=services`, or `tables` in the compact model on `c/far`); with `PROGRAM=none` no program module at all, and the processes have the keys; with `PROGRAM=shell` (the default; `sh` too) neither, and init runs the shell in C (*docs/processes.md*) |
 | `inc/`, `c/` | the C headers made from the include files; the C's objects, libraries, maps and disassemblies |
-| `z-init.rx`, `z-sh.rx`, `z-ls.rx`, ..., `z.arc` | the programs of `/z`, and `/z` itself, their archive (`tools/mkarchive`; *docs/processes.md*); `z-codes.rx` and the shell's commands but `echo`, `cat` and `ls`, programs for the disks alone (`DISK_PROGRAMS`), which a test installs; `make run` installs them all in C's `/BIN` (`tools/install-programs`) |
+| `z-init.rx`, `z-sh.rx`, `z-ls.rx`, ..., `z.arc` | the programs: `/z`'s, init and a test build's own, and `/z` itself, their archive (`tools/mkarchive`; *docs/processes.md*); the shell, `echo`, `cat`, `ls`, `clock` and `counter` on the boot diskette's `/BIN` (`A_PROGRAMS`; disk-scheduler.md M8b); `z-codes.rx` and the shell's other commands, programs for the disks alone (`DISK_PROGRAMS`), which a test installs; `make run` installs them all in C's `/BIN` (`tools/install-programs`) |
 | `image.bin` | the boot image, `KERNEL.BIN` on the floppy: `tools/mkimage` of the kernel and the modules, `/z` the last (*docs/memory-map.md*) |
 | `rx286.img` | the 1.2 MB floppy |
 | `rx286.sym` | Bochs symbols for every binary |
@@ -87,6 +87,8 @@ E5):
    F9h (`-R` alone would make it F0h), a fixed serial.
 3. `dd` the loader into sectors 1-3.
 4. `mcopy image.bin ::KERNEL.BIN`.
+5. Where init runs the shell, `mmd ::BIN` and `mcopy` the shell's programs
+   into it, upper case, as FAT keeps names (`::BIN/SH`).
 
 `SOURCE_DATE_EPOCH` is set for all of it, and `TZ` is UTC (mtools makes the
 time stamp local time), so every time stamp is 1989-01-01 00:00 wherever the

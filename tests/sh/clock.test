@@ -5,7 +5,6 @@
 # image a sector at a time, about 60 s of Bochs' time for 140 KB); clear's
 # form feed.
 program: sh
-emulators: bochs mame
 install: C /BIN/UPTIME z-uptime.rx
 install: C /BIN/DATE z-date.rx
 install: C /BIN/CLEAR z-clear.rx

@@ -6,7 +6,6 @@
 # any case; a command of redirections alone opens its files; a lone Esc
 # eats no key. tests/sh/review3.test has the rest.
 program: sh
-emulators: bochs mame
 install: C /BIN/SLEEP z-sleep.rx
 install: C /BIN/KILL z-kill.rx
 install: C /BIN/CP z-cp.rx

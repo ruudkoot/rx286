@@ -5,7 +5,6 @@
 # The wait after `spin &` lets it say so before the next line is echoed;
 # the kernel's trace of its start may fall inside the prompt on the log.)
 program: sh
-emulators: bochs mame
 install: C /BIN/SPIN z-spin.rx
 keys: spin &\n{wait 50}echo beside it\nfg\n{wait 50}{now ctrl-c}echo $?\n
 match: contains

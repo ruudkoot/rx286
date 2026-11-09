@@ -146,7 +146,10 @@ UMEM_ALIGN          equ 0x400
 UMEM_END            equ 0xA0000
 UMEM_LEAST          equ 0x30000     ; the least the kernel runs with: what the root needs to
                                     ;    build the boot modules (memory.md D4, E3)
-BASE_LEAST          equ 0x80000     ; the least base memory of the machines rx286 is for
+BASE_LEAST          equ 0x9FC00     ; the least machine (the owner's, disk-scheduler.md M8b):
+                                    ;    639 KB of base memory (the BIOS's own 1 KB at the
+EXT_LEAST_KB        equ 384         ;    top of 640) and 384 KB of extended memory, as an AT
+                                    ;    of 1 MB had; the kernel stops on less (least_check)
 SPACE_MAX           equ 128         ; spaces (space_list)
 THREAD_MAX          equ 192         ; threads (thread_list)
 
@@ -160,7 +163,7 @@ GDT_OFF             equ GDT_PHYS - KDATA_BASE           ; the GDT
 OBJ_FREE_OFF        equ OBJ_FREE_PHYS - KDATA_BASE      ; its pool's free descriptors
 
 %if KERNEL_PHYS + IMAGE_MAX + UMEM_LEAST > BASE_LEAST
-  %error "layout.inc: the image's room leaves a 512 KB machine too little for programs"
+  %error "layout.inc: the image's room leaves the least machine too little for programs"
 %endif
 %if BOOT_INFO_PHYS < 0x510 || BOOT_INFO_PHYS + BOOT_INFO_SIZE > DFSTACK_PHYS + DFSTACK_SIZE
   %error "layout.inc: the boot information must lie past 50Fh, in the double fault's stack"

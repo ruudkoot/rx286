@@ -4,8 +4,6 @@
 # in when its line is read, as POSIX has it: on its own line it is not there
 # yet.
 program: sh
-# DOSBox-X has no disk controller rx286 can use (docs/emulators.md).
-emulators: bochs mame
 install: C /BIN/WC z-wc.rx
 keys: echo 'a  b' "home: $HOME" \\$HOME\nX=1; echo $X $\{X}y\nexport X; set\n
 keys: true && echo yes; false || echo no; false && echo never; echo $?\n
@@ -19,7 +17,7 @@ a  b home: /mnt/a: $HOME
 /mnt/rx286$ X=1; echo $X ${{X}}y
 1 1y
 /mnt/rx286$ export X; set
-PATH=/z:/mnt/rx286c/bin
+PATH=/z:/mnt/rx286/bin:/mnt/rx286c/bin
 HOME=/mnt/a:
 X=1
 /mnt/rx286$ true && echo yes; false || echo no; false && echo never; echo $?

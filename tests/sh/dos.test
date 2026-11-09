@@ -3,7 +3,6 @@
 # cd, in either case; alias lists them, and unalias takes one away, from
 # the next line on (an alias is put in as its line is read: XCU 2.3.1).
 program: shell
-emulators: bochs mame
 install: C /BIN/CP z-cp.rx
 install: C /BIN/MV z-mv.rx
 install: C /BIN/RM z-rm.rx

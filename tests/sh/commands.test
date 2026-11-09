@@ -2,7 +2,6 @@
 # since P12: mkdir, cp into a directory, mv, cat of two files, wc and its
 # options, rm, rmdir, and their refusals. fsck.fat finds B sound after.
 program: sh
-emulators: bochs mame
 install: C /BIN/CP z-cp.rx
 install: C /BIN/MV z-mv.rx
 install: C /BIN/RM z-rm.rx

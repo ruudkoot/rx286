@@ -122,7 +122,7 @@ the terminal's modes, and `fg` gives them back (XCU 2.11).
 
 init (*docs/processes.md*, *init*) runs a shell on each terminal, as getty
 does: a child of its own leads a session, opens `/dev/ttyN`, which so
-becomes its session's, as descriptors 0 to 2, and runs `/z/sh`. On the
+becomes its session's, as descriptors 0 to 2, and runs the boot diskette's `/mnt/rx286/bin/sh`. On the
 first terminal it does so at once; on the others it says "rx286 terminal
 N: press Enter for a shell" and waits for Enter, so that a shell's memory
 is taken only where one is wanted. A shell that ends is started again.

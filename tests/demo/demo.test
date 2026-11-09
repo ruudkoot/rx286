@@ -18,6 +18,8 @@
 program: shell
 define: TEST_DEMO
 define: TEST_SCREEN
+# DOSBox-X faults crash gp's jump past its code as #BR, not #GP(0000)
+# (docs/emulators.md).
 emulators: bochs mame
 install: C /BIN/WC z-wc.rx
 install: C /BIN/MORE z-more.rx
@@ -35,7 +37,6 @@ file: B /DOCS.TXT hello.txt\nprintme.txt\n
 rx286, test build
 /mnt/rx286$ ls c:/docs | wc -l; ls c:/docs > b:/docs.txt; cat b:/docs.txt
 status, clock: {...}
-status, counter: idle {...}k/s
 2
 hello.txt
 printme.txt

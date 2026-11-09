@@ -5,7 +5,6 @@
 # 768 (D8) the table fills first: CHILD_MAX less init and held itself.
 program: idle
 define: TEST_POSIX_HELD
-emulators: bochs mame
 keys: {wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 120

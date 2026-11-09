@@ -50,7 +50,6 @@
 #include "root.h"
 #include "disk.h"
 #define FD_DMA_BYTES (FD_DMA_SECTORS * SECTOR_SIZE)            /* the diskettes' runs */
-#define FD_DMA_SMALL_BYTES (FD_DMA_SMALL_SECTORS * SECTOR_SIZE) /*    (drivers.inc) */
 #include "buddy.h"
 
 #define MY_SPACE SLOT(ROOT_SLOT_SPACE)
@@ -427,28 +426,16 @@ static void dma_high(rx_u16 slot)
 }
 #endif
 
-/* dma_bytes - the diskette's DMA buffer: a 1.2 MB cylinder, FD_DMA_SECTORS,
- * with extended memory; FD_DMA_SMALL_SECTORS without, where every KB counts
- * (at 512 KB a track's buffer left tests/memory/many-small.test's 16th fork
- * no room: disk-scheduler.md M2). The driver moves as much of a run as its
- * buffer holds */
-static rx_u16 dma_bytes(void)
-{
-    const rx_u16 RX_FAR *w = (const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
-
-    return w[BI_EXT_KB / 2] ? FD_DMA_BYTES : FD_DMA_SMALL_BYTES;
-}
-
 /* driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
  * the console's, the screen's text page; the keyboard's, the OS server's
  * control notification to signal Ctrl+Break with; the diskette's, a DMA
- * buffer (dma_bytes) that does not cross 64 KB. The disk drivers get the
+ * buffer of a 1.2 MB cylinder that does not cross 64 KB. The disk drivers get the
  * boot information too, for the drives' geometry (DRV_SLOT_BOOT_INFO;
  * disk-scheduler.md M2) */
 static void driver_device(int service)
 {
     struct rx_kregs r;
-    rx_u16 bytes = dma_bytes();
+    rx_u16 bytes = FD_DMA_BYTES;
 
     if (service == SERVICE_CONSOLE) {
         give(SLOT(ROOT_SLOT_VIDEO), W_DRV_DEVICE);
@@ -818,10 +805,14 @@ static rx_u16 ext_kb(void)
 
 /* lend_most - the blocks of 256 KB the disk server's cache may be lent
  * (disk-scheduler.md M7, D10 A): one for each 256 KB of extended memory,
- * DS_LEND_MAX at most */
+ * DS_LEND_MAX at most; none to TEST_DISK_FEW's (DS_CACHE_FEW) */
 static unsigned lend_most(void)
 {
+#ifdef TEST_DISK_FEW
+    return 0;
+#else
     return ext_kb() / 256 < DS_LEND_MAX ? ext_kb() / 256 : DS_LEND_MAX;
+#endif
 }
 
 /* disk_space_new - the disk server's space, of so many slots: from
@@ -837,10 +828,10 @@ static int disk_space_new(rx_u16 slots)
 }
 
 /* disk_cache - the disk server's own cache (disk-scheduler.md M3, D10):
- * with extended memory, a segment of DS_CACHE_PER_SEGMENT blocks, and an
- * index for the blocks it may be lent besides (M7); without,
- * DS_CACHE_SMALL blocks in one, and an index of DS_INDEX_SMALL. Its
- * segments: how many */
+ * a segment of DS_CACHE_PER_SEGMENT blocks, from extended memory, and an
+ * index for the blocks it may be lent besides (M7); TEST_DISK_FEW's,
+ * DS_CACHE_FEW blocks (tests/disk/behind-small.test). Its segments: how
+ * many */
 static unsigned disk_cache(int ring)
 {
     rx_u32 index = DS_INDEX_BYTES + (rx_u32)DS_INDEX_PER_LENT * lend_most();
@@ -848,10 +839,11 @@ static unsigned disk_cache(int ring)
 
     if (index > DS_INDEX_MOST)
         index = DS_INDEX_MOST;
-    if (disk_segment(ext_kb() ? (rx_u16)index : DS_INDEX_SMALL, ring) == 0)
+    if (disk_segment((rx_u16)index, ring) == 0)
         must(copy(disk_space, SCRATCH, DS_SLOT_INDEX * 8 + 4, COPY_MOVE, 0, 0));
-    if (ext_kb() == 0)
-        bytes = DS_CACHE_SMALL * DS_CACHE_BLOCK;
+#ifdef TEST_DISK_FEW
+    bytes = DS_CACHE_FEW * DS_CACHE_BLOCK;
+#endif
     if (disk_segment(bytes, ring))
         return 0;
     must(copy(disk_space, SCRATCH, DS_SLOT_CACHE * 8 + 4, COPY_MOVE, 0, 0));

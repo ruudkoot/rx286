@@ -8,7 +8,6 @@ define: TEST_POSIX_PIPE
 keys: {wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 240
-emulators: bochs mame
 ---
 pipe: made (0): 0, ends 3 and 4
 pipe: through it (5): 5, the same

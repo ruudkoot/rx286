@@ -41,7 +41,7 @@ of a file's contiguous clusters goes straight between the disk server and
 the process's data. A read goes through the OS server's cache instead if
 that cache holds one of those sectors changed, and a write drops that
 cache's copies. Everything else goes through the OS server's cache of 32
-sectors, 3 without extended memory (*docs/processes.md*, *Files*), which
+sectors (*docs/processes.md*, *Files*), which
 writes its changed sectors in their order on the disk, neighbours as one
 run. While a call waits for the disk server the OS server's lock is given
 up, the call holding its volume's lock alone (roadmap disk-scheduler.md
@@ -87,9 +87,8 @@ The NEC 765 of IBM's adapter, IRQ6 and DMA channel 2, driven by the
 diskette driver (`src/drivers/diskette.asm`), which resets the DMA
 controllers at its start. Channel 2 moves each run into or out of a DMA
 buffer of a 1.2 MB cylinder, 30 sectors (`FD_DMA_SECTORS`), the root gives
-the driver (2 sectors, `FD_DMA_SMALL_SECTORS`, on a machine without extended
-memory, whose processes a larger one left too little at 512 KB; a run then
-moves what the buffer holds, and the OS server asks again for the rest): a segment it retypes for it, whose physical base the driver
+the driver (2 sectors on a machine without extended memory until
+disk-scheduler.md M8b, which rx286 no longer runs on): a segment it retypes for it, whose physical base the driver
 asks the kernel for (`KCALL_SEGMENT`; the root retries until the buffer
 does not cross a 64 KB boundary, which the 8237's page register cannot).
 A run starts at any sector of a cylinder and ends at its end at the
@@ -110,8 +109,12 @@ latest. For each run the driver:
    on from head 0 to head 1, and with the BIOS's gap (`FDC_GAP_1200K`,
    `FDC_GAP_360K`); the DMA's terminal count ends the transfer after the
    run's last sector;
-5. waits for IRQ6, reads the seven result bytes, checks ST0, and copies a
-   read's sectors from the DMA buffer into the segment passed.
+5. waits for IRQ6, reads the seven result bytes, checks ST0, takes as
+   moved the sectors the DMA's count says it moved (a controller that ends
+   well but short, DOSBox-X's at the end of a multi-track run's first
+   track, then moved less, and the disk server asks for the rest; an AT's
+   count always runs out), and copies a read's sectors from the DMA buffer
+   into the segment passed.
 
 A failed transfer is tried three times, the drive recalibrated in between; a
 write-protected diskette fails at once with `E_PROTECTED`, a timeout (no

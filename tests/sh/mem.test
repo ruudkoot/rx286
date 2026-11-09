@@ -4,7 +4,6 @@
 # its break. (Where they are, and their limits, change with the build: only
 # the selectors are checked.)
 program: sh
-emulators: bochs mame
 install: C /BIN/MEM z-mem.rx
 keys: mem\n
 match: contains

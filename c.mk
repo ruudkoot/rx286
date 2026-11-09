@@ -310,11 +310,16 @@ Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TE
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))
 # The shell and its first commands (P9), where init runs the shell, and
-# the daemons it starts (P12)
-Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls clock counter, \
+# the daemons it starts (P12): on the boot diskette's /BIN, not /z, since
+# disk-scheduler.md M8b (the owner's: /z's 37 KB were the image's, and so
+# memory below 1 MB, for good). /z holds init, and a test build's own
+# programs
+A_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls clock counter, \
     $(c)=$(C_B)/bin/$(c).$(OBJ))
-Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED)) \
-    $(if $(filter shell sh,$(PROGRAM)),$(Z_SHELL))
+A_PROGRAMS := $(if $(filter shell sh,$(PROGRAM)),$(A_SHELL))
+A_NAMES := $(foreach p,$(A_PROGRAMS),$(firstword $(subst =, ,$(p))))
+A_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(A_NAMES)))
+Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
 # install: lines put them on a run's drive C, `make run` all of them in
 # /c/bin (tools/install-programs). The shell's commands but its first
@@ -334,7 +339,7 @@ define z_program
 $(B)/z-$(1).rx: $(PROCESS_LIBS) $(subst +, ,$(2)) tools/mkexe tools/rxlib.py
 	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(subst +, ,$(2)),$(if $(filter $(1),$(Z_287)),--287))
 endef
-$(foreach p,$(Z_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
+$(foreach p,$(Z_PROGRAMS) $(A_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
     $(subst =, ,$(p))),$(lastword $(subst =, ,$(p))))))
 $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 	$(PYTHON) tools/mkarchive $@ $(foreach n,$(Z_NAMES),$(n)=$(B)/z-$(n).rx)

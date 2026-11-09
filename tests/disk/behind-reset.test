@@ -7,6 +7,8 @@
 # the second start.
 program: idle
 define: TEST_POSIX_BEHIND
+# DOSBox-X keeps protected-mode segment limits across the 8042's reset
+# (docs/emulators.md).
 emulators: bochs mame
 define: TEST_BEHIND_NOWAIT
 define: TEST_END_NOSYNC

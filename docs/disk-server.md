@@ -106,10 +106,12 @@ again.
 The cache has a segment of its own, and grows with the blocks of 256 KB
 that the root lends it (roadmap disk-scheduler.md M7, D10 A):
 
-| Machine | Its own | Lent | Index |
-|---|---|---|---|
-| with extended memory | a segment of 125 blocks | up to one block for each 256 KB of extended memory, `DS_LEND_MAX` (56, 14 MB) at most | `DS_INDEX_BYTES`, and `DS_INDEX_PER_LENT` more for each block it may be lent, `DS_INDEX_MOST` (65,520) at most |
-| without extended memory | `DS_CACHE_SMALL` (1) block in one segment | none | `DS_INDEX_SMALL` |
+| Its own | Lent | Index |
+|---|---|---|
+| a segment of 125 blocks, from extended memory | up to one block for each 256 KB of extended memory, `DS_LEND_MAX` (56, 14 MB) at most | `DS_INDEX_BYTES`, and `DS_INDEX_PER_LENT` more for each block it may be lent, `DS_INDEX_MOST` (65,520) at most |
+
+A `TEST_DISK_FEW` build's cache is `DS_CACHE_FEW` (1) block, none lent
+(`tests/disk/behind-small.test`: write-behind's bound with a full cache).
 
 The root lends while more than its reserve for the processes would stay
 free: an eighth of the extended memory, 64 KB at least. It lends a block
@@ -137,21 +139,15 @@ server answers once none of the block's segments is used:
 The write-behind passes walk only the segments that hold dirty blocks, as
 each segment counts its own, so a large cache costs them nothing more.
 
-On a 512 KB machine without extended memory, the disk server costs about
-17 KB below 1 MB:
-- its code in the boot image, 12 KB;
-- its space, 2 KB (`DS_SLOTS` of 32 bytes each);
-- its stacks, 1.5 KB;
-- its data, 1 KB;
-- its cache.
-
-The OS server's cache, 3 sectors there instead of 32, pays for most of it.
-Each milestone's code comes out of that machine's memory for processes,
-since the image's code runs where it lies: M7's and M8's left the shell no
-fork for a command at 512 KB, and the cache there went from 4 blocks to 1,
-the OS server's from 4 sectors to 3, the diskette's DMA buffer from 4
-sectors to 2, and the OS server's scratch sets from 3 to 2
-(`tests/memory/sizes.test` is the canary).
+Below 1 MB the disk server costs about 17 KB: its code in the boot image,
+12 KB; its space, 2 KB (`DS_SLOTS` of 32 bytes each); its stacks, 1.5 KB;
+and its data, 1 KB. Its cache is in extended memory, which every machine
+rx286 runs on has since disk-scheduler.md M8b: 384 KB at least. Until then
+a machine of 512 KB without any was the canary, and each milestone's code,
+which runs where it lies in the image, came out of its processes' memory:
+there the cache was one block, the OS server's three sectors and the
+diskette's DMA buffer two sectors, and the OS server kept two scratch sets,
+not three. M8b undid them all.
 
 ## The order of the requests
 

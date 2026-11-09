@@ -6,7 +6,6 @@
 # its turn: neither takes more than half as long again as the other.
 program: idle
 define: TEST_POSIX_FAIR
-emulators: bochs mame
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains

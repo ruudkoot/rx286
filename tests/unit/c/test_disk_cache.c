@@ -330,7 +330,7 @@ int main(void)
         random_work(seed % 2 ? 1000 : 37, seed, 1500);
     random_work(16, 99, 3000);
     random_work(4, 98, 2000);
-    random_work(2, 97, 2000);           /* (the least machine's: DS_CACHE_SMALL) */
+    random_work(2, 97, 2000);           /* (behind-small.test's few: DS_CACHE_FEW) */
     if (failures)
         return 1;
     printf("test_disk_cache: passed\n");

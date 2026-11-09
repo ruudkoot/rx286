@@ -4,8 +4,7 @@
 # SIGSEGV is the last status, 139). The 287's error is the kernel's fault
 # #MF for a process, SIGFPE: on Bochs alone, as MAME's AT has no 287.
 program: sh
-# DOSBox-X lets a write through CS go through (docs/emulators.md), and has
-# no drive C.
+# DOSBox-X lets a write through CS go through (docs/emulators.md).
 emulators: bochs mame
 install: C /BIN/CRASH z-crash.rx
 keys: crash\ncrash gp\ncrash ud\ncrash de\ncrash ss\ncrash io\ncrash cli\n

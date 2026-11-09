@@ -131,6 +131,7 @@ simulator; none of their code is in the repository.
 | M6: read-ahead and write-behind | done (2026-11-09) |
 | M7: the cache's memory | done (2026-11-09) |
 | M8: removable volumes and `/mnt` | done (2026-11-09) |
+| M8b: the owner's decisions after M8 | done (2026-11-09) |
 | M9: the formatter | not started |
 | M10: the simulator in `tools/`, the documents, a review and the close | not started |
 
@@ -2147,6 +2148,77 @@ less, M a few, L a week.
       Once DOSBox-X had drives, its shell mounted A there, and `echo` was out of memory again:
       `sizes.test` no longer runs 512 KB without extended memory, a machine the owner's
       decisions after M8 leave behind (M8b).
+
+### M8b. The owner's decisions after M8 (S)
+
+The owner decided on 2026-11-09, after M8, in two steps.
+- **First:** only Bochs and MAME, since DOSBox-X had no disks for rx286 (DOSBox-X kept for
+  a kernel's boot); at least 639 KB of base memory, without extended memory; most of `/z`
+  back on the disks; and the sizes the 512 KB machine forced, looked at again.
+- **Then**, once DOSBox-X turned out to have a 765 and an IDE controller that rx286's drivers
+  can drive (M8's last notes), these, which replace the first:
+  - **all three emulators** stay, now that all three have the disks;
+  - **the least machine is 639 KB of conventional memory and 384 KB of extended memory**,
+    which any AT had, so that rx286 is sized for it now and made smaller later if wanted;
+  - **`/z` is reduced**;
+  - **everything is sized again** for the memory there is, and the changes the least
+    machine forced on the others are looked at again;
+  - then the rest of the roadmap.
+
+- **What:**
+  - the tests that left DOSBox-X out for want of disks run on it; those that leave it out
+    for its CPU say why;
+  - the kernel stops on a machine below the least, saying so (`least_check`): `BASE_LEAST`
+    639 KB and `EXT_LEAST_KB` 384 KB; the tests' machines below it go, and those of the
+    small machines run at the least;
+  - `/z` holds init and a test build's own programs; the shell, `echo`, `cat`, `ls`, `clock`
+    and `counter` are on the boot diskette's `/BIN`; `PATH` is
+    `/z:/mnt/rx286/bin:/mnt/rx286c/bin`;
+  - what a machine without extended memory forced on every machine goes: the OS server's
+    two scratch sets and its cache of three sectors, the disk server's cache of one block,
+    the diskette's DMA buffer of two sectors.
+- **Done when:** every suite passes on all three emulators; a machine below the least
+  stops at boot.
+- **Decisions:** the owner's, above.
+- **Done** (2026-11-09). `make check` passes on Bochs (149), DOSBox-X (123) and MAME (128),
+  with 211 unit tests, and `make check-ia16` passes (149).
+  - What it found:
+    - **Two execs at once, from disks, were never safe** (M4's). The OS server keeps an
+      exec's arguments, and the slot its code is loaded into, one for the server, and a
+      spawn took a free entry of the process table before reading the program, both across
+      reads that give the lock up. The shell's commands in `/z` had hidden it: no exec of
+      theirs read a disk. Once they came from A, `cat a.txt | wc` had `cat` (from A) take
+      `wc`'s (from C) arguments and fault, and with the daemons a fork took the counter's
+      entry while its spawn read it from A: the counter never ran, and the shell's next
+      command hung. Now one exec at a time builds its arguments and loads its code
+      (`exec_turn`), and an entry is taken from `entry_new` until its process starts.
+      `commands.test` and `daemons.test` found them.
+    - **DOSBox-X's 765 ends a multi-track run at the first head's last sector,** with ST0
+      saying all went well, so a cylinder's second track came back as the DMA buffer's old
+      bytes: the shell, read from A, ran into its own stale code and spun (`below.test`,
+      once the counter module made the image larger). The driver now takes as moved what the
+      DMA's count says it moved, and the disk server asks for the rest. On an AT the count
+      always runs out, and nothing changes.
+    - **The least machine's 384 KB** leaves a `TEST_CAPS` program (which gets the first piece
+      of extended memory) too little for `pools.test` and `resume.test`: they run on 1 MB or
+      more.
+    - **DOSBox-X's suites grew** from 61 runs to 123: the 58 tests that wanted only its
+      disks, and `calls.test` and `drivers.test`, which wanted extended memory. 15 still
+      leave it out, each with its reason: its CPU (a write through CS, a jump past CS's
+      limit as #BR, an IRET with NT, a far RET through a gate, the reset after the 8042's,
+      the TSS and the double-fault task, a null selector, stack limits), its joystick, or
+      `media:`.
+    - **`/z` is 3 KB** (init) in a shell's image, down from 40 KB; the boot image is 37 KB
+      smaller, and so is what it takes below 1 MB. A command typed after two seconds' rest
+      reads the boot diskette (M8's check of a diskette), as DOS does, and the boot
+      diskette must stay in A for the shell: without it, the terminal asks for it.
+    - **Sized again:** the OS server's cache is 32 sectors and its scratch sets three on
+      every machine; the disk server's cache a segment of its own and lent blocks; the
+      diskette's DMA buffer a cylinder. On the least machine 5 of `many-small.test`'s 16
+      children of 60 KB fit, against 1 of 12 at 512 KB. The OS server's space stays at 512
+      slots, not D12's 1,024: the retype's 12.9 ms with interrupts off still stands against
+      it, not the memory. `behind-small.test` keeps its cache of one block by a test build's
+      `TEST_DISK_FEW`.
 
 ### M9. The formatter (M)
 

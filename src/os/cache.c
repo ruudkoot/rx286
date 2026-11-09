@@ -42,7 +42,7 @@ static rx_u16 lost[DRIVES];             /* a dirty sector an eviction could not 
                                            drive's next flush says so (P15) */
 static rx_u32 clock;
 static int ready;                       /* the segment is there */
-static unsigned sectors = CACHE_SECTORS;    /* its sectors: fewer without extended memory */
+static unsigned sectors = CACHE_SECTORS;    /* its sectors */
 static rx_u8 holder[DRIVES];            /* the thread (its number + 1) whose call holds a
                                            volume's lock, or 0 (D15) */
 #define VOL_WAITERS 64                  /* threads that may wait for one volume at once */
@@ -118,17 +118,13 @@ void vol_release(unsigned keep)
         proc_in_volume(0);
 }
 
-/* cache_init - the cache's segment, from the root (at boot): 0 or KE_*.
- * Without extended memory CACHE_SECTORS_SMALL: the disk server caches
- * below it, and a 512 KB machine has no room for both (disk-scheduler.md
- * M3) */
+/* cache_init - the cache's segment, from the root (at boot): 0 or KE_*
+ * (CACHE_SECTORS_SMALL, 3, without extended memory until disk-scheduler.md
+ * M8b) */
 int cache_init(void)
 {
     struct rx_kregs r;
 
-    if (rx_lsl(SLOT(OS_SLOT_BOOT_INFO)) >= BI_EXT_KB + 1
-            && ((const rx_u16 RX_FAR *)RX_MK_FP(SLOT(OS_SLOT_BOOT_INFO), 0))[BI_EXT_KB / 2] == 0)
-        sectors = CACHE_SECTORS_SMALL;
     if (call(SLOT(OS_SLOT_ROOT), ROOT_LOAD, (rx_u16)(sectors * SECTOR_SIZE), 0, 0, CACHE_SEG, 0, &r)
             || r.bx)
         return E_NOMEM;

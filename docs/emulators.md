@@ -14,8 +14,8 @@ on Bochs; `make test-286` runs them on DOSBox-X's 286 and MAME's IBM PC/AT;
 | Debugger | yes, scriptable, with symbols | not in this build | `-debug` (with a window) |
 | Diskettes, fixed disks | both | both: its 765 (`[fdc, primary]`) and an IDE controller at the AT's task file (`[ide, primary]`), with the ways below | both: IBM's BIOS and a 765; the IDE card stands in for the fixed disk controller |
 | Printers | LPT1, LPT2, into files | LPT1, LPT2, into files | none: no slot for the card |
-| Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS, the disks |
-| Tests that run | all 57 | 36 | 48 |
+| Used for | everything daily; the reference of every test | no 386 instruction on any tested path; the least machine | the 286's own behaviour: protection, faults, the BIOS, the disks' timing |
+| Tests that run (runs: one for each machine of a test's `memory:` lines; disk-scheduler.md M8b) | all, 149 | 123 | 128 |
 | A boot in a test | 0.3-0.5 s | about 1.5 s | about 6 s (IBM's power-on test) |
 | Without a window | `rfb`, with no client | SDL's dummy drivers | `-video none`, and SDL's dummy drivers: `-video none` alone still opens a window under WSLg |
 
@@ -54,13 +54,14 @@ DOSBox-X's 286 rejects 386 opcodes with #UD (a 66h-prefixed `MOV` faults at
 `cputype=286` and runs at `cputype=386`), so every test that passes on it
 proves its paths free of 386 instructions. Its protection is not a 286's,
 which is why the attack suite and the fuzzer run on Bochs and MAME instead.
-Its memory is 1 MB (`memsize = 1`): no extended memory, so its suites are
-the ones that prove an AT without any still boots and runs, the root's
-memory below 1 MB (roadmap os-server.md P3). It is the only emulator that
-can be any size (`memsizekb`; `dos mem limit` for 639 KB; `isa memory hole
-at 512kb` for 512 KB with extended memory), and so the one that runs the
-small machines of `tests/memory` (memory.md E1). Its CMOS says 640 KB of
-base memory whatever it is: INT 12h is right.
+Its memory is by default the least machine rx286 runs on, an AT of 1 MB:
+640 KB and 384 KB above 1 MB (`memsize = 1`, `memsizekb = 384`; roadmap
+disk-scheduler.md M8b), so its suites are the ones that prove the least
+machine boots and runs. It is the only emulator that can be any size
+(`memsizekb`; `dos mem limit` for 639 KB; `isa memory hole at 512kb` for
+512 KB with extended memory), and so the one that runs most machines of
+`tests/memory`, those the kernel refuses among them (memory.md E1). Its
+CMOS says 640 KB of base memory whatever it is: INT 12h is right.
 
 
 | Seen | A 286 |
@@ -69,6 +70,8 @@ base memory whatever it is: INT 12h is right.
 | stops itself ("E_Exit: RET from illegal descriptor type 13") on a far RET the fuzzer made | #GP |
 | no fault for memory used through a null selector | #GP(0000) |
 | a write through CS goes through | #GP(0000) |
+| a jump past CS's limit (`crash gp`) faults as #BR | #GP(0000) |
+| stops itself ("E_Exit: TSS not busy for IRET") at an IRET with NT whose back link's TSS is not busy | #TS |
 | a kernel stack overflow never reaches the double-fault task | the double-fault task |
 | a push past a stack segment's limit goes through, SP wrapping to FFFEh past the segment's base (a server thread's overflow, memory.md M6) | #SS(0000) |
 | after the 8042's reset, real-mode code meets protected-mode segment limits | a reset |
@@ -78,6 +81,7 @@ base memory whatever it is: INT 12h is right.
 | the ST0 of an invalid command kept, and given as a Read ID's (which the driver so does only after a recalibrate) | a fresh ST0 |
 | 3F7h reads FFh: the controller has no digital input register, and A no change line (the driver finds A's diskette by time, as B's) | bit 7 the change line, which a step with a diskette in drops |
 | a diskette's or fixed disk's step, seek and transfer at once | the drives' times |
+| a multi-track (MT) Read or Write ends at the first head's last sector, as ending well: the driver finds the rest by the DMA's count (*docs/storage.md*) | goes on to the second head's |
 | the clock is the host's | |
 
 Its drives (roadmap disk-scheduler.md M8): the template enables its 765

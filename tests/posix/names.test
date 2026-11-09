@@ -1,14 +1,13 @@
 # Names on a volume, case-sensitive (roadmap disk-scheduler.md M1, D19;
 # tests/posix/names.c): a.txt is A.TXT on B's image and a.txt in a listing;
 # A.TXT, Docs, /dev/NULL and /B are refused or not found; DOS's b: and B:
-# both name drive B. DOSBox-X has no diskette controller (docs/emulators.md).
+# both name drive B.
 program: idle
 define: TEST_POSIX_NAMES
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 file: B /A.TXT names\n
 timeout: 120
-emulators: bochs mame
 ---
 names: a.txt made (3): 3
 names: written (6): 6

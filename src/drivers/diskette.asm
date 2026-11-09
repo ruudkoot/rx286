@@ -649,6 +649,9 @@ fd_transfer:
         pop si
         mov bx, ax                      ; (0 if done)
         jc .out
+        mov bx, E_IO
+        call fd_dma_moved               ; what the DMA moved: the run, or less
+        jc .out
         xor bx, bx
         cmp byte [fd_base_command], FDC_CMD_READ
         jne .whole
@@ -849,6 +852,41 @@ fd_dma:
         pop cx
         mov al, DMA_CHANNEL_DISKETTE    ; unmasked
         out DMA1_MASK, al
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_dma_moved - after a transfer the controller ended well: the sectors the
+; DMA moved, by channel 2's count, which wraps to FFFFh (terminal count)
+; with the run's last byte. A controller that stops short leaves it above,
+; and then the run is what it moved, the caller asking again for the rest:
+; DOSBox-X's 765 ends a multi-track run at the first head's last sector,
+; and a cylinder's second track came back as the DMA buffer's old bytes
+; (disk-scheduler.md M8b). On an AT's the count always ends at FFFFh
+;   In:       fd_count
+;   Out:      CF clear and fd_count the sectors moved; or CF set: none
+;   Destroys: AX, CX
+; ----------------------------------------------------------------------------
+fd_dma_moved:
+        out DMA1_CLEAR_FLIPFLOP, al     ; any value
+        in al, DMA1_CH2_COUNT
+        mov cl, al
+        in al, DMA1_CH2_COUNT
+        mov ch, al
+        inc cx                          ; the bytes left: 0 at terminal count
+        jz .all
+        mov ax, [fd_count]
+        shl ax, SECTOR_SHIFT            ; the run's bytes
+        cmp cx, ax
+        jae .none
+        sub ax, cx                      ; the bytes moved
+        shr ax, SECTOR_SHIFT            ; whole sectors of them
+        jz .none
+        mov [fd_count], ax
+.all:
+        clc
+        ret
+.none:
+        stc
         ret
 
 ; ----------------------------------------------------------------------------

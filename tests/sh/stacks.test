@@ -11,6 +11,8 @@ install: C /BIN/CRASH z-crash.rx
 keys: ls -l b:/many\ncat c:/docs/hello.txt\ncd c:/docs\nps -e\ncrash gp\nexit\n
 match: contains
 timeout: 120
+# DOSBox-X faults crash gp's jump past its code as #BR, not #GP(0000)
+# (docs/emulators.md).
 emulators: bochs mame
 ---
 /mnt/rx286c/docs$ exit

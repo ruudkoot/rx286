@@ -3,7 +3,6 @@
 # then stops with an error.
 program: sh
 media: B damaged
-emulators: bochs mame
 keys: ls b:/many\n
 match: contains
 ---

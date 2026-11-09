@@ -21,8 +21,7 @@ DRV_SLOT_IRQ        equ 5       ;    its interrupt line, if it has one
 DRV_SLOT_RECV       equ 6       ;    where a segment passed to it lands
 DRV_SLOT_DEVICE     equ 7       ;    the console's: the screen's text page; the keyboard's:
                                 ;    the OS server's control notification, to signal; the
-                                ;    diskette's: its DMA buffer (FD_DMA_SECTORS, or
-                                ;    FD_DMA_SMALL_SECTORS without extended memory, within
+                                ;    diskette's: its DMA buffer (FD_DMA_SECTORS, within
                                 ;    64 KB)
 DRV_SLOT_KEYS       equ 8       ;    the keyboard's: the notification of the OS server's
                                 ;    thread for the foreground program, badged
@@ -114,9 +113,8 @@ DRV_STATUS_CHANGED  equ 1       ; DRV_DISK_STATUS's SI: the diskette's change li
 DRV_STATUS_SEEKING  equ 2       ;    a fixed disk's seek not yet complete
 DRV_DISK_RUN_MAX    equ 64      ; a fixed disk's run at most: 32 KB
 FD_DMA_SECTORS      equ 30      ; a diskette's run at most: a 1.2 MB cylinder, the DMA buffer
-FD_DMA_SMALL_SECTORS equ 2      ;    without extended memory, where a larger buffer left a
-                                ;    512 KB machine's processes too little (the root's choice;
-                                ;    4 until disk-scheduler.md M8)
+                                ;    (2 sectors without extended memory, M2 to M8: the least
+                                ;    machine has it since M8b)
 DISK_CYLINDER_UNKNOWN equ 0xFFFF
 ; The serial driver: COM2, the modem's line (l4.md L10)
 DRV_SERIAL_WRITE    equ 1       ; CX bytes (SERIAL_MAX at most), SI their offset in the

@@ -78,7 +78,11 @@ A later roadmap adds what else the loader finds of the hardware: 0 is "not
 given" in every field. The disk drivers read it too (`DRV_SLOT_BOOT_INFO`;
 *docs/drivers.md*). The memory for programs below 1 MB must hold at
 least `UMEM_LEAST`, or the kernel stops; the build checks that a machine of
-`BASE_LEAST`, 512 KB, leaves that much with the image at its most.
+`BASE_LEAST`, 639 KB, leaves that much with the image at its most. The
+least machine rx286 runs on (roadmap disk-scheduler.md M8b, the owner's) is
+639 KB of base memory and `EXT_LEAST_KB`, 384 KB, of extended memory, an
+AT of 1 MB: on less of either the kernel stops at boot, saying so
+(`least_check`; `tests/memory/least.test`).
 
 ## The boot image
 

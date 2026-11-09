@@ -12,7 +12,6 @@ keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wai
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 300
-emulators: bochs mame
 install: C /BIN/CHILD z-child.rx
 install: C /BIN/CODES z-codes.rx
 fsck: B

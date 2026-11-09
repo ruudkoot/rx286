@@ -87,18 +87,16 @@ DS_THREAD_STACK     equ 512     ; (250 bytes used at most: tests/disk, M3)
 ; lends beyond its reserve for the processes, DS_LEND_SEGMENTS segments
 ; each, DS_LEND_MAX at most (M7); the index of DS_INDEX_BYTES, and
 ; DS_INDEX_PER_LENT more for each block it may lend, DS_INDEX_MOST at most.
-; Without, DS_CACHE_SMALL blocks in one segment (the least machine's), and
-; the index of DS_INDEX_SMALL
+; A TEST_DISK_FEW build's cache is DS_CACHE_FEW blocks, none lent
+; (tests/disk/behind-small.test: write-behind's bound)
 DS_CACHE_PER_SEGMENT equ 125
 DS_CACHE_BLOCK      equ 524     ; a sector and its record
-DS_CACHE_SMALL      equ 1       ; (4 until M7, 2 until M8: their code left the shell no
-                                ;    fork at 512 KB)
+DS_CACHE_FEW        equ 1       ; (the cache without extended memory, until M8b)
 DS_LEND_SEGMENTS    equ 4       ; 4 * 65,500 bytes: a block of 256 KB
 DS_LEND_MAX         equ 56      ; 14 MB
 DS_SEGMENTS_MAX     equ 1 + DS_LEND_SEGMENTS * DS_LEND_MAX
 DS_INDEX_BYTES      equ 4096
 DS_INDEX_PER_LENT   equ 2000    ; 500 blocks: a bucket and a ghost for two
 DS_INDEX_MOST       equ 65520
-DS_INDEX_SMALL      equ 64
 
 %endif

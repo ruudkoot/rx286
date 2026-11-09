@@ -5,15 +5,16 @@
 # A PATH through the missing drive finds nothing there, and says so (P15).
 program: sh
 media: D absent
+# DOSBox-X leaves no drive out (media:).
 emulators: bochs mame
-keys: ls /mnt/rx286d; ls c:/docs\nexport PATH=/z:/mnt/rx286d/bin; nosuch; echo [$?]\n
+keys: ls /mnt/rx286d; ls c:/docs\nexport PATH=/z:/mnt/rx286d/bin:/mnt/rx286/bin; nosuch; echo [$?]\n
 ---
 rx286, test build
 /mnt/rx286$ ls /mnt/rx286d; ls c:/docs
 /mnt/rx286d: no such file or directory
 hello.txt
 printme.txt
-/mnt/rx286$ export PATH=/z:/mnt/rx286d/bin; nosuch; echo [$?]
+/mnt/rx286$ export PATH=/z:/mnt/rx286d/bin:/mnt/rx286/bin; nosuch; echo [$?]
 sh: nosuch: no such file or directory
 [127]
 /mnt/rx286$

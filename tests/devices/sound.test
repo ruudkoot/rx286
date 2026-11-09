@@ -2,7 +2,6 @@
 # note measured by the kernel's probe (TEST_SOUND), the tune's rest silent.
 program: sh
 define: TEST_SOUND
-emulators: bochs mame
 install: C /BIN/BEEP z-beep.rx
 install: C /BIN/PLAY z-play.rx
 keys: beep\nplay\n

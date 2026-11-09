@@ -4,7 +4,6 @@
 # P15 (256 now: tests/posix/files.c, whose paths need no key script).
 program: sh
 media: B deep
-emulators: bochs mame
 keys: cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd\n
 keys: cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..\n
 keys: ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits\n

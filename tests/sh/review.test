@@ -6,7 +6,6 @@
 # byte at a time, no line's start lost, and without a prompt or an echo
 # (P15's second review).
 program: sh
-emulators: bochs mame
 install: C /BIN/CP z-cp.rx
 install: C /BIN/SLEEP z-sleep.rx
 keys: echo a $EMPTY b; echo "say \\"hi; bye\\""; echo "a\\"b" && echo two\n

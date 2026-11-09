@@ -8,11 +8,11 @@
  * (INIT_SHELL, PROGRAM=sh) start a shell on each terminal, as getty does
  * (os-server.md P11): a child of its own leads a session, opens the
  * terminal, which so becomes its session's, as descriptors 0 to 2, and
- * runs the shell; again whenever it ends. On the terminals but the first
- * the child waits for Enter first, so that a shell's memory is taken only
- * where one is wanted (a machine without extended memory has 128 KB). Once
- * the shells are started it starts the daemons, the clock and the counter
- * (P12), which leave it at once and run on as its orphans: not in a test
+ * runs the shell, the boot diskette's /bin/sh (disk-scheduler.md M8b);
+ * again whenever it ends. On the terminals but the first the child waits
+ * for Enter first, so that a shell's memory is taken only where one is
+ * wanted. Once the shells are started it starts the daemons, the clock and
+ * the counter (P12), which leave it at once and run on as its orphans: not in a test
  * build, unless it asks (TEST_DAEMONS, TEST_DEMO), since they would change
  * every test's pids and timing.
  * ============================================================================ */
@@ -26,6 +26,8 @@
 
 #ifdef INIT_SHELL
 #define TERMINALS 8                     /* /dev/tty1 to /dev/tty8, if there */
+#define BIN "/mnt/rx286/bin/"           /* the boot diskette's (disk-scheduler.md M8b) */
+#define SHELL BIN "sh"
 
 static pid_t shells[TERMINALS];
 static char name[] = "/dev/tty1";
@@ -39,15 +41,27 @@ static int there(int n)
     return stat(name, &st) == 0;
 }
 
+/* enter - wait for a line, to its new line (P15) */
+static void enter(void)
+{
+    char line[8];
+    int got;
+
+    while ((got = (int)read(0, line, sizeof line)) > 0 && !memchr(line, '\n', (size_t)got))
+        ;
+}
+
 /* shell - a shell on terminal n, in a session of its own whose terminal
- * it is, at once on the first, after Enter on the others: its pid, or -1 */
+ * it is, at once on the first, after Enter on the others: its pid, or -1.
+ * The shell is the boot diskette's (disk-scheduler.md M8b): without it, the
+ * child asks for the diskette and waits for Enter, as DOS asks for
+ * COMMAND.COM's, before init tries again */
 static pid_t shell(int n)
 {
     static char *const argv[] = { "sh", 0 };
     static char wait[] = "rx286 terminal 1: press Enter for a shell\n";
-    char line[8];
+    static const char no_shell[] = "init: no " SHELL ": the boot diskette in A, then Enter\n";
     pid_t pid;
-    int got;
 
     name[8] = (char)('1' + n);
     if ((pid = fork()) == 0) {
@@ -62,18 +76,19 @@ static pid_t shell(int n)
         if (n > 0) {
             wait[15] = (char)('1' + n);
             write(1, wait, sizeof wait - 1);
-            while ((got = (int)read(0, line, sizeof line)) > 0
-                    && !memchr(line, '\n', (size_t)got))
-                ;                       /* (the line, to its new line: P15) */
+            enter();
         }
-        execve("/z/sh", argv, environ);
+        execve(SHELL, argv, environ);
+        write(1, no_shell, sizeof no_shell - 1);
+        enter();
         _exit(127);
     }
     return pid;
 }
 
 #if !defined(TEST) || defined(TEST_DAEMONS) || defined(TEST_DEMO)
-/* daemon_start - a daemon of /z started (it makes itself one: rx_daemon) */
+/* daemon_start - a daemon of the boot diskette's started (it makes itself
+ * one: rx_daemon) */
 static void daemon_start(char *path)
 {
     char *argv[2];
@@ -105,8 +120,8 @@ int main(void)
         if (!daemons) {
             daemons = 1;                /* (once: no count to wrap, P15) */
 #ifdef WITH_DAEMONS
-            daemon_start("/z/clock");
-            daemon_start("/z/counter");
+            daemon_start(BIN "clock");
+            daemon_start(BIN "counter");
 #endif
         }
         got = wait(&status);

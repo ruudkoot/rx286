@@ -2,7 +2,6 @@
 # missing name, a directory read as a file, a file as a directory, a name
 # FAT cannot hold, one past 8.3, a drive that is not there.
 program: sh
-emulators: bochs mame
 keys: ls nothing; cat c:/docs; ls c:/readme.txt/x\n
 keys: cat a:bad*name; cat a:toolongname.txt; ls /q\n
 ---

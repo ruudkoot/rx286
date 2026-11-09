@@ -13,7 +13,6 @@ keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wai
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 300
-emulators: bochs mame
 fsck: B
 file: B /MOVED.TXT inner\n
 file: B /NEW.TXT hello, files\nmore\n

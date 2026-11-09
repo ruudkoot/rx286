@@ -59,6 +59,8 @@ enum { R_NONE, R_STOP, R_CONT };        /* a stop or a continue its parent's wai
  * data segment's most, its wait status once a zombie, its file's name */
 struct proc {
     rx_u8 state;
+    rx_u8 taken;                        /* entry_new gave it out, and it is not started
+                                           yet: a spawn's may wait for the disk meanwhile */
     rx_u8 waiting;                      /* its server thread waits for a child */
     rx_u8 served;                       /* entry i has its server thread (ROOT_SERVE) */
     rx_u8 report, stopsig;              /* R_*, and the signal that stopped it (P11) */
@@ -107,6 +109,8 @@ static pid_t serving[PROCS];            /* the pid whose call entry i's thread s
 static struct server_lock lock;
 static pid_t next_pid = INIT_PID;
 static rx_u8 args[PX_ARG_MAX];          /* an image's argv and environ, being built */
+static rx_u8 exec_holder;               /* the thread (its number + 1) whose exec has the
+                                           turn (exec_turn), or 0 */
 
 /* far_copy - bytes from one segment of the server's to another */
 static void far_copy(rx_u16 to, rx_u16 to_at, rx_u16 from, rx_u16 from_at, rx_u16 n)
@@ -494,6 +498,26 @@ static int list_count(rx_u16 segment, rx_u16 list, int *error)
     return -1;
 }
 
+/* exec_turn - the turn of the calling thread's exec, from its image_take
+ * to its image_done, waited for with the lock given up: `args` and
+ * LOAD_SLOT are one exec's at a time. Its reads of the file give the lock
+ * up (disk-scheduler.md M4), and two execs from disks at once, a pipeline's
+ * from A and C, had the second's argv written over the first's
+ * (disk-scheduler.md M8b, when the shell's commands left /z). It is taken
+ * before the file's volume, so that no call waits for it holding one */
+static void exec_turn(void)
+{
+    while (exec_holder)
+        lock_nap();
+    exec_holder = (rx_u8)(server_self() + 1);
+}
+
+/* exec_turn_end - the exec's turn given up */
+static void exec_turn_end(void)
+{
+    exec_holder = 0;
+}
+
 /* args_take - argv and environ of a segment (the caller's, or the server's
  * own), as the block an image gets at its first break: both lists of
  * pointers, each ending with a null one, then the strings, laid out in
@@ -549,8 +573,11 @@ static int image_take(struct image *img, int i, const char *path, rx_u16 segment
     rx_u32 end;
     int error;
 
-    if ((error = vfs_exe_open(i, path, &img->file)) != 0)
+    exec_turn();
+    if ((error = vfs_exe_open(i, path, &img->file)) != 0) {
+        exec_turn_end();
         return error;
+    }
     memcpy(img->name, img->file.name, AR_NAME_SIZE);
     if (vfs_exe_read(&img->file, 0, RX_SEG(head), RX_OFF(head), RX_HEADER_SIZE))
         goto noexec;
@@ -599,13 +626,15 @@ noexec:
     error = ENOEXEC;
 failed:
     vfs_exe_close(&img->file);
+    exec_turn_end();
     return error;
 }
 
-/* image_done - an image's file closed */
+/* image_done - an image's file closed, and the exec's turn over */
 static void image_done(struct image *img)
 {
     vfs_exe_close(&img->file);
+    exec_turn_end();
 }
 
 /* image_make - the process of an image: its four capabilities in the
@@ -639,13 +668,17 @@ static int image_make(struct image *img, rx_u16 to, unsigned badge, rx_u16 *n)
 }
 
 /* entry_new - a free entry with its server thread, for a new process; -1 if
- * the table is full (or no thread for it) */
+ * the table is full (or no thread for it). It is taken until entry_start, or
+ * its caller's failure gives it back: a spawn reads its file between, with
+ * the lock given up, and a fork meanwhile took the same entry, its child's
+ * slots then the spawned process's (disk-scheduler.md M8b, when the
+ * daemons left /z: the counter never ran, the shell's command hung) */
 static int entry_new(void)
 {
     int i;
 
     for (i = 0; i < PROCS; i++) {
-        if (procs[i].state != P_FREE)
+        if (procs[i].state != P_FREE || procs[i].taken)
             continue;
         if (!procs[i].served) {         /* its thread, on a stack of its own (M6) */
             server_stacks[PROC_N0 + i] = P_SLOT(i, PK_STACK);
@@ -656,6 +689,7 @@ static int entry_new(void)
             thread_op(P_SLOT(i, PK_SERVER), THREAD_BIND, P_SLOT(i, PK_NOTIFY), 0, 0);
             procs[i].served = 1;
         }
+        procs[i].taken = 1;
         return i;
     }
     return -1;
@@ -703,6 +737,7 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
     int parent = entry_of(ppid, P_ALIVE);
 
     p->state = P_ALIVE;
+    p->taken = 0;
     p->waiting = p->asleep = 0;
     p->futexing = p->lending = 0;
     p->in_volume = p->doomed = p->doom_revoke = 0;
@@ -736,12 +771,15 @@ static int spawn(const char *path, rx_u16 segment, rx_u16 argv, rx_u16 envp, pid
         return -1;
     }
     *error = image_take(&img, parent, path, segment, argv, envp);
-    if (*error)
+    if (*error) {
+        procs[i].taken = 0;
         return -1;
+    }
     *error = image_make(&img, P_SLOT(i, PK_EP), badge_new(i), &n);
     image_done(&img);
     if (*error) {
         root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);    /* (a code it sealed, unused: P15) */
+        procs[i].taken = 0;
         return -1;
     }
     procs[i].root = n;
@@ -916,11 +954,13 @@ static int px_fork(int i, int t, rx_u16 ip, rx_u16 sp, int *error)
         return -1;
     }
     if (root(ROOT_FORK, procs[i].root, 0, badge_new(c), P_SLOT(c, PK_EP), &n)) {
+        procs[c].taken = 0;
         *error = EAGAIN;
         return -1;
     }
     if (thread_op(P_SLOT(c, PK_THREAD), THREAD_CONFIGURE, P_SLOT(c, PK_SPACE), ip, sp)) {
         root(ROOT_EXIT, n, 0, 0, 0, 0);
+        procs[c].taken = 0;
         *error = ENOMEM;
         return -1;
     }
@@ -1335,18 +1375,21 @@ static int px_thread(int p, rx_u16 ip, rx_u16 sp, rx_u16 at, int *error)
     rx_u16 n;
 
     *error = EAGAIN;
-    if (!w) {
-        *error = EFAULT;
+    if (!w || c < 0 || root(ROOT_THREAD, procs[p].root, 0, badge_new(c), P_SLOT(c, PK_EP), &n)) {
+        if (!w)
+            *error = EFAULT;
+        if (c >= 0)
+            procs[c].taken = 0;
         return -1;
     }
-    if (c < 0 || root(ROOT_THREAD, procs[p].root, 0, badge_new(c), P_SLOT(c, PK_EP), &n))
-        return -1;
     if (thread_op(P_SLOT(c, PK_THREAD), THREAD_CONFIGURE, P_SLOT(p, PK_SPACE), ip, sp)) {
         root(ROOT_UNTHREAD, procs[p].root, n, 0, 0, 0);
+        procs[c].taken = 0;
         return -1;
     }
     *w = (rx_u16)(((OS_SLOT_EP + n) << 3) | 7);     /* its endpoint: slot 8 + n, RPL 3 */
     procs[c].state = P_THREAD;
+    procs[c].taken = 0;
     procs[c].lending = 0;
     procs[c].in_volume = procs[c].doomed = procs[c].doom_revoke = 0;
     procs[c].leader = (rx_u8)p;
@@ -1739,7 +1782,8 @@ void proc_interrupt(void)
 void proc_boot(void)
 {
     static const char path[] = "/z/init";
-    static const char env_path[] = "PATH=/z:/mnt/rx286c/bin", env_home[] = "HOME=/mnt/a:";
+    static const char env_path[] = "PATH=/z:/mnt/rx286/bin:/mnt/rx286c/bin",
+                      env_home[] = "HOME=/mnt/a:";
     static rx_u16 argv[2], envp[3];     /* offsets in the server's data, as spawn reads */
     int error;                          /* them: a far pointer is two words (memory.md M5) */
 

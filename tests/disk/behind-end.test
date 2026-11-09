@@ -6,7 +6,6 @@
 # server hold before it ends the test.
 program: idle
 define: TEST_POSIX_BEHIND
-emulators: bochs mame
 define: TEST_BEHIND_NOWAIT
 keys: {wait 100}
 match: contains
