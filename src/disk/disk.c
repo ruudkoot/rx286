@@ -62,6 +62,7 @@
 
 RX_STATIC_ASSERT(SCHED_JOBS >= DS_REQUESTS, jobs);
 RX_STATIC_ASSERT(DS_SLOT_REQUEST + 2 * DS_REQUESTS <= DS_SLOTS, request_slots);
+RX_STATIC_ASSERT(DS_SEGMENTS_MAX == DC_SEGMENTS_MAX, segments);
 
 rx_u16 server_stacks[DS_THREADS + 1] = {
     0, SLOT(DS_SLOT_STACK + 1), SLOT(DS_SLOT_STACK + 2), SLOT(DS_SLOT_STACK + 3)
@@ -102,13 +103,22 @@ static int receiving = -1;              /* the request's record thread 1 receive
 static rx_u16 wb_error[DS_VOLUMES];     /* a write behind's failure, for the volume's next
                                            DS_SYNC */
 static const char msg_behind[] = "disk: write-behind failed\n";
+static unsigned segments;               /* the cache's: its own, and those the root lent (M7) */
+#ifdef TEST_DISK_MEMORY
+static int last_change;                 /* the cache's last: 1 grew, -1 shrank */
+static const char msg_grows[] = "disk: the cache grows\n";
+static const char msg_shrinks[] = "disk: the cache shrinks\n";
+#endif
 
 static void drain(int aged_only);
+
+/* cache_slot - the cache's segment k's slot: its own, or a lent one (M7) */
+#define CACHE_SLOT(k) SLOT((k) ? DS_SLOT_LENT + (k) - 1 : DS_SLOT_CACHE)
 
 /* dc_segment - the cache's segment k (cache.h) */
 rx_u8 RX_FAR *dc_segment(unsigned k)
 {
-    return (rx_u8 RX_FAR *)RX_MK_FP(SLOT(DS_SLOT_CACHE + k), 0);
+    return (rx_u8 RX_FAR *)RX_MK_FP(CACHE_SLOT(k), 0);
 }
 
 /* dc_index - the cache's index (cache.h) */
@@ -745,6 +755,20 @@ static rx_u32 sectors_of(unsigned v)
     return volumes[v].known ? volumes[v].sectors : 0;
 }
 
+/* changed - the cache grew (1) or shrank (-1): said on the log in
+ * TEST_DISK_MEMORY builds when it turns (tests/disk/memory.test) */
+static void changed(int how)
+{
+#ifdef TEST_DISK_MEMORY
+    if (how != last_change)
+        rx_log(how > 0 ? msg_grows : msg_shrinks,
+               how > 0 ? sizeof msg_grows - 1 : sizeof msg_shrinks - 1);
+    last_change = how;
+#else
+    (void)how;
+#endif
+}
+
 /* take_call - thread 1: a call received in request q's slots; 1 if it is
  * answered at once (r the reply), 0 if queued (q's record kept) */
 static int take_call(unsigned q, struct rx_kregs *r)
@@ -824,6 +848,43 @@ static int take_call(unsigned q, struct rx_kregs *r)
             return 0;
         requests[q].used = 0;
         break;
+    case DS_GROW:                       /* the root's lent segments (M7, D10) */
+        if (r->dx != DS_BADGE_ROOT || v > DS_SEGMENTS_MAX - segments) {
+            error = E_INVAL;
+            break;
+        }
+        for (k = 0; k < v; k++)
+            if ((rx_u32)rx_lsl(CACHE_SLOT(segments + k)) + 1 < DC_SEGMENT_BYTES)
+                error = E_INVAL;
+        take();
+        if (error == 0 && !dc_grow(v * DC_PER_SEGMENT))
+            error = E_INVAL;
+        if (error == 0)
+            segments += v;
+        give();
+        changed(1);
+        break;
+    case DS_SHRINK:                     /* the last ones back: once none is used */
+        if (r->dx != DS_BADGE_ROOT || v >= segments) {
+            error = E_INVAL;
+            break;
+        }
+        for (k = 0;; k++) {
+            take();
+            count = dc_shrink(v * DC_PER_SEGMENT);
+            if (count)
+                segments -= v;
+            give();
+            if (count)
+                break;
+            if (k == DS_SHRINK_TICKS) {
+                error = E_BUSY;         /* (busy, or too many dirty: the root says ENOMEM) */
+                break;
+            }
+            nap(DS_N_REQUESTS);         /* (a run ends; write-behind writes) */
+        }
+        changed(-1);
+        break;
     case DS_EJECT:
         if (v >= DS_VOLUMES) {
             error = E_INVAL;
@@ -880,16 +941,18 @@ static void setup(void)
             volumes[d].known = 1;
         }
     }
-    for (k = 0; k < DS_CACHE_SEGMENTS; k++) {
-        limit = rx_lsl(SLOT(DS_SLOT_CACHE + k));
+    for (k = 0; k < DS_SEGMENTS_MAX; k++) {
+        limit = rx_lsl(CACHE_SLOT(k));
         if (limit == 0)
             break;
         blocks += ((rx_u32)limit + 1) / DS_CACHE_BLOCK;
+        segments++;
         if (((rx_u32)limit + 1) / DS_CACHE_BLOCK < DS_CACHE_PER_SEGMENT)
             break;                      /* (a short segment is the last) */
     }
     limit = rx_lsl(SLOT(DS_SLOT_INDEX));
-    dc_init(blocks, limit ? limit + 1 : 0);
+    dc_init(blocks, DC_BLOCKS_MAX, limit ? limit + 1 : 0);  /* (the index's size, the root's,
+                                                               bounds what it is sized for) */
     sched_init();
     ready = 1;
     kcall(KCALL_SIGNAL, 0, 0, 0, NOTIFY(DS_N_FIXED), 0, 0, 0, 0);

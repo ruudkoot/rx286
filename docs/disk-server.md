@@ -30,6 +30,8 @@ write passes a segment: the process's data, or the OS server's cache.
 | `DS_WRITE` | the same, the sectors from the segment | the same: the sectors on a diskette when the reply comes, in the cache for a fixed disk (M6) |
 | `DS_SYNC` | BL a volume, or `DS_ALL` | BX 0, or the first error of its dirty sectors' writes, once they are written |
 | `DS_EJECT` | BL a volume | BX 0: its sectors no longer cached, except the dirty ones |
+| `DS_GROW` | the root's alone (badged `DS_BADGE_ROOT`): BL the segments it has put in the cache's next slots | BX 0, or `E_INVAL` if one is not a whole segment of 125 blocks |
+| `DS_SHRINK` | the root's alone: BL the last segments to give back | BX 0 once none of them is used, or `E_BUSY` if not within `DS_SHRINK_TICKS` (10 s) |
 
 A volume's sectors are numbered from 0, in 32 bits. There are
 `DS_VOLUMES` (4) volumes:
@@ -99,16 +101,45 @@ too, over the blocks that hold its sectors or in a window of new ones. A
 block the driver refused to write is dropped, and the disk's copy counts
 again.
 
-The cache's size is fixed at boot (D10 B; M7 lends it more):
+## The cache's memory
 
-| Machine | Cache | Index |
-|---|---|---|
-| with extended memory | a segment of 125 blocks for each 256 KB of it, one at least and `DS_CACHE_SEGMENTS` (8, 512 KB) at most | `DS_INDEX_BYTES` |
-| without extended memory | `DS_CACHE_SMALL` (4) blocks in one segment | `DS_INDEX_SMALL` |
+The cache has a segment of its own, and grows with the blocks of 256 KB
+that the root lends it (roadmap disk-scheduler.md M7, D10 A):
+
+| Machine | Its own | Lent | Index |
+|---|---|---|---|
+| with extended memory | a segment of 125 blocks | up to one block for each 256 KB of extended memory, `DS_LEND_MAX` (56, 14 MB) at most | `DS_INDEX_BYTES`, and `DS_INDEX_PER_LENT` more for each block it may be lent, `DS_INDEX_MOST` (65,520) at most |
+| without extended memory | `DS_CACHE_SMALL` (2) blocks in one segment | none | `DS_INDEX_SMALL` |
+
+The root lends while more than its reserve for the processes would stay
+free: an eighth of the extended memory, 64 KB at least. It lends a block
+at the end of a call that starts something (a fork, a spawn, a load), which
+is slow anyway, and not after an exit, whose waiter it would hold up; and
+none in the first 10 s, so that the boot is not held up. The cache grows to
+its size as the system works.
+For each block it retypes four segments of 65,500 bytes
+(`DS_LEND_SEGMENTS`), moves them into the disk server's next slots, and
+calls `DS_GROW`; the cache holds `DS_SEGMENTS_MAX` (225) segments at most. The hash and the ghosts
+were sized at boot for all the blocks the cache may be lent, within the
+index's segment.
+
+When an allocation finds no free block, the root calls `DS_SHRINK` for the
+block it lent last, then revokes the block and tries again; only when
+nothing more comes back is the allocation refused (`ENOMEM`). The disk
+server answers once none of the block's segments is used:
+- a busy block (a driver's run) makes it wait for a tick and try again;
+- a dirty block's sector, key and state are moved to a free or clean block
+  of the segments it keeps, which takes its place in its queue, so nothing
+  waits for the disk;
+- after `DS_SHRINK_TICKS` (10 s, past write-behind's 5 s) it answers
+  `E_BUSY`, and the root refuses the allocation, losing nothing.
+
+The write-behind passes walk only the segments that hold dirty blocks, as
+each segment counts its own, so a large cache costs them nothing more.
 
 On a 512 KB machine without extended memory, the disk server costs about
-16 KB below 1 MB:
-- its code in the boot image, 9.6 KB;
+17 KB below 1 MB:
+- its code in the boot image, 12 KB;
 - its space, 2 KB (`DS_SLOTS` of 32 bytes each);
 - its stacks, 1.5 KB;
 - its data, 1 KB;
@@ -224,9 +255,12 @@ write-protected diskette, or a call the driver refused is not tried again.
 | 7 | the cache's index (`DS_SLOT_INDEX`) |
 | 8 + n | thread n's notification, which it sleeps on (`DS_SLOT_NOTIFY`) |
 | 16 + n | thread n's stack (`DS_SLOT_STACK`) |
-| 24 + k | the cache's segment k (`DS_SLOT_CACHE`) |
+| 24 | the cache's own segment, its segment 0 (`DS_SLOT_CACHE`) |
 | 32 + n | thread n (`DS_SLOT_THREAD`) |
 | 40 + 2r, 41 + 2r | request r's segment and its saved reply (`DS_SLOT_REQUEST`) |
+| 64 + k - 1 | the cache's segment k, lent by the root (`DS_SLOT_LENT`) |
 
-Its space has `DS_SLOTS` (64), 2 KB of the kernel's. M7's lent memory will
-need more.
+Its space has `DS_SLOTS` (64), 2 KB of the kernel's, when the root may lend
+it nothing. Otherwise the space is the power of two that holds the slots
+for every block it may be lent, 512 at 16 MB (16 KB), made from extended
+memory.

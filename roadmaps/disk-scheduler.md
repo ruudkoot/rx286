@@ -129,7 +129,7 @@ simulator; none of their code is in the repository.
 | M4: waiting without the lock | done (2026-11-09) |
 | M5: fairness | done (2026-11-09) |
 | M6: read-ahead and write-behind | done (2026-11-09) |
-| M7: the cache's memory | not started |
+| M7: the cache's memory | done (2026-11-09) |
 | M8: removable volumes and `/mnt` | not started |
 | M9: the formatter | not started |
 | M10: the simulator in `tools/`, the documents, a review and the close | not started |
@@ -1999,6 +1999,66 @@ less, M a few, L a week.
   - `tests/memory/*` pass at every size the memory suite runs;
   - the least machine boots with the small cache.
 - **Decisions:** D10.
+- **Done** (2026-11-09). With extended memory the cache has a segment of its own, and the
+  root lends it blocks of 256 KB while more than its reserve for the processes would stay free:
+  an eighth of the extended memory, 64 KB at least. For each block the root retypes four
+  segments, moves them into the disk server's space and calls `DS_GROW`. An allocation that
+  finds no free block calls `DS_SHRINK` for the block lent last, then revokes it and tries
+  again; only when nothing more comes back is the answer `ENOMEM`. The disk server answers
+  once none of the block's segments is used. It moves their dirty sectors to free or clean
+  blocks of the segments it keeps, which takes no disk time, and waits a tick at a time while
+  a driver's run holds one. After 10 s it answers `E_BUSY`, and nothing is lost. On Bochs at
+  16 MB the root lends 52 blocks (13 MB, 26,125 blocks of cache with its own), one at the end
+  of each call that starts something. `memory.test` waits past the first 10 s, forks and waits
+  for 40 children one after another, whose forks let the cache grow to that, then has 40
+  children of 60 KB at once take three blocks back, and the cache grows again once they
+  have exited. On MAME with 1 MB of extended memory, `memory-1m.test`'s children take every
+  block back, 14 of them fit, and 26 are told there is no memory. In both, the files are as
+  written and fsck.fat finds C sound. The host test moves a segment's dirty blocks below,
+  and is refused while one is busy or when there is no room below. `make check` passes on
+  Bochs (149), DOSBox-X (62) and MAME (124), with 212 unit tests, and `make check-ia16` passes
+  (149).
+  - Not as planned:
+    - **The dirty sectors are moved, not written.** D10 has the disk server write them before
+      it answers. Moving them to clean blocks takes no disk time, so the root waits for no
+      write. The clean blocks are there: write-behind keeps half the cache clean (M6).
+    - **The deadline is the disk server's.** The root's call waits for its answer, and the
+      disk server gives up after `DS_SHRINK_TICKS`.
+    - **When the root lends.** A block at the end of a call that starts something (a fork,
+      a spawn, a load), none in the first 10 s, and none after an exit. Zeroing a segment
+      costs the AT about 26 ms (E9), and Bochs runs at the AT's 4 million instructions a
+      second. At 8 blocks a call the first calls after boot held the system up by seconds,
+      and five tests that act two seconds in failed; at a block a call, MAME's boot still
+      took 0.3 s longer, and `ctrl-break.test` failed; a block after an exit would hold up
+      its waiter. The cache grows to its size as the system works; `memory.test` lets it
+      with 40 children forked one after another.
+    - **The tty's test hook had a race,** which M7's timing on MAME showed in `tty.test`.
+      After a ^C the tty thread said a reader still waited, the one the signal was about to
+      end, and the test could end before the parent printed. It now says none until a
+      woken reader says otherwise.
+    - **The cache's own segment is one,** not one for each 256 KB as M3's. Lending covers the
+      rest.
+    - **A space's slots are a power of two** (the kernel's), so the cache's own segment
+      stays in slot 24, inside the 64 slots of a space that may be lent nothing. Lent
+      segments go from slot 64. A space that may be lent is 512 slots at 16 MB, and comes
+      from extended memory.
+    - **The hash and the ghosts are sized at boot** for every block the cache may be lent,
+      within an index of 65,520 bytes at most, with 2Q's ghosts kept to half the cache
+      there is. Each segment counts its dirty blocks, so write-behind's walks pass over the
+      clean ones.
+    - **`many-small.test` leaves its fork count open.** The image's code runs where it lies,
+      so each KB more is one less for the processes of a machine without extended memory.
+      The lending code, idle there, made it 1.7 KB larger, and 2 of the 12 forks were
+      refused. The test now asks that one child of 60 KB be sound and none fail otherwise,
+      which was its point.
+    - **The least machine's cache is 2 blocks,** not 4 (`DS_CACHE_SMALL`). At 512 KB without
+      extended memory the image's code and the boot's segments come out of the memory the
+      processes have below 1 MB. M6 had left 48 bytes before the next kilobyte; M7's code
+      took 2 KB, and `sizes.test`'s shell was refused the fork for `echo`. The kilobyte the
+      smaller cache gives back makes it fit again; the OS server's own 4 sectors still hold
+      the FAT and the directories there.
+    - **`DC_SEGMENT_BYTES` was a signed 65,500,** which a 16-bit `int` cannot hold: every
+      lent segment looked short, and `DS_GROW` refused them all.
 
 ### M8. Removable volumes and `/mnt` (L)
 

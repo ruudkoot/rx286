@@ -23,6 +23,13 @@ int copy(rx_u16 space, rx_u16 from, rx_u16 to, int how, rx_u16 badge, int rights
 int thread_call(rx_u16 thread, int op, rx_u16 si, rx_u16 bx, rx_u16 cx);
 /* revoke, delete_slot - everything below a slot; a slot emptied */
 int revoke(rx_u16 slot);
+/* disk_lend_setup - the disk server's cache, for services.c to lend blocks
+ * of 256 KB to (disk-scheduler.md M7, D10): its endpoint, badged
+ * DS_BADGE_ROOT; its space and ring; the segments it has; the blocks it may
+ * be lent; the extended memory's KB, of which an eighth is the processes'
+ * reserve */
+void disk_lend_setup(rx_u16 ep, rx_u16 space, int ring, unsigned segments, unsigned most,
+                     rx_u16 ext_kb);
 int delete_slot(rx_u16 slot);
 /* slot_take - an empty slot of the root's own, ROOT_SLOT_DYNAMIC on: its
  * selector, or 0; slot_give - one it emptied */

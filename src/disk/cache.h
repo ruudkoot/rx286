@@ -24,11 +24,14 @@
 #define DC_SECTOR 512
 #define DC_PER_SEGMENT 125              /* blocks a segment, after their records */
 #define DC_RECORD 12                    /* a record's bytes (struct dc_rec) */
-#define DC_SEGMENT_BYTES (DC_PER_SEGMENT * (DC_RECORD + DC_SECTOR))    /* 65,500 */
-#define DC_SEGMENTS_MAX 8               /* 512 KB of sectors (M7 lends more) */
+#define DC_SEGMENT_BYTES (DC_PER_SEGMENT * (DC_RECORD + DC_SECTOR + 0u))  /* 65,500: unsigned,
+                                                                       past a 16-bit int */
+#define DC_SEGMENTS_MAX 225             /* a segment of its own and 56 blocks of 256 KB the
+                                           root lends, 4 segments each: 14 MB (M7; disk.inc's
+                                           DS_SEGMENTS_MAX) */
 #define DC_BLOCKS_MAX (DC_SEGMENTS_MAX * DC_PER_SEGMENT)
 #define DC_NONE 0xFFFFu
-#define DC_HASH_MAX 512                 /* buckets at most: one for two blocks */
+#define DC_HASH_MAX 8192                /* buckets at most: one for two blocks, 16 KB */
 #define DC_INDEX_BYTES(blocks) (DC_HASH_MAX * 2 + (blocks) / 2 * 6)  /* at most */
 #define DC_KEY(volume, sector) (((rx_u32)(volume) << 24) | ((rx_u32)(sector) & 0xFFFFFFUL))
 #define DC_KEY_VOLUME(key) ((unsigned)((key) >> 24))
@@ -49,8 +52,16 @@ rx_u8 RX_FAR *dc_index(void);
 
 /* dc_init - an empty cache of so many blocks (0 to DC_BLOCKS_MAX), in
  * segments of DC_PER_SEGMENT, the last perhaps of fewer; its hash and its
- * ghosts in the index's bytes (16 at least: else no cache) */
-void dc_init(unsigned blocks, unsigned index_bytes);
+ * ghosts sized for the most it may grow to, in the index's bytes (16 at
+ * least: else no cache) */
+void dc_init(unsigned blocks, unsigned most, unsigned index_bytes);
+/* dc_grow - n blocks more, whole segments after the last, which must be
+ * whole (M7: the root's lent memory): 1, or 0 if it cannot */
+int dc_grow(unsigned n);
+/* dc_shrink - the last n blocks, whole segments, given up (M7): their dirty
+ * blocks moved to free or clean ones below. 1; or 0, the cache as sound as
+ * before, if one of them is busy or there is no room below */
+int dc_shrink(unsigned n);
 /* dc_blocks - the cache's blocks */
 unsigned dc_blocks(void);
 /* dc_find - the block that holds a key, or DC_NONE */

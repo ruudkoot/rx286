@@ -57,6 +57,7 @@ struct tty {
 
 static struct tty ttys[TTYS];
 static int shown, terminals;            /* the terminal shown; how many there are */
+static int signalled;                   /* a key just signalled the readers' group (^C) */
 static char echoes[ECHO_ROOM];
 static unsigned echoed;
 static int echo_unit;                   /* the terminal the echoes are for */
@@ -225,6 +226,7 @@ static void input(rx_u8 c)
         if (!(t->lflag & NOFLSH))
             tty_flush(shown);
         proc_terminal(is(t, c, VINTR) ? SIGINT : is(t, c, VQUIT) ? SIGQUIT : SIGTSTP);
+        signalled = 1;
         return;
     }
     if (t->lflag & ICANON) {
@@ -352,7 +354,11 @@ void tty_thread(void)
             if ((k = key_take()) != 0)
                 key(k);
             wake_readers(echo_unit);
-            reader_flag();
+            if (signalled)              /* (its readers, not yet woken, wait no more: */
+                test_reader(TEST_READER_NONE);  /* each says so itself once woken) */
+            else
+                reader_flag();
+            signalled = 0;
             lock_give();
             echo_flush();
             if (to_show >= 0) {

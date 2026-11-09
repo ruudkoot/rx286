@@ -9,7 +9,9 @@
  * does not wash out; a cache of 16 blocks, the least machine's; and the
  * runs write-behind finds (M6): in their keys' order, split at a busy
  * block and at a segment's end, the lowest kept when there is no room, the
- * aged alone begun.
+ * aged alone begun; and segments lent and given back (M7): the dirty
+ * blocks of those given back moved below with their bytes, refused while
+ * one is busy or there is no room below.
  * ============================================================================ */
 
 #include <stdio.h>
@@ -39,7 +41,7 @@ rx_u8 *dc_index(void)
 /* init - a cache of n blocks, its index as large as it needs */
 static void init(unsigned n)
 {
-    dc_init(n, DC_INDEX_BYTES(n));
+    dc_init(n, n, DC_INDEX_BYTES(n));
 }
 
 /* window_ok - a window's blocks neighbours in one segment, with its keys */
@@ -248,6 +250,73 @@ static void runs(void)
           dc_check(), dc_dirty());
 }
 
+/* marked - a window of n keys from key on, each sector filled with its
+ * key's low byte, dirty or clean: its first */
+static rx_u16 marked(rx_u32 key, unsigned n, int dirty)
+{
+    rx_u16 first;
+    unsigned got = dc_window(key, n, &first), i;
+
+    CHECK(got == n, "marked: a window of %u, not %u", got, n);
+    for (i = 0; i < got; i++) {
+        memset(dc_bytes((rx_u16)(first + i)), (int)((key + i) & 0xFF), DC_SECTOR);
+        dc_set((rx_u16)(first + i), dirty ? DC_DIRTY | DC_AGED : DC_CLEAN);
+    }
+    return first;
+}
+
+/* kept - n dirty keys from key on still cached, below `keep`, their bytes
+ * as they were: how many are */
+static unsigned kept(rx_u32 key, unsigned n, unsigned keep)
+{
+    unsigned i, good = 0;
+    rx_u16 b;
+
+    for (i = 0; i < n; i++) {
+        b = dc_find(key + i);
+        if (b != DC_NONE && b < keep && dc_state(b) == (DC_DIRTY | DC_AGED)
+                && dc_bytes(b)[0] == ((key + i) & 0xFF)
+                && dc_bytes(b)[DC_SECTOR - 1] == ((key + i) & 0xFF))
+            good++;
+    }
+    return good;
+}
+
+/* lent - dc_grow and dc_shrink */
+static void lent(void)
+{
+    rx_u16 b;
+
+    dc_init(DC_PER_SEGMENT, 5 * DC_PER_SEGMENT, DC_INDEX_BYTES(5 * DC_PER_SEGMENT));
+    CHECK(dc_grow(2 * DC_PER_SEGMENT) && dc_blocks() == 3 * DC_PER_SEGMENT, "grow: %u",
+          dc_blocks());
+    CHECK(!dc_grow(10), "grow: a part of a segment");
+    marked(DC_KEY(2, 0), DC_PER_SEGMENT, 0);            /* segment 0, clean */
+    marked(DC_KEY(2, 1000), 20, 1);                     /* segment 1: 20 dirty, */
+    marked(DC_KEY(2, 1020), DC_PER_SEGMENT - 20, 0);    /*    the rest clean */
+    b = marked(DC_KEY(2, 5000), 30, 1);                 /* segment 2: 30 dirty */
+    CHECK(b == 2 * DC_PER_SEGMENT, "lent: segment 2 at %u", b);
+    CHECK(dc_shrink(DC_PER_SEGMENT) && dc_blocks() == 2 * DC_PER_SEGMENT,
+          "shrink: %u blocks", dc_blocks());
+    CHECK(kept(DC_KEY(2, 5000), 30, 2 * DC_PER_SEGMENT) == 30, "shrink: the dirty moved below");
+    CHECK(dc_check() == 0 && dc_dirty() == 50, "shrink: invariant %d, %u dirty", dc_check(),
+          dc_dirty());
+    dc_set(200, DC_BUSY | DC_CLEAN);
+    CHECK(!dc_shrink(DC_PER_SEGMENT) && dc_blocks() == 2 * DC_PER_SEGMENT && dc_check() == 0,
+          "shrink: refused while a block is busy");
+    dc_set(200, DC_CLEAN);
+    CHECK(dc_shrink(DC_PER_SEGMENT) && dc_blocks() == DC_PER_SEGMENT
+          && kept(DC_KEY(2, 1000), 20, DC_PER_SEGMENT) == 20
+          && kept(DC_KEY(2, 5000), 30, DC_PER_SEGMENT) == 30 && dc_check() == 0,
+          "shrink: to one segment, the 50 dirty in it");
+    marked(DC_KEY(3, 0), DC_PER_SEGMENT - 50, 1);       /* segment 0 all dirty */
+    CHECK(dc_grow(DC_PER_SEGMENT), "grow again");
+    marked(DC_KEY(2, 9000), 5, 1);                      /* 5 dirty in segment 1 */
+    CHECK(!dc_shrink(DC_PER_SEGMENT) && dc_blocks() == 2 * DC_PER_SEGMENT && dc_check() == 0
+          && kept(DC_KEY(2, 9000), 5, 2 * DC_PER_SEGMENT) == 5,
+          "shrink: refused with no room below, nothing lost");
+}
+
 /* main - every case; 0 if all passed */
 int main(void)
 {
@@ -256,10 +325,12 @@ int main(void)
     windows();
     scan_resistance();
     runs();
+    lent();
     for (seed = 1; seed <= 6 && !failures; seed++)
         random_work(seed % 2 ? 1000 : 37, seed, 1500);
     random_work(16, 99, 3000);
-    random_work(4, 98, 2000);           /* (the least machine's: DS_CACHE_SMALL) */
+    random_work(4, 98, 2000);
+    random_work(2, 97, 2000);           /* (the least machine's: DS_CACHE_SMALL) */
     if (failures)
         return 1;
     printf("test_disk_cache: passed\n");

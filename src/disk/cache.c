@@ -11,6 +11,7 @@
  * is a ghost's.
  * ============================================================================ */
 
+#include <string.h>
 #include "cache.h"
 
 #define Q_FREE 0
@@ -40,6 +41,7 @@ static unsigned hash_mask;
 static unsigned ghost_first, ghost_count, ghost_room;  /* a ring, the oldest first */
 static unsigned blocks, in_room, last_segment, last_per;
 static unsigned dirty;                  /* the blocks dirty (dc_dirty) */
+static rx_u8 seg_dirty[DC_SEGMENTS_MAX];    /* each segment's: walks skip the clean (M7) */
 
 /* per - the blocks of a segment */
 static unsigned per(unsigned segment)
@@ -158,15 +160,16 @@ static void q_push(rx_u16 b, unsigned queue)
     q[queue].count++;
 }
 
-/* ghost_add - a key put out of the FIFO remembered, the oldest ghost
- * forgotten if the ring is full */
+/* ghost_add - a key put out of the FIFO remembered, the oldest ghosts
+ * forgotten while there are as many as half the cache's blocks, or the ring
+ * holds */
 static void ghost_add(rx_u32 key)
 {
-    unsigned g;
+    unsigned g, most = blocks / 2 < ghost_room ? blocks / 2 : ghost_room;
 
-    if (ghost_room == 0)
+    if (most == 0)
         return;
-    if (ghost_count == ghost_room) {
+    while (ghost_count >= most) {
         g = ghost_first;
         if (ghost_key[g] != GHOST_DEAD)
             chain_remove((rx_u16)(GHOST_BIT | g), ghost_key[g]);
@@ -189,20 +192,22 @@ static void ghost_kill(rx_u16 e)
 /* dc_init - an empty cache (cache.h): the buckets a power of two, one for
  * two blocks or as many as a third of the index holds; the ghosts, half
  * the blocks or as many as the rest holds */
-void dc_init(unsigned n, unsigned index_bytes)
+void dc_init(unsigned n, unsigned most, unsigned index_bytes)
 {
     rx_u8 RX_FAR *index = dc_index();
     unsigned i, hash = 4;
 
     if (n > DC_BLOCKS_MAX)
         n = DC_BLOCKS_MAX;
+    if (most < n || most > DC_BLOCKS_MAX)
+        most = most < n ? n : DC_BLOCKS_MAX;
     if (index_bytes < 16)
-        n = 0;                          /* (no index: no cache) */
-    while (hash < DC_HASH_MAX && hash < n / 2 && hash * 2 * 2 <= index_bytes / 3)
+        n = most = 0;                   /* (no index: no cache) */
+    while (hash < DC_HASH_MAX && hash < most / 2 && hash * 2 * 2 <= index_bytes / 3)
         hash *= 2;
     hash_mask = hash - 1;
     bucket = (rx_u16 RX_FAR *)index;
-    ghost_room = n / 2;
+    ghost_room = most / 2;
     if (index_bytes >= 16 && ghost_room > (index_bytes - hash * 2) / 6)
         ghost_room = (index_bytes - hash * 2) / 6;
     ghost_key = (rx_u32 RX_FAR *)(index + hash * 2);
@@ -212,6 +217,8 @@ void dc_init(unsigned n, unsigned index_bytes)
     last_per = n - last_segment * DC_PER_SEGMENT;
     in_room = n / 4 ? n / 4 : 1;
     ghost_first = ghost_count = dirty = 0;
+    for (i = 0; i < DC_SEGMENTS_MAX; i++)
+        seg_dirty[i] = 0;
     for (i = 0; i < hash; i++)
         bucket[i] = DC_NONE;
     for (i = 0; i < QUEUES; i++) {
@@ -332,6 +339,95 @@ unsigned dc_window(rx_u32 key, unsigned n, rx_u16 *first)
     return (unsigned)(hi - lo);
 }
 
+/* sized - the cache's bookkeeping for its blocks now */
+static void sized(unsigned n)
+{
+    blocks = n;
+    last_segment = n ? (n - 1) / DC_PER_SEGMENT : 0;
+    last_per = n - last_segment * DC_PER_SEGMENT;
+    in_room = n / 4 ? n / 4 : 1;
+}
+
+/* dc_grow - blocks added after the last whole segment (cache.h) */
+int dc_grow(unsigned n)
+{
+    unsigned i;
+    struct dc_rec RX_FAR *r;
+
+    if (blocks % DC_PER_SEGMENT || n % DC_PER_SEGMENT || n > DC_BLOCKS_MAX - blocks)
+        return 0;
+    for (i = blocks; i < blocks + n; i++) {
+        r = rec((rx_u16)i);
+        r->key = 0;
+        r->hnext = DC_NONE;
+        r->state = DC_FREE;
+        q_push((rx_u16)i, Q_FREE);
+    }
+    sized(blocks + n);
+    return 1;
+}
+
+/* below - a block under `keep` that may be taken: the oldest free, else the
+ * FIFO's oldest clean, else the LRU's */
+static rx_u16 below(unsigned keep)
+{
+    unsigned queue;
+    rx_u16 b;
+
+    for (queue = 0; queue < QUEUES; queue++)
+        for (b = q[queue].oldest; b != DC_NONE; b = rec(b)->newer)
+            if (b < keep && evictable(b))
+                return b;
+    return DC_NONE;
+}
+
+/* dc_shrink - the last blocks given up (cache.h): each dirty one's sector,
+ * key and state moved to a block below, which takes its place in its
+ * queue; then every one out of its chain and its queue */
+int dc_shrink(unsigned n)
+{
+    unsigned keep, b;
+    rx_u16 to;
+    struct dc_rec RX_FAR *r;
+    struct dc_rec RX_FAR *t;
+
+    if (n > blocks || (blocks - n) % DC_PER_SEGMENT)
+        return 0;
+    keep = blocks - n;
+    for (b = keep; b < blocks; b++)
+        if (rec((rx_u16)b)->state & DC_BUSY)
+            return 0;                   /* (a driver's: not now) */
+    for (b = keep; b < blocks; b++) {
+        r = rec((rx_u16)b);
+        if (!(r->state & DC_DIRTY))
+            continue;
+        if ((to = below(keep)) == DC_NONE)
+            return 0;                   /* (those moved so far are sound where they are) */
+        evict(to);
+        t = rec(to);
+        memcpy(dc_bytes(to), dc_bytes((rx_u16)b), DC_SECTOR);
+        t->key = r->key;
+        t->state = r->state;
+        seg_dirty[to / DC_PER_SEGMENT]++;
+        seg_dirty[b / DC_PER_SEGMENT]--;
+        chain_remove((rx_u16)b, r->key);
+        q_unlink((rx_u16)b);
+        q_push(to, r->queue);
+        chain_add(to, t->key);
+        r->state = DC_FREE;
+        r->key = 0;
+        q_push((rx_u16)b, Q_FREE);
+    }
+    for (b = keep; b < blocks; b++) {
+        r = rec((rx_u16)b);
+        if (r->queue != Q_FREE)
+            chain_remove((rx_u16)b, r->key);
+        q_unlink((rx_u16)b);
+    }
+    sized(keep);
+    return 1;
+}
+
 /* dc_state - a block's state */
 rx_u8 dc_state(rx_u16 b)
 {
@@ -341,10 +437,14 @@ rx_u8 dc_state(rx_u16 b)
 /* dc_set - a block's state set */
 void dc_set(rx_u16 b, rx_u8 state)
 {
-    if (rec(b)->state & DC_DIRTY)
+    if (rec(b)->state & DC_DIRTY) {
         dirty--;
-    if (state & DC_DIRTY)
+        seg_dirty[b / DC_PER_SEGMENT]--;
+    }
+    if (state & DC_DIRTY) {
         dirty++;
+        seg_dirty[b / DC_PER_SEGMENT]++;
+    }
     rec(b)->state = state;
 }
 
@@ -367,8 +467,10 @@ void dc_drop(rx_u16 b)
 
     if (r->queue != Q_FREE)
         chain_remove(b, r->key);
-    if (r->state & DC_DIRTY)
+    if (r->state & DC_DIRTY) {
         dirty--;
+        seg_dirty[b / DC_PER_SEGMENT]--;
+    }
     q_unlink(b);
     r->state = DC_FREE;
     r->key = 0;
@@ -406,6 +508,8 @@ unsigned dc_runs(unsigned volume, rx_u8 bits, unsigned most, struct dc_run *runs
     run.key = 0;
     run.first = run.count = 0;
     for (segment = 0; blocks && segment <= last_segment; segment++) {
+        if (!seg_dirty[segment])
+            continue;                   /* (nothing to write there) */
         n = per(segment);
         open = 0;
         r = rec((rx_u16)(segment * DC_PER_SEGMENT));
@@ -439,6 +543,8 @@ void dc_mark(unsigned volume, rx_u8 has, rx_u8 add)
     struct dc_rec RX_FAR *r;
 
     for (segment = 0; blocks && segment <= last_segment; segment++) {
+        if (!seg_dirty[segment] && (has & DC_DIRTY))
+            continue;
         n = per(segment);
         r = rec((rx_u16)(segment * DC_PER_SEGMENT));
         for (i = 0; i < n; i++, r++)
@@ -467,10 +573,10 @@ void dc_forget(unsigned volume)
 /* dc_check - the invariants (cache.h): 1 a queue's links, 2 its count, 3 a
  * block's state against its queue, 4 a block not found by its key, 5 two
  * blocks of one key, 6 a ghost not found by its key, 7 the counts' sum, 8
- * the dirty blocks' count */
+ * the dirty blocks' count, 9 a segment's */
 int dc_check(void)
 {
-    unsigned queue, n, sum = 0, g, k, d = 0;
+    unsigned queue, n, sum = 0, g, k, d = 0, segment, ds;
     rx_u16 b, before, e;
     struct dc_rec RX_FAR *r;
 
@@ -509,6 +615,14 @@ int dc_check(void)
     }
     if (sum != blocks)
         return 7;
-    return d == dirty ? 0 : 8;
+    if (d != dirty)
+        return 8;
+    for (segment = 0; segment < DC_SEGMENTS_MAX; segment++) {
+        for (ds = 0, k = 0; segment <= last_segment && k < per(segment); k++)
+            ds += (rec((rx_u16)(segment * DC_PER_SEGMENT + k))->state & DC_DIRTY) != 0;
+        if (blocks == 0 ? seg_dirty[segment] != 0 : ds != seg_dirty[segment])
+            return 9;
+    }
+    return 0;
 }
 #endif

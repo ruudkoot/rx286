@@ -522,6 +522,9 @@ static void give_twin(unsigned module, int ring)
 }
 #endif
 
+static unsigned lend_most(void);
+static int disk_space_new(rx_u16 slots);
+
 /* build - a module's space; and for a program, its thread, configured and
  * started */
 static void build(unsigned module)
@@ -542,7 +545,9 @@ static void build(unsigned module)
     if (module == server) {
         slots = OS_SLOTS;
     } else if (module == disk) {
-        slots = DS_SLOTS;
+        for (slots = DS_SLOTS; lend_most() && slots < DS_SLOT_LENT + DS_LEND_SEGMENTS
+             * lend_most(); slots *= 2)
+            ;                           /* (a power of two: the kernel's) */
     } else if (flags & MF_DRIVER) {
         slots = DRV_SLOTS;
     } else {
@@ -556,8 +561,10 @@ static void build(unsigned module)
     }
     /* (the server's, 16 KB, from the memory for segments: the arena keeps
      * its room for the others' objects, and a TEST_CAPS program's, P15) */
-    must(retype(module == server || module == disk ? UNTYPED : ARENA, CAP_SPACE, s.space,
-                slots, 0));
+    if (module == disk)                 /* (its slots for lent segments: from extended */
+        must(disk_space_new(slots));    /*    memory, if there is enough of it to lend) */
+    else
+        must(retype(module == server ? UNTYPED : ARENA, CAP_SPACE, s.space, slots, 0));
     if (module != server && module != disk)
         must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
     /* its code, as the kernel gave it */
@@ -803,29 +810,52 @@ static int disk_segment(rx_u16 bytes, int ring)
     return retype(UNTYPED, CAP_SEGMENT, SCRATCH, bytes, (ring << 5) | ACC_DATA);
 }
 
-/* disk_cache - the disk server's cache, of a size fixed at boot
- * (disk-scheduler.md M3, D10 B): with extended memory, a segment of
- * DS_CACHE_PER_SEGMENT blocks for each 256 KB of it, one at least and
- * DS_CACHE_SEGMENTS at most, and an index of DS_INDEX_BYTES; without,
- * DS_CACHE_SMALL blocks in one, and an index of DS_INDEX_SMALL */
-static void disk_cache(int ring)
+/* ext_kb - the extended memory's KB, as the boot information says */
+static rx_u16 ext_kb(void)
 {
-    const rx_u16 RX_FAR *w = (const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
-    unsigned k, wanted = w[BI_EXT_KB / 2] / 256;
+    return ((const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0))[BI_EXT_KB / 2];
+}
+
+/* lend_most - the blocks of 256 KB the disk server's cache may be lent
+ * (disk-scheduler.md M7, D10 A): one for each 256 KB of extended memory,
+ * DS_LEND_MAX at most */
+static unsigned lend_most(void)
+{
+    return ext_kb() / 256 < DS_LEND_MAX ? ext_kb() / 256 : DS_LEND_MAX;
+}
+
+/* disk_space_new - the disk server's space, of so many slots: from
+ * extended memory when blocks may be lent, else below 1 MB (2 KB) */
+static int disk_space_new(rx_u16 slots)
+{
+    int n;
+
+    for (n = 0; lend_most() && n < ROOT_SLOTS_EXTENDED; n++)
+        if (retype(SLOT(ROOT_SLOT_EXTENDED + n), CAP_SPACE, s.space, slots, 0) == 0)
+            return 0;
+    return retype(UNTYPED, CAP_SPACE, s.space, slots, 0);
+}
+
+/* disk_cache - the disk server's own cache (disk-scheduler.md M3, D10):
+ * with extended memory, a segment of DS_CACHE_PER_SEGMENT blocks, and an
+ * index for the blocks it may be lent besides (M7); without,
+ * DS_CACHE_SMALL blocks in one, and an index of DS_INDEX_SMALL. Its
+ * segments: how many */
+static unsigned disk_cache(int ring)
+{
+    rx_u32 index = DS_INDEX_BYTES + (rx_u32)DS_INDEX_PER_LENT * lend_most();
     rx_u16 bytes = (rx_u16)(DS_CACHE_PER_SEGMENT * (unsigned)DS_CACHE_BLOCK);
 
-    if (disk_segment(w[BI_EXT_KB / 2] ? DS_INDEX_BYTES : DS_INDEX_SMALL, ring) == 0)
+    if (index > DS_INDEX_MOST)
+        index = DS_INDEX_MOST;
+    if (disk_segment(ext_kb() ? (rx_u16)index : DS_INDEX_SMALL, ring) == 0)
         must(copy(disk_space, SCRATCH, DS_SLOT_INDEX * 8 + 4, COPY_MOVE, 0, 0));
-    if (w[BI_EXT_KB / 2] == 0) {
-        wanted = 1;
+    if (ext_kb() == 0)
         bytes = DS_CACHE_SMALL * DS_CACHE_BLOCK;
-    } else if (wanted == 0) {
-        wanted = 1;
-    } else if (wanted > DS_CACHE_SEGMENTS) {
-        wanted = DS_CACHE_SEGMENTS;
-    }
-    for (k = 0; k < wanted && disk_segment(bytes, ring) == 0; k++)
-        must(copy(disk_space, SCRATCH, (rx_u16)((DS_SLOT_CACHE + k) * 8 + 4), COPY_MOVE, 0, 0));
+    if (disk_segment(bytes, ring))
+        return 0;
+    must(copy(disk_space, SCRATCH, DS_SLOT_CACHE * 8 + 4, COPY_MOVE, 0, 0));
+    return 1;
 }
 
 /* build_disk - the disk server (disk-scheduler.md M3): its endpoint, which
@@ -836,7 +866,8 @@ static void disk_cache(int ring)
  * (SERVE_BADGE), the threads kept in its own slots */
 static void build_disk(void)
 {
-    unsigned module, n;
+    unsigned module, n, segments;
+    rx_u16 disk_ep;
     entry_ptr e;
     rx_u16 entry;
     rx_u8 priority, ring;
@@ -865,8 +896,12 @@ static void build_disk(void)
         if (ENTRY_B(e, M_SERVICE) == SERVICE_FIXED_DISK)
             must(copy(disk_space, s.ep, DS_SLOT_FIXED_DISK * 8 + 4, COPY_COPY, 0, 0));
     }
-    disk_cache(ring);
+    segments = disk_cache(ring);
     program_slots(disk);
+    disk_ep = slot_take();              /* (the root's copy, for DS_GROW and DS_SHRINK: M7) */
+    if (disk_ep && copy(SLOT(ROOT_SLOT_SPACE), s.ep, disk_ep, COPY_MINT, DS_BADGE_ROOT,
+                        RIGHT_SEND) == 0)
+        disk_lend_setup(disk_ep, disk_space, ring, segments, lend_most(), ext_kb());
     must(server_stacks_keep(disk, (rx_u16)(DS_THREADS * (DS_THREAD_STACK / 16))));
     for (n = 1; n <= DS_THREADS; n++) {
         must(server_stack(disk, ring, disk_space, DS_THREAD_STACK,

@@ -194,6 +194,20 @@ and where the diskette's DMA buffer, 15 KB, lies (`tests/memory`); `TEST_DMA_HIG
 builds retype that buffer from the highest piece of extended memory
 (`tests/memory/dma.test`).
 
+The memory the processes do not use goes to the disk server's cache
+(roadmap disk-scheduler.md M7, D10 A; *docs/disk-server.md*). With
+extended memory, the root lends it blocks of 256 KB while more than its
+reserve would stay free: an eighth of the extended memory, 64 KB at least.
+Each block becomes four segments in the disk server's space and a
+`DS_GROW`, a block at the end of each call that starts something (a fork,
+a spawn, a load), once the system has run 10 s. An
+allocation that finds no free block (`alloc`) asks for the block lent last
+back with `DS_SHRINK`, revokes it and tries again, until the allocation fits
+or nothing more comes back, which is `ENOMEM`. The root calls the disk
+server through a copy of its endpoint badged `DS_BADGE_ROOT`, which the disk
+server takes those two calls from alone. Without extended memory nothing
+is lent, and the disk server's space keeps its 64 slots below 1 MB.
+
 ## In test builds
 
 `TEST_CAPS` builds give the program the keys are for, in slots 10-13 of a

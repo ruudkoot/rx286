@@ -1,0 +1,39 @@
+# The cache's lent memory (roadmap disk-scheduler.md M7, D10 A), on Bochs at
+# 16 MB: the root lends the disk server's cache blocks of 256 KB beyond an
+# eighth of the extended memory, which it keeps for the processes.
+# tests/posix/diskmem.c forks and waits for 40 children one after another,
+# whose calls let the root lend the cache its blocks, a block a call; then
+# writes files on C, none fsync'd, and forks 40 children of 60 KB at once: the root asks the cache for its blocks back,
+# the last lent first, and the cache moves what their segments held dirty
+# to its others. Once the children have exited, the next fork lets it grow
+# again. The
+# files are as written, on the host's image too, and fsck.fat finds C
+# sound. TEST_DISK_MEMORY builds say on the log when the cache turns to
+# growing or to shrinking.
+program: idle
+define: TEST_POSIX_DISKMEM
+define: TEST_DISK_MEMORY
+emulators: bochs
+memory: 639K 15M
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+fsck: C
+file: C /MEM0.TXT memory 0\n
+file: C /MEM1.TXT memory 1\n
+file: C /MEM2.TXT memory 2\n
+file: C /MEM3.TXT memory 3\n
+file: C /MEM4.TXT memory 4\n
+file: C /MEM5.TXT memory 5\n
+file: C /MEM6.TXT memory 6\n
+file: C /MEM7.TXT memory 7\n
+---
+disk: the cache grows
+diskmem: files written (0): 0
+disk: the cache shrinks
+diskmem: 40 children of 60 KB: forked 40, refused 0, sound 40, no memory 0, other 0
+disk: the cache grows
+diskmem: files as written: yes
+diskmem: done

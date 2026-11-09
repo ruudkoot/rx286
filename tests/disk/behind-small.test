@@ -1,6 +1,6 @@
 # Write-behind's bound (roadmap disk-scheduler.md M6, D8): fsrand2.test's
 # random operations on B and C, against their models, on a machine without
-# extended memory, where the disk server's cache holds DS_CACHE_SMALL (4)
+# extended memory, where the disk server's cache holds DS_CACHE_SMALL (2)
 # blocks: a fixed disk's write that leaves more than half of them dirty
 # has both fixed disks' dirty blocks written at once, and the rest go
 # straight to the disk. fsck.fat finds both volumes sound afterwards.

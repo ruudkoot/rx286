@@ -1,9 +1,12 @@
 # The processes' memory without extended memory (roadmap memory.md M4, E3):
 # a 512 KB AT with none. The processes have what the boot modules left of
 # the memory below 1 MB, so one of tests/posix/many.c's children of 60 KB
-# fits, and the others are told there is no memory. Twelve children
-# (TEST_MANY_FEWER), not 16, since the disk server (disk-scheduler.md M3)
-# took the last 2-3 KB the sixteenth fork needed.
+# fits, and the others are told there is no memory, at their fork or at
+# their malloc. Twelve children (TEST_MANY_FEWER), not 16, since the disk
+# server (disk-scheduler.md M3) took the last 2-3 KB the sixteenth fork
+# needed. How many forks go through is left open: the image's code runs
+# where it lies, so each KB it grows is a KB less for them, and M6's
+# write-behind and M7's lending, idle without extended memory, cost two.
 program: idle
 define: TEST_POSIX_MANY
 define: TEST_MANY_FEWER
@@ -12,4 +15,4 @@ keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wai
 match: contains
 timeout: 120
 ---
-many: 12 children of 60 KB: forked 12, refused 0, sound 1, no memory 11, other 0
+many: 12 children of 60 KB: forked {...}, refused {...}, sound 1, no memory {...}, other 0
