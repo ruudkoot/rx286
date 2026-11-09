@@ -122,7 +122,7 @@ simulator; none of their code is in the repository.
 | | State |
 |---|---|
 | The survey and this roadmap | done (2026-11-08) |
-| D1-D21 | undecided: each has options and a recommendation (*Decisions*) |
+| D1-D21 | decided (2026-11-09): as recommended |
 | M1: the copy and the names | not started |
 | M2: runs through the drivers | not started |
 | M3: the disk server | not started |
@@ -194,6 +194,10 @@ The owner's draft, as written. It stood alone in `roadmaps/disk-scheduler.md`, u
 - **"wait does the at disk controller support four floppies?"** No: two (*Writing it found*;
   W1).
 - **"mame-tools installed":** `chdman` made CHDs of the AT's geometry for MAME (E1, D21).
+- **After it was written (2026-11-09):** "please record that i take all decisions as per your
+  recommendations", and "i have left mame's source code under /home/ruud/mame/mame so you can
+  modify it an create a custom build if to e.g. test the formatter. please implement the
+  roadmap and all its milestones".
 
 ## What the draft leaves open, contradicts, or makes dangerous
 
@@ -1120,34 +1124,36 @@ diskette tests run at the drives' speed (an estimate from E7's runs).
 
 ## Decisions
 
-All are undecided. Each gives the options and a recommendation, with the experiment behind
-it.
+All are decided (2026-11-09), as recommended: "i take all decisions as per your
+recommendations". Each gives the options, the recommendation, and the experiment behind it.
 
-| | Decision | Recommended |
-|---|---|---|
-| D1 | One driver or two | B: two, as today, one for each controller |
-| D2 | The drivers' calls | A: runs in CHS, every command the controllers have, one run in flight and the next held by the driver |
-| D3 | Where the scheduler and the cache live | A: a disk server of their own |
-| D4 | The order within a drive | C-LOOK, with Linux's batched deadline as a safety net |
-| D5 | Fair shares between processes | A: BFQ-lite: budgets of 136 sectors, idling of a tick ended by an arrival, a process that was idle ending the turn |
-| D6 | The turn between a controller's two drives | A: the draft's, a cylinder's work then the other drive, at most two cylinders a turn; each request's Seek first |
-| D7 | Read-ahead, read-between, read-behind | A: ahead to the cylinder's end on sequential misses only; between within a run; behind only when idle |
-| D8 | Write-behind | A: fixed disks after at most 5 s; diskettes before their motor stops |
-| D9 | The cache | A: sectors, records in each segment, a hash, 2Q |
-| D10 | The cache's memory | A: lent by the root in blocks of 256 KB, given back on request, a clean reserve |
-| D11 | Volumes and their sectors | A: 32-bit sectors; partitions and diskettes as volumes, in the disk server |
-| D12 | Removable volumes | A: known by sector 0, the FAT and the root; offline until ejected; B checked after its motor stops; writes to an offline volume ENXIO |
-| D13 | Media | A: the data rate probed with Read ID; double stepping detected by Read ID, not assumed |
-| D14 | Retries | A: in the disk server, the controllers' own retries inside a command |
-| D15 | The OS server's lock | A: given up across every disk wait; a lock for each volume's metadata |
-| D16 | The drives' geometry | A: from the BIOS, in the boot information |
-| D17 | The formatter | A: a program through the disk server, unmounted volumes only; the interleave measured (3:1 if not), and a skew |
-| D18 | RAID and LVM | later, in the disk server under the cache |
-| D19 | FAT names | A: the draft's: upper case on the disk, lower case shown, capitals refused (EINVAL) |
-| D20 | Mount points | A: `/mnt/<name>` by volume, DOS's `a:` to `d:` for what a drive holds |
-| D21 | The emulators for the disk tests | A: MAME's fixed disks as CHDs of the AT's geometry; media changed by MAME's Lua |
+| | Decision | Recommended | Decided |
+|---|---|---|---|
+| D1 | One driver or two | B: two, as today, one for each controller | as recommended (2026-11-09) |
+| D2 | The drivers' calls | A: runs in CHS, every command the controllers have, one run in flight and the next held by the driver | as recommended (2026-11-09) |
+| D3 | Where the scheduler and the cache live | A: a disk server of their own | as recommended (2026-11-09) |
+| D4 | The order within a drive | C-LOOK, with Linux's batched deadline as a safety net | as recommended (2026-11-09) |
+| D5 | Fair shares between processes | A: BFQ-lite: budgets of 136 sectors, idling of a tick ended by an arrival, a process that was idle ending the turn | as recommended (2026-11-09) |
+| D6 | The turn between a controller's two drives | A: the draft's, a cylinder's work then the other drive, at most two cylinders a turn; each request's Seek first | as recommended (2026-11-09) |
+| D7 | Read-ahead, read-between, read-behind | A: ahead to the cylinder's end on sequential misses only; between within a run; behind only when idle | as recommended (2026-11-09) |
+| D8 | Write-behind | A: fixed disks after at most 5 s; diskettes before their motor stops | as recommended (2026-11-09) |
+| D9 | The cache | A: sectors, records in each segment, a hash, 2Q | as recommended (2026-11-09) |
+| D10 | The cache's memory | A: lent by the root in blocks of 256 KB, given back on request, a clean reserve | as recommended (2026-11-09) |
+| D11 | Volumes and their sectors | A: 32-bit sectors; partitions and diskettes as volumes, in the disk server | as recommended (2026-11-09) |
+| D12 | Removable volumes | A: known by sector 0, the FAT and the root; offline until ejected; B checked after its motor stops; writes to an offline volume ENXIO | as recommended (2026-11-09) |
+| D13 | Media | A: the data rate probed with Read ID; double stepping detected by Read ID, not assumed | as recommended (2026-11-09) |
+| D14 | Retries | A: in the disk server, the controllers' own retries inside a command | as recommended (2026-11-09) |
+| D15 | The OS server's lock | A: given up across every disk wait; a lock for each volume's metadata | as recommended (2026-11-09) |
+| D16 | The drives' geometry | A: from the BIOS, in the boot information | as recommended (2026-11-09) |
+| D17 | The formatter | A: a program through the disk server, unmounted volumes only; the interleave measured (3:1 if not), and a skew | as recommended (2026-11-09) |
+| D18 | RAID and LVM | later, in the disk server under the cache | as recommended (2026-11-09) |
+| D19 | FAT names | A: the draft's: upper case on the disk, lower case shown, capitals refused (EINVAL) | as recommended (2026-11-09) |
+| D20 | Mount points | A: `/mnt/<name>` by volume, DOS's `a:` to `d:` for what a drive holds | as recommended (2026-11-09) |
+| D21 | The emulators for the disk tests | A: MAME's fixed disks as CHDs of the AT's geometry; media changed by MAME's Lua | as recommended (2026-11-09) |
 
 ### D1. One driver or two
+
+**Decided: B** (2026-11-09), as recommended.
 
 - **A. One driver for both controllers,** as the draft has it: one thread waiting on both
   interrupts, with a state machine for each controller so that a diskette transfer and a
@@ -1165,6 +1171,8 @@ nothing the disk server cannot do.
 **Recommended: B.**
 
 ### D2. The drivers' calls
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. Runs in CHS, and every command:** read and write a run (up to 64 sectors on a fixed
   disk across heads and cylinders, a cylinder on a diskette); Seek, Read ID, Format, Status,
@@ -1189,6 +1197,8 @@ MAME. Holding the next run is what keeps 2:1 at its full speed (E10).
 
 ### D3. Where the scheduler and the cache live
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. A disk server of their own,** between the OS server and the drivers. It costs an IPC
   hop a request (about 1 ms), which matters only to single-sector requests at 3:1 (E6). It
   gives the cache a space of its own and keeps the scheduler out of the OS server's lock.
@@ -1199,6 +1209,8 @@ MAME. Holding the next run is what keeps 2:1 at its full speed (E10).
 **Recommended: A.**
 
 ### D4. The order within a drive
+
+**Decided: C-LOOK with the batched deadline** (2026-11-09), as recommended.
 
 | Random 4 KB readers on C, 8 at once (E6, E10) | KB/s | p95 | at most |
 |---|---|---|---|
@@ -1226,6 +1238,8 @@ MAME. Holding the next run is what keeps 2:1 at its full speed (E10).
 (*Later*).
 
 ### D5. Fair shares between processes
+
+**Decided: A, at 136 sectors** (2026-11-09), as recommended.
 
 - **A. BFQ-lite:**
   - each process has a budget of sectors (136, two of C's cylinders) and its requests are
@@ -1267,6 +1281,8 @@ each user first, then for each of the user's processes.
 
 ### D6. The turn between a controller's two drives
 
+**Decided: A** (2026-11-09), as recommended.
+
 | A reader of C beside a flush on D (E6) | C's KB/s | the flush |
 |---|---|---|
 | the oldest request first (FIFO) | 32 | 13.0 s |
@@ -1295,6 +1311,8 @@ each user first, then for each of the user's processes.
 
 ### D7. Read-ahead, read-between, read-behind
 
+**Decided: A** (2026-11-09), as recommended.
+
 | (E6) | a sequential read of C | random reads | a random read beside a sequential one |
 |---|---|---|---|
 | none | 5.31 s | 17.6 s | 122 ms |
@@ -1316,6 +1334,8 @@ each user first, then for each of the user's processes.
 
 ### D8. Write-behind
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. Fixed disks:** a dirty sector is written within 5 s, or sooner when the cache needs the
   room, the root asks for memory, or a process calls fsync or sync. Writes go out in sorted
   runs. fsync keeps POSIX's meaning: the data and its metadata are on the disk when it
@@ -1336,6 +1356,8 @@ directory that disagree, which today's write-through only makes rarer.
 
 ### D9. The cache
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. Blocks of a sector,** in 64 KB segments with their records at the segment's head, a
   hash in DGROUP, and 2Q.
 - **B. The same with LRU.** 242 bytes against 473, and half the hits once a file is read
@@ -1346,6 +1368,8 @@ directory that disagree, which today's write-through only makes rarer.
 **Recommended: A.** ARC does as well as 2Q, with more code (E6).
 
 ### D10. The cache's memory
+
+**Decided: A, with B as its first step** (2026-11-09), as recommended.
 
 - **A. Lent by the root in blocks of 256 KB.** The disk server retypes four segments of each,
   and the root asks for blocks back with a notification. The server answers after writing
@@ -1359,6 +1383,8 @@ directory that disagree, which today's write-through only makes rarer.
 
 ### D11. Volumes and their sectors
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. 32-bit sectors from 0 for each volume,** and the volumes in the disk server: each
   partition of a fixed disk's master boot record (FAT12, and later FAT16), and each diskette.
   The OS server mounts a file system on a volume and no longer reads partition tables
@@ -1369,6 +1395,8 @@ directory that disagree, which today's write-through only makes rarer.
 **Recommended: A.**
 
 ### D12. Removable volumes
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. The draft's volumes, made safe:**
   - **a fingerprint:** a hash of sector 0, the first FAT and the root directory, and the
@@ -1394,6 +1422,8 @@ absence fits. EIO would hide it among failures.
 
 ### D13. Media
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. The data rate probed** by Read ID at 500 kbit/s then 300, as the BIOS's state machine
   does (Diskette 5-89).
   - **Double stepping is detected, not assumed:** step two tracks and read an ID. Cylinder 1
@@ -1409,6 +1439,8 @@ a real AT runs it.
 
 ### D14. Retries
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. In the disk server.**
   - **Fixed disks:** the controller's own retries inside each command (Read Sectors with
     retries), then a reset and one more try by the disk server.
@@ -1423,6 +1455,8 @@ a real AT runs it.
 
 ### D15. The OS server's lock
 
+**Decided: A** (2026-11-09), as recommended.
+
 - **A. Given up across every disk wait.** A lock for each volume keeps its metadata changes
   one at a time, held across the whole call that changes them. A read of a file's data holds
   no lock while it waits, and an open file description keeps a flag for its offset. E8's
@@ -1435,6 +1469,8 @@ a real AT runs it.
 **Recommended: A.**
 
 ### D16. The drives' geometry
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. From the BIOS,** in the boot information memory.md M2 began.
   - **For each fixed disk,** the parameter table the INT 41h and 46h vectors point to:
@@ -1449,6 +1485,8 @@ a real AT runs it.
 queries take an estimated 40-60.
 
 ### D17. The formatter
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. A program, `format`,** through the disk server's exclusive use of an unmounted volume:
   - **diskettes** as DOS lays them out, plus a cylinder skew of 5 on A and 3 on B, which hold
@@ -1473,6 +1511,8 @@ queries take an estimated 40-60.
 
 ### D18. RAID and LVM
 
+**Decided: a roadmap of its own, later** (2026-11-09), as recommended.
+
 **An opinion, not a milestone** (A8): in the disk server, below the cache and above the
 queues, so that a mirror can choose the nearer heads and retry on the other drive. On one
 controller that transfers one drive at a time, a mirror doubles a write and gains only seeks,
@@ -1480,6 +1520,8 @@ and striping gains nothing (*The architecture*). **Recommended:** a roadmap of i
 this one, built on D11's volumes.
 
 ### D19. FAT names
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. The draft's:** names stored upper case, shown lower case, a name with an upper-case
   letter refused with EINVAL. `/dev` and `/z` become case-sensitive too. A lower-case name
@@ -1496,6 +1538,8 @@ FAT cannot hold"), as `fat_name` already does for a forbidden character. DOS's d
 stay, `C:` and `c:` alike: a drive, not a name (D20).
 
 ### D20. Mount points
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. `/mnt/<name>` for every volume.**
   - **Its name** is the volume label in lower case (`rx286c`), its spaces made `-` and the
@@ -1514,6 +1558,8 @@ stay, `C:` and `c:` alike: a drive, not a name (D20).
 **Recommended: A.**
 
 ### D21. The emulators for the disk tests
+
+**Decided: A** (2026-11-09), as recommended.
 
 - **A. CHDs** for MAME's fixed disks, made by `chdman createhd -chs 615,4,17` (and 306,4,17),
   so that MAME's IDE card has the AT's geometry (E1). And media changed mid-run by MAME's Lua
@@ -1810,9 +1856,8 @@ Each needs a roadmap of its own, or a real AT:
 
 ## Left open for the owner
 
-- **D1-D21,** each with its recommendation (*Decisions*). D1, D7, D12, D19 and D20 are where
-  the roadmap departs from the draft or makes a choice the draft left open. D2 came back to the
-  draft's next command after E10.
+- **None of the decisions:** all are decided as recommended (2026-11-09). D1, D7, D12, D19 and
+  D20 are where the roadmap departs from the draft or makes a choice the draft left open.
 - **A real AT,** for the interleave, the drives' settling, double stepping and B's diskette
   changes.
 - **Four drives on a card that IBM sold for three** (W1): rx286's machine, kept as it is.
