@@ -93,10 +93,13 @@ firmware, IBM's EGA. What it needs:
   `mame -verifyroms ibm5170` says "best available": one PAL has no known
   dump.
 - **A valid CMOS**: the IBM BIOS stops its power-on test without one, as on a
-  real AT nobody has run SETUP on. `rxlib.at_cmos()` writes the 64 bytes of
-  rx286's AT (drive A 1.2 MB, B 360 KB, no fixed disk, two diskette drives, a
-  287, an EGA, 640 KB and the extended memory, the checksum) into a fresh
-  nvram directory per run. The extended memory it says must be what
+  real AT nobody has run SETUP on. It names no fixed disk: with types 2
+  and 1 in CMOS 12h, IBM's BIOS on MAME's IDE card did not boot again after
+  Ctrl+Alt+Del (`tests/kernel/reset.test`; roadmap disk-scheduler.md M2),
+  so on MAME the fixed disk driver takes `disks.inc`'s geometry, the same.
+  `rxlib.at_cmos()` writes the 64 bytes of rx286's AT (drive A 1.2 MB, B
+  360 KB, no fixed disk, two diskette drives, a 287, an EGA, 640 KB and the
+  extended memory, the checksum) into a fresh nvram directory per run. The extended memory it says must be what
   `-ramsize` fits, or the POST stops at error 164 (memory size) and waits
   for F1; a base memory it says below 640 KB is error 164 too, and the BIOS
   still reports 640 KB (memory.md E1).
@@ -133,8 +136,11 @@ The drives' tests (`tests/posix/drives.test`, `protected.test`;
   drive/head register only while it is not busy, so the driver selects a
   drive before the controller's reset as well as after. The runner gives
   it drive B and both
-  fixed disks, the fixed disks as raw `.hd` images (links to the run's
-  copies). MAME, run so, takes no signal to stop (SIGTERM and SIGINT are
+  fixed disks, the fixed disks as CHDs that `chdman createhd` makes from
+  the run's copies with the AT's geometry (615/4/17 and 306/4/17), and
+  which `chdman extracthd` turns back into the copies after the run
+  (roadmap disk-scheduler.md M2: a raw image gets a geometry MAME guesses
+  from its size, which the BIOS's types would not match). MAME, run so, takes no signal to stop (SIGTERM and SIGINT are
   ignored): at the end the runner makes a file `mame/rx286.lua` watches for
   each frame, and the machine exits as at its own end, its diskettes
   written back, at once (until os-server.md P15 every MAME test waited 10 s

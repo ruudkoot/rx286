@@ -15,7 +15,7 @@
 | Unicorn | 2.0 or later | the same | `python3-unicorn` |
 | fsck.fat | 4.2 or later | the image check | `dosfstools` |
 | DOSBox-X | 2024.03 or later | the suites on a 286 core (optional) | `dosbox-x` |
-| MAME | 0.264 or later | the suites on the IBM PC/AT itself (optional) | `mame`, and the IBM 5170 ROMs in `~/mame/roms` |
+| MAME | 0.264 or later | the suites on the IBM PC/AT itself (optional) | `mame`, `mame-tools` (`chdman`, for the fixed disks), and the IBM 5170 ROMs in `~/mame/roms` |
 | Open Watcom v2 | 558748e (2026-11-05) | the C (*docs/c.md*) | built from its repository (below), in `~/opt/open-watcom` or `WATCOM` |
 | gcc | any | the host tests of the C | `gcc` |
 | gcc-ia16 | 9a55395 (2026-06-12), binutils-ia16 904e46a | `make check-ia16` (optional) | built from its repository (below), in `~/opt/gcc-ia16` or `IA16` |

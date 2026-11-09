@@ -8,8 +8,11 @@ which the OS server keeps (*docs/processes.md*), and so does the shell
 
 ## The drives
 
-The machine is fixed (*docs/hardware.md*), and so is every drive's geometry:
-`src/include/disks.inc` holds it, and nothing is detected.
+The machine is fixed (*docs/hardware.md*). The diskettes' geometry is
+`src/include/disks.inc`'s. The fixed disks' is the BIOS's, from the table
+of the type CMOS 12h gives each (the boot information, *docs/memory-map.md*;
+roadmap disk-scheduler.md M2); `disks.inc`'s is taken where the BIOS gave
+none. The emulators' disks have these:
 
 | Drive | Number | Disk | Cylinders | Heads | Sectors a track | Sectors |
 |---|---|---|---|---|---|---|
@@ -20,19 +23,25 @@ The machine is fixed (*docs/hardware.md*), and so is every drive's geometry:
 
 The fixed disks' types are the BIOS's (table `FD_TBL`), with the cylinder
 from which writes are precompensated: `DISK_C_PRECOMP` 300 and
-`DISK_D_PRECOMP` 128. The drivers turn a sector's number *n* into the
-controllers' terms as the BIOS's callers do: sector *n* mod sectors a track,
-plus 1; head (*n* / sectors a track) mod heads; cylinder *n* / (sectors a
-track × heads).
+`DISK_D_PRECOMP` 128. The OS server turns a sector's number *n* into the
+controllers' terms as the BIOS's callers do (`os.c`'s `disk_run`): sector
+*n* mod sectors a track, plus 1; head (*n* / sectors a track) mod heads;
+cylinder *n* / (sectors a track × heads).
 
 ## The disks' sectors
 
-The OS server reads and writes the drives a sector at a time, through its
-cache of 32 sectors (*docs/processes.md*, *Files*): it asks the drive's
-driver, the diskettes' for A and B, the fixed disks' for C and D, passing
-the cache's segment, where the sector is; the printers it asks for a
-process's writes to `/dev/lpt1` and `/dev/lpt2`. Every call is synchronous,
-and every wait inside a driver has a limit:
+The OS server reads and writes the drives in runs of sectors (roadmap
+disk-scheduler.md M2; *docs/drivers.md*): it asks the drive's driver, the
+diskettes' for A and B, the fixed disks' for C and D, passing the segment
+the sectors are in. A process's read or write of two whole sectors or more
+of a file's contiguous clusters goes straight between the disk and the
+process's data: a read through the cache instead if the cache holds one of
+those sectors changed, and a write drops the cache's copies. Everything
+else goes through its cache of 32 sectors (*docs/processes.md*, *Files*),
+which writes its changed sectors in their order on the disk, neighbours as
+one run. The printers it asks for a process's writes to `/dev/lpt1` and
+`/dev/lpt2`. Every call is synchronous, and every wait inside a driver has
+a limit:
 
 | Wait | Limit | Source |
 |---|---|---|
@@ -44,7 +53,8 @@ and every wait inside a driver has a limit:
 
 A driver waits on its notification (`src/drivers/dwait.asm`): for its
 interrupt, or for the kernel's one-tick timer, after which it looks at the
-time again; meanwhile every other thread runs. Ctrl+Alt+Del does not wait.
+time again; meanwhile every other thread runs. A run's limit counts from
+its command (`dw_run_start`), not from each sector's interrupt. Ctrl+Alt+Del does not wait.
 Until roadmap os-server.md P14 a program read and wrote any sector itself
 (`SYS_DISK_READ`, `SYS_DISK_WRITE`) and printed (`SYS_PRINT`) through a
 transfer segment; `tests/posix/drives.test` now writes a file on each
@@ -68,11 +78,15 @@ of its own.
 
 The NEC 765 of IBM's adapter, IRQ6 and DMA channel 2, driven by the
 diskette driver (`src/drivers/diskette.asm`), which resets the DMA
-controllers at its start. Channel 2 moves each sector into or out of a
-512-byte DMA buffer the root gives the driver: a segment it retypes for
-it, whose physical base the driver asks the kernel for (`KCALL_SEGMENT`;
-the root retries until the buffer does not cross a 64 KB boundary, which
-the 8237's page register cannot). For each sector the driver:
+controllers at its start. Channel 2 moves each run into or out of a DMA
+buffer of a 1.2 MB cylinder, 30 sectors (`FD_DMA_SECTORS`), the root gives
+the driver (4 sectors, `FD_DMA_SMALL_SECTORS`, on a machine without extended
+memory, whose processes a larger one left too little at 512 KB; a run then
+moves what the buffer holds, and the OS server asks again for the rest): a segment it retypes for it, whose physical base the driver
+asks the kernel for (`KCALL_SEGMENT`; the root retries until the buffer
+does not cross a 64 KB boundary, which the 8237's page register cannot).
+A run starts at any sector of a cylinder and ends at its end at the
+latest. For each run the driver:
 
 1. resets the controller and gives it IBM's timings (Specify), the first
    time and after a timeout;
@@ -81,13 +95,14 @@ the 8237's page register cannot). For each sector the driver:
    the step rate scales with it, then recalibrates the drive if its
    cylinder is not known, seeks (the 765 has no implied seek) and lets the
    heads settle;
-4. copies a write's sector from the segment passed into the DMA buffer,
-   points DMA channel 2 at the buffer for 512 bytes, and sends Read Data
-   or Write Data
-   with the BIOS's gap (`FDC_GAP_1200K`, `FDC_GAP_360K`); the DMA's terminal
-   count ends the transfer after one sector;
+4. copies a write's sectors from the segment passed into the DMA buffer,
+   points DMA channel 2 at the buffer for the run's bytes, and sends one
+   Read Data or Write Data, with the multi-track bit (MT) if the run goes
+   on from head 0 to head 1, and with the BIOS's gap (`FDC_GAP_1200K`,
+   `FDC_GAP_360K`); the DMA's terminal count ends the transfer after the
+   run's last sector;
 5. waits for IRQ6, reads the seven result bytes, checks ST0, and copies a
-   read's sector from the DMA buffer into the segment passed.
+   read's sectors from the DMA buffer into the segment passed.
 
 A failed transfer is tried three times, the drive recalibrated in between; a
 write-protected diskette fails at once with `E_PROTECTED`, a timeout (no
@@ -104,13 +119,18 @@ before a drive's first transfer it tells the controller the drive's heads
 and sectors a track (Set Parameters) and sends the heads to cylinder 0
 (Restore), as the BIOS does at start (a reset for the second drive would
 undo the first's set-up): a reset leaves the step rate at 7.5 ms, and
-Restore sets the one the controller's implied seeks use. Then, for each sector:
-the precompensation cylinder / 4, a count of 1, the sector, cylinder and
-head, and Read Sectors or Write Sectors with retries. A read interrupts
-when the sector is in the controller's buffer, and the driver reads its
-256 words straight into the segment passed; a write takes the 256 words
-first and interrupts when they are on the disk. A sector is tried twice; a drive that does not answer fails with
-`E_TIMEOUT` after six seconds.
+Restore sets the one the controller's implied seeks use. Then, for each run:
+the precompensation cylinder / 4, the count (up to 64), the first sector,
+cylinder and head, and Read Sectors or Write Sectors with retries; the
+controller goes on across heads and cylinders by itself. A read interrupts
+when each sector is in the controller's buffer, and the driver reads its
+256 words straight into the segment passed; a write gives the first
+sector's 256 words at once, and each next one at an interrupt, the last
+interrupt saying the run is on the disk. A run is tried twice; a drive that
+does not answer fails with `E_TIMEOUT` after six seconds. A drive with more
+than eight heads gets the control register's bit 3, as the BIOS sets it.
+`DRV_DISK_SEEK` sends a Seek, which ends once its steps are sent; the heads
+go on moving, and `DRV_DISK_STATUS` says when they are there.
 
 ## The printers
 

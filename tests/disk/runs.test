@@ -1,0 +1,30 @@
+# Runs of sectors through the drivers (roadmap disk-scheduler.md M2;
+# tests/posix/runs.c): files of 2 to 100 sectors on C and D, to 31 on B, written and
+# read back in calls of 512 bytes, 4 KB and 15 KB, from a sector's start and
+# from inside one; the text file of each is on the host's image as written,
+# and fsck.fat finds each volume sound. DOSBox-X has no disk controller.
+program: idle
+define: TEST_POSIX_RUNS
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+fsck: B
+fsck: C
+fsck: D
+file: B /RUNS.TXT runs: b, line 00 of 32 lines...\nruns: b, line 01 of 32 lines...\nruns: b, line 02 of 32 lines...\nruns: b, line 03 of 32 lines...\nruns: b, line 04 of 32 lines...\nruns: b, line 05 of 32 lines...\nruns: b, line 06 of 32 lines...\nruns: b, line 07 of 32 lines...\nruns: b, line 08 of 32 lines...\nruns: b, line 09 of 32 lines...\nruns: b, line 10 of 32 lines...\nruns: b, line 11 of 32 lines...\nruns: b, line 12 of 32 lines...\nruns: b, line 13 of 32 lines...\nruns: b, line 14 of 32 lines...\nruns: b, line 15 of 32 lines...\nruns: b, line 16 of 32 lines...\nruns: b, line 17 of 32 lines...\nruns: b, line 18 of 32 lines...\nruns: b, line 19 of 32 lines...\nruns: b, line 20 of 32 lines...\nruns: b, line 21 of 32 lines...\nruns: b, line 22 of 32 lines...\nruns: b, line 23 of 32 lines...\nruns: b, line 24 of 32 lines...\nruns: b, line 25 of 32 lines...\nruns: b, line 26 of 32 lines...\nruns: b, line 27 of 32 lines...\nruns: b, line 28 of 32 lines...\nruns: b, line 29 of 32 lines...\nruns: b, line 30 of 32 lines...\nruns: b, line 31 of 32 lines...\n
+file: C /RUNS.TXT runs: c, line 00 of 32 lines...\nruns: c, line 01 of 32 lines...\nruns: c, line 02 of 32 lines...\nruns: c, line 03 of 32 lines...\nruns: c, line 04 of 32 lines...\nruns: c, line 05 of 32 lines...\nruns: c, line 06 of 32 lines...\nruns: c, line 07 of 32 lines...\nruns: c, line 08 of 32 lines...\nruns: c, line 09 of 32 lines...\nruns: c, line 10 of 32 lines...\nruns: c, line 11 of 32 lines...\nruns: c, line 12 of 32 lines...\nruns: c, line 13 of 32 lines...\nruns: c, line 14 of 32 lines...\nruns: c, line 15 of 32 lines...\nruns: c, line 16 of 32 lines...\nruns: c, line 17 of 32 lines...\nruns: c, line 18 of 32 lines...\nruns: c, line 19 of 32 lines...\nruns: c, line 20 of 32 lines...\nruns: c, line 21 of 32 lines...\nruns: c, line 22 of 32 lines...\nruns: c, line 23 of 32 lines...\nruns: c, line 24 of 32 lines...\nruns: c, line 25 of 32 lines...\nruns: c, line 26 of 32 lines...\nruns: c, line 27 of 32 lines...\nruns: c, line 28 of 32 lines...\nruns: c, line 29 of 32 lines...\nruns: c, line 30 of 32 lines...\nruns: c, line 31 of 32 lines...\n
+file: D /RUNS.TXT runs: d, line 00 of 32 lines...\nruns: d, line 01 of 32 lines...\nruns: d, line 02 of 32 lines...\nruns: d, line 03 of 32 lines...\nruns: d, line 04 of 32 lines...\nruns: d, line 05 of 32 lines...\nruns: d, line 06 of 32 lines...\nruns: d, line 07 of 32 lines...\nruns: d, line 08 of 32 lines...\nruns: d, line 09 of 32 lines...\nruns: d, line 10 of 32 lines...\nruns: d, line 11 of 32 lines...\nruns: d, line 12 of 32 lines...\nruns: d, line 13 of 32 lines...\nruns: d, line 14 of 32 lines...\nruns: d, line 15 of 32 lines...\nruns: d, line 16 of 32 lines...\nruns: d, line 17 of 32 lines...\nruns: d, line 18 of 32 lines...\nruns: d, line 19 of 32 lines...\nruns: d, line 20 of 32 lines...\nruns: d, line 21 of 32 lines...\nruns: d, line 22 of 32 lines...\nruns: d, line 23 of 32 lines...\nruns: d, line 24 of 32 lines...\nruns: d, line 25 of 32 lines...\nruns: d, line 26 of 32 lines...\nruns: d, line 27 of 32 lines...\nruns: d, line 28 of 32 lines...\nruns: d, line 29 of 32 lines...\nruns: d, line 30 of 32 lines...\nruns: d, line 31 of 32 lines...\n
+timeout: 300
+emulators: bochs mame
+---
+runs: b: 8 of 8 files read back the same
+runs: b: the text written: 1024
+runs: c: 12 of 12 files read back the same
+runs: c: the text written: 1024
+runs: d: 12 of 12 files read back the same
+runs: d: the text written: 1024
+runs: done

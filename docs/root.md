@@ -22,7 +22,7 @@ waiting.
 | 6, 7 | its own space and thread |
 | 8 on | each module's code, and its data as assembled, read-only, two slots a module |
 | 100, 101 | with extended memory: the memory for segments below 1 MB and the arena's, as untyped (slots 3 and 4 then hold extended memory) |
-| 102 | the boot information, read-only (`ROOT_SLOT_BOOT_INFO`; `layout.inc`'s `BI_*`): what the loader found of the memory (INT 12h, INT 15h AH=88h), and where the kernel made the memory for programs below 1 MB start and end (roadmap memory.md M2) |
+| 102 | the boot information, read-only (`ROOT_SLOT_BOOT_INFO`; `layout.inc`'s `BI_*`): what the loader found of the memory (INT 12h, INT 15h AH=88h), and where the kernel made the memory for programs below 1 MB start and end (roadmap memory.md M2); the drives the BIOS knows, a copy of which the disk drivers get in their slot 9 (`DRV_SLOT_BOOT_INFO`; disk-scheduler.md M2) |
 | 111 | the screen's text page, for the console driver |
 | 112-127 | every interrupt line the kernel does not keep, line n at 112 + n |
 
@@ -180,7 +180,7 @@ entry with a count of the processes that run it. The allocator is tested
 on the host against a simulation of untyped memory
 (`tests/unit/c/test_buddy.c`), its reserves too. In `TEST_MEMORY` builds the
 root says what the boot information holds, the extended memory it holds,
-and where the diskette's DMA buffer lies (`tests/memory`); `TEST_DMA_HIGH`
+and where the diskette's DMA buffer, 15 KB, lies (`tests/memory`); `TEST_DMA_HIGH`
 builds retype that buffer from the highest piece of extended memory
 (`tests/memory/dma.test`).
 

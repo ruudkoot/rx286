@@ -59,6 +59,12 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
 /* disk_call - a sector to or from a segment of the server's (passed), through
  * the drive's driver: 0 or the error */
 rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 offset);
+/* disk_run - `count` sectors to or from a segment of the server's (passed),
+ * in the runs the drivers take: 0 or the error */
+rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segment,
+                rx_u16 offset);
+/* disk_geometry - each drive's geometry, asked of its driver (at start) */
+void disk_geometry(void);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:

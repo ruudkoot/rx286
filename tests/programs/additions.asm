@@ -2031,7 +2031,8 @@ rv_retype_part:
 ; ----------------------------------------------------------------------------
 ; rv_d - thread D (finding 1): a 64 KB segment retyped from UT_SEG,
 ; deleted and its memory given back, over and over, until B has acted
-; inside a retype
+; inside a retype (B may find in_retype set just after the call returned:
+; then again, as disk-scheduler.md M2's timing showed on gcc-ia16's build)
 ;   In:       a thread's start
 ;   Out:      does not return
 ;   Destroys: everything
@@ -2052,10 +2053,18 @@ rv_d:
         mov [made], ax
         cmp word [acted], 1
         jne .again
-        mov dx, BIG                     ; B came after the call, and its revoke
-        kcall KCALL_SEGMENT             ; deleted the segment: not the race
-        jc .over
-        jmp .over
+        cmp byte [made], KE_OK
+        jne .over                       ; the race: the retype refused at its resumption
+        mov dx, BIG                     ; made: and still there after B's revoke (the bug),
+        kcall KCALL_SEGMENT             ;    or deleted by it, B having come after the
+        jnc .over                       ;    call returned, before in_retype went to 0:
+        dec word [b_inside]             ;    not the race, which is tried again, B's
+        mov word [acted], 0             ;    space and untyped revoked with UT_SEG's
+        mov dx, UT_SEG                  ;    children, and B back to its ticks
+        kcall KCALL_REVOKE
+        mov dx, NTF_B
+        kcall KCALL_SIGNAL
+        jmp .loop
 .again:
         mov dx, BIG
         kcall KCALL_DELETE
@@ -2107,6 +2116,8 @@ rv_b:
 .stay:
         mov dx, NTF_B
         kcall KCALL_RECV
+        cmp word [acted], 0             ; D found it was not the race: again
+        je .loop
         jmp .stay
 
 ; ----------------------------------------------------------------------------

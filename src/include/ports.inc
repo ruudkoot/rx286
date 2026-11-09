@@ -101,6 +101,7 @@ CMOS_REG_D          equ 0x0D
 CMOS_REG_D_VRT      equ 0x80        ; register D: the battery is good, the time valid
 CMOS_SHUTDOWN       equ 0x0F        ; the BIOS's shutdown status byte; 0 = soft reset
 CMOS_CENTURY        equ 0x32
+CMOS_DISK_TYPES     equ 0x12        ; the fixed disks' types: disk 0 high nibble, 1 low
 CMOS_EXT_LOW        equ 0x30        ; the KB of extended memory the POST found
 CMOS_EXT_HIGH       equ 0x31
 CMOS_REG_A_UIP      equ 0x80        ; update in progress
@@ -125,16 +126,21 @@ HDC_STATUS          equ 0x1F7       ; read
 HDC_COMMAND         equ 0x1F7       ; write
 HDC_CONTROL         equ 0x3F6
 HDC_STATUS_BSY      equ 0x80        ; busy: no other bit is valid
+HDC_STATUS_READY    equ 0x40        ; the drive is ready
 HDC_STATUS_WRITE_FAULT equ 0x20
+HDC_STATUS_DSC      equ 0x10        ; Seek Complete: the drive's heads are on their cylinder
 HDC_STATUS_DRQ      equ 0x08        ; data request: the sector buffer wants service
 HDC_STATUS_ERR      equ 0x01        ; the error register says why
 HDC_DRIVE_HEAD_BASE equ 0xA0        ; bits 7 and 5 always set; bit 4 the drive, 0-3 the head
 HDC_DRIVE_1         equ 0x10
 HDC_CONTROL_RESET   equ 0x04        ; the fixed disk register: reset the controller
 HDC_CONTROL_RUN     equ 0x00        ; out of reset, at most 8 heads
+HDC_CONTROL_HEADS   equ 0x08        ; more than 8 heads (head select 3)
 HDC_CMD_RESTORE     equ 0x10        ; heads to cylinder 0; implied seeks step at 35 us
 HDC_CMD_READ        equ 0x20        ; read sectors, with retries
 HDC_CMD_WRITE       equ 0x30        ; write sectors, with retries
+HDC_CMD_SEEK        equ 0x70        ; the heads to the task file's cylinder: done once the
+                                    ;    steps are sent (WD1010-05; disk-scheduler.md W2)
 HDC_CMD_SET_PARAMETERS equ 0x91     ; heads (drive/head register) and sectors a track (count)
 HDC_PRECOMP_SHIFT   equ 2           ; the precompensation register holds the cylinder / 4
 

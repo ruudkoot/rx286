@@ -1023,6 +1023,53 @@ static rx_u16 file_cluster(struct ofd *o, rx_u16 index, int grow, rx_u16 *c)
 
 enum { IO_READ, IO_WRITE, IO_ZERO };
 
+#define RUN_FIXED DRV_DISK_RUN_MAX      /* a direct run's sectors at most: a fixed disk's */
+#define RUN_DISKETTE FD_DMA_SECTORS     /*    and a diskette's (disk-scheduler.md M2) */
+
+/* file_run - the whole sectors from the description's offset, which is a
+ * sector's start, that lie together on the disk and that the call moves: a
+ * run of contiguous clusters, short enough for one call and for the
+ * process's segment. Its length, 0 if under two (the cache does better
+ * then), and its first sector in *first. A read's run holds no sector dirty
+ * in the cache, which the disk would not have yet; a write's drops the
+ * cache's copies it covers. A write takes the clusters the run needs as it
+ * goes (file_cluster) */
+static rx_u16 file_run(struct ofd *o, struct vol *v, rx_u16 cluster, rx_u32 within,
+                       rx_u32 left, int write, rx_u16 at, rx_u16 *first)
+{
+    rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, whole;
+    rx_u16 run, c = cluster, c2, index = (rx_u16)(o->offset / bytes);
+    rx_u16 max = o->drive >= DRIVE_C ? RUN_FIXED : RUN_DISKETTE;
+    rx_u16 room = (rx_u16)((0x10000UL - at) / SECTOR_SIZE);
+
+    whole = left;
+    if (!write && whole > o->size - o->offset)
+        whole = o->size - o->offset;
+    whole /= SECTOR_SIZE;
+    if (whole > max)
+        whole = max;
+    if (whole > room)
+        whole = room;
+    if (whole < 2)
+        return 0;
+    *first = (rx_u16)(vol_cluster_sector(v, cluster) + within / SECTOR_SIZE);
+    run = (rx_u16)(v->cluster_sectors - within / SECTOR_SIZE);
+    while (run < whole) {
+        if (file_cluster(o, (rx_u16)(index + 1), write, &c2) != 0 || c2 != c + 1)
+            break;
+        c = c2;
+        index++;
+        run = (rx_u16)(run + v->cluster_sectors);
+    }
+    if (run > whole)
+        run = (rx_u16)whole;
+    if (run < 2 || (!write && cache_dirty_in(o->drive, *first, run)))
+        return 0;
+    if (write)
+        cache_drop(o->drive, *first, run);
+    return run;
+}
+
 /* file_move - bytes moved between a volume's file at the description's
  * offset and a process's data segment (IO_READ, IO_WRITE), or zeros
  * written into the file (IO_ZERO), a sector of the cache at a time: 0 or
@@ -1032,7 +1079,7 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
 {
     struct vol *v = &vols[o->drive];
     rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, within;
-    rx_u16 chunk, in, cluster, e;
+    rx_u16 chunk, in, cluster, e, first;
     int slot, write = how != IO_READ;
     rx_u8 RX_FAR *p;
     rx_u8 RX_FAR *q;
@@ -1045,6 +1092,22 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
         if (cluster == 0)
             return E_BROKEN;            /* a chain shorter than its size */
         in = (rx_u16)(within % SECTOR_SIZE);
+        if (in == 0 && how != IO_ZERO
+                && (chunk = file_run(o, v, cluster, within, n - *done, write,
+                                     (rx_u16)(at + *done), &first)) != 0) {
+            /* whole sectors straight between the process and the drive, one call
+             * (disk-scheduler.md M2; E7): no copy through the cache */
+            if ((e = disk_run(write ? DRV_DISK_WRITE : DRV_DISK_READ, o->drive, first, chunk,
+                              data, (rx_u16)(at + *done))) != 0)
+                return e;
+            *done += (rx_u32)chunk * SECTOR_SIZE;
+            o->offset += (rx_u32)chunk * SECTOR_SIZE;
+            if (write)
+                o->changed = 1;
+            if (o->offset > o->size)
+                o->size = o->offset;
+            continue;
+        }
         chunk = (rx_u16)(SECTOR_SIZE - in);
         if (chunk > n - *done)
             chunk = (rx_u16)(n - *done);

@@ -35,8 +35,9 @@ besides its code, data and stack:
 | 4 | `DRV_SLOT_NOTIFY` | a notification, bound to its thread: its timer signals `DRV_TIMER_BIT` |
 | 5 | `DRV_SLOT_IRQ` | its interrupt line, which the root bound to that notification with `DRV_IRQ_BIT` |
 | 6 | `DRV_SLOT_RECV` | empty: where a segment passed to it lands |
-| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` (the server's own timers for the processes ring there as `CONTROL_TIMER`); the diskettes', a 512-byte DMA buffer that crosses no 64 KB boundary |
+| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` (the server's own timers for the processes ring there as `CONTROL_TIMER`); the diskettes', a DMA buffer of `FD_DMA_SECTORS` sectors, 15 KB, a 1.2 MB cylinder (`FD_DMA_SMALL_SECTORS`, 4, without extended memory), that crosses no 64 KB boundary (roadmap disk-scheduler.md M2) |
 | 8 | `DRV_SLOT_KEYS` | the keyboard's: the notification of the OS server's thread for the foreground program, badged `KEY_SIGNAL_BIT`, which it signals after every byte it takes, so that a wait for a key sleeps until the keyboard does something (roadmap os-server.md P5) |
+| 9 | `DRV_SLOT_BOOT_INFO` | the disk drivers': the boot information, read-only, for the drives the BIOS knows (*docs/memory-map.md*; roadmap disk-scheduler.md M2) |
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
@@ -162,17 +163,34 @@ and on MAME takes the script's keys from it (`TEST_KEY_BYTE`).
 
 ## The disk drivers
 
-They took the kernel's disk code as it was (roadmap l4.md L9), and wait as
-above (*docs/storage.md*). The OS server asks them with `DRV_DISK_READ` and
-`DRV_DISK_WRITE` for its cache of sectors (*docs/processes.md*, *Files*):
-BX the unit (0 or 1 on the driver's controller, drives `DRIVE_A` and
-`DRIVE_B`, or `DRIVE_C` and `DRIVE_D`, of `DRIVES`), CX the sector, SI its
-offset in the segment passed, the cache's. The reply's BX is 0 or the
-error. The server has checked the drive and the sector; the driver checks
-them again. The diskette driver moves the sector through
-its DMA buffer, and stops the motor two seconds after its last transfer on
-its timer; the fixed disk driver moves the words straight to or from the
-segment passed.
+They took the kernel's disk code (roadmap l4.md L9), and since roadmap
+disk-scheduler.md M2 move runs of sectors by cylinder, head and sector
+(*docs/storage.md*). A unit is 0 or 1 on the driver's controller: drives
+`DRIVE_A` and `DRIVE_B`, or `DRIVE_C` and `DRIVE_D`, of `DRIVES`. Every
+reply's BX is 0 or the error.
+
+| Call | Asks | Answers |
+|---|---|---|
+| `DRV_DISK_READ` | BL the unit, BH the head, CX the cylinder, DI's low byte the sector (from 1) and its high byte the count (0 for 1), SI the offset in the segment passed | CX the sectors moved |
+| `DRV_DISK_WRITE` | the same, the sectors from the segment | the same |
+| `DRV_DISK_SEEK` | BL the unit, CX the cylinder | a fixed disk's heads go on moving after the reply |
+| `DRV_DISK_STATUS` | BL the unit | CX the cylinder the driver believes the heads on (`DISK_CYLINDER_UNKNOWN`), SI `DRV_STATUS_CHANGED` (A's change line) and `DRV_STATUS_SEEKING` (a fixed disk's seek not complete) |
+| `DRV_DISK_RESET` | | the controller reset, every unit's cylinder forgotten |
+| `DRV_DISK_GEOMETRY` | BL the unit | CX the cylinders, SI's low byte the heads and its high byte the sectors a track (`E_INVAL`: no such unit) |
+| `DRV_DISK_READ_ID` | BL the unit, BH the head (diskettes) | CX the cylinder, SI's low byte the head and its high byte the sector of the first ID the 765 found |
+
+A fixed disk's run goes on across heads and cylinders, `DRV_DISK_RUN_MAX`
+(64) sectors at most; a diskette's ends with its cylinder, and moves as
+many sectors as its DMA buffer holds (`FD_DMA_SECTORS`, 30, or 4 without
+extended memory), CX saying how many. The OS server turns a drive's sector numbers into these
+(`disk_run`), asking each drive's geometry at its start
+(`DRV_DISK_GEOMETRY`). The driver checks every number again. The fixed
+disk driver takes its drives' geometry from the boot information
+(`DRV_SLOT_BOOT_INFO`), or `disks.inc`'s where the BIOS gave none. The
+diskette driver moves a run through its DMA buffer, and stops the motor two
+seconds after its last transfer on its timer; the fixed disk driver moves
+the words straight to or from the segment passed. Both still try a failed
+run again (until the disk server, roadmap disk-scheduler.md M3).
 
 ## The serial driver
 

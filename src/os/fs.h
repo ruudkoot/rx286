@@ -26,6 +26,10 @@ rx_u16 cache_write(int slot);
 void cache_meta(int slot);
 rx_u16 cache_flush_meta(void);
 rx_u16 cache_flush(unsigned drive);
+/* cache_dirty_in - is any of `count` sectors from `sector` of a drive dirty? */
+int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count);
+/* cache_drop - `count` sectors from `sector` of a drive out of the cache */
+void cache_drop(unsigned drive, rx_u16 sector, rx_u16 count);
 
 /* A mounted FAT12 volume (vol.c): where it is on its drive, from its BPB */
 struct vol {

@@ -7,7 +7,9 @@
  * it goes. The file system's FAT and directory sectors are written at the
  * end of the call that changed them (cache_meta, cache_flush_meta), each
  * once however often the call changed it; a file's data at its close, its
- * fsync or its eviction. A sector the driver refuses to write is dropped;
+ * fsync or its eviction. A flush writes in the order of the sectors, in
+ * runs where neighbouring slots hold neighbouring sectors
+ * (disk-scheduler.md M2). A sector the driver refuses to write is dropped;
  * one an eviction could not write is said by its drive's next flush, a
  * close's or an fsync's, not by the call that needed the room (P15).
  * Every call is made with the lock held (proc.c's lock_take).
@@ -49,17 +51,54 @@ int cache_ready(void)
     return ready;
 }
 
-/* put - a dirty sector written: 0 or the driver's error. One the driver
- * refused is dropped: the call that changed it is told so, and the disk's
- * copy counts again, rather than every later call failing on it (a
+/* put - `n` dirty sectors written, from slot k on, which hold neighbours on
+ * the disk: one run (disk_run), 0 or the driver's error. Sectors the driver
+ * refused are dropped: the call that changed them is told so, and the
+ * disk's copy counts again, rather than every later call failing on them (a
  * diskette write-protected, or taken out) */
-static rx_u16 put(int k)
+static rx_u16 put(int k, int n)
 {
-    rx_u16 error = disk_call(DRV_DISK_WRITE, cache[k].drive, cache[k].sector, CACHE_SEG,
-                             (rx_u16)(k * SECTOR_SIZE));
+    rx_u16 error = disk_run(DRV_DISK_WRITE, cache[k].drive, cache[k].sector, (rx_u16)n,
+                            CACHE_SEG, (rx_u16)(k * SECTOR_SIZE));
+    int i;
 
-    cache[k].state = error ? C_EMPTY : C_CLEAN;
+    for (i = k; i < k + n; i++)
+        cache[i].state = error ? C_EMPTY : C_CLEAN;
     return error;
+}
+
+/* wanted - is slot k one a flush writes? Every changed FAT and directory
+ * sector (meta), or every dirty sector of a drive */
+static int wanted(int k, int meta, unsigned drive)
+{
+    return meta ? cache[k].state == C_META
+                : cache[k].state >= C_DIRTY && cache[k].drive == drive;
+}
+
+/* flush - the sectors `wanted` says written, in the order of drive and
+ * sector, and neighbours in the cache that are neighbours on the disk as
+ * one run (disk-scheduler.md M2): 0 or the first error */
+static rx_u16 flush(int meta, unsigned drive)
+{
+    rx_u16 error, first = 0;
+    int k, n, low;
+
+    for (;;) {
+        low = -1;
+        for (k = 0; k < CACHE_SECTORS; k++)
+            if (wanted(k, meta, drive) && (low < 0 || cache[k].drive < cache[low].drive
+                    || (cache[k].drive == cache[low].drive
+                        && cache[k].sector < cache[low].sector)))
+                low = k;
+        if (low < 0)
+            return first;
+        for (n = 1; low + n < CACHE_SECTORS && n < DRV_DISK_RUN_MAX && wanted(low + n, meta, drive)
+                && cache[low + n].drive == cache[low].drive
+                && cache[low + n].sector == cache[low].sector + n; n++)
+            ;
+        if ((error = put(low, n)) != 0 && !first)
+            first = error;
+    }
 }
 
 /* cache_get - a sector in the cache (fs.h): found, or in the place of the
@@ -84,7 +123,7 @@ rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
             oldest = k;
     }
     k = oldest;
-    if (cache[k].state >= C_DIRTY && (error = put(k)) != 0 && !lost[cache[k].drive])
+    if (cache[k].state >= C_DIRTY && (error = put(k, 1)) != 0 && !lost[cache[k].drive])
         lost[cache[k].drive] = error;   /* (dropped: not this call's error, its owner's) */
     cache[k].state = C_EMPTY;
     if (fill && (error = disk_call(DRV_DISK_READ, drive, sector, CACHE_SEG,
@@ -114,7 +153,7 @@ void cache_dirty(int slot)
 rx_u16 cache_write(int slot)
 {
     cache[slot].state = C_DIRTY;
-    return put(slot);
+    return put(slot, 1);
 }
 
 /* cache_meta - a FAT or directory sector changed: written at the call's end */
@@ -123,30 +162,44 @@ void cache_meta(int slot)
     cache[slot].state = C_META;
 }
 
-/* cache_flush_meta - every changed FAT and directory sector written */
+/* cache_flush_meta - every changed FAT and directory sector written (flush) */
 rx_u16 cache_flush_meta(void)
 {
-    rx_u16 error, first = 0;
-    int k;
-
-    for (k = 0; k < CACHE_SECTORS; k++)
-        if (cache[k].state == C_META && (error = put(k)) != 0 && !first)
-            first = error;
-    return first;
+    return flush(1, 0);
 }
 
-/* cache_flush - every dirty sector of a drive written */
+/* cache_flush - every dirty sector of a drive written (flush) */
 rx_u16 cache_flush(unsigned drive)
 {
-    rx_u16 error, first = 0;
-    int k;
+    rx_u16 first = flush(0, drive);
 
-    for (k = 0; k < CACHE_SECTORS; k++)
-        if (cache[k].state >= C_DIRTY && cache[k].drive == drive && (error = put(k)) != 0
-                && !first)
-            first = error;
     if (!first)
         first = lost[drive];            /* an eviction's since the last flush */
     lost[drive] = 0;
     return first;
+}
+
+/* cache_dirty_in - is any of `count` sectors from `sector` of a drive dirty in
+ * the cache? A direct read must not pass it by (disk-scheduler.md M2) */
+int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count)
+{
+    int k;
+
+    for (k = 0; k < CACHE_SECTORS; k++)
+        if (cache[k].state >= C_DIRTY && cache[k].drive == drive && cache[k].sector >= sector
+                && cache[k].sector - sector < count)
+            return 1;
+    return 0;
+}
+
+/* cache_drop - `count` sectors from `sector` of a drive out of the cache, dirty
+ * or not: a direct write about to cover them whole (disk-scheduler.md M2) */
+void cache_drop(unsigned drive, rx_u16 sector, rx_u16 count)
+{
+    int k;
+
+    for (k = 0; k < CACHE_SECTORS; k++)
+        if (cache[k].state != C_EMPTY && cache[k].drive == drive && cache[k].sector >= sector
+                && cache[k].sector - sector < count)
+            cache[k].state = C_EMPTY;
 }

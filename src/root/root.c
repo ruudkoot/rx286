@@ -45,6 +45,8 @@
 #include "descriptors.h"
 #include "vectors.h"
 #include "root.h"
+#define FD_DMA_BYTES (FD_DMA_SECTORS * SECTOR_SIZE)            /* the diskettes' runs */
+#define FD_DMA_SMALL_BYTES (FD_DMA_SMALL_SECTORS * SECTOR_SIZE) /*    (drivers.inc) */
 #include "buddy.h"
 
 #define MY_SPACE SLOT(ROOT_SLOT_SPACE)
@@ -71,6 +73,7 @@ RX_STATIC_ASSERT(PROGRAM_SLOT + 8 * PROGRAMS_MAX < ROOT_SLOT_DYNAMIC - 1, progra
 #define W_DRV_IRQ (DRV_SLOT_IRQ * 8 + 4)
 #define W_DRV_DEVICE (DRV_SLOT_DEVICE * 8 + 4)
 #define W_DRV_KEYS (DRV_SLOT_KEYS * 8 + 4)
+#define W_DRV_BOOT_INFO (DRV_SLOT_BOOT_INFO * 8 + 4)
 #define W_SOUND_STOP (13 * 8 + 4)               /* the OS server's: the sound driver's
                                                    notification, */
 #define W_CONTROL (14 * 8 + 4)                  /* its control notification, */
@@ -174,6 +177,30 @@ static void memory_report(void)
              w[BI_UMEM_START / 2], w[BI_UMEM_END / 2]);
     say(line);
     extended_report();
+}
+#endif
+
+#ifdef TEST_GEOMETRY
+/* drives_report - TEST_GEOMETRY builds (tests/disk/geometry.test): the drives
+ * the loader found, from the boot information (disk-scheduler.md M2, D16) */
+static void drives_report(void)
+{
+    const rx_u8 RX_FAR *b = (const rx_u8 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
+    char line[96];
+    int k;
+
+    snprintf(line, sizeof line, "root: diskette drives' types: %u %u\n", b[BI_FD_TYPES],
+             b[BI_FD_TYPES + 1]);
+    say(line);
+    for (k = 0; k < 2; k++) {
+        const rx_u8 RX_FAR *h = b + BI_HD0 + k * BIH_SIZE;
+
+        snprintf(line, sizeof line, "root: fixed disk %d: %u cylinders, %u heads, %u sectors, "
+                 "precompensation from %u, control %02X\n", k,
+                 h[BIH_CYLINDERS] | (h[BIH_CYLINDERS + 1] << 8), h[BIH_HEADS], h[BIH_SECTORS],
+                 h[BIH_PRECOMP] | (h[BIH_PRECOMP + 1] << 8), h[BIH_CONTROL]);
+        say(line);
+    }
 }
 #endif
 
@@ -386,20 +413,35 @@ static void dma_high(rx_u16 slot)
     int n;
 
     for (n = ROOT_SLOTS_EXTENDED - 1; n >= 0; n--)
-        if (retype(SLOT(ROOT_SLOT_EXTENDED + n), CAP_SEGMENT, slot, SECTOR_SIZE,
+        if (retype(SLOT(ROOT_SLOT_EXTENDED + n), CAP_SEGMENT, slot, FD_DMA_BYTES,
                    (1 << 5) | ACC_DATA) == 0)
             return;
-    new_segment(slot, SECTOR_SIZE, 1);
+    new_segment(slot, FD_DMA_BYTES, 1);
 }
 #endif
+
+/* dma_bytes - the diskette's DMA buffer: a 1.2 MB cylinder, FD_DMA_SECTORS,
+ * with extended memory; FD_DMA_SMALL_SECTORS without, where every KB counts
+ * (at 512 KB a track's buffer left tests/memory/many-small.test's 16th fork
+ * no room: disk-scheduler.md M2). The driver moves as much of a run as its
+ * buffer holds */
+static rx_u16 dma_bytes(void)
+{
+    const rx_u16 RX_FAR *w = (const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
+
+    return w[BI_EXT_KB / 2] ? FD_DMA_BYTES : FD_DMA_SMALL_BYTES;
+}
 
 /* driver_device - what a driver's service needs besides (DRV_SLOT_DEVICE):
  * the console's, the screen's text page; the keyboard's, the OS server's
  * control notification to signal Ctrl+Break with; the diskette's, a DMA
- * buffer of a sector that does not cross 64 KB */
+ * buffer (dma_bytes) that does not cross 64 KB. The disk drivers get the
+ * boot information too, for the drives' geometry (DRV_SLOT_BOOT_INFO;
+ * disk-scheduler.md M2) */
 static void driver_device(int service)
 {
     struct rx_kregs r;
+    rx_u16 bytes = dma_bytes();
 
     if (service == SERVICE_CONSOLE) {
         give(SLOT(ROOT_SLOT_VIDEO), W_DRV_DEVICE);
@@ -410,13 +452,13 @@ static void driver_device(int service)
 #ifdef TEST_DMA_HIGH
             dma_high(s.server);         /* tests/memory/dma.test: near the top (M4) */
 #else
-            new_segment(s.server, SECTOR_SIZE, 1);
+            new_segment(s.server, bytes, 1);
 #endif
             r.ax = KCALL_SEGMENT << 8;  /* DL:AX = its physical address */
             r.dx = s.server;
             r.bp = 0;
             rx_kcall(&r);
-            if (r.ax <= 0x10000UL - SECTOR_SIZE)
+            if (r.ax <= 0x10000UL - bytes)
                 break;                  /* the 8237 does not carry past 64 KB */
             kcall(KCALL_DELETE, 0, 0, 0, s.server, 0, 0);  /* its memory stays */
         }
@@ -433,6 +475,8 @@ static void driver_device(int service)
 #endif
         give(s.server, W_DRV_DEVICE);
     }
+    if (service == SERVICE_DISKETTE || service == SERVICE_FIXED_DISK)
+        give(SLOT(ROOT_SLOT_BOOT_INFO), W_DRV_BOOT_INFO);
 }
 
 /* build_driver - a driver's endpoint, which it serves; its notification,
@@ -879,6 +923,9 @@ int RX_MAIN_CALL main(void)
 
 #ifdef TEST_MEMORY
     memory_report();
+#endif
+#ifdef TEST_GEOMETRY
+    drives_report();
 #endif
     must(retype(ARENA, CAP_ENDPOINT, FAULT_EP, 0, 0));
     /* the OS server's control notification, which the keyboard driver signals */

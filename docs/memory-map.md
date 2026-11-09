@@ -11,7 +11,7 @@ D7). This document explains each one.
 | 00400h-004FFh | BIOS data area | | never read |
 | 00500h-07BFFh | the boot code's stack, down from 7C00h | `LOADER_STACK_TOP` | boot sector and loader |
 | 00500h-006FFh | the double-fault task's stack, once the kernel runs | `DFSTACK_PHYS`, `DFSTACK_SIZE` | the kernel (`SEL_DFSTACK`) |
-| 00600h-0061Fh | the boot information, until the kernel's entry copies it into its data (roadmap memory.md M2) | `BOOT_INFO_PHYS`, `BOOT_INFO_SIZE` | the loader writes, the kernel copies |
+| 00600h-00627h | the boot information, until the kernel's entry copies it into its data (roadmap memory.md M2) | `BOOT_INFO_PHYS`, `BOOT_INFO_SIZE` | the loader writes, the kernel copies |
 | 00700h-0BFFFh | the arena, once the kernel runs: untyped memory, the root's | `ARENA_PHYS`, `ARENA_SIZE` | the root, and what it gives |
 | 0C000h | where the kernel's data segment starts | `KDATA_BASE` | the kernel (`SEL_KDATA`) |
 | 0C100h-0C4FFh | the kernel's one stack (roadmap os-server.md P3) | `KSTACK_PHYS`, `KSTACK_SIZE`; its offsets in `SEL_KDATA`, `KSTACK_BOTTOM` to `KSTACK_TOP` | the kernel (`SEL_KSTACK`, expand-down over `SEL_KDATA`'s memory) |
@@ -52,12 +52,12 @@ runs (roadmap memory.md M2). The kernel's entry, in real mode and before
 anything else touches low memory, copies as much as `BI_SIZE` says into
 `boot_info` in its data, the rest zero; its start stops if `BI_MAGIC` is not
 `BOOT_INFO_MAGIC` ("BI"). The root reads the copy, read-only, in slot 102.
-The structure is `BOOT_INFO_SIZE`, 32 bytes, words unless said:
+The structure is `BOOT_INFO_SIZE`, 40 bytes, words unless said:
 
 | Offset | Field | What |
 |---|---|---|
 | 0 | `BI_MAGIC` | `BOOT_INFO_MAGIC`, "BI" |
-| 2 | `BI_SIZE` | the bytes the loader gave: 32 |
+| 2 | `BI_SIZE` | the bytes the loader gave: 40 |
 | 4 | `BI_FLAGS` | `BIF_EXT_CMOS`: INT 15h AH=88h failed, and `BI_EXT_KB` is CMOS 30h-31h's |
 | 6 | `BI_BASE_KB` | INT 12h: the base memory in KB, an EBDA left out |
 | 8 | `BI_EXT_KB` | INT 15h AH=88h: the extended memory in KB |
@@ -65,9 +65,18 @@ The structure is `BOOT_INFO_SIZE`, 32 bytes, words unless said:
 | 12 | `BI_DRIVE` | the boot drive (a byte) |
 | 16 | `BI_UMEM_START` | the kernel's: where the memory for programs below 1 MB starts (a paragraph) |
 | 18 | `BI_UMEM_END` | and where it ends: the base memory's end, at most A000h |
+| 20 | `BI_FD_TYPES` | INT 13h AH=15h for diskette drives 0 and 1, a byte each: 1 a drive without a change line (360 KB), 2 one with (1.2 MB), 0 none (roadmap disk-scheduler.md M2) |
+| 24 | `BI_HD0` | fixed disk 0's parameters, `BIH_SIZE` (8) bytes, from the BIOS's table the vector of INT 41h (`BIOS_VEC_DISK0_TABLE`) points to, if CMOS 12h gives the disk a type; else all 0: the cylinders (`BIH_CYLINDERS`, a word), the heads (`BIH_HEADS`, a byte), the cylinder from which writes are precompensated (`BIH_PRECOMP`, a word), the table's control byte (`BIH_CONTROL`), the sectors a track (`BIH_SECTORS`, a byte) |
+| 32 | `BI_HD1` | fixed disk 1's, the same, from INT 46h's table (`BIOS_VEC_DISK1_TABLE`) |
+
+The BIOS's table of a fixed disk type is 16 bytes (Technical Reference
+5-166 to 5-167): the cylinders at `FD_TBL_CYLINDERS`, the heads at `FD_TBL_HEADS`,
+the precompensation cylinder at `FD_TBL_PRECOMP`, the control byte at
+`FD_TBL_CONTROL`, the sectors a track at `FD_TBL_SECTORS`.
 
 A later roadmap adds what else the loader finds of the hardware: 0 is "not
-given" in every field. The memory for programs below 1 MB must hold at
+given" in every field. The disk drivers read it too (`DRV_SLOT_BOOT_INFO`;
+*docs/drivers.md*). The memory for programs below 1 MB must hold at
 least `UMEM_LEAST`, or the kernel stops; the build checks that a machine of
 `BASE_LEAST`, 512 KB, leaves that much with the image at its most.
 
@@ -205,7 +214,8 @@ for each object and for each space's LDT; the kernel lists `SPACE_MAX`
 spaces and `THREAD_MAX` threads at most.
 
 The kernel's data holds no disk buffer since the disks left it (roadmap
-l4.md L9). The diskette driver's DMA buffer is a segment the root retypes
+l4.md L9). The diskette driver's DMA buffer, 15 KB since roadmap
+disk-scheduler.md M2 (a 1.2 MB cylinder), is a segment the root retypes
 from the memory for programs and gives it; DMA channel 2 reads and writes
 it by its physical address, which the driver asks the kernel for
 (`KCALL_SEGMENT`). Since the 8237's address counter has 16 bits, the root

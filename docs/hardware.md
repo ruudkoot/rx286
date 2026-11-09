@@ -105,7 +105,9 @@ numbers below are the Technical Reference's.
   the BIOS's shutdown status byte (1-49), 0 for a soft reset (the BIOS
   listing's table of shutdown codes). `CMOS_EXT_LOW` and `CMOS_EXT_HIGH`
   hold the KB of extended memory the POST found (1-45), which the kernel
-  gives the root (roadmap os-server.md P3).
+  gives the root (roadmap os-server.md P3). `CMOS_DISK_TYPES` holds the
+  fixed disks' types, disk 0's in the high nibble (1-50), which the loader
+  looks at before it reads a disk's table (roadmap disk-scheduler.md M2).
   `CMOS_NMI_DISABLE` is bit 7 of the index port: set, NMI is masked (1-28).
 - **80287**: `FPU_CLEAR_BUSY` (F0h) clears the busy latch an error leaves;
   `FPU_RESET` (F1h) would reset the 287 into real mode (2-4).
@@ -137,13 +139,16 @@ numbers below are the Technical Reference's.
 - **Fixed disk** (`HDC_*`, the task file of IBM's adapter, 1-2 to 1-9 of its
   section): the status bits `HDC_STATUS_BSY` (no other bit is valid),
   `HDC_STATUS_WRITE_FAULT`, `HDC_STATUS_DRQ` and `HDC_STATUS_ERR`; reading the
-  status clears IRQ14. The drive/head register is `HDC_DRIVE_HEAD_BASE`, with
+  status clears IRQ14; `HDC_STATUS_READY` says the drive is ready and
+  `HDC_STATUS_DSC` that its seek is complete. The drive/head register is `HDC_DRIVE_HEAD_BASE`, with
   `HDC_DRIVE_1` for the second drive, and the head. `HDC_PRECOMP` takes the
   precompensation cylinder shifted right by `HDC_PRECOMP_SHIFT`. In the fixed
   disk register, `HDC_CONTROL_RESET` resets the controller and
-  `HDC_CONTROL_RUN` lets it run. The commands: `HDC_CMD_SET_PARAMETERS`,
+  `HDC_CONTROL_RUN` lets it run; `HDC_CONTROL_HEADS` is for a drive of
+  more than eight heads. The commands: `HDC_CMD_SET_PARAMETERS`,
   `HDC_CMD_RESTORE` (whose step rate, 35 us, implied seeks then use),
-  `HDC_CMD_READ`, `HDC_CMD_WRITE`.
+  `HDC_CMD_READ`, `HDC_CMD_WRITE`, `HDC_CMD_SEEK` (which ends once its
+  steps are sent: roadmap disk-scheduler.md M2).
 - **Printer** (`LPT_*`, offsets `LPT_DATA`, `LPT_STATUS`, `LPT_CONTROL` from
   an `LPT*_BASE`; the Serial/Parallel Adapter's section): `LPT_STATUS_NOT_BUSY`
   set means the printer takes a byte, `LPT_STATUS_PAPER_END` that it has no
@@ -206,8 +211,8 @@ gives the rule for each line.
 | 5-7 | free (16-bit) |
 
 The diskette driver resets both controllers at its start, cascades
-channel 4, and programs channel 2 for each diskette sector, into and out
-of its DMA buffer (*docs/storage.md*).
+channel 4, and programs channel 2 for each run of diskette sectors, up to
+a cylinder, into and out of its DMA buffer (*docs/storage.md*).
 
 ## What Bochs differs in
 

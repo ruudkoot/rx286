@@ -21,11 +21,15 @@ DRV_SLOT_IRQ        equ 5       ;    its interrupt line, if it has one
 DRV_SLOT_RECV       equ 6       ;    where a segment passed to it lands
 DRV_SLOT_DEVICE     equ 7       ;    the console's: the screen's text page; the keyboard's:
                                 ;    the OS server's control notification, to signal; the
-                                ;    diskette's: its DMA buffer (512 bytes within 64 KB)
+                                ;    diskette's: its DMA buffer (FD_DMA_SECTORS, or
+                                ;    FD_DMA_SMALL_SECTORS without extended memory, within
+                                ;    64 KB)
 DRV_SLOT_KEYS       equ 8       ;    the keyboard's: the notification of the OS server's
                                 ;    thread for the foreground program, badged
                                 ;    KEY_SIGNAL_BIT, signalled whenever the keyboard sent
                                 ;    something (os-server.md P5)
+DRV_SLOT_BOOT_INFO  equ 9       ;    the disk drivers': the boot information, read-only
+                                ;    (layout.inc's BI_*; disk-scheduler.md M2)
 DRV_SLOTS           equ 16      ; a driver's space
 DRV_TIMER_BIT       equ 1       ; the notification's bits: its timer (its own capability)
 DRV_IRQ_BIT         equ 2       ;    its interrupt (the root binds a copy badged so)
@@ -73,10 +77,35 @@ DRV_KBD_GET         equ 1       ; -> BX 1 and CX the key (CL ASCII, CH scancode)
 DRV_KBD_PEEK        equ 2       ; -> BX 1 if a key waits, not taken; CX the keys a full
                                 ;    ring dropped since the last peek (P15)
 DRV_KBD_CLEAR       equ 3       ;    the keys waiting, dropped (a program started again)
-; The disk drivers: the diskettes (A, B) and the fixed disks (C, D)
-DRV_DISK_READ       equ 1       ; BX the drive (0 or 1 of the driver's), CX the sector, SI
-                                ;    the offset in the segment passed -> BX 0 or the error
-DRV_DISK_WRITE      equ 2       ;    the same, the sector from the segment
+; The disk drivers: the diskettes (A, B) and the fixed disks (C, D), by
+; cylinder, head and sector, in runs (roadmap disk-scheduler.md M2, D2)
+DRV_DISK_READ       equ 1       ; BL the unit (0 or 1 of the driver's), BH the head, CX the
+                                ;    cylinder, DI's low byte the sector (from 1) and its high
+                                ;    byte the count (0: 1), SI the offset in the segment
+                                ;    passed -> BX 0 or the error, CX the sectors moved. A
+                                ;    fixed disk's run goes on across heads and cylinders
+                                ;    (DRV_DISK_RUN_MAX at most); a diskette's ends with its
+                                ;    cylinder
+DRV_DISK_WRITE      equ 2       ;    the same, the sectors from the segment
+DRV_DISK_SEEK       equ 3       ; BL the unit, CX the cylinder -> BX 0 or the error; a fixed
+                                ;    disk's heads go on moving after the reply (W2)
+DRV_DISK_STATUS     equ 4       ; BL the unit -> BX 0 or the error, CX the cylinder the
+                                ;    driver believes the heads on (DISK_CYLINDER_UNKNOWN), SI
+                                ;    the DRV_STATUS_* bits
+DRV_DISK_RESET      equ 5       ; -> BX 0 or the error: the controller reset, every unit's
+                                ;    cylinder forgotten
+DRV_DISK_GEOMETRY   equ 6       ; BL the unit -> BX 0 or E_INVAL; CX the cylinders, SI's
+                                ;    low byte the heads and its high byte the sectors a track
+DRV_DISK_READ_ID    equ 7       ; BL the unit, BH the head -> BX 0 or the error; CX the
+                                ;    cylinder, SI's low byte the head and its high byte the
+                                ;    sector of the first ID found (diskettes)
+DRV_STATUS_CHANGED  equ 1       ; DRV_DISK_STATUS's SI: the diskette's change line (A's)
+DRV_STATUS_SEEKING  equ 2       ;    a fixed disk's seek not yet complete
+DRV_DISK_RUN_MAX    equ 64      ; a fixed disk's run at most: 32 KB
+FD_DMA_SECTORS      equ 30      ; a diskette's run at most: a 1.2 MB cylinder, the DMA buffer
+FD_DMA_SMALL_SECTORS equ 4      ;    without extended memory, where a larger buffer left a
+                                ;    512 KB machine's processes too little (the root's choice)
+DISK_CYLINDER_UNKNOWN equ 0xFFFF
 ; The serial driver: COM2, the modem's line (l4.md L10)
 DRV_SERIAL_WRITE    equ 1       ; CX bytes (SERIAL_MAX at most), SI their offset in the
                                 ;    segment passed -> BX 0 or E_TIMEOUT (no UART: at

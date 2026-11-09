@@ -42,8 +42,8 @@ It reads the BPB the boot sector left at 7C00h and:
    file; its first module is the root; every module lies inside it, after
    the table;
 6. asks the BIOS for the memory (roadmap memory.md M2) and leaves the answer,
-   the boot information, at `BOOT_INFO_PHYS` 600h (32 bytes, `layout.inc`'s
-   `BI_*`):
+   the boot information, at `BOOT_INFO_PHYS` 600h (40 bytes, `layout.inc`'s
+   `BI_*`), and the drives (roadmap disk-scheduler.md M2):
    - the base memory from INT 12h, which leaves out an EBDA (Bochs' BIOS keeps
      1 KB at 9FC00h: 639 KB);
    - the extended memory from INT 15h AH=88h, called with CF clear, since
@@ -52,6 +52,11 @@ It reads the BPB the boot sector left at 7C00h and:
    - the EBDA's segment, if BDA 40:0Eh holds INT 12h's end (on IBM's AT that
      word is the fourth printer's port);
    - the boot drive;
+   - each diskette drive's type (INT 13h AH=15h);
+   - each fixed disk's parameters, from the table the vector of INT 41h
+     (disk 0) or 46h (disk 1) points to, if CMOS 12h gives it a type
+     (INT 13h AH=08h would say two cylinders fewer and no
+     precompensation);
 7. hands over, using the BIOS for the last time:
    - text mode 3, 80x25 colour (INT 10h AX=0003h);
    - the floppy motor off (DOR = `FDC_DOR_MOTORS_OFF`), since the BIOS's

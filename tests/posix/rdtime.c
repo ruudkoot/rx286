@@ -68,11 +68,37 @@ static void read_whole(const char *what, const char *path, int size, long budget
     said(what, total, ms() - start, budget);
 }
 
+/* per_sector - a file read `times` times in calls of 15 KB, the time a sector
+ * said: on Bochs, at its fixed 4 million instructions a second, a sector's
+ * instructions are the microseconds times 4 (disk-scheduler.md M2) */
+static void per_sector(const char *what, const char *path, int times, long budget_us)
+{
+    long start = ms(), total = 0, took, us;
+    int k, fd, n;
+
+    for (k = 0; k < times; k++) {
+        fd = open(path, O_RDONLY);
+        while ((n = (int)read(fd, buf, CALL_MAX)) > 0)
+            total += n;
+        close(fd);
+    }
+    took = ms() - start;
+    us = total ? took * 1000L / ((total + 511) / 512) : 0;
+    printf("rdtime: %s: %ld bytes in %ld ms, %ld us a sector\n", what, total, took, us);
+    printf("rdtime: %s: within %ld us a sector: %s\n", what, budget_us,
+           us <= budget_us ? "yes" : "no");
+}
+
 /* main - the checks of the milestones so far, against their budgets */
 int main(void)
 {
     written("D, 32 KB written in calls of 4 KB", "/d/w4k.dat", 4096, 32768L, 1000L);
-    (void)read_whole;
+    read_whole("A, KERNEL.BIN read in calls of 15 KB", "/a/kernel.bin", 15360, 6000L);
+    written("B, 45 KB written in calls of 15 KB", "/b/big.dat", 15360, 46080L, 8000L);
+    read_whole("B, 45 KB read back in calls of 15 KB", "/b/big.dat", 15360, 8000L);
+    read_whole("C, NUMBERS.TXT read in calls of 15 KB", "/c/numbers.txt", 15360, 600L);
+    read_whole("C, NUMBERS.TXT read in calls of 512 bytes", "/c/numbers.txt", 512, 3000L);
+    per_sector("C, NUMBERS.TXT 20 times in calls of 15 KB", "/c/numbers.txt", 20, 3000L);
     printf("rdtime: done\n");
     return 0;
 }

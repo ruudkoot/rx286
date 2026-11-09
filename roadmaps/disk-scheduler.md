@@ -124,7 +124,7 @@ simulator; none of their code is in the repository.
 | The survey and this roadmap | done (2026-11-08) |
 | D1-D21 | decided (2026-11-09): as recommended |
 | M1: the copy and the names | done (2026-11-09) |
-| M2: runs through the drivers | not started |
+| M2: runs through the drivers | done (2026-11-09) |
 | M3: the disk server | not started |
 | M4: waiting without the lock | not started |
 | M5: fairness | not started |
@@ -1638,6 +1638,69 @@ less, M a few, L a week.
     The target is under a sector's time, 0.99 ms on a 6 MHz AT (about 900 instructions), so
     that 2:1 can work; under two, for 3:1, at the least.
 - **Decisions:** D1, D2, D16.
+- **Done** (2026-11-09). The drivers take runs by cylinder, head and sector, and answer Seek,
+  Status, Reset, Geometry and Read ID (`drivers.inc`). The fixed disk driver sends one
+  command for up to 64 sectors, and the diskette driver one Read or Write Data a cylinder,
+  with MT, through a DMA buffer of 15 KB. The loader puts the diskette drives' types and the
+  fixed disks' tables (INT 41h and 46h, if CMOS 12h gives a type) in the boot information,
+  now 40 bytes. The OS server asks each drive's geometry, turns its sector numbers into runs
+  (`os.c`'s `disk_run`), and moves a process's whole sectors straight between the disk and
+  its data, reads and writes alike. Its cache writes in the order of the sectors, neighbours
+  as one run. `tests/disk/runs.test` passes on Bochs and MAME, `geometry.test` on Bochs.
+  - **speed.test on MAME:**
+    - A's 100,144 bytes in 5.9 s (6 s allowed; 4.3 s in E7). The 15 KB reads do not fall on
+      A's cylinders, so each read leaves one sector at a cylinder's end, read alone a
+      revolution later. M6's read-ahead removes that.
+    - B's 45 KB written in 6.8 s and read back in 3.4 s (8 s each).
+    - C's NUMBERS.TXT, 29,000 bytes, in 140-160 ms (0.6 s). The roadmap's 58 KB was E7's two
+      reads of it.
+    - D's 32 KB written in 420 ms (780 after M1).
+  - **The sizes:**
+
+    | | master | E7 | M2 |
+    |---|---|---|---|
+    | fixeddisk.asm, code and data | 765 and 23 | 854 and 31 | 1,438 and 37 |
+    | diskette.asm, code and data | 1,221 and 55 | 1,358 and 62 | 1,699 and 64 |
+    | the OS server's code | 46,175 | 47,851 (the file) | 47,508 |
+
+    The calls E7 left out (Seek, Status, Reset, Geometry, Read ID) and the geometry from the
+    boot information make up the difference.
+  - **The path per sector:** C's NUMBERS.TXT read 20 times in calls of 15 KB costs 511 µs a
+    sector on Bochs, about 2,040 instructions. That counts each read's share of its open,
+    its close and its three calls; E7 measured about 2,100 the same way. MAME takes 2.4 ms
+    a sector. **The target is not met:** 900 instructions would let 2:1 work, and 1,800 is
+    3:1's limit. The kernel's path stays: the interrupt, the receive, the acknowledgement
+    and the timer. M3 measures again with the disk server in the path.
+  - Not as planned:
+    - **Neither driver holds a next run.** One request reaches a driver at a time while the
+      OS server holds its lock, so the queue waits for the disk server (M3).
+    - **The timer is still armed at each wait.** `dw_run_wait` no longer asks the ticks
+      until the timer rings, but it arms a one-tick timer before each receive. Without it
+      MAME's AT woke the driver about 13 ms after a write's interrupt: D's 32 KB took 900 ms
+      instead of 420. MAME's ATA model writes a sector in 100 µs (`atastorage.cpp`), so the
+      delay is its scheduling, and the cause is not understood. Arming the timer once a
+      run saved 7% on Bochs. It is left for a real AT (*At the close*).
+    - **Only the fixed disk driver reads the geometry** from the boot information. The
+      diskettes keep `disks.inc`'s until M8's media detection.
+    - **The DMA buffer is 15 KB only with extended memory.** Without it the root gives 4
+      sectors (`FD_DMA_SMALL_SECTORS`), and a run moves what the buffer holds. At 512 KB
+      a buffer of 15 or 8 sectors cost `tests/memory/many-small.test`'s 16th fork: M2's
+      code left 2-3 KB to spare there. M3's disk server meets the same limit.
+    - **A direct read falls back to the cache** when a sector of its run is dirty there; a
+      direct write drops the cache's copies of the sectors it covers.
+    - **MAME's fixed disks are CHDs** (from M8, D21): `chdman` makes them with the AT's
+      geometry, since MAME's IDE card guessed a raw image's geometry from its size, which
+      the BIOS's types did not match. MAME's CMOS still names no fixed disk: with types 2
+      and 1, IBM's BIOS on MAME's IDE card did not boot again after Ctrl+Alt+Del
+      (`tests/kernel/reset.test`). So the BIOS's tables are seen on Bochs alone, and on
+      MAME the driver takes `disks.inc`'s geometry, the same.
+    - **Two tests had races of their own,** which M2's timing exposed:
+      - `tests/posix/devices.test`'s speaker probe counts over a tick, but it can begin
+        only once that tick's timer interrupt has returned. A slower handler, with one
+        more timer due, lost three changes at 2000 Hz on MAME. The probe now also allows
+        1 ms of handler for a count that comes up short.
+      - `tests/caps/review-retype.test` (gcc-ia16's build) took for the race a thread B
+        that saw `in_retype` just after the call had returned. It now tries again.
 
 ### M3. The disk server (L)
 

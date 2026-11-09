@@ -79,6 +79,7 @@ TR_HEAD             equ 0               ; a test ring: the next byte to take
 TR_TAIL             equ 1               ;    where the next byte goes
 TR_BYTES            equ 2
 TEST_SOUND_SLACK    equ 2               ; changes of channel 2's output either way
+TEST_SOUND_HANDLER_MS equ 1             ; and fewer for the tick's own handler, up to so long
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
 TEST_LPT_LIMIT      equ 10000           ; polls of the printer's BUSY
@@ -474,7 +475,10 @@ test_probes:
 ; ----------------------------------------------------------------------------
 ; test_sound - count the changes of channel 2's output (port B's OUT2) over a
 ; whole tick, letting interrupts in: twice the frequency a second, so BX / 25
-; a tick, within TEST_SOUND_SLACK
+; a tick, within TEST_SOUND_SLACK. The count begins once the tick's timer
+; interrupt has returned, so the window is short by that handler's time:
+; fewer are allowed for TEST_SOUND_HANDLER_MS of it too (three changes at
+; 2000 Hz once disk-scheduler.md M2's OS server had a timer more due then)
 ;   In:       BX = the frequency asked, the speaker on; DS = SEL_KDATA
 ;   Out:      a probe line
 ;   Destroys: AX, DX, SI, DI
@@ -518,11 +522,21 @@ test_sound:
         xor dx, dx
         mov di, PIT_HZ
         div di                          ; AX = the changes a tick should have
-        sub ax, cx
-        jns .slack
-        neg ax
+        sub ax, cx                      ;    less those counted
+        mov di, TEST_SOUND_SLACK
+        jns .fewer
+        neg ax                          ; more: the slack alone
+        jmp .slack
+.fewer:
+        push ax                         ; fewer: and the handler's share, f / 500 for 1 ms
+        mov ax, bx
+        xor dx, dx
+        mov si, 1000 / (2 * TEST_SOUND_HANDLER_MS)
+        div si
+        add di, ax
+        pop ax
 .slack:
-        cmp ax, TEST_SOUND_SLACK
+        cmp ax, di
         ja .bad
         mov si, msg_sound_ok
         call kputs

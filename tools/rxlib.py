@@ -954,7 +954,9 @@ MAME_ROMS = os.path.expanduser('~/mame/roms')     # the IBM 5170 ROM set (docs/e
 def at_cmos(extended_kb=None):
     """The 64 bytes of CMOS of rx286's AT, as IBM's SETUP would leave them, so
     the real BIOS's power-on test passes in MAME: drive A 1.2 MB, B 360 KB, no
-    fixed disk, two diskette drives, a 287, an EGA, 640 KB and `extended_kb`
+    fixed disk (with types 2 and 1, IBM's BIOS on MAME's IDE card did not
+    boot again after Ctrl+Alt+Del: disk-scheduler.md M2), two diskette
+    drives, a 287, an EGA, 640 KB and `extended_kb`
     above 1 MB (MAME's default machine's), the checksum of 10h-2Dh (IBM,
     Technical Reference, 1-45 to 1-50). The extended memory must be what the
     POST finds, or it stops at error 164 (memory.md E1)."""
@@ -977,6 +979,8 @@ def at_cmos(extended_kb=None):
     return bytes(c)
 
 
+MAME_DISKS = (('hd0.img', 'c.chd', '%d,%d,%d' % (615, 4, 17)),    # AT types 2 and 1
+              ('hd1.img', 'd.chd', '%d,%d,%d' % (306, 4, 17)))
 MAME_STOP_SECONDS = 10       # for MAME to exit when mame/rx286.lua is asked, before a kill
 
 
@@ -1004,16 +1008,19 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
     open(serial, 'wb').close()      # the null modem's file must exist
     args = []
     if disks:
-        # MAME knows a raw fixed disk by its name: .hd.
-        for name, drive in (('hd0.img', 'c.hd'), ('hd1.img', 'd.hd')):
-            link = os.path.join(disks, drive)
-            if not os.path.exists(link):
-                os.symlink(name, link)
+        # The fixed disks as CHDs of the AT's geometry, made from the run's raw
+        # images and taken back into them after the run (disk-scheduler.md D21,
+        # E1): from a raw image MAME's IDE card takes a geometry of its own
+        # (82 cylinders, 10 heads, 51 sectors for C), and its seeks with it.
+        for name, drive, chs in MAME_DISKS:
+            subprocess.run(['chdman', 'createhd', '-f', '-c', 'none', '-chs', chs, '-i',
+                            os.path.join(disks, name), '-o', os.path.join(disks, drive)],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if 'B ejected' not in media:
             args += ['-flop2', os.path.join(disks, 'fdb.img')]
-        args += ['-hard1', os.path.join(disks, 'c.hd')]
+        args += ['-hard1', os.path.join(disks, 'c.chd')]
         if 'D absent' not in media:
-            args += ['-isa4:ide:ide:1', 'hdd', '-hard2', os.path.join(disks, 'd.hd')]
+            args += ['-isa4:ide:ide:1', 'hdd', '-hard2', os.path.join(disks, 'd.chd')]
     stop = os.path.join(directory, 'mame-stop')
     if os.path.exists(stop):
         os.remove(stop)
@@ -1050,6 +1057,11 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
             proc.kill()
             proc.wait()
     log.close()
+    for name, drive, chs in MAME_DISKS if disks else ():
+        if os.path.exists(os.path.join(disks, drive)):
+            subprocess.run(['chdman', 'extracthd', '-f', '-i', os.path.join(disks, drive),
+                            '-o', os.path.join(disks, name)],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return status, time.monotonic() - started
 
 

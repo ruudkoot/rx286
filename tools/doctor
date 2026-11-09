@@ -47,6 +47,7 @@ check unicorn   required 2.0     "$(python3 -c 'import unicorn; print(unicorn.__
 check fsck.fat  required 4.2     "$(dpkg-query -W -f='${Version}' dosfstools 2>/dev/null | grep -o -E '^[0-9]+\.[0-9]+')" "(dosfstools)"
 check dosbox-x  optional 2024.03 "$(ver dosbox-x -version)" "M9: a 286 core"
 check mame      optional 0.264   "$(ver mame -version)" "M9: the IBM PC/AT"
+check chdman    optional 0.264   "$(ver chdman)" "MAME's fixed disks (mame-tools)"
 check gcc       required 9.0     "$(ver gcc --version)" "the host tests of the C"
 
 # The C compilers (docs/building.md, docs/c.md): Open Watcom v2 for the build,

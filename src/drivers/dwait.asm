@@ -57,6 +57,69 @@ dw_wait_irq:
         ret
 
 ; ----------------------------------------------------------------------------
+; dw_run_start - a command's time begins (disk-scheduler.md M2): dw_run_wait
+; then looks at the time only when a tick passes, not before each wait, so
+; that a sector of a run costs a timer, a receive and the interrupt's
+; acknowledgement
+;   In:       CX = the command's limit in ticks (1 or more)
+;   Out:      nothing
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+dw_run_start:
+        call dw_ticks
+        mov [dw_start], ax
+        mov [dw_limit], cx
+        ret
+
+; ----------------------------------------------------------------------------
+; dw_run_wait - wait for the interrupt within the command's time. The wait
+; arms the notification's timer for the next tick first, as dw_tick does:
+; without a timer that near, MAME's AT woke the driver some 13 ms after a
+; write's interrupt (disk-scheduler.md M2, *At the close*), its reads and
+; Bochs not
+;   In:       dw_run_start called for the command; irq_seen cleared before the
+;             interrupt waited for
+;   Out:      CF clear if it came; CF set if the command's time ran out
+;   Destroys: AX
+; ----------------------------------------------------------------------------
+dw_run_wait:
+        push bx
+        push cx
+        push dx
+.check:
+        cmp byte [irq_seen], 0
+        jne .came
+        mov dx, NOTIFY
+        mov cx, 1
+        kcall KCALL_TIMER
+        mov dx, NOTIFY
+        kcall KCALL_RECV                ; BX = the bits
+        jc .check
+        call dw_bits
+        test bx, DRV_TIMER_BIT
+        jz .check
+        call dw_ticks                   ; a tick passed: is the command's time up?
+        sub ax, [dw_start]
+        cmp ax, [dw_limit]
+        jb .check
+        cmp byte [irq_seen], 0          ; (the interrupt with the last tick)
+        jne .came
+        stc
+        jmp .out
+.came:
+        clc
+.out:
+        pop dx
+        pop cx
+        pop bx
+        ret
+
+begin_udata
+dw_start            dw 0                ; dw_run_start's: the tick it began at
+dw_limit            dw 0                ;    and its limit
+end_udata
+
+; ----------------------------------------------------------------------------
 ; dw_sleep - sleep for CX ticks (an interrupt meanwhile is taken)
 ;   In:       CX = ticks (1 or more)
 ;   Out:      nothing

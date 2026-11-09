@@ -249,7 +249,7 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     late=$(C_B)/tests/posix/late.$(OBJ) many=$(C_B)/tests/posix/many.$(OBJ) \
     held=$(C_B)/tests/posix/held.$(OBJ) overflow=$(C_B)/tests/posix/overflow.$(OBJ) \
     orphans=$(C_B)/tests/posix/orphans.$(OBJ) names=$(C_B)/tests/posix/names.$(OBJ) \
-    rdtime=$(C_B)/tests/posix/rdtime.$(OBJ)
+    rdtime=$(C_B)/tests/posix/rdtime.$(OBJ) runs=$(C_B)/tests/posix/runs.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -272,6 +272,7 @@ Z_FOR_DEVICES := devices
 Z_FOR_FSRAND := fsrand
 Z_FOR_NAMES := names
 Z_FOR_RDTIME := rdtime
+Z_FOR_RUNS := runs
 Z_FOR_PXRAND := pxrand
 Z_FOR_EDGES := edges
 Z_FOR_LATE := late

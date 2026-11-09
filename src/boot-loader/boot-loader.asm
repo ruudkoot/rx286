@@ -291,10 +291,15 @@ check_image:
 ; extended memory, called with CF clear, since IBM's leaves CF as it was
 ; (Technical Reference 5-155), else CMOS 30h-31h's; the EBDA's segment, if
 ; 40:0Eh holds INT 12h's end (on IBM's AT that word is the fourth printer's
-; port: 5-29); the boot drive
+; port: 5-29); the boot drive; and the drives (disk-scheduler.md M2, D16):
+; each diskette drive's type (INT 13h AH=15h), and each fixed disk's
+; parameters from the BIOS's table its vector points to, INT 41h for disk 0
+; and 46h for disk 1, when CMOS 12h gives the disk a type (Technical
+; Reference 1-50; AH=08h would say two cylinders fewer and no
+; precompensation)
 ;   In:       DS = ES = 0
 ;   Out:      the structure at BOOT_INFO_PHYS
-;   Destroys: AX, BX, CX, DI
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 boot_info:
         mov di, BOOT_INFO_PHYS
@@ -332,6 +337,59 @@ boot_info:
 .ebda:
         mov al, [drive]
         mov [BOOT_INFO_PHYS + BI_DRIVE], al
+        xor dx, dx                      ; DL = diskette drive 0
+.diskette:
+        mov ah, 0x15                    ; INT 13h AH=15h: AH = the drive's type
+        push dx
+        int 0x13
+        pop dx
+        jc .untyped
+        mov bl, dl
+        xor bh, bh
+        mov [BOOT_INFO_PHYS + BI_FD_TYPES + bx], ah
+.untyped:
+        inc dx
+        cmp dl, 2
+        jb .diskette
+        mov al, CMOS_DISK_TYPES | CMOS_NMI_DISABLE
+        out CMOS_INDEX, al
+        in al, CMOS_DATA
+        mov dl, al
+        mov si, BIOS_VEC_DISK0_TABLE * 4
+        mov di, BOOT_INFO_PHYS + BI_HD0
+        test dl, 0xF0
+        jz .disk1
+        call disk_table
+.disk1:
+        mov si, BIOS_VEC_DISK1_TABLE * 4
+        mov di, BOOT_INFO_PHYS + BI_HD1
+        test dl, 0x0F
+        jz .tables
+        call disk_table
+.tables:
+        ret
+
+; ----------------------------------------------------------------------------
+; disk_table - a fixed disk's parameters, from the BIOS's table a vector
+; points to (FD_TBL_*), into the boot information (BIH_*, in their order)
+;   In:       SI = the vector's address; DI = the disk's entry; DS = ES = 0
+;   Out:      the entry filled
+;   Destroys: SI
+; ----------------------------------------------------------------------------
+disk_table:
+        push ds
+        push di
+        lds si, [si]                    ; the table
+        movsw                           ; BIH_CYLINDERS
+        movsb                           ; BIH_HEADS
+        add si, FD_TBL_PRECOMP - FD_TBL_HEADS - 1
+        movsw                           ; BIH_PRECOMP
+        add si, FD_TBL_CONTROL - FD_TBL_PRECOMP - 2
+        movsb                           ; BIH_CONTROL
+        add si, FD_TBL_SECTORS - FD_TBL_CONTROL - 1
+        movsb                           ; BIH_SECTORS
+        pop di
+        pop ds
         ret
 
 ; ----------------------------------------------------------------------------
