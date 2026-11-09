@@ -1,0 +1,16 @@
+# Two readers of one volume at once, each its share (roadmap
+# disk-scheduler.md M5, D5): init starts tests/posix/fair.c
+# (TEST_POSIX_FAIR), whose two children, started together, each read C's
+# NUMBERS.TXT fifteen times in calls of 1 KB. The volume's lock goes to the
+# calls in the order they asked, and the disk server serves each process
+# its turn: neither takes more than half as long again as the other.
+program: idle
+define: TEST_POSIX_FAIR
+emulators: bochs mame
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+---
+fair: within half again of each other: yes
+fair: done

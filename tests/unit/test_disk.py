@@ -24,7 +24,7 @@ def test_disk_on_the_host(part):
         subprocess.run(['gcc'] + FLAGS + ['-I', os.path.join(ROOT, 'src', 'include'),
                         '-I', tmp, '-I', os.path.join(ROOT, 'src', 'disk'), '-o', exe,
                         os.path.join(ROOT, 'src', 'disk', part + '.c'),
-                        os.path.join(ROOT, 'tests', 'unit', 'c', 'test_disk_' + part + '.c')],
-                       check=True)
+                        os.path.join(ROOT, 'tests', 'unit', 'c', 'test_disk_' + part + '.c'),
+                        '-lm'], check=True)
         run = subprocess.run([exe], capture_output=True, text=True)
         assert run.returncode == 0, run.stdout + run.stderr

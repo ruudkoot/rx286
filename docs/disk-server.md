@@ -26,7 +26,7 @@ write passes a segment: the process's data, or the OS server's cache.
 | Label | In | Out |
 |---|---|---|
 | `DS_VOLUME` | BL a volume | BX 0 or the error; CX the low word of its sectors, SI the high word; DI `DSV_REMOVABLE` for a diskette |
-| `DS_READ` | BL a volume; BH the sectors, 1 to `DS_RUN_MAX` (64); CX the low word of the first; SI's low byte its bits 16-23, its high byte the process; DI the offset in the segment passed | BX 0 or the error; CX the sectors moved |
+| `DS_READ` | BL a volume; BH the sectors, 1 to `DS_RUN_MAX` (64); CX the low word of the first; SI's low byte its bits 16-23, its high byte the process (the OS server's entry + 1, 0 its own; M5's shares); DI the offset in the segment passed | BX 0 or the error; CX the sectors moved |
 | `DS_WRITE` | the same, the sectors from the segment | the same, the sectors on the disk when the reply comes |
 | `DS_SYNC` | BL a volume, or `DS_ALL` | BX 0, or the first error of its dirty sectors' writes |
 | `DS_EJECT` | BL a volume | BX 0: its sectors no longer cached, except the dirty ones |
@@ -117,20 +117,33 @@ The OS server's cache, 4 sectors there instead of 32, pays for most of it.
 
 ## The order of the requests
 
-Each drive has a queue (`sched.c`; D4, D6). The choices come in this order:
-1. A drive's oldest expired request (500 ms for a read, 5 s for a write)
-   starts a batch of 16 in sweep order (Linux's deadline scheduler).
-2. The controller's turn says which drive: a cylinder's work, then the
+Each drive has a queue (`sched.c`; D4, D5, D6). The choices come in this
+order:
+1. A drive's oldest expired request (2 s for a read, 5 s for a write)
+   starts a batch of 16 in sweep order (Linux's deadline scheduler). A
+   read's deadline is longer than another process's turn, or the batches
+   would undo the shares (roadmap disk-scheduler.md M5).
+2. The process whose turn it is (BFQ-lite, M5): each process has a budget
+   of 136 sectors a turn, then the next process with work, in turn. After a
+   read it waited for, the turn waits for the same process's next request
+   to the second tick (20-40 ms), unless a process that had asked nothing
+   for 50 ms asks meanwhile: that ends the turn, so an interactive reader
+   is not held behind a greedy one. The controller's thread waits on its
+   timer, and a new request's signal cuts the wait short.
+3. The controller's turn says which drive: a cylinder's work, then the
    other drive's, two cylinders' sectors (136) at most a turn.
-3. C-LOOK picks the drive's request: the lowest sector from the sector
+4. C-LOOK picks the drive's request: the lowest sector from the sector
    after the last one served, else the lowest of all.
-4. On the fixed disks, a request that needs a seek has its Seek sent
+5. On the fixed disks, a request that needs a seek has its Seek sent
    first, and the other drive's request is served while the heads move.
 
 Since M4 the OS server gives its lock up while a call waits for the disk
 server, and takes a volume's lock for the call (*docs/processes.md*): a
-request of each volume can be queued at once. The host's tests show the
-orders.
+request of each volume can be queued at once, and a volume's calls follow
+one another in the order they asked. The host's test runs the choices
+together against a model of C (E6's): two sequential readers far apart
+get 113 KB/s against C-LOOK's 41, Jain's index 0.997; an interactive reader
+beside a greedy scan waits no longer than under C-LOOK.
 
 ## Retries
 

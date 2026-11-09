@@ -127,7 +127,7 @@ simulator; none of their code is in the repository.
 | M2: runs through the drivers | done (2026-11-09) |
 | M3: the disk server | done (2026-11-09) |
 | M4: waiting without the lock | done (2026-11-09) |
-| M5: fairness | not started |
+| M5: fairness | done (2026-11-09) |
 | M6: read-ahead and write-behind | not started |
 | M7: the cache's memory | not started |
 | M8: removable volumes and `/mnt` | not started |
@@ -1854,6 +1854,35 @@ less, M a few, L a week.
     - two sequential readers get at least twice C-LOOK's throughput, with Jain at least 0.95;
     - an interactive reader beside a greedy scan waits at most 20% longer than under C-LOOK.
 - **Decisions:** D5.
+- **Done** (2026-11-09). The OS server tags each request with its process (DS_READ's SI).
+  The disk server's scheduler (`sched.c`) gives each process a turn of 136 sectors, then the
+  next process with work. After a read it waits for the same process's next request, and a
+  process idle 50 ms ends the turn. The controller's thread waits on its timer, cut short by
+  a new request. The host test runs D4, D5 and D6 together against a model of C, E6's seek
+  curve and costs, in C (`tests/unit/c/test_disk_sched.c`):
+  - two sequential readers far apart get 113 KB/s against C-LOOK's 41 (E10: 106), Jain's
+    index 0.997;
+  - an interactive reader beside a greedy scan waits 110 ms with the shares and 110 ms
+    under C-LOOK.
+
+  `tests/disk/fair.test` passes on Bochs (2,920 and 2,940 ms) and MAME (14,320 and
+  14,240). `make check` passes on Bochs (143), DOSBox-X (62) and MAME (119), and `make
+  check-ia16` passes (143).
+  - Not as planned:
+    - **A read's deadline is 2 s, not D4's 500 ms.** Run together, as M5 asks, the 500 ms
+      deadline expired every request of the reader whose turn it was not, since the other's
+      turn of 136 sectors takes about 500 ms at 3:1. The deadline's batches then took over
+      and undid the shares (49 KB/s). It must be longer than a turn.
+    - **The wait for a reader's next request runs to the second tick,** 20-40 ms, not
+      one tick: the kernel's timer ends at the next tick, which may be any time from 0 to
+      20 ms away, and too short a wait missed the next request half the time.
+    - **The shares choose between requests the disk server holds at once.** With M4's
+      volume locks a volume's calls reach it one at a time, so on one volume they choose
+      between a process's call and the server's own (M6), and across a controller's two
+      drives. Between two processes on one volume, fairness comes from the volume's lock,
+      which now goes to the calls in the order they asked (a ticket each). Before, a call
+      that had just given it up could take it straight back while the others napped out
+      their tick.
 
 ### M6. Read-ahead and write-behind (M)
 

@@ -264,7 +264,8 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     orphans=$(C_B)/tests/posix/orphans.$(OBJ) names=$(C_B)/tests/posix/names.$(OBJ) \
     rdtime=$(C_B)/tests/posix/rdtime.$(OBJ) runs=$(C_B)/tests/posix/runs.$(OBJ) \
     beside=$(C_B)/tests/posix/beside.$(OBJ) onedir=$(C_B)/tests/posix/onedir.$(OBJ) \
-    truncrace=$(C_B)/tests/posix/truncrace.$(OBJ) killread=$(C_B)/tests/posix/killread.$(OBJ)
+    truncrace=$(C_B)/tests/posix/truncrace.$(OBJ) killread=$(C_B)/tests/posix/killread.$(OBJ) \
+    fair=$(C_B)/tests/posix/fair.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -293,6 +294,7 @@ Z_FOR_FSRAND2 := fsrand
 Z_FOR_ONEDIR := onedir
 Z_FOR_TRUNCRACE := truncrace
 Z_FOR_KILLREAD := killread
+Z_FOR_FAIR := fair
 Z_FOR_PXRAND := pxrand
 Z_FOR_EDGES := edges
 Z_FOR_LATE := late

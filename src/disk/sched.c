@@ -1,14 +1,15 @@
 /* ============================================================================
  * rx286 - src/disk/sched.c
  * The disk server's order of requests (sched.h; roadmap disk-scheduler.md
- * M3, D4, D6). The choices come in this order: a drive's expired deadline
- * starts a batch from the oldest; the controller's turn says which drive;
- * C-LOOK says which of its requests; and a fixed disk's request that needs
- * a seek has its Seek sent first while the other drive is served.
- * (M5's shares between processes come before the turn.)
+ * M3, M5; D4, D5, D6), in the order of the choices: an expired deadline,
+ * the process whose turn it is, the controller's turn between its drives,
+ * C-LOOK; and on the fixed disks a Seek first while the other drive is
+ * served.
  * ============================================================================ */
 
 #include "sched.h"
+
+int sched_fair = 1;
 
 static struct sched_job jobs[SCHED_JOBS];
 
@@ -28,6 +29,19 @@ static struct {
     rx_u16 cylinder, sectors;
 } turn[SCHED_DRIVES / 2];
 
+/* Each controller's share (D5): the process whose turn it is, or
+ * SCHED_NONE, and the last whose turn it was; its budget's sectors left;
+ * whether the turn waits for its next read, and until when; whether an
+ * idle process asked, which ends the turn */
+static struct {
+    rx_u8 active, last, waiting, ended;
+    rx_u16 left, until;
+} share[SCHED_DRIVES / 2];
+
+/* Each process's last request's tick, and whether it has made one */
+static rx_u16 last_seen[SCHED_OWNERS];
+static rx_u8 seen[SCHED_OWNERS];
+
 /* sched_init - nothing queued (sched.h) */
 void sched_init(void)
 {
@@ -44,14 +58,20 @@ void sched_init(void)
         turn[k].drive = (rx_u8)(k * 2);
         turn[k].started = 0;
         turn[k].sectors = 0;
+        share[k].active = share[k].last = SCHED_NONE;
+        share[k].waiting = share[k].ended = 0;
     }
+    for (k = 0; k < SCHED_OWNERS; k++)
+        seen[k] = 0;
 }
 
-/* sched_add - a request queued (sched.h) */
+/* sched_add - a request queued (sched.h). A process that had asked nothing
+ * for SCHED_IDLE_TICKS ends another's turn (D5: the interactive one BFQ
+ * favours); the process whose turn waits for it ends the wait */
 unsigned sched_add(unsigned drive, rx_u32 sector, rx_u16 cylinder, rx_u16 count, int write,
-                   rx_u16 now)
+                   unsigned owner, rx_u16 now)
 {
-    unsigned k;
+    unsigned k, c = drive / 2;
 
     if (drive >= SCHED_DRIVES)
         return SCHED_NONE;
@@ -59,13 +79,23 @@ unsigned sched_add(unsigned drive, rx_u32 sector, rx_u16 cylinder, rx_u16 count,
         ;
     if (k == SCHED_JOBS)
         return SCHED_NONE;
+    owner %= SCHED_OWNERS;
     jobs[k].sector = sector;
     jobs[k].cylinder = cylinder;
     jobs[k].count = count;
     jobs[k].due = (rx_u16)(now + (write ? SCHED_WRITE_TICKS : SCHED_READ_TICKS));
     jobs[k].drive = (rx_u8)drive;
+    jobs[k].owner = (rx_u8)owner;
+    jobs[k].read = (rx_u8)!write;
     jobs[k].used = 1;
     drv[drive].queued++;
+    if (share[c].active != SCHED_NONE && owner != share[c].active
+            && (!seen[owner] || (rx_u16)(now - last_seen[owner]) >= SCHED_IDLE_TICKS))
+        share[c].ended = 1;
+    if (owner == share[c].active)
+        share[c].waiting = 0;
+    seen[owner] = 1;
+    last_seen[owner] = now;
     return k;
 }
 
@@ -81,14 +111,20 @@ unsigned sched_queued(unsigned drive)
     return drv[drive].queued;
 }
 
-/* clook - a drive's next request by C-LOOK: the lowest sector from its
- * sweep on, else the lowest of all */
-static unsigned clook(unsigned d)
+/* mine - is a request of a drive's, and the owner's (SCHED_NONE: anyone's)? */
+static int mine(unsigned k, unsigned d, unsigned owner)
+{
+    return jobs[k].used && jobs[k].drive == d && (owner == SCHED_NONE || jobs[k].owner == owner);
+}
+
+/* clook - a drive's next request of an owner's by C-LOOK: the lowest sector
+ * from its sweep on, else the lowest of all; SCHED_NONE if it has none */
+static unsigned clook(unsigned d, unsigned owner)
 {
     unsigned k, best = SCHED_NONE, low = SCHED_NONE;
 
     for (k = 0; k < SCHED_JOBS; k++) {
-        if (!jobs[k].used || jobs[k].drive != d)
+        if (!mine(k, d, owner))
             continue;
         if (jobs[k].sector >= drv[d].sweep
                 && (best == SCHED_NONE || jobs[k].sector < jobs[best].sector))
@@ -99,15 +135,15 @@ static unsigned clook(unsigned d)
     return best != SCHED_NONE ? best : low;
 }
 
-/* next_of - a drive's next request: once no batch is running, the most
- * overdue of its expired requests starts one, the sweep moved to it */
-static unsigned next_of(unsigned d, rx_u16 now)
+/* expired - once no batch is running on a drive, the most overdue of its
+ * expired requests starts one, the sweep moved to it: is a batch running? */
+static int expired(unsigned d, rx_u16 now)
 {
     unsigned k, old = SCHED_NONE;
 
     if (drv[d].batch == 0) {
         for (k = 0; k < SCHED_JOBS; k++)
-            if (jobs[k].used && jobs[k].drive == d && (rx_i16)(now - jobs[k].due) >= 0
+            if (mine(k, d, SCHED_NONE) && (rx_i16)(now - jobs[k].due) >= 0
                     && (old == SCHED_NONE || (rx_i16)(jobs[k].due - jobs[old].due) < 0))
                 old = k;
         if (old != SCHED_NONE) {
@@ -115,51 +151,100 @@ static unsigned next_of(unsigned d, rx_u16 now)
             drv[d].batch = SCHED_BATCH;
         }
     }
-    return clook(d);
+    return drv[d].batch != 0;
 }
 
-/* sched_pick - the controller's next (sched.h): the drive whose turn it is,
- * unless the other has work and the turn is over (the next request on
- * another cylinder, or SCHED_TURN_SECTORS served); then C-LOOK; then, on
- * the fixed disks, a request that needs a seek has its Seek sent first and
- * the other drive served meanwhile, if it has work */
+/* owned - has an owner (SCHED_NONE: anyone) requests on a controller's
+ * drives? */
+static int owned(unsigned c, unsigned owner)
+{
+    return clook(c * 2, owner) != SCHED_NONE || clook(c * 2 + 1, owner) != SCHED_NONE;
+}
+
+/* next_owner - the controller's next process with requests after the one
+ * whose turn ended, in turn, or SCHED_NONE */
+static unsigned next_owner(unsigned c, unsigned after)
+{
+    unsigned k, o;
+
+    for (k = 1; k <= SCHED_OWNERS; k++) {
+        o = (after == SCHED_NONE ? k - 1 : after + k) % SCHED_OWNERS;
+        if (owned(c, o))
+            return o;
+    }
+    return SCHED_NONE;
+}
+
+/* sched_pick - the controller's next (sched.h) */
 int sched_pick(unsigned controller, rx_u16 now, struct sched_choice *choice)
 {
-    unsigned d = turn[controller].drive, u = d ^ 1, j, k;
+    unsigned d = turn[controller].drive, u = d ^ 1, j, k, owner = SCHED_NONE;
+    unsigned c = controller;
 
     if (!drv[d].queued && !drv[u].queued)
-        return 0;
-    if (drv[d].queued && drv[u].queued) {
-        j = next_of(d, now);
-        if (turn[controller].sectors >= SCHED_TURN_SECTORS
-                || (turn[controller].started && jobs[j].cylinder != turn[controller].cylinder))
+        return SCHED_EMPTY;
+    /* 1. an expired deadline: its batch, whoever's turn it is */
+    if (expired(d, now) || expired(u, now)) {
+        if (!drv[d].batch)
             d = u;
-    } else if (!drv[d].queued) {
+    } else if (sched_fair) {
+        /* 2. the process whose turn it is: on, or waiting for its next read */
+        if (share[c].ended || (share[c].active != SCHED_NONE && share[c].left == 0))
+            share[c].active = SCHED_NONE;
+        if (share[c].active != SCHED_NONE && !owned(c, share[c].active)) {
+            if (share[c].waiting && (rx_i16)(now - share[c].until) < 0) {
+                choice->until = share[c].until;
+                return SCHED_WAIT;
+            }
+            share[c].active = SCHED_NONE;
+        }
+        if (share[c].active == SCHED_NONE) {
+            share[c].active = (rx_u8)next_owner(c, share[c].last);
+            share[c].last = share[c].active;
+            share[c].left = SCHED_BUDGET;
+        }
+        share[c].ended = 0;
+        share[c].waiting = 0;
+        owner = share[c].active;
+        if (clook(d, owner) == SCHED_NONE)
+            d = u;                      /* (its work is the other drive's alone) */
+        u = d ^ 1;
+    }
+    /* 3. the controller's turn between its drives */
+    if (!drv[d].batch && clook(d, owner) != SCHED_NONE && clook(u, owner) != SCHED_NONE) {
+        j = clook(d, owner);
+        if (turn[c].sectors >= SCHED_TURN_SECTORS
+                || (turn[c].started && jobs[j].cylinder != turn[c].cylinder))
+            d = u;
+    } else if (clook(d, owner) == SCHED_NONE) {
         d = u;
     }
-    if (d != turn[controller].drive) {
-        turn[controller].drive = (rx_u8)d;
-        turn[controller].started = 0;
-        turn[controller].sectors = 0;
+    if (d != turn[c].drive) {
+        turn[c].drive = (rx_u8)d;
+        turn[c].started = 0;
+        turn[c].sectors = 0;
     }
     u = d ^ 1;
-    j = next_of(d, now);
+    /* 4. C-LOOK; and a Seek first on the fixed disks */
+    j = clook(d, drv[d].batch ? SCHED_NONE : owner);
     choice->job = (rx_u8)j;
     choice->seek_drive = SCHED_NONE;
     choice->seek_cylinder = 0;
-    if (controller == 1 && drv[d].cylinder != jobs[j].cylinder && drv[u].queued) {
-        k = next_of(u, now);
+    choice->until = now;
+    if (c == 1 && drv[d].cylinder != jobs[j].cylinder
+            && (k = clook(u, drv[u].batch ? SCHED_NONE : owner)) != SCHED_NONE) {
         choice->seek_drive = (rx_u8)d;
         choice->seek_cylinder = jobs[j].cylinder;
         drv[d].cylinder = jobs[j].cylinder;     /* (on their way) */
         choice->job = (rx_u8)k;
     }
-    return 1;
+    return SCHED_SERVE;
 }
 
-/* sched_done - a request served (sched.h); it counts toward the turn if it
- * was its drive's */
-void sched_done(unsigned job, rx_u16 end_cylinder)
+/* sched_done - a request served (sched.h): it counts toward the drive's
+ * turn if it was its drive's, and the process's budget; after a read, the
+ * process's turn waits for its next one, if it has none queued */
+void sched_done(unsigned job, rx_u16 end_cylinder, rx_u16 now)
 {
     struct sched_job *p = &jobs[job];
     unsigned d = p->drive, c = d / 2;
@@ -175,6 +260,14 @@ void sched_done(unsigned job, rx_u16 end_cylinder)
     }
     p->used = 0;
     drv[d].queued--;
+    if (p->owner == share[c].active) {
+        share[c].left = (rx_u16)(share[c].left > p->count ? share[c].left - p->count : 0);
+        if (p->read && share[c].left && !owned(c, p->owner)) {
+            share[c].waiting = 1;
+            share[c].until = (rx_u16)(now + SCHED_ANTICIPATE);
+        }
+    }
+    last_seen[p->owner] = now;
 }
 
 /* sched_heads - a drive's heads' cylinder (sched.h) */

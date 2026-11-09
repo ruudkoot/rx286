@@ -93,8 +93,8 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
  * the calling thread's call holds; the server's lock given up while it
  * waits, if the thread holds it (disk-scheduler.md M4, D15): the call's
  * status */
-static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 di, rx_u16 bp,
-                        struct rx_kregs *r)
+static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
+                        rx_u16 bp, struct rx_kregs *r)
 {
     int had, status;
 
@@ -102,7 +102,7 @@ static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 
     had = lock_mine();
     if (had)
         lock_give();
-    status = call(OS_DISK, label, bx, cx, 0, di, bp, r);
+    status = call(OS_DISK, label, bx, cx, si, di, bp, r);
     if (had)
         lock_take(self_notify());
     return status;
@@ -116,7 +116,7 @@ rx_u16 disk_volume(unsigned drive)
     struct rx_kregs r;
     rx_u32 n;
 
-    if (disk_call_ds(drive, DS_VOLUME, (rx_u16)drive, 0, 0, 0, &r))
+    if (disk_call_ds(drive, DS_VOLUME, (rx_u16)drive, 0, 0, 0, 0, &r))
         return E_TIMEOUT;               /* no disk server answered */
     if (r.bx)
         return r.bx;
@@ -144,7 +144,8 @@ rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segm
     while (count) {
         n = count > DS_RUN_MAX ? DS_RUN_MAX : count;
         if (disk_call_ds(drive, op == DRV_DISK_WRITE ? DS_WRITE : DS_READ,
-                         (rx_u16)(drive | (n << 8)), sector, offset, segment, &r))
+                         (rx_u16)(drive | (n << 8)), sector, (rx_u16)((proc_self() + 1) << 8),
+                         offset, segment, &r))
             return E_TIMEOUT;
         if (r.bx)
             return r.bx;

@@ -70,9 +70,10 @@ static struct {
 } volumes[DS_VOLUMES];
 
 /* A request: its kind (its label), its volume, its first sector of the
- * volume and its count, the offset in the segment passed, its job */
+ * volume and its count, its process (M5), the offset in the segment
+ * passed, its job */
 static struct {
-    rx_u8 used, kind, volume, count, job;
+    rx_u8 used, kind, volume, count, owner, job;
     rx_u32 sector;
     rx_u16 offset;
 } requests[DS_REQUESTS];
@@ -461,18 +462,27 @@ static void serve(unsigned q)
 }
 
 /* controller - thread 2's or 3's: the controller's requests, for ever, in
- * the order sched_pick says; a Seek first if it says so */
+ * the order sched_pick says; a Seek first if it says so. While it says to
+ * wait for a process's next read (D5), a timer to that tick, which a new
+ * request's signal cuts short */
 static void controller(unsigned c, unsigned n)
 {
     struct sched_choice ch;
     const struct sched_job *j;
-    rx_u16 unit, ep, cylinder;
+    rx_u16 unit, ep, cylinder, now;
     unsigned q;
+    int pick;
 
     for (;;) {
         take();
-        if (!ready || !sched_pick(c, (rx_u16)rx_ticks(), &ch)) {
+        now = (rx_u16)rx_ticks();
+        pick = ready ? sched_pick(c, now, &ch) : SCHED_EMPTY;
+        if (pick != SCHED_SERVE) {
             give();
+            if (pick == SCHED_WAIT)
+                kcall(KCALL_TIMER, 0, 0,
+                      (rx_u16)((rx_i16)(ch.until - now) > 0 ? ch.until - now : 1), NOTIFY(n),
+                      0, 0, 0, 0);
             kcall(KCALL_RECV, 0, 0, 0, NOTIFY(n), 0, 0, 0, 0);
             continue;
         }
@@ -489,7 +499,7 @@ static void controller(unsigned c, unsigned n)
             ? (rx_u16)((j->sector + (j->count ? j->count - 1 : 0))
                        / ((rx_u32)drives[j->drive].heads * drives[j->drive].track))
             : SCHED_CYLINDER_UNKNOWN;
-        sched_done(ch.job, cylinder);
+        sched_done(ch.job, cylinder, (rx_u16)rx_ticks());
         give();
     }
 }
@@ -522,7 +532,7 @@ static rx_u16 queue(unsigned q)
         return E_BUSY;
     take();
     job = sched_add(drive, lba, cylinder, requests[q].kind == DS_VOLUME ? 1 : requests[q].count,
-                    requests[q].kind == DS_WRITE, (rx_u16)rx_ticks());
+                    requests[q].kind == DS_WRITE, requests[q].owner, (rx_u16)rx_ticks());
     if (job == SCHED_NONE) {
         give();
         kcall(KCALL_SEND, 0, E_BUSY, 0, REQUEST_REPLY(q), 0, 0, 0, 0);
@@ -554,6 +564,7 @@ static int take_call(unsigned q, struct rx_kregs *r)
     requests[q].volume = (rx_u8)v;
     requests[q].count = (rx_u8)count;
     requests[q].sector = sector;
+    requests[q].owner = (rx_u8)(r->si >> 8);
     requests[q].offset = r->di;
     r->cx = r->si = r->di = 0;
     switch (label) {

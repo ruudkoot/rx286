@@ -358,13 +358,10 @@ void lock_give(void)
     server_lock_give(&lock);
 }
 
-/* self_notify - the calling thread's own notification, to nap on: a
- * process entry's, the tty thread's, the control thread's, or a program's
- * (server.h; disk-scheduler.md M4) */
-rx_u16 self_notify(void)
+/* notify_of - thread n's own notification, to nap on: a process entry's,
+ * the tty thread's, the control thread's, or a program's */
+static rx_u16 notify_of(unsigned n)
 {
-    unsigned n = server_self();
-
     if (n >= PROC_N0 && n < PROC_N0 + PROCS)
         return PROC_NOTIFY(n - PROC_N0);
     if (n == TTY_N)
@@ -372,6 +369,24 @@ rx_u16 self_notify(void)
     if (n == OS_CONTROL_N)
         return OS_CONTROL;
     return SLOT(OS_SLOT_SLEEP + n);
+}
+
+/* self_notify - the calling thread's own notification (server.h;
+ * disk-scheduler.md M4) */
+rx_u16 self_notify(void)
+{
+    return notify_of(server_self());
+}
+
+/* notify_thread - thread n woken out of its nap (server.h; M5) */
+void notify_thread(unsigned n)
+{
+    struct rx_kregs r;
+
+    r.ax = KCALL_SIGNAL << 8;
+    r.dx = notify_of(n);
+    r.bp = 0;
+    rx_kcall(&r);
 }
 
 /* lock_mine - does the calling thread hold the lock? (server.h) */

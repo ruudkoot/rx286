@@ -45,6 +45,10 @@ static int ready;                       /* the segment is there */
 static unsigned sectors = CACHE_SECTORS;    /* its sectors: fewer without extended memory */
 static rx_u8 holder[DRIVES];            /* the thread (its number + 1) whose call holds a
                                            volume's lock, or 0 (D15) */
+#define VOL_WAITERS 64                  /* threads that may wait for one volume at once */
+static rx_u16 ticket[DRIVES], served[DRIVES];   /* each volume's next ticket, and the one
+                                           whose turn it is: the lock goes in their order (M5) */
+static rx_u8 waiter[DRIVES][VOL_WAITERS];   /* a ticket's thread (its number + 1) */
 
 /* me - the calling thread, as a holder */
 static rx_u8 me(void)
@@ -53,16 +57,23 @@ static rx_u8 me(void)
 }
 
 /* vol_hold - a drive's volume's lock for the calling thread's call (fs.h):
- * a nap, the server's lock given up, while another call holds it, never a
- * wait with it kept (the order of the locks) */
+ * a ticket, then a nap, the server's lock given up, until its turn, never a
+ * wait with the lock kept (the order of the locks). The calls on a volume
+ * get it in the order they asked (disk-scheduler.md M5): a call that has
+ * just given it up cannot take it straight back */
 void vol_hold(unsigned drive)
 {
-    while (holder[drive] && holder[drive] != me())
+    rx_u16 mine;
+
+    if (holder[drive] == me())
+        return;
+    mine = ticket[drive]++;
+    waiter[drive][mine % VOL_WAITERS] = me();
+    while (holder[drive] || served[drive] != mine)
         lock_nap();
-    if (holder[drive] != me()) {
-        holder[drive] = me();
-        proc_in_volume(1);
-    }
+    waiter[drive][mine % VOL_WAITERS] = 0;
+    holder[drive] = me();
+    proc_in_volume(1);
 }
 
 /* vol_mine - does the calling thread's call hold a volume's lock? */
@@ -89,8 +100,12 @@ void vol_release(unsigned keep)
     unsigned d;
 
     for (d = 0; d < DRIVES; d++)
-        if (holder[d] == me() && !(keep & (1u << d)))
+        if (holder[d] == me() && !(keep & (1u << d))) {
             holder[d] = 0;
+            served[d]++;                /* the next ticket's turn: woken, not left to */
+            if (waiter[d][served[d] % VOL_WAITERS])     /*    its nap's end */
+                notify_thread(waiter[d][served[d] % VOL_WAITERS] - 1u);
+        }
     if (!vol_held())
         proc_in_volume(0);
 }

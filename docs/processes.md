@@ -401,7 +401,9 @@ another (`tests/disk/beside.test`):
   it before it touches the volume, and keeps it to its end: when its path
   reaches the drive (`lookup`), or at once for a descriptor of a volume's
   file or directory, before its offset is used. Calls on one volume run
-  one at a time; calls on two volumes run at once. A rename takes both its
+  one at a time, in the order they asked (a ticket each: a call that has
+  just given the lock up cannot take it straight back; M5); calls on two
+  volumes run at once. A rename takes both its
   volumes before it touches either, in their order. No thread waits for a
   volume's lock with the lock kept.
 - **The files' cache** keeps a slot busy while the disk server reads or

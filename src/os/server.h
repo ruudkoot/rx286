@@ -177,6 +177,8 @@ void lock_take(rx_u16 notify);
 void lock_give(void);
 /* self_notify - the calling thread's own notification, to nap on */
 rx_u16 self_notify(void);
+/* notify_thread - thread n woken out of its nap */
+void notify_thread(unsigned n);
 /* lock_mine - does the calling thread hold the lock? */
 int lock_mine(void);
 /* lock_nap - a tick's nap, the lock given up meanwhile (lock held) */
