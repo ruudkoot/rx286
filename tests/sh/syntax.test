@@ -39,10 +39,10 @@ sh: nosuch: no such file or directory
 /$ alias ll='ls /c'; ll
 sh: ll: no such file or directory
 /$ alias ll='ls /c'; ll
-README.TXT
-DOCS
-NUMBERS.TXT
-BIN
+readme.txt
+docs
+numbers.txt
+bin
 /$ cd; pwd
 /a
 /a$

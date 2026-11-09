@@ -8,7 +8,7 @@ keys: ls b:/many\n
 match: contains
 ---
 /a$ ls b:/many
-FILE01.TXT
-FILE30.TXT
+file01.txt
+file30.txt
 b:/many: input/output error
 /a$

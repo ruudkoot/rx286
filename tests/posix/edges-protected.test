@@ -21,6 +21,6 @@ edges: fsync (-1, EROFS 30): -1, errno 30
 edges: fsync again (-1, EROFS 30): -1, errno 30
 edges: close (-1, EROFS 30): -1, errno 30
 edges: rename of my directory (-1, EROFS 30): -1, errno 30
-edges: getcwd after it (/b/MANY): /b/MANY
+edges: getcwd after it (/b/many): /b/many
 edges: stat . (0): 0
 edges: done

@@ -123,7 +123,7 @@ static void listing(void)
             continue;
         }
         while ((e = readdir(dp)) != 0)
-            if (e->d_name[0] == 'F' && e->d_name[1] >= '0' && e->d_name[1] < '0' + FILES)
+            if (e->d_name[0] == 'f' && e->d_name[1] >= '0' && e->d_name[1] < '0' + FILES)
                 seen |= 1u << (e->d_name[1] - '0');
         closedir(dp);
         for (f = 0; f < FILES; f++)

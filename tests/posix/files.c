@@ -68,9 +68,11 @@ int main(void)
     check("make /b/new.txt (3)", fd);
     check("write 13 bytes (13)", write(fd, "hello, files\n", 13));
     check("close (0)", close(fd));
-    fd = open("/B/NEW.TXT", O_RDONLY);
+    check("open it in capitals (-1, EINVAL 22): names are case-sensitive",
+          open("/b/NEW.TXT", O_RDONLY));
+    fd = open("/b/new.txt", O_RDONLY);
     n = read(fd, buf, sizeof buf);
-    printf("files: read it back in capitals: %d bytes, the same: %s\n", n,
+    printf("files: read it back: %d bytes, the same: %s\n", n,
            n == 13 && memcmp(buf, "hello, files\n", 13) == 0 ? "yes" : "no");
     close(fd);
 
@@ -211,7 +213,7 @@ int main(void)
     mkdir("/b/e", 0755);
     chdir("/b/e");
     check("rename my directory (0)", rename("/b/e", "/b/f"));
-    printf("files: getcwd after it (/b/F): %s\n", getcwd(cwd, sizeof cwd) ? cwd : "(error)");
+    printf("files: getcwd after it (/b/f): %s\n", getcwd(cwd, sizeof cwd) ? cwd : "(error)");
     check("rmdir my directory (-1, EBUSY 16)", rmdir("/b/f"));
     check("rmdir . (-1, EINVAL 22)", rmdir("."));
     chdir("/");
@@ -231,7 +233,7 @@ int main(void)
     same = 0;
     if ((dp = opendir("/b/i1")) != 0) {
         while ((e = readdir(dp)) != 0)
-            if (strcmp(e->d_name, "F64") == 0)
+            if (strcmp(e->d_name, "f64") == 0)
                 same = (unsigned long)e->d_ino == ino;
         closedir(dp);
     }
@@ -289,21 +291,21 @@ int main(void)
     printf("files: getcwd with no room (NULL, EINVAL 22): %s, ",
            getcwd(cwd, 0) ? "a text" : "NULL");
     printf("%d\n", errno);
-    mkdir("/b/A", 0755);                /* a rename that would take a current */
-    mkdir("/b/A/B", 0755);              /*    directory past 12 names: no path of */
-    mkdir("/b/A/B/C", 0755);            /*    12 names of 8.3 reaches PATH_MAX, 256 */
-    mkdir("/b/A/B/C/D", 0755);          /*    (P15) */
-    mkdir("/b/A/B/C/D/E", 0755);
-    mkdir("/b/A/B/C/D/E/F", 0755);
-    mkdir("/b/A/B/C/D/E/F/G", 0755);
-    mkdir("/b/A/B/C/D/E/F/G/H", 0755);
-    mkdir("/b/A/B/C/D/E/F/G/H/I", 0755);
-    mkdir("/b/A/B/C/D/E/F/G/H/I/J", 0755);
-    mkdir("/b/A/B/C/D/E/F/G/H/I/J/K", 0755);
-    mkdir("/b/X", 0755);                /* (12 names, 13 once renamed) */
-    chdir("/b/A/B/C/D/E/F/G/H/I/J/K");
+    mkdir("/b/a", 0755);                /* a rename that would take a current */
+    mkdir("/b/a/b", 0755);              /*    directory past 12 names: no path of */
+    mkdir("/b/a/b/c", 0755);            /*    12 names of 8.3 reaches PATH_MAX, 256 */
+    mkdir("/b/a/b/c/d", 0755);          /*    (P15) */
+    mkdir("/b/a/b/c/d/e", 0755);
+    mkdir("/b/a/b/c/d/e/f", 0755);
+    mkdir("/b/a/b/c/d/e/f/g", 0755);
+    mkdir("/b/a/b/c/d/e/f/g/h", 0755);
+    mkdir("/b/a/b/c/d/e/f/g/h/i", 0755);
+    mkdir("/b/a/b/c/d/e/f/g/h/i/j", 0755);
+    mkdir("/b/a/b/c/d/e/f/g/h/i/j/k", 0755);
+    mkdir("/b/x", 0755);                /* (12 names, 13 once renamed) */
+    chdir("/b/a/b/c/d/e/f/g/h/i/j/k");
     check("a rename that would take my directory past 12 names (-1, ENAMETOOLONG 36)",
-          rename("/b/A", "/b/X/A"));
+          rename("/b/a", "/b/x/a"));
     chdir("/");
     printf("files: done\n");
     return 0;

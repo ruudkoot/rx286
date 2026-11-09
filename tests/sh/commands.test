@@ -17,16 +17,16 @@ fsck: B
 ---
 rx286, test build
 /a$ cd /b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d
-B.TXT
+b.txt
 /b$ cat a.txt d/b.txt | wc; wc -l -c a.txt
 2 2 10
 1 5 a.txt
 /b$ rm d/b.txt; rmdir d; ls
-README.TXT
-FRAG.TXT
-PAD.TXT
-MANY
-A.TXT
+readme.txt
+frag.txt
+pad.txt
+many
+a.txt
 /b$ rmdir /b/many; cp nothing x; mv a.txt /c/a.txt
 /b/many: directory not empty
 nothing: no such file or directory

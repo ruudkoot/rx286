@@ -45,7 +45,7 @@ int main(void)
     check("close (-1, EROFS 30)", close(fd));
     chdir("/b/many");
     check("rename of my directory (-1, EROFS 30)", rename("/b/many", "/b/other"));
-    printf("edges: getcwd after it (/b/MANY): %s\n", getcwd(cwd, sizeof cwd) ? cwd : "(error)");
+    printf("edges: getcwd after it (/b/many): %s\n", getcwd(cwd, sizeof cwd) ? cwd : "(error)");
     check("stat . (0)", stat(".", &st));
 #elif defined(EDGES_LOOP)
     struct dirent *e;

@@ -7,7 +7,11 @@
  * FAT12 volumes (vol.c), /z the archive of programs, /dev the devices
  * (null, tty, lpt1, lpt2). A path is made absolute against the process's
  * current directory and its "." and ".." taken out before it is followed.
- * Within a volume a name is 8.3, matched in any case and kept upper case.
+ * Within a volume a name is 8.3, kept upper case as FAT has it, shown in
+ * lower case, and a name with an upper-case letter refused (EINVAL): rx286's
+ * names are case-sensitive (roadmap disk-scheduler.md M1, D19). DOS's drive
+ * letters, "c:" or "C:", stay. A name another system wrote in lower case is
+ * shown as it is; unlink and rename find it when it has no upper-case twin.
  *
  * A descriptor (OPEN_MAX a process) names an open file description, shared
  * by dup and fork: its kind, flags and offset, and for a file of a volume
@@ -293,10 +297,10 @@ split:
     return 0;
 }
 
-/* same - two names alike in any case */
+/* same - two names alike, byte for byte (disk-scheduler.md D19) */
 static int same(const char *a, const char *b)
 {
-    while (*a && lower(*a) == lower(*b)) {
+    while (*a && *a == *b) {
         a++;
         b++;
     }
@@ -310,8 +314,10 @@ static int name_char(unsigned char c)
 
     if (c >= 'a' && c <= 'z')
         return c - 'a' + 'A';
-    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+    if (c >= '0' && c <= '9')
         return c;
+    if (c >= 'A' && c <= 'Z')
+        return -1;                      /* case-sensitive: capitals are FAT's own (D19) */
     for (i = 0; punctuation[i]; i++)
         if (c == (unsigned char)punctuation[i])
             return c;
@@ -353,11 +359,11 @@ static unsigned name_text(const rx_u8 *name, char *t)
     unsigned n = 0, i;
 
     for (i = 0; i < FAT_BASE_LENGTH && name[i] != ' '; i++)
-        t[n++] = (char)name[i];
+        t[n++] = lower((char)name[i]);  /* shown in lower case (D19) */
     if (name[FAT_BASE_LENGTH] != ' ') {
         t[n++] = '.';
         for (i = FAT_BASE_LENGTH; i < DIR_NAME_LENGTH && name[i] != ' '; i++)
-            t[n++] = (char)name[i];
+            t[n++] = lower((char)name[i]);
     }
     t[n] = 0;
     return n;
@@ -395,15 +401,34 @@ static int archive_entry(const char *name)
     return -1;
 }
 
-/* tty_unit - a terminal's name, "tty1" to "tty8" in any case: its unit, or
- * -1 if there is no such terminal */
+/* tty_unit - a terminal's name, "tty1" to "tty8": its unit, or -1 if there
+ * is no such terminal */
 static int tty_unit(const char *name)
 {
-    if (!tty_keys() || lower(name[0]) != 't' || lower(name[1]) != 't' || lower(name[2]) != 'y'
+    if (!tty_keys() || name[0] != 't' || name[1] != 't' || name[2] != 'y'
             || name[3] < '1' || name[3] > '0' + tty_terminals() || name[4])
         return -1;
     return name[3] - '1';
 }
+
+/* raw_name - a component as a FAT name of its own bytes, not upper-cased: a
+ * name another system wrote in lower case (D19) */
+static void raw_name(const char *s, rx_u8 *name)
+{
+    unsigned k;
+
+    memset(name, ' ', DIR_NAME_LENGTH);
+    for (k = 0; *s && *s != '.' && k < FAT_BASE_LENGTH; s++)
+        name[k++] = (rx_u8)*s;
+    while (*s && *s != '.')
+        s++;
+    if (*s == '.')
+        s++;
+    for (k = FAT_BASE_LENGTH; *s && k < DIR_NAME_LENGTH; s++)
+        name[k++] = (rx_u8)*s;
+}
+
+static int loose_last;                  /* unlink, rename: the last name may be lower case */
 
 /* lookup - the node a path names; on a volume the node may be absent, its
  * directory there (exists 0): 0 or the error. Each name found is written in
@@ -433,10 +458,7 @@ static int lookup(struct path *p, struct node *n)
                 return 0;
             }
         if (p->parts == 2 && (e = tty_unit(p->part[1])) >= 0) {
-            p->part[1][0] = 't';        /* "tty1" to "tty8" (P11) */
-            p->part[1][1] = 't';
-            p->part[1][2] = 'y';
-            n->kind = K_TTY;
+            n->kind = K_TTY;            /* "tty1" to "tty8" (P11) */
             n->unit = (rx_u16)e;
             return 0;
         }
@@ -453,9 +475,8 @@ static int lookup(struct path *p, struct node *n)
         n->unit = (rx_u16)e;
         return 0;
     }
-    if (strlen(p->part[0]) != 1 || (d = lower(p->part[0][0]) - 'a') < 0 || d >= DRIVES)
+    if (strlen(p->part[0]) != 1 || (d = p->part[0][0] - 'a') < 0 || d >= DRIVES)
         return ENOENT;
-    p->part[0][0] = (char)('a' + d);
     n->kind = K_DIR;
     n->drive = (rx_u8)d;
     if ((error = vol_mount(&vols[d], (unsigned)d)) != 0)
@@ -467,6 +488,13 @@ static int lookup(struct path *p, struct node *n)
             return e;
         n->parent = n->first;
         error = vol_dir_find(&vols[d], n->parent, n->name, &n->where, n->entry, &n->index);
+        if (error == ENOENT && k == p->parts - 1 && loose_last) {
+            raw_name(p->part[k], n->name);      /* another system's lower case (D19) */
+            error = vol_dir_find(&vols[d], n->parent, n->name, &n->where, n->entry,
+                                 &n->index);
+            if (error == ENOENT)
+                fat_name(p->part[k], n->name);
+        }
         if (error == ENOENT && k == p->parts - 1) {
             n->exists = 0;              /* to be made, in n->parent */
             n->kind = K_FILE;
@@ -1004,7 +1032,7 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
 {
     struct vol *v = &vols[o->drive];
     rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, within;
-    rx_u16 chunk, in, cluster, e, k;
+    rx_u16 chunk, in, cluster, e;
     int slot, write = how != IO_READ;
     rx_u8 RX_FAR *p;
     rx_u8 RX_FAR *q;
@@ -1028,11 +1056,12 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
             return e;
         p = cache_bytes(slot) + in;
         q = (rx_u8 RX_FAR *)RX_MK_FP(data, (rx_u16)(at + *done));
-        for (k = 0; k < chunk; k++)
-            if (how == IO_READ)
-                q[k] = p[k];
-            else
-                p[k] = how == IO_WRITE ? q[k] : 0;
+        if (how == IO_READ)             /* rep movsw (memory-far.asm), not a byte at a time: */
+            memcpy(q, p, chunk);        /*    about 9 ms a sector less (disk-scheduler.md M1) */
+        else if (how == IO_WRITE)
+            memcpy(p, q, chunk);
+        else
+            memset(p, 0, chunk);
         if (write) {
             cache_dirty(slot);
             o->changed = 1;
@@ -1564,7 +1593,10 @@ static int px_remove(int i, rx_u16 data, rx_u16 at, int directory, int *error)
     rx_u16 e;
     int empty;
 
-    if ((*error = resolve(i, data, at, &p, &n)) != 0)
+    loose_last = 1;                     /* the name may be another system's (D19) */
+    *error = resolve(i, data, at, &p, &n);
+    loose_last = 0;
+    if (*error)
         return -1;
     if (!n.exists) {
         *error = ENOENT;
@@ -1739,8 +1771,10 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
     rx_u16 e, e_dots = 0;
     int end, k, empty;
 
-    if ((*error = resolve(i, data, from, &p, &a)) != 0
-            || (*error = resolve(i, data, to, &q, &b)) != 0)
+    loose_last = 1;                     /* the old name may be another system's (D19) */
+    *error = resolve(i, data, from, &p, &a);
+    loose_last = 0;
+    if (*error || (*error = resolve(i, data, to, &q, &b)) != 0)
         return -1;
     if (!a.exists) {
         *error = ENOENT;

@@ -25,7 +25,8 @@ file: B /TWO.TXT first\nsecond\n
 files: make /b/new.txt (3): 3
 files: write 13 bytes (13): 13
 files: close (0): 0
-files: read it back in capitals: 13 bytes, the same: yes
+files: open it in capitals (-1, EINVAL 22): names are case-sensitive: -1, errno 22
+files: read it back: 13 bytes, the same: yes
 files: write 5000 bytes over five clusters (5000): 5000
 files: its size (5000): 5000, a file: yes
 files: lseek to 4090 (4090): 4090
@@ -36,8 +37,8 @@ files: appended to (18): 18
 files: mkdir /b/dir (0): 0
 files: mkdir it again (-1, EEXIST 17): -1, errno 17
 files: chdir to it (0): 0
-files: getcwd: /b/DIR
-files: . holds: . .. INNER.TXT
+files: getcwd: /b/dir
+files: . holds: . .. inner.txt
 files: rmdir it, not empty (-1, ENOTEMPTY 39): -1, errno 39
 files: rename the file out of it (0): 0
 files: stat the old name (-1, ENOENT 2): -1, errno 2
@@ -73,7 +74,7 @@ files: a new name and a slash, made (-1, EISDIR 21): -1, errno 21
 files: a new name made as a directory (-1, ENOTDIR 20): -1, errno 20
 files: and no file made (-1, ENOENT 2): -1, errno 2
 files: rename my directory (0): 0
-files: getcwd after it (/b/F): /b/F
+files: getcwd after it (/b/f): /b/f
 files: rmdir my directory (-1, EBUSY 16): -1, errno 16
 files: rmdir . (-1, EINVAL 22): -1, errno 22
 files: rmdir it once I left it (0): 0

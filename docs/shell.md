@@ -11,12 +11,13 @@ commands inside it.
 
 ## The prompt and the line
 
-The prompt is the current directory and `$`: `/a$`, `/c/DOCS$`. The shell
+The prompt is the current directory and `$`: `/a$`, `/c/docs$`. The shell
 starts in `HOME`, `/a`, the boot drive, with the environment init gave it
 (`PATH=/z:/c/bin`, `HOME=/a`). The tree is one: `/a` to `/d` are the
 drives, `/dev` the devices, `/z` the boot image's programs; a path may
-name its drive DOS's way, `c:/docs` for `/c/docs`. Names on a drive are
-8.3, in any case.
+name its drive DOS's way, `c:/docs` or `C:/docs` for `/c/docs`. Names on
+a drive are 8.3 and case-sensitive: shown in lower case, a name with a
+capital refused (*docs/processes.md*).
 
 The shell reads a line from its terminal raw (`ICANON` and `ECHO` off
 while it edits, the terminal as it was while a command runs): it echoes

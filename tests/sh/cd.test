@@ -1,23 +1,26 @@
 # cd (roadmap os-server.md P9): relative and absolute, "." and "..", a
-# drive DOS's way and in any case, and HOME without an argument; a file or
+# drive DOS's way in either case, and HOME without an argument; a file or
 # a missing name is no directory, and "/.." is "/". One current directory
-# for all the drives, as POSIX has it, not DOS's one a drive; each of its
-# names in its own case, as the server or FAT has it.
+# for all the drives, as POSIX has it, not DOS's one a drive. Names are
+# case-sensitive (disk-scheduler.md M1, D19): /D is no drive, and MANY a
+# name FAT cannot hold.
 program: sh
 emulators: bochs mame
 keys: cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /c/docs/../docs; pwd\n
-keys: cd /D; pwd; cd B:/MANY; pwd; cd ..; cd readme.txt; cd nowhere\n
+keys: cd /D; cd /d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere\n
 keys: cd /; cd ..; pwd; cd; pwd\n
 ---
 rx286, test build
 /a$ cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /c/docs/../docs; pwd
 /c
-/c/DOCS
+/c/docs
 /c
-/c/DOCS
-/c/DOCS$ cd /D; pwd; cd B:/MANY; pwd; cd ..; cd readme.txt; cd nowhere
+/c/docs
+/c/docs$ cd /D; cd /d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere
+sh: /D: no such file or directory
 /d
-/b/MANY
+sh: B:/MANY: invalid argument
+/b/many
 sh: readme.txt: not a directory
 sh: nowhere: no such file or directory
 /b$ cd /; cd ..; pwd; cd; pwd

@@ -1,0 +1,15 @@
+# The disks' speed on MAME's AT, against budgets (roadmap disk-scheduler.md
+# M1, M2; tests/posix/rdtime.c): MAME's diskettes turn at the drives' speeds
+# and its CPU at the AT's, so the budgets are about the drivers' and the OS
+# server's work; Bochs and DOSBox-X give no AT's time. M1: 32 KB written to D
+# in calls of 4 KB within 1 s (1.86 s before M1's memcpy; 0.74 s in E7).
+program: idle
+define: TEST_POSIX_RDTIME
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+emulators: mame
+---
+rdtime: D, 32 KB written in calls of 4 KB: within 1000 ms: yes
+rdtime: done

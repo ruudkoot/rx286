@@ -123,7 +123,7 @@ simulator; none of their code is in the repository.
 |---|---|
 | The survey and this roadmap | done (2026-11-08) |
 | D1-D21 | decided (2026-11-09): as recommended |
-| M1: the copy and the names | not started |
+| M1: the copy and the names | done (2026-11-09) |
 | M2: runs through the drivers | not started |
 | M3: the disk server | not started |
 | M4: waiting without the lock | not started |
@@ -1597,6 +1597,16 @@ less, M a few, L a week.
   1 s on MAME (1.86 s today, 0.74 s in E7), checked by `tests/disk/speed.test`, which M1 begins
   with that line and M2 extends.
 - **Decisions:** D19.
+- **Done** (2026-11-09). `vfs.c` copies with `memcpy` and matches every name byte for byte;
+  `tests/posix/names.test` and `names-lowercase.test` (`media: B lowercase`, a new change of
+  the runner's) pass; `tests/disk/speed.test` writes D's 32 KB in 780 ms on MAME (1,860 before).
+  The 15 tests that expected capitals now expect lower case, and `cd.test` and
+  `listing.test` type the refused capitals on purpose. Not as planned:
+  - **names.test runs on Bochs and MAME,** not DOSBox-X, which has no disk controller
+    rx286 can use (docs/emulators.md).
+  - **Two tests had a race,** which M1's new timing on MAME exposed: `sh/break.test` and
+    `sh/jobs.test` typed on at once after Ctrl+Break or ^C, and the keys could reach `cat`'s
+    read before the signal ended it. They now wait a moment, as a person would.
 
 ### M2. Runs through the drivers (M)
 

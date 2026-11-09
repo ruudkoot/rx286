@@ -6,12 +6,14 @@
 # jobs and echo, a program. A cat in the background may stop before the
 # next prompt, which then says so too: the lines below in order, others
 # between them.)
+# (The keys after ^C wait a moment for cat's end, as after Ctrl+Break in
+# break.test.)
 program: sh
 emulators: bochs mame
 match: contains
 keys: cat\n{ctrl-z}jobs\nfg\nhello\n{ctrl-d}echo $?\n
 keys: cat &\n{wait 20}jobs\nfg %1\nworld\n{ctrl-d}
-keys: cat\n{ctrl-c}echo $?\nabc{ctrl-c}echo still here\n
+keys: cat\n{ctrl-c}{wait 20}echo $?\nabc{ctrl-c}echo still here\n
 ---
 rx286, test build
 /a$ cat

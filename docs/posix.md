@@ -118,7 +118,9 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
   file, 0755 for a directory), any process may signal any other (init
   aside), and any may lower its own nice value as well as raise it
   (os-server.md's follow-up roadmap adds users).
-- **FAT12.** Names are 8.3, in any case, kept upper case; there are no
+- **FAT12.** Names are 8.3 and case-sensitive: kept upper case on the disk
+  as FAT has them, shown in lower case, a name with a capital refused
+  (`EINVAL`; roadmap disk-scheduler.md D19); there are no
   links (`st_nlink` 1), no device or inode numbers beyond a drive and an
   entry's place (`st_dev` is the drive; `st_ino`, 32 bits, is the entry's
   sector on the disk times 16 and its slot there, so that a rename gives

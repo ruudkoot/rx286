@@ -38,7 +38,8 @@
 #                               D blank (no partition), B deep (paths of 64
 #                               characters: rxlib.DEEP_PATH), B loop (MANY's
 #                               chain to itself), B zerodir (MANY's cluster
-#                               0), B longnames (two VFAT names); may repeat
+#                               0), B longnames (two VFAT names), B lowercase
+#                               (FRAG.TXT's name in lower case); may repeat
 #   lpt1: text\r                a line LPT1 must have printed, then LF; may
 #                               repeat: byte for byte the whole of what it
 #                               printed (\r CR, \f a form feed, \t, \s a

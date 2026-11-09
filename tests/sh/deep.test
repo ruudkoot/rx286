@@ -11,11 +11,11 @@ keys: ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && ech
 ---
 rx286, test build
 /a$ cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/ABCDEFG.X
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF/ABCDEFGH.XY
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits
+/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff
+/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$ cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..
+/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff/abcdefg.x
+/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff/abcdefgh.xy
+/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits
 fits
 fits
-/b/AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF$
+/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$

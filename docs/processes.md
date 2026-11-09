@@ -188,12 +188,16 @@ read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
 programs and `/dev` the devices (`null`; `tty`, the caller's terminal;
 `tty1` to `tty8`, the terminals, as many as the EGA holds pages; `lpt1`,
 `lpt2`; `speaker`, `joystick`, `mouse`, `com2`, `status`: *The devices*
-below). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A path
-is made absolute against the process's current directory, which starts at
-its parent's (`/` for init), and its "." and ".." taken out before it is
-followed; within a volume a name is 8.3, matched in any case and kept upper
-case. The current directory keeps each name in its own case, as the server
-or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A path that ends with "/"
+below). A path may name a drive DOS's way: `c:/docs` and `C:/docs` are
+`/c/docs`. A path is made absolute against the process's current
+directory, which starts at its parent's (`/` for init), and its "." and
+".." taken out before it is followed. Names are case-sensitive (roadmap
+disk-scheduler.md M1, D19): within a volume a name is 8.3, kept upper case
+on the disk as FAT has it and shown in lower case, and a name with an
+upper-case letter is refused (`EINVAL`), since FAT holds no such name; the
+server's own names (`/dev`, `tty1`, `/z`'s programs) match byte for byte.
+A name another system wrote in lower case is shown as it is and cannot be
+opened, but unlink and rename find it when it has no upper-case twin. A path that ends with "/"
 names a directory: a file's is `ENOTDIR`, a new name's `O_CREAT` `EISDIR`
 (XBD 4.13). A path has 12 names at most once its ".." are taken out
 (`ENAMETOOLONG`).

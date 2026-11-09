@@ -11,8 +11,8 @@ rx286, test build
 /a$ echo hello
 hello
 /a$ ls c:/docs
-HELLO.TXT
-PRINTME.TXT
+hello.txt
+printme.txt
 /a$ ls c:/docs | wc -l > c:/n.txt
 /a$ cat c:/n.txt
 2

@@ -15,8 +15,8 @@ timeout: 60
 ---
 rx286, test build
 /a$ dir c:/docs
--rw-r--r--       21 HELLO.TXT
--rw-r--r--      161 PRINTME.TXT
+-rw-r--r--       21 hello.txt
+-rw-r--r--      161 printme.txt
 /a$ type c:/docs/hello.txt
 Hello from C:\DOCS.
 /a$ b:
@@ -24,7 +24,7 @@ Hello from C:\DOCS.
 /b
 /b$ md d; copy frag.txt d/f.txt; ren d/f.txt d/g.txt
 /b$ dir d
--rw-r--r--     3136 G.TXT
+-rw-r--r--     3136 g.txt
 /b$ del d/g.txt; rd d; C:
 /c$ pwd
 /c
@@ -47,10 +47,10 @@ alias B:=cd /b
 alias C:=cd /c
 alias D:=cd /d
 /c$ unalias dir; dir
--rw-r--r--      142 README.TXT
-drwxr-xr-x        0 DOCS
--rw-r--r--    29000 NUMBERS.TXT
-drwxr-xr-x        0 BIN
+-rw-r--r--      142 readme.txt
+drwxr-xr-x        0 docs
+-rw-r--r--    29000 numbers.txt
+drwxr-xr-x        0 bin
 /c$ dir
 sh: dir: no such file or directory
 /c$

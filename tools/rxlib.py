@@ -441,7 +441,7 @@ RUN_DISKS = os.path.join(ROOT, 'build', 'run-disks')    # make run's, which it w
 # `media:`): the first four in the emulator (LPT2's adapter gone: Bochs
 # only), the others in the run's copies of the images (damage_disks).
 MEDIA = ('B ejected', 'B protected', 'D absent', 'LPT2 absent', 'B damaged', 'D blank',
-         'B deep', 'B loop', 'B zerodir', 'B longnames')
+         'B deep', 'B loop', 'B zerodir', 'B longnames', 'B lowercase')
 # 'B deep': directories whose paths reach DOS's 64 characters (PATH_MAX).
 DEEP_PATH = '/'.join(c * 8 for c in 'ABCDEF')      # 54 characters as \AAAAAAAA...
 DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
@@ -552,7 +552,9 @@ def damage_disks(directory, media):
     'B loop' to itself, its 32 entries all used (os-server.md P15);
     'B zerodir' zeroes the first cluster of MANY's entry; 'B longnames'
     adds two files with long names (VFAT's entries before their 8.3 ones);
-    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG. Two
+    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG; 'B
+    lowercase' writes FRAG.TXT's name in B's root in lower case, as another
+    system might (disk-scheduler.md D19). Two
     changes of MANY at once ('B zerodir', 'B damaged', 'B loop') are
     refused, and so is a change of MANY when B has none: a test must never
     run on a drive it believes damaged and is not."""
@@ -575,6 +577,21 @@ def damage_disks(directory, media):
         with open(path, 'r+b') as f:
             f.truncate(0)
             f.truncate(size)
+    if 'B lowercase' in media:
+        path = os.path.join(directory, 'fdb.img')
+        with open(path, 'r+b') as f:
+            boot = f.read(512)
+            reserved = int.from_bytes(boot[0x0E:0x10], 'little')
+            fats, per_fat = boot[0x10], int.from_bytes(boot[0x16:0x18], 'little')
+            roots = int.from_bytes(boot[0x11:0x13], 'little')
+            at = (reserved + fats * per_fat) * 512
+            f.seek(at)
+            root = f.read(roots * 32)
+            found = [k for k in range(roots) if root[k * 32:k * 32 + 11] == b'FRAG    TXT']
+            if len(found) != 1:
+                raise ValueError("media: B lowercase: B's root holds %d FRAG.TXT" % len(found))
+            f.seek(at + found[0] * 32)
+            f.write(b'frag    txt')
     if 'B zerodir' in media:
         path = os.path.join(directory, 'fdb.img')
         with open(path, 'r+b') as f:
