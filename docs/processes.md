@@ -391,6 +391,35 @@ it (one within the segment's block keeps it, with every copy: `ROOT_BRK`). A wai
 is still the one whose call it serves: the process may have ended and a new
 one taken its entry meanwhile (`proc_still`).
 
+### The volumes' locks
+
+Since roadmap disk-scheduler.md M4 (D15) the lock is given up across every
+call to the disk server, so that a call on one drive waits for none on
+another (`tests/disk/beside.test`):
+
+- **Each volume has a lock** (`vol_hold`, `src/os/cache.c`). A call takes
+  it before it touches the volume, and keeps it to its end: when its path
+  reaches the drive (`lookup`), or at once for a descriptor of a volume's
+  file or directory, before its offset is used. Calls on one volume run
+  one at a time; calls on two volumes run at once. A rename takes both its
+  volumes before it touches either, in their order. No thread waits for a
+  volume's lock with the lock kept.
+- **The files' cache** keeps a slot busy while the disk server reads or
+  writes it. A call never evicts a busy slot, or a slot of a volume another
+  call holds, and naps, the lock given up, when none is left to evict. A
+  call writes its own volumes' changed FAT and directory sectors at its
+  end, no others'.
+- **A process ended while a call of its holds a volume** ends when that
+  call is over (`end`): its segments are not revoked under a transfer, nor
+  its descriptions freed under a call. An exec waits for the process's
+  other threads' volume calls the same way.
+- **The paths and nodes** a call works with are in one of three scratch
+  sets (`scratch_take`), taken at the start of a call with a path, a stat
+  or an exec, and given back at its end. Until M4 each function kept its
+  own statics, which another call could now write over while the first
+  waits for the disk. A read, which may wait for ever on a terminal, takes
+  none.
+
 ## init
 
 init (`src/userland/init.c`), process 1, is the first process: the server's

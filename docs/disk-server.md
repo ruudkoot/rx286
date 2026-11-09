@@ -127,8 +127,10 @@ Each drive has a queue (`sched.c`; D4, D6). The choices come in this order:
 4. On the fixed disks, a request that needs a seek has its Seek sent
    first, and the other drive's request is served while the heads move.
 
-While the OS server holds its one lock across every call (until M4), at
-most one request is queued at a time. The host's tests show the orders.
+Since M4 the OS server gives its lock up while a call waits for the disk
+server, and takes a volume's lock for the call (*docs/processes.md*): a
+request of each volume can be queued at once. The host's tests show the
+orders.
 
 ## Retries
 

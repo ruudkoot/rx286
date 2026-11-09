@@ -68,6 +68,11 @@ struct proc {
     rx_u8 futexing;                     /* waits in PX_FUTEX on the word futex_at (P13) */
     rx_u8 lending;                      /* its call lends the data segment to a driver, the
                                            lock given up: a brk waits (proc_lend, P15) */
+    rx_u8 in_volume;                    /* its call holds a volume's lock, and gives the lock
+                                           up while it waits for the disk (D15) */
+    rx_u8 doomed, doom_revoke;          /* ended while such a call ran: it ends when the
+                                           call is over (end(); disk-scheduler.md M4) */
+    int doom_status;
     rx_u16 futex_at;
     pid_t pid, ppid;
     pid_t pgid, sid;                    /* its group and session (P11) */
@@ -353,6 +358,70 @@ void lock_give(void)
     server_lock_give(&lock);
 }
 
+/* self_notify - the calling thread's own notification, to nap on: a
+ * process entry's, the tty thread's, the control thread's, or a program's
+ * (server.h; disk-scheduler.md M4) */
+rx_u16 self_notify(void)
+{
+    unsigned n = server_self();
+
+    if (n >= PROC_N0 && n < PROC_N0 + PROCS)
+        return PROC_NOTIFY(n - PROC_N0);
+    if (n == TTY_N)
+        return TTY_NOTIFY;
+    if (n == OS_CONTROL_N)
+        return OS_CONTROL;
+    return SLOT(OS_SLOT_SLEEP + n);
+}
+
+/* lock_mine - does the calling thread hold the lock? (server.h) */
+int lock_mine(void)
+{
+    return server_lock_holder(&lock) == server_self();
+}
+
+/* lock_nap - a tick's nap, the lock given up meanwhile (server.h; the
+ * calling thread holds it) */
+void lock_nap(void)
+{
+    rx_u16 notify = self_notify();
+
+    lock_give();
+    sleep_on(notify, 1);
+    lock_take(notify);
+}
+
+/* proc_self - the entry whose call the calling thread serves, or -1
+ * (server.h) */
+int proc_self(void)
+{
+    unsigned n = server_self();
+
+    return n >= PROC_N0 && n < PROC_N0 + PROCS ? (int)(n - PROC_N0) : -1;
+}
+
+/* proc_in_volume - the calling thread's call holds a volume's lock (1), or
+ * no longer (0) (server.h; lock held; disk-scheduler.md M4, D15) */
+void proc_in_volume(int on)
+{
+    int i = proc_self();
+
+    if (i >= 0)
+        procs[i].in_volume = (rx_u8)on;
+}
+
+/* volume_busy - is a call of process p's, or of a thread of its, holding a
+ * volume's lock? */
+static int volume_busy(int p)
+{
+    int k;
+
+    for (k = 0; k < PROCS; k++)
+        if (procs[k].in_volume && (k == p || (procs[k].state == P_THREAD && procs[k].leader == p)))
+            return 1;
+    return 0;
+}
+
 #define take lock_take
 #define give lock_give
 
@@ -620,6 +689,7 @@ static void entry_start(int i, pid_t ppid, const char *name, rx_u16 brk, rx_u16 
     p->state = P_ALIVE;
     p->waiting = p->asleep = 0;
     p->futexing = p->lending = 0;
+    p->in_volume = p->doomed = p->doom_revoke = 0;
     p->nice = parent >= 0 ? procs[parent].nice : NZERO;     /* a fork's, a spawn's */
     p->report = R_NONE;
     p->pid = p->pgid = p->sid = 0;      /* (its old ones are no one's now) */
@@ -692,7 +762,15 @@ static void end(int i, int status, int revoke)
     unsigned g;
     char line[48];
 
-    end_depth++;
+    if (volume_busy(i)) {               /* a call of its waits for the disk: it ends when */
+        p->doomed = 1;                  /*    that call is over, its segments and files */
+        p->doom_status = status;        /*    left alone until then (disk-scheduler.md M4) */
+        p->doom_revoke = (rx_u8)(p->doom_revoke | revoke);
+        return;
+    }
+    p->doomed = 0;
+    serving[i] = -1;                    /* (its own server thread's waits find it gone, */
+    end_depth++;                        /*    though vfs_exit may wait for a volume: M4) */
     for (k = 0; k < PROCS; k++)         /* its group, its children's: orphaned */
         if ((k == i || (procs[k].state == P_ALIVE && procs[k].ppid == p->pid))
                 && end_count < END_GROUPS) {    /*    before it ends? (P15) */
@@ -855,6 +933,9 @@ static int px_exec(int i, int t, const char *path, rx_u16 argv, rx_u16 envp, int
     *error = image_take(&img, i, path, P_SLOT(i, PK_DATA), argv, envp);
     if (*error)
         return -1;
+    vol_release(0);                     /* (the file read: its volume no longer needed) */
+    while (volume_busy(i))              /* another thread's call waits for the disk with */
+        lock_nap();                     /*    the old segment lent: it ends first (M4) */
     same = img.code == procs[i].code;   /* its own file again: its code kept (P12) */
     root(ROOT_EXIT, procs[i].root, (rx_u16)same, 0, 0, 0);  /* its threads, in this call, too */
     threads_end(i);
@@ -1251,6 +1332,7 @@ static int px_thread(int p, rx_u16 ip, rx_u16 sp, rx_u16 at, int *error)
     *w = (rx_u16)(((OS_SLOT_EP + n) << 3) | 7);     /* its endpoint: slot 8 + n, RPL 3 */
     procs[c].state = P_THREAD;
     procs[c].lending = 0;
+    procs[c].in_volume = procs[c].doomed = procs[c].doom_revoke = 0;
     procs[c].leader = (rx_u8)p;
     procs[c].tnum = (rx_u8)n;
     procs[c].pid = procs[p].pid;
@@ -1348,13 +1430,23 @@ static unsigned overflow(unsigned k)
 }
 #endif
 
+/* paths_call - does a call use a scratch (vfs.c): a path's, a stat's, an
+ * exec's? Only such a call takes one, never one that may wait for ever (a
+ * terminal's read), which would keep it from the rest (M4) */
+static int paths_call(int call)
+{
+    return call == PX_OPEN || call == PX_STAT || call == PX_FSTAT || call == PX_UNLINK
+        || call == PX_RMDIR || call == PX_MKDIR || call == PX_RENAME || call == PX_CHDIR
+        || call == PX_EXECVE || call == PX_SPAWN;
+}
+
 /* handle - a message on process i's endpoint: a call, its reply in r (BX
  * the result, CX the error, SI and DI more); or a fault. 0 if it ended the
  * process and there is no one to answer */
 static int handle(int i, struct rx_kregs *r)
 {
     rx_u16 notify = P_SLOT(i, PK_NOTIFY), status = 0;
-    static char path[PX_PATH_MAX];      /* (the lock is held: static, P15) */
+    char *path;                         /* (the call's scratch's: disk-scheduler.md M4) */
     char line[64];
     int result = -1, error = 0, unit, p;
     unsigned n;
@@ -1388,6 +1480,14 @@ static int handle(int i, struct rx_kregs *r)
         }
         return 0;
     }
+    if (paths_call(r->ax & 0xFF)) {
+        scratch_take();                 /* (perhaps a nap: then the process may be gone) */
+        if (!proc_still(i)) {
+            scratch_give();
+            give();
+            return 0;
+        }
+    }
     switch (r->ax & 0xFF) {
     case PX_EXIT:
 #ifdef TEST_OS_STACKS
@@ -1404,11 +1504,13 @@ static int handle(int i, struct rx_kregs *r)
         result = px_fork(p, i, r->bx, r->cx, &error);
         break;
     case PX_EXECVE:
+        path = scratch_text();
         result = path_in(i, r->si, path, &error);
         if (result == 0)
             result = px_exec(p, i, path, r->di, r->bx, &error);
         break;
     case PX_SPAWN:
+        path = scratch_text();
         result = path_in(i, r->si, path, &error);
         if (result == 0)
             result = spawn(path, data, r->di, r->bx, procs[p].pid, p, &error);
@@ -1504,6 +1606,12 @@ static int handle(int i, struct rx_kregs *r)
     if (result == VFS_EIO) {
         result = -1;
         error = EIO;
+    }
+    vol_release(0);                     /* the call's volumes (disk-scheduler.md M4) */
+    scratch_give();
+    if (procs[p].doomed && proc_alive(p) && !volume_busy(p)) {
+        end(p, procs[p].doom_status, procs[p].doom_revoke);
+        signal_entry((unsigned)p);      /* ended while the call ran: now */
     }
     give();
     if (result == NO_REPLY || !proc_still(i))
@@ -1635,5 +1743,7 @@ void proc_boot(void)
         rx_log(line, (unsigned)snprintf(line, sizeof line, "rx286: os: no init: error %d\n",
                                         error));
     }
+    vol_release(0);                     /* (what init's start took: M4) */
+    scratch_give();
     give();
 }

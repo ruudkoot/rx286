@@ -27,6 +27,22 @@ rx_u16 cache_write(int slot);
 void cache_meta(int slot);
 rx_u16 cache_flush_meta(void);
 rx_u16 cache_flush(unsigned drive);
+/* vol_hold - a drive's volume's lock for the calling thread's call, held to
+ * the call's end: a nap, the lock given up, while another call holds it
+ * (disk-scheduler.md M4, D15) */
+void vol_hold(unsigned drive);
+/* vol_mine - does the calling thread's call hold a volume's lock? */
+int vol_mine(unsigned drive);
+/* vol_held - the volumes the calling thread's call holds, a bit each */
+unsigned vol_held(void);
+/* vol_release - the calling thread's volumes given up, but those in keep */
+void vol_release(unsigned keep);
+/* scratch_take, scratch_give - a call's scratch: its paths and nodes, one of
+ * a few, while the lock may be given up in the call (vfs.c; M4) */
+void scratch_take(void);
+void scratch_give(void);
+/* scratch_text - the calling thread's scratch's text, for a path */
+char *scratch_text(void);
 /* cache_dirty_in - is any of `count` sectors from `sector` of a drive dirty? */
 int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count);
 /* cache_drop - `count` sectors from `sector` of a drive out of the cache */

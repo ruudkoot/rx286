@@ -175,6 +175,16 @@ void proc_timers(void);
  * thread that finds it taken sleeps a tick on its notification */
 void lock_take(rx_u16 notify);
 void lock_give(void);
+/* self_notify - the calling thread's own notification, to nap on */
+rx_u16 self_notify(void);
+/* lock_mine - does the calling thread hold the lock? */
+int lock_mine(void);
+/* lock_nap - a tick's nap, the lock given up meanwhile (lock held) */
+void lock_nap(void);
+/* proc_self - the entry whose call the calling thread serves, or -1 */
+int proc_self(void);
+/* proc_in_volume - the calling thread's call holds a volume's lock, or not */
+void proc_in_volume(int on);
 
 /* Process entry i's slots of the server's (proc.c) */
 #define P_SLOT(i, k) SLOT(PROC_SLOT0 + PROC_SLOTS_EACH * (i) + (k))

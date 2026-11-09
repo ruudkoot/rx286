@@ -126,7 +126,7 @@ simulator; none of their code is in the repository.
 | M1: the copy and the names | done (2026-11-09) |
 | M2: runs through the drivers | done (2026-11-09) |
 | M3: the disk server | done (2026-11-09) |
-| M4: waiting without the lock | not started |
+| M4: waiting without the lock | done (2026-11-09) |
 | M5: fairness | not started |
 | M6: read-ahead and write-behind | not started |
 | M7: the cache's memory | not started |
@@ -1809,6 +1809,39 @@ less, M a few, L a week.
   - fsrand2, onedir, truncrace and killread pass on Bochs and MAME;
   - every suite passes.
 - **Decisions:** D15.
+- **Done** (2026-11-09). The OS server gives its lock up across every call to the disk
+  server (`os.c`). A call takes a volume's lock before it touches the volume (`vol_hold`),
+  and keeps it to its end: at `lookup` for a path, or at once for a descriptor of a volume's
+  file or directory, before its offset is used. A rename takes both volumes first, in their
+  order. The files' cache keeps a slot busy while the disk server reads or writes it, and
+  never evicts a busy slot or one of a volume another call holds. A call flushes its own
+  volumes' metadata alone. `tests/disk/beside.test`, `tests/posix/fsrand2.test`,
+  `onedir.test`, `truncrace.test` and `killread.test` pass on Bochs and MAME. `make check`
+  passes on Bochs (142), DOSBox-X (62) and MAME (118), and `make check-ia16` passes (142).
+  - **beside.test:** C beside A takes 1.39 times C alone on MAME (1,640 ms against 1,180)
+    and 1.33 on Bochs (320 against 240); E8's prototype had 2.3.
+  - Not as planned:
+    - **A call holds its volume to its end,** so calls on one volume run one at a time.
+      That makes the offset's flag and the count of each file's transfers in flight
+      unnecessary: a truncation never overlaps a transfer on its own volume
+      (truncrace.test).
+    - **A process ended during such a call ends when the call is over** (`end`), in place
+      of a reference on the description across each wait. Its segments are not revoked
+      under a transfer, nor its descriptions freed under a call. An exec waits for its
+      process's other threads' volume calls the same way.
+    - **The statics.** The OS server's functions kept their paths and nodes in statics,
+      safe while one call ran at a time ("the lock is held"). They are now in three
+      scratch sets, which a call with a path, a stat or an exec takes at its start and
+      gives back at its end: about 5.3 KB of DGROUP, against the 6.6 KB of statics they
+      replace. A read takes none, since a terminal's read may wait for ever (the first
+      try took one for every call, and three shells waiting at their prompts held them
+      all). The last directory walked (`vol.c`) is kept for each drive, and `loose_last`
+      for each call.
+    - **The disk server checks a segment passed again** after each driver call, before it
+      copies into it: a process ended meanwhile has its segment revoked, and the copy
+      would fault.
+    - **`fsrand2.test` runs 200 operations on each drive,** not 400, for MAME's diskette at
+      the AT's speed (140 s).
 
 ### M5. Fair shares (M)
 

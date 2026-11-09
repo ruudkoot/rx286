@@ -33,6 +33,7 @@
 
 #include <stdio.h>
 #include "server.h"
+#include "fs.h"
 #include "disks.h"
 #include "posix.h"
 #include "vectors.h"
@@ -88,6 +89,25 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
     return rx_kcall(r);
 }
 
+/* disk_call_ds - a call to the disk server for a drive's volume, whose lock
+ * the calling thread's call holds; the server's lock given up while it
+ * waits, if the thread holds it (disk-scheduler.md M4, D15): the call's
+ * status */
+static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 di, rx_u16 bp,
+                        struct rx_kregs *r)
+{
+    int had, status;
+
+    vol_hold(drive);
+    had = lock_mine();
+    if (had)
+        lock_give();
+    status = call(OS_DISK, label, bx, cx, 0, di, bp, r);
+    if (had)
+        lock_take(self_notify());
+    return status;
+}
+
 /* disk_volume - a drive's volume, as the disk server says it (DS_VOLUME;
  * disk-scheduler.md M3): 0, or the error (E_NOT_FAT12, E_TIMEOUT); its
  * sectors kept for drive_sectors */
@@ -96,7 +116,7 @@ rx_u16 disk_volume(unsigned drive)
     struct rx_kregs r;
     rx_u32 n;
 
-    if (call(OS_DISK, DS_VOLUME, (rx_u16)drive, 0, 0, 0, 0, &r))
+    if (disk_call_ds(drive, DS_VOLUME, (rx_u16)drive, 0, 0, 0, &r))
         return E_TIMEOUT;               /* no disk server answered */
     if (r.bx)
         return r.bx;
@@ -112,9 +132,9 @@ rx_u16 drive_sectors(unsigned drive)
 }
 
 /* disk_run - `count` sectors from `sector` of a drive's volume, to or from
- * a segment of the server's (passed) at an offset, through the disk server
- * (DS_READ, DS_WRITE: DS_RUN_MAX a call). 0, E_TIMEOUT if it did not
- * answer, or its error */
+ * a segment (passed) at an offset, through the disk server (DS_READ,
+ * DS_WRITE: DS_RUN_MAX a call), the lock given up meanwhile. 0, E_TIMEOUT
+ * if it did not answer, or its error */
 rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segment,
                 rx_u16 offset)
 {
@@ -123,8 +143,8 @@ rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segm
 
     while (count) {
         n = count > DS_RUN_MAX ? DS_RUN_MAX : count;
-        if (call(OS_DISK, op == DRV_DISK_WRITE ? DS_WRITE : DS_READ, (rx_u16)(drive | (n << 8)),
-                 sector, 0, offset, segment, &r))
+        if (disk_call_ds(drive, op == DRV_DISK_WRITE ? DS_WRITE : DS_READ,
+                         (rx_u16)(drive | (n << 8)), sector, offset, segment, &r))
             return E_TIMEOUT;
         if (r.bx)
             return r.bx;

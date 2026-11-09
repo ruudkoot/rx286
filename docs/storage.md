@@ -43,9 +43,11 @@ that cache holds one of those sectors changed, and a write drops that
 cache's copies. Everything else goes through the OS server's cache of 32
 sectors, 4 without extended memory (*docs/processes.md*, *Files*), which
 writes its changed sectors in their order on the disk, neighbours as one
-run. The printers it asks for a process's writes to `/dev/lpt1` and
-`/dev/lpt2`. Every call is synchronous, and every wait inside a driver has
-a limit:
+run. While a call waits for the disk server the OS server's lock is given
+up, the call holding its volume's lock alone (roadmap disk-scheduler.md
+M4; *docs/processes.md*), so calls on two drives run at once. The printers
+it asks for a process's writes to `/dev/lpt1` and `/dev/lpt2`. Every call
+is synchronous, and every wait inside a driver has a limit:
 
 | Wait | Limit | Source |
 |---|---|---|

@@ -1,0 +1,26 @@
+# The file system against a model on two volumes at once (roadmap
+# disk-scheduler.md M4, D15; tests/posix/fsrand.c with TEST_POSIX_FSRAND2):
+# a child runs the random operations on C while its parent runs them on B,
+# each against its own model and with its own seed, their calls
+# interleaved by the OS server's threads, which give the lock up while they
+# wait for the disk. fsck.fat finds both volumes sound afterwards. Fewer
+# rounds than fsrand.test's, for MAME's diskette at the AT's speed.
+program: idle
+define: TEST_POSIX_FSRAND2
+emulators: bochs mame
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+fsck: B
+fsck: C
+---
+fsrand: C: {...} operations, {...} checks, 0 mismatches
+fsrand: B: {...} operations, {...} checks, 0 mismatches
+fsrand: done

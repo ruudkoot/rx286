@@ -123,7 +123,9 @@ int main(void)
     || defined(TEST_POSIX_PXRAND) || defined(TEST_POSIX_EDGES) || defined(TEST_POSIX_LATE) \
     || defined(TEST_POSIX_MANY) || defined(TEST_POSIX_HELD) || defined(TEST_POSIX_OVERFLOW) \
     || defined(TEST_POSIX_ORPHANS) || defined(TEST_POSIX_NAMES) \
-    || defined(TEST_POSIX_RDTIME) || defined(TEST_POSIX_RUNS)
+    || defined(TEST_POSIX_RDTIME) || defined(TEST_POSIX_RUNS) || defined(TEST_POSIX_BESIDE) \
+    || defined(TEST_POSIX_FSRAND2) || defined(TEST_POSIX_ONEDIR) \
+    || defined(TEST_POSIX_TRUNCRACE) || defined(TEST_POSIX_KILLREAD)
 #if defined(TEST_POSIX_PROC)
     static char *const argv[] = { "/z/proc", 0 };
 #elif defined(TEST_POSIX_FILES)
@@ -172,6 +174,16 @@ int main(void)
     static char *const argv[] = { "/z/rdtime", 0 };
 #elif defined(TEST_POSIX_RUNS)
     static char *const argv[] = { "/z/runs", 0 };
+#elif defined(TEST_POSIX_BESIDE)
+    static char *const argv[] = { "/z/beside", 0 };
+#elif defined(TEST_POSIX_FSRAND2)
+    static char *const argv[] = { "/z/fsrand", 0 };
+#elif defined(TEST_POSIX_ONEDIR)
+    static char *const argv[] = { "/z/onedir", 0 };
+#elif defined(TEST_POSIX_TRUNCRACE)
+    static char *const argv[] = { "/z/truncrace", 0 };
+#elif defined(TEST_POSIX_KILLREAD)
+    static char *const argv[] = { "/z/killread", 0 };
 #else
     static char *const argv[] = { "/z/pipes", 0 };
 #endif

@@ -9,7 +9,9 @@
  * file of the new name too, and into the other directories; unlinks.
  * Each result is checked against a model of what every file must hold,
  * and every so often every file is read back and every directory listed.
- * The test runs fsck.fat on B afterwards.
+ * The test runs fsck.fat on B afterwards. With TEST_POSIX_FSRAND2 a child
+ * runs the same on C, with a seed of its own, at once (disk-scheduler.md
+ * M4; tests/posix/fsrand2.test), and each says its drive.
  * ============================================================================ */
 
 #include <stdio.h>
@@ -19,13 +21,18 @@
 #include "fcntl.h"
 #include "unistd.h"
 #include "sys/stat.h"
+#include "sys/wait.h"
 
 #define FILES 8                         /* names F0.TXT to F7.TXT */
 #define DIRS 3                          /* /b/r, /b/r/d1, /b/r/d2 */
 #define MAXLEN 2500                     /* a file's bytes at most: three clusters */
 #define CHUNK 700
 #define HOLE 300                        /* a write's start past the end, at most */
+#ifdef TEST_POSIX_FSRAND2
+#define ROUNDS 200                      /* (MAME's diskette, at the AT's speed) */
+#else
 #define ROUNDS 400
+#endif
 #define CHECK_EVERY 25
 #define SAY_MAX 8                       /* mismatches said */
 
@@ -39,6 +46,7 @@ struct mfile {
 static struct mfile model[FILES];
 static unsigned char chunk[CHUNK], back[MAXLEN + 1];
 static unsigned rng = 0x2860, ops, checks, bad;
+static char drive = 'b';                /* the drive the operations are on */
 
 /* next - xorshift's next number (7, 9, 8) */
 static unsigned next(void)
@@ -61,9 +69,9 @@ static const char *path(int f, int dir)
     static char p[24];
 
     if (dir == 0)
-        snprintf(p, sizeof p, "/b/r/f%d.txt", f);
+        snprintf(p, sizeof p, "/%c/r/f%d.txt", drive, f);
     else
-        snprintf(p, sizeof p, "/b/r/d%d/f%d.txt", dir, f);
+        snprintf(p, sizeof p, "/%c/r/d%d/f%d.txt", drive, dir, f);
     return p;
 }
 
@@ -109,12 +117,15 @@ static void verify(int f)
 /* listing - each directory's names against the model */
 static void listing(void)
 {
-    static const char *const dirs[DIRS] = { "/b/r", "/b/r/d1", "/b/r/d2" };
+    static char dirs[DIRS][12];
     unsigned seen;
     struct dirent *e;
     DIR *dp;
     int d, f;
 
+    snprintf(dirs[0], sizeof dirs[0], "/%c/r", drive);
+    snprintf(dirs[1], sizeof dirs[1], "/%c/r/d1", drive);
+    snprintf(dirs[2], sizeof dirs[2], "/%c/r/d2", drive);
     for (d = 0; d < DIRS; d++) {
         checks++;
         seen = 0;
@@ -271,14 +282,28 @@ static void op_rename(int f)
     }
 }
 
-/* main - the rounds, then every file and directory checked */
+/* main - the rounds, then every file and directory checked; with
+ * TEST_POSIX_FSRAND2 a child does the same on C at once */
 int main(void)
 {
+    char r[12], d1[12], d2[12];
     int f, k;
+#ifdef TEST_POSIX_FSRAND2
+    pid_t pid = fork();
+    int status;
+
+    if (pid == 0) {
+        drive = 'c';
+        rng = 0x1986;
+    }
+#endif
 
     for (f = 0; f < FILES; f++)
         model[f].dir = -1;
-    if (mkdir("/b/r", 0755) < 0 || mkdir("/b/r/d1", 0755) < 0 || mkdir("/b/r/d2", 0755) < 0) {
+    snprintf(r, sizeof r, "/%c/r", drive);
+    snprintf(d1, sizeof d1, "/%c/r/d1", drive);
+    snprintf(d2, sizeof d2, "/%c/r/d2", drive);
+    if (mkdir(r, 0755) < 0 || mkdir(d1, 0755) < 0 || mkdir(d2, 0755) < 0) {
         printf("fsrand: mkdir: errno %d\n", errno);
         return 1;
     }
@@ -306,7 +331,16 @@ int main(void)
     for (f = 0; f < FILES; f++)
         verify(f);
     listing();
+#ifdef TEST_POSIX_FSRAND2
+    if (pid != 0)
+        waitpid(pid, &status, 0);       /* (C's line first, whichever ends first) */
+    printf("fsrand: %c: %u operations, %u checks, %u mismatches\n", drive - 'a' + 'A', ROUNDS,
+           checks, bad);
+    if (pid == 0)
+        _exit(0);
+#else
     printf("fsrand: %u operations, %u checks, %u mismatches\n", ROUNDS, checks, bad);
+#endif
     printf("fsrand: done\n");
     return 0;
 }

@@ -14,12 +14,13 @@
 #define FAT12_LAST 0xFFF                /* the end of a chain, as written */
 #define ENTRIES (SECTOR_SIZE / DIR_ENTRY_SIZE)
 
-/* The last directory walked (vol_dir_entry): its drive and first cluster,
- * and the cluster its walk reached, that step along its chain (P15) */
+/* The last directory walked on each drive (vol_dir_entry): its first
+ * cluster, and the cluster its walk reached, that step along its chain
+ * (P15); a drive's own, since calls on two volumes run at once (M4) */
 static struct {
-    rx_u8 valid, drive;
+    rx_u8 valid;
     rx_u16 first, step, cluster;
-} walk;
+} walks[DRIVES];
 
 /* w16 - a little-endian word of a segment */
 static rx_u16 w16(const rx_u8 RX_FAR *p)
@@ -51,7 +52,7 @@ rx_u16 vol_mount(struct vol *v, unsigned drive)
     rx_u32 fats;
     int slot;
 
-    walk.valid = 0;                     /* (another disk, perhaps) */
+    walks[drive].valid = 0;             /* (another disk, perhaps) */
     v->drive = (rx_u8)drive;
     v->start = 0;                       /* (the disk server's volumes: M3) */
     if ((error = disk_volume(drive)) != 0)
@@ -136,7 +137,7 @@ rx_u16 vol_fat_set(struct vol *v, rx_u16 cluster, rx_u16 value)
     rx_u16 at = (rx_u16)(cluster + cluster / 2), error;
     unsigned copy;
 
-    walk.valid = 0;                     /* (a chain may change) */
+    walks[v->drive].valid = 0;          /* (a chain may change) */
     if (cluster < FAT12_FIRST_CLUSTER || cluster >= v->clusters + FAT12_FIRST_CLUSTER)
         return E_BROKEN;
     for (copy = 0; copy < v->fats; copy++) {
@@ -245,9 +246,10 @@ rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *wher
         target = index / per;
         step = 0;
         c = dir;
-        if (walk.valid && walk.drive == v->drive && walk.first == dir && walk.step <= target) {
-            step = walk.step;
-            c = walk.cluster;
+        if (walks[v->drive].valid && walks[v->drive].first == dir
+                && walks[v->drive].step <= target) {
+            step = walks[v->drive].step;
+            c = walks[v->drive].cluster;
         }
         for (; step < target; step++) {
             if ((error = vol_fat_get(v, c, &c)) != 0)
@@ -260,11 +262,10 @@ rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *wher
                     || step + 1u >= v->clusters)
                 return E_BROKEN;
         }
-        walk.valid = 1;
-        walk.drive = (rx_u8)v->drive;
-        walk.first = dir;
-        walk.step = target;
-        walk.cluster = c;
+        walks[v->drive].valid = 1;
+        walks[v->drive].first = dir;
+        walks[v->drive].step = target;
+        walks[v->drive].cluster = c;
         sector = (rx_u16)(vol_cluster_sector(v, c) + (index % per) / ENTRIES);
     }
     if ((error = cache_get(v->drive, sector, 1, &slot)) != 0)

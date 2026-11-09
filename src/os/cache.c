@@ -13,6 +13,15 @@
  * one an eviction could not write is said by its drive's next flush, a
  * close's or an fsync's, not by the call that needed the room (P15).
  * Every call is made with the lock held (proc.c's lock_take).
+ *
+ * The volumes' locks (disk-scheduler.md M4, D15): a call takes a volume's
+ * lock before it touches the volume (vol_hold), and keeps it to its end;
+ * meanwhile it gives the server's lock up whenever it waits for the disk
+ * server (os.c). So a slot is busy while the disk server reads or writes
+ * it, and no call evicts a slot that is busy or is a volume's another call
+ * holds: those it may still be using. A call that finds none to evict
+ * naps, the lock given up, as one does that waits for a volume. The
+ * changed FAT and directory sectors a call flushes are its own volumes'.
  * ============================================================================ */
 
 #include "server.h"
@@ -20,9 +29,10 @@
 
 enum { C_EMPTY, C_CLEAN, C_DIRTY, C_META };
 
-/* A sector of the cache: its drive, its number, its state, when last used */
+/* A sector of the cache: its drive, its number, its state, busy while the
+ * disk server reads or writes it, when last used */
 struct cached {
-    rx_u8 drive, state;
+    rx_u8 drive, state, busy, unused_;
     rx_u16 sector;
     rx_u32 used;                        /* (32 bits: a clock that never wraps, P15) */
 };
@@ -33,6 +43,57 @@ static rx_u16 lost[DRIVES];             /* a dirty sector an eviction could not 
 static rx_u32 clock;
 static int ready;                       /* the segment is there */
 static unsigned sectors = CACHE_SECTORS;    /* its sectors: fewer without extended memory */
+static rx_u8 holder[DRIVES];            /* the thread (its number + 1) whose call holds a
+                                           volume's lock, or 0 (D15) */
+
+/* me - the calling thread, as a holder */
+static rx_u8 me(void)
+{
+    return (rx_u8)(server_self() + 1);
+}
+
+/* vol_hold - a drive's volume's lock for the calling thread's call (fs.h):
+ * a nap, the server's lock given up, while another call holds it, never a
+ * wait with it kept (the order of the locks) */
+void vol_hold(unsigned drive)
+{
+    while (holder[drive] && holder[drive] != me())
+        lock_nap();
+    if (holder[drive] != me()) {
+        holder[drive] = me();
+        proc_in_volume(1);
+    }
+}
+
+/* vol_mine - does the calling thread's call hold a volume's lock? */
+int vol_mine(unsigned drive)
+{
+    return holder[drive] == me();
+}
+
+/* vol_held - the volumes the calling thread's call holds, a bit each */
+unsigned vol_held(void)
+{
+    unsigned d, bits = 0;
+
+    for (d = 0; d < DRIVES; d++)
+        if (holder[d] == me())
+            bits |= 1u << d;
+    return bits;
+}
+
+/* vol_release - the calling thread's volumes given up, but those in keep
+ * (fs.h) */
+void vol_release(unsigned keep)
+{
+    unsigned d;
+
+    for (d = 0; d < DRIVES; d++)
+        if (holder[d] == me() && !(keep & (1u << d)))
+            holder[d] = 0;
+    if (!vol_held())
+        proc_in_volume(0);
+}
 
 /* cache_init - the cache's segment, from the root (at boot): 0 or KE_*.
  * Without extended memory CACHE_SECTORS_SMALL: the disk server caches
@@ -65,21 +126,37 @@ int cache_ready(void)
  * diskette write-protected, or taken out) */
 static rx_u16 put(int k, int n)
 {
-    rx_u16 error = disk_run(DRV_DISK_WRITE, cache[k].drive, cache[k].sector, (rx_u16)n,
-                            CACHE_SEG, (rx_u16)(k * SECTOR_SIZE));
+    rx_u16 error;
     int i;
 
     for (i = k; i < k + n; i++)
+        cache[i].busy = 1;              /* (the lock given up meanwhile: M4) */
+    error = disk_run(DRV_DISK_WRITE, cache[k].drive, cache[k].sector, (rx_u16)n, CACHE_SEG,
+                     (rx_u16)(k * SECTOR_SIZE));
+    for (i = k; i < k + n; i++) {
+        cache[i].busy = 0;
         cache[i].state = error ? C_EMPTY : C_CLEAN;
+    }
     return error;
 }
 
 /* wanted - is slot k one a flush writes? Every changed FAT and directory
- * sector (meta), or every dirty sector of a drive */
+ * sector of the calling thread's volumes (meta), or every dirty sector of
+ * a drive; never a busy one */
 static int wanted(int k, int meta, unsigned drive)
 {
-    return meta ? cache[k].state == C_META
+    if (cache[k].busy)
+        return 0;
+    return meta ? cache[k].state == C_META && holder[cache[k].drive] == me()
                 : cache[k].state >= C_DIRTY && cache[k].drive == drive;
+}
+
+/* evictable - may the calling thread take slot k for another sector? Not
+ * busy, and empty or of a volume no other call holds */
+static int evictable(int k)
+{
+    return !cache[k].busy && (cache[k].state == C_EMPTY || holder[cache[k].drive] == 0
+                              || holder[cache[k].drive] == me());
 }
 
 /* flush - the sectors `wanted` says written, in the order of drive and
@@ -109,37 +186,63 @@ static rx_u16 flush(int meta, unsigned drive)
 }
 
 /* cache_get - a sector in the cache (fs.h): found, or in the place of the
- * least recently used */
+ * least recently used slot it may evict, its volume held first. A wait for
+ * the disk gives the lock up, and the cache is looked at again after it */
 rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
 {
-    int k, oldest = 0;
+    int k, oldest;
     rx_u16 error;
 
     if (!ready)
         return E_IO;
-    if (drive >= DRIVES || sector >= drive_sectors(drive))
+    if (drive >= DRIVES)
         return E_INVAL;
-    for (k = 0; k < (int)sectors; k++) {
-        if (cache[k].state != C_EMPTY && cache[k].drive == drive && cache[k].sector == sector) {
+    vol_hold(drive);
+    if (sector >= drive_sectors(drive))
+        return E_INVAL;
+    for (;;) {
+        oldest = -1;
+        for (k = 0; k < (int)sectors; k++) {
+            if (cache[k].state != C_EMPTY && cache[k].drive == drive && cache[k].sector == sector)
+                break;
+            if (evictable(k) && (oldest < 0 || (cache[k].state == C_EMPTY
+                                                && cache[oldest].state != C_EMPTY)
+                                 || (cache[oldest].state != C_EMPTY && cache[k].state != C_EMPTY
+                                     && cache[k].used < cache[oldest].used)))
+                oldest = k;
+        }
+        if (k < (int)sectors) {
+            if (cache[k].busy) {        /* another's eviction writes it: once it has */
+                lock_nap();
+                continue;
+            }
             cache[k].used = ++clock;
             *slot = k;
             return 0;
         }
-        if (cache[k].state == C_EMPTY
-                || (cache[oldest].state != C_EMPTY && cache[k].used < cache[oldest].used))
-            oldest = k;
+        if (oldest < 0) {               /* every slot busy, or another call's volume's */
+            lock_nap();
+            continue;
+        }
+        k = oldest;
+        if (cache[k].state < C_DIRTY)
+            break;
+        if ((error = put(k, 1)) != 0 && !lost[cache[k].drive])
+            lost[cache[k].drive] = error;   /* (dropped: not this call's error, its owner's) */
     }
-    k = oldest;
-    if (cache[k].state >= C_DIRTY && (error = put(k, 1)) != 0 && !lost[cache[k].drive])
-        lost[cache[k].drive] = error;   /* (dropped: not this call's error, its owner's) */
-    cache[k].state = C_EMPTY;
-    if (fill && (error = disk_call(DRV_DISK_READ, drive, sector, CACHE_SEG,
-                                   (rx_u16)(k * SECTOR_SIZE))) != 0)
-        return error;
     cache[k].drive = (rx_u8)drive;
     cache[k].sector = sector;
     cache[k].state = C_CLEAN;
     cache[k].used = ++clock;
+    if (fill) {
+        cache[k].busy = 1;
+        error = disk_call(DRV_DISK_READ, drive, sector, CACHE_SEG, (rx_u16)(k * SECTOR_SIZE));
+        cache[k].busy = 0;
+        if (error) {
+            cache[k].state = C_EMPTY;
+            return error;
+        }
+    }
     *slot = k;
     return 0;
 }
@@ -175,10 +278,14 @@ rx_u16 cache_flush_meta(void)
     return flush(1, 0);
 }
 
-/* cache_flush - every dirty sector of a drive written (flush) */
+/* cache_flush - every dirty sector of a drive written (flush), its volume
+ * held first */
 rx_u16 cache_flush(unsigned drive)
 {
-    rx_u16 first = flush(0, drive);
+    rx_u16 first;
+
+    vol_hold(drive);
+    first = flush(0, drive);
 
     if (!first)
         first = lost[drive];            /* an eviction's since the last flush */

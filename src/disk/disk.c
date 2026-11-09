@@ -275,12 +275,18 @@ static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved
 {
     unsigned count = requests[q].count, i = 0, n, got, done, k;
     rx_u16 b, first, error = 0;
+    int gone;
 
     while (i < count) {
         take();
         b = dc_find(key(drive, lba + i));
         if (b != DC_NONE && !(dc_state(b) & DC_BUSY)) {
             dc_hit(b);
+            if (!fits(q)) {             /* revoked since the last run (M4) */
+                give();
+                error = E_FAULT;
+                break;
+            }
             memcpy(place(q, i), dc_bytes(b), SECTOR_SIZE);
             give();
             i++;
@@ -301,14 +307,20 @@ static rx_u16 serve_read(unsigned q, unsigned drive, rx_u32 lba, unsigned *moved
         error = tried(DRV_DISK_READ, drive, lba + i, got, window_segment(first),
                       window_offset(first), &done);
         take();
-        for (k = 0; k < got; k++) {
+        gone = !fits(q);                /* the segment revoked while the driver read (a */
+        for (k = 0; k < got; k++) {     /*    process ended): nothing copied into it (M4) */
             b = (rx_u16)(first + k);
             if (k < done) {
                 dc_set(b, DC_CLEAN);
-                memcpy(place(q, i + k), dc_bytes(b), SECTOR_SIZE);
+                if (!gone)
+                    memcpy(place(q, i + k), dc_bytes(b), SECTOR_SIZE);
             } else {
                 dc_drop(b);
             }
+        }
+        if (gone) {
+            error = E_FAULT;
+            done = 0;
         }
         give();
         i += done;
@@ -341,6 +353,11 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
             for (n = 1; i + n < count && dc_find(key(drive, lba + i + n)) == DC_NONE; n++)
                 ;
             n = dc_window(key(drive, lba + i), n, &first);
+        }
+        if (!fits(q)) {                 /* revoked since the last run (M4) */
+            give();
+            error = E_FAULT;
+            break;
         }
         if (n == 0) {                   /* no block free: straight from the segment */
             give();
