@@ -52,7 +52,9 @@ static void written(const char *what, const char *path, int size, long bytes, lo
     said(what, done, ms() - start, budget);
 }
 
-/* read_whole - a file read whole in calls of `size`: the time */
+/* read_whole - a file read whole in calls of `size`: the time; a budget
+ * below 0 is so many ms for 96 KB, the file's own scaled to its size (A's
+ * KERNEL.BIN grows with every milestone: disk-scheduler.md M3) */
 static void read_whole(const char *what, const char *path, int size, long budget)
 {
     long start = ms(), total = 0;
@@ -65,6 +67,8 @@ static void read_whole(const char *what, const char *path, int size, long budget
     while ((n = (int)read(fd, buf, size)) > 0)
         total += n;
     close(fd);
+    if (budget < 0)
+        budget = -budget * (total / 1024) / 96;
     said(what, total, ms() - start, budget);
 }
 
@@ -93,7 +97,7 @@ static void per_sector(const char *what, const char *path, int times, long budge
 int main(void)
 {
     written("D, 32 KB written in calls of 4 KB", "/d/w4k.dat", 4096, 32768L, 1000L);
-    read_whole("A, KERNEL.BIN read in calls of 15 KB", "/a/kernel.bin", 15360, 6000L);
+    read_whole("A, KERNEL.BIN read in calls of 15 KB", "/a/kernel.bin", 15360, -6000L);
     written("B, 45 KB written in calls of 15 KB", "/b/big.dat", 15360, 46080L, 8000L);
     read_whole("B, 45 KB read back in calls of 15 KB", "/b/big.dat", 15360, 8000L);
     read_whole("C, NUMBERS.TXT read in calls of 15 KB", "/c/numbers.txt", 15360, 600L);

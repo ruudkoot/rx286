@@ -74,7 +74,17 @@ programs below 1 MB, 32 KB, so that the kernel's arena keeps its room
    memory for segments; for `ROOT_SERVE`'s, blocks of 8 KB from the
    allocator as the server asks, so that a small machine keeps no stacks of
    entries it never uses; a block is kept for good, as the threads are, and
-   a full one is followed by another (roadmap memory.md M6, M7).
+   a full one is followed by another (roadmap memory.md M6, M7). The OS
+   server gets the boot information too, read-only (`OS_SLOT_BOOT_INFO`),
+   and the disk drivers' endpoints are the disk server's.
+5. **The disk server** ("disk"; roadmap disk-scheduler.md M3;
+   *docs/disk-server.md*): a space of `DS_SLOTS`; its endpoint, a copy of
+   which the OS server gets in `OS_SLOT_DISK`; a copy of the fault endpoint
+   badged `ROOT_BADGE_DISK`, for `ROOT_PANIC` alone; the disk drivers'
+   endpoints; its cache's index and segments, from the lowest piece of
+   extended memory with room, else from the memory for segments; and its
+   `DS_THREADS` threads, each with a notification and a stack segment from
+   a block kept for its stacks, their faults the root's (`SERVE_BADGE`).
 
 A kernel call the root's building needs, refused, stops it with "rx286:
 the root could not build the system", as does an OS server that is not the

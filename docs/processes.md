@@ -241,7 +241,9 @@ The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 (past 8.3, or past `PX_PATH_MAX`), `ENOTEMPTY`, `EPIPE`.
 
 The volumes are read and written through a cache of 32 sectors in a segment
-of the server's (`src/os/cache.c`, `src/os/vol.c`): the FAT, in every copy,
+of the server's, 4 without extended memory (`src/os/cache.c`,
+`src/os/vol.c`), whose sectors come from the disk server and its own cache
+(*docs/disk-server.md*): the FAT, in every copy,
 and the directories are written at the end of each call that changed them;
 a file's data at its close, its `fsync`, or when its sector leaves the
 cache. A sector the driver refuses to write is dropped from the cache: the
@@ -250,9 +252,9 @@ diskette, and the disk's copy counts again. A write within a file's
 clusters changes data sectors alone, whose error its `fsync` or close
 gives. A directory's chain is walked once in a scan of it, and one longer
 than the volume has clusters, which loops, is `EIO`; so is a directory's
-entry whose cluster is 0. The diskette driver still moves a sector at a
-time and has no change line: its rework is the disk subsystem's
-(`roadmaps/disk-scheduler.md`).
+entry whose cluster is 0. A process's whole sectors go straight between
+the disk server and the process's data (`roadmaps/disk-scheduler.md` M2,
+M3). The diskette drives' change line is not read yet (M8).
 
 A pipe holds 1 KB, in a segment of the server's; eight may be open at once.
 A read of an empty pipe waits, in the reader's server thread, until a

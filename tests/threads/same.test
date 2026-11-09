@@ -32,6 +32,9 @@ rx286: thread rtc ran
 rx286: thread counter ran
 rx286: thread os ran
 rx286: thread os ran
+rx286: thread disk ran
+rx286: thread disk ran
+rx286: thread disk ran
 rx286: thread os ran
 rx286: thread os ran
 rx286: thread thread ran

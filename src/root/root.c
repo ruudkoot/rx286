@@ -11,6 +11,9 @@
  * that serves that program alone (START_SESSION), started with SP = 4n,
  * which tells it its program (src/lib/crt/server.asm), on a stack segment
  * of its own, with the program's capabilities in its slots (src/os/os.c).
+ * The disk server's module ("disk"; disk-scheduler.md M3) gets a space of
+ * DS_SLOTS, the disk drivers' endpoints, its cache's segments and its
+ * DS_THREADS threads (build_disk); the OS server, an endpoint to it.
  * Every other module is a program: it gets a thread and an endpoint to the
  * OS server badged with its module's number (OS_SLOT_EP), on which it makes
  * its calls (docs/syscalls.md); and its faults go to the OS server, on the
@@ -45,6 +48,7 @@
 #include "descriptors.h"
 #include "vectors.h"
 #include "root.h"
+#include "disk.h"
 #define FD_DMA_BYTES (FD_DMA_SECTORS * SECTOR_SIZE)            /* the diskettes' runs */
 #define FD_DMA_SMALL_BYTES (FD_DMA_SMALL_SECTORS * SECTOR_SIZE) /*    (drivers.inc) */
 #include "buddy.h"
@@ -114,6 +118,8 @@ static unsigned programs;               /* the modules it builds: 1 to programs 
 static unsigned foreground;             /* the one the keys are for */
 static unsigned server;                 /* the OS server's module, or 0 */
 rx_u16 server_space;                    /* its space, of the root's */
+static unsigned disk;                   /* the disk server's module, or 0 */
+static rx_u16 disk_space;               /* its space, of the root's */
 #ifdef TEST_SERVICES
 static rx_u16 test_space;               /* the test program's, its requests' (give_caps) */
 #endif
@@ -378,7 +384,7 @@ static void fault_to(rx_u16 thread, rx_u16 endpoint, rx_u16 badge)
  * OS server and the module is neither it nor a driver */
 static void program_endpoint(unsigned module)
 {
-    if (server == 0 || module == server)
+    if (server == 0 || module == server || module == disk)
         return;
     if (ENTRY_B(entry_of(module), M_FLAGS) & (MF_DRIVER | MF_ARCHIVE))
         return;                         /* a driver: its endpoint comes with build */
@@ -533,6 +539,8 @@ static void build(unsigned module)
     /* its space; a program's thread */
     if (module == server) {
         slots = OS_SLOTS;
+    } else if (module == disk) {
+        slots = DS_SLOTS;
     } else if (flags & MF_DRIVER) {
         slots = DRV_SLOTS;
     } else {
@@ -546,8 +554,9 @@ static void build(unsigned module)
     }
     /* (the server's, 16 KB, from the memory for segments: the arena keeps
      * its room for the others' objects, and a TEST_CAPS program's, P15) */
-    must(retype(module == server ? UNTYPED : ARENA, CAP_SPACE, s.space, slots, 0));
-    if (module != server)
+    must(retype(module == server || module == disk ? UNTYPED : ARENA, CAP_SPACE, s.space,
+                slots, 0));
+    if (module != server && module != disk)
         must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
     /* its code, as the kernel gave it */
     give(s.code, W_CODE);
@@ -560,8 +569,8 @@ static void build(unsigned module)
     /* its stack, of its ring */
     new_segment(s.stack, stack, ring);
     give(s.stack, W_STACK);
-    if (module == server)
-        return;                         /* its threads come with build_server */
+    if (module == server || module == disk)
+        return;                         /* their threads come with build_server, build_disk */
     if (flags & MF_DRIVER) {
         build_driver(irq, service);
         fault_ep = FAULT_EP;            /* a driver's faults: the root's */
@@ -726,8 +735,8 @@ rx_u16 server_room(unsigned module)
  * driver's notification, badged DRV_STOP_BIT, for Ctrl+Break */
 static void give_service(unsigned module, int service)
 {
-    if (service == 0)
-        return;
+    if (service == 0 || (disk && (service == SERVICE_DISKETTE || service == SERVICE_FIXED_DISK)))
+        return;                         /* (the disk server's: build_disk) */
     program_slots(module);
     give_server(s.ep, (rx_u16)(((OS_SLOT_SERVICE + service) & 0xFF) * 8 + 4));
     if (service == SERVICE_SOUND)
@@ -752,6 +761,7 @@ static void build_server(void)
      * allocator's as the server asks (memory.md M7) */
     must(server_stacks_keep(server, (rx_u16)((OS_SESSIONS + 1) * (OS_THREAD_STACK / 16))));
     give_server(MODULES, W_MODULES);    /* the module table */
+    give_server(SLOT(ROOT_SLOT_BOOT_INFO), OS_SLOT_BOOT_INFO * 8 + 4);  /* (its cache's size) */
     server_control();
     /* its requests for processes, on the fault endpoint, badged so */
     must(copy(server_space, FAULT_EP, OS_SLOT_ROOT * 8 + 4, COPY_MINT, ROOT_BADGE_OS,
@@ -763,7 +773,7 @@ static void build_server(void)
         must(copy(server_space, SCRATCH, OS_SLOT_KEYS * 8 + 4, COPY_MOVE, 0, 0));
     }
     for (module = 1; module <= programs; module++) {
-        if (module == server)
+        if (module == server || module == disk)
             continue;
         e = entry_of(module);
         if (ENTRY_B(e, M_FLAGS) & MF_DRIVER) {
@@ -774,6 +784,99 @@ static void build_server(void)
         } else {
             serve_program(module);
         }
+    }
+}
+
+/* disk_segment - a segment for the disk server's cache, of its ring, in
+ * SCRATCH: from the lowest piece of extended memory that has room, else
+ * from the memory for segments; 0 or the error */
+static int disk_segment(rx_u16 bytes, int ring)
+{
+    int n;
+
+    for (n = 0; n < ROOT_SLOTS_EXTENDED; n++)
+        if (retype(SLOT(ROOT_SLOT_EXTENDED + n), CAP_SEGMENT, SCRATCH, bytes,
+                   (ring << 5) | ACC_DATA) == 0)
+            return 0;
+    return retype(UNTYPED, CAP_SEGMENT, SCRATCH, bytes, (ring << 5) | ACC_DATA);
+}
+
+/* disk_cache - the disk server's cache, of a size fixed at boot
+ * (disk-scheduler.md M3, D10 B): with extended memory, a segment of
+ * DS_CACHE_PER_SEGMENT blocks for each 256 KB of it, one at least and
+ * DS_CACHE_SEGMENTS at most, and an index of DS_INDEX_BYTES; without,
+ * DS_CACHE_SMALL blocks in one, and an index of DS_INDEX_SMALL */
+static void disk_cache(int ring)
+{
+    const rx_u16 RX_FAR *w = (const rx_u16 RX_FAR *)RX_MK_FP(SLOT(ROOT_SLOT_BOOT_INFO), 0);
+    unsigned k, wanted = w[BI_EXT_KB / 2] / 256;
+    rx_u16 bytes = (rx_u16)(DS_CACHE_PER_SEGMENT * (unsigned)DS_CACHE_BLOCK);
+
+    if (disk_segment(w[BI_EXT_KB / 2] ? DS_INDEX_BYTES : DS_INDEX_SMALL, ring) == 0)
+        must(copy(disk_space, SCRATCH, DS_SLOT_INDEX * 8 + 4, COPY_MOVE, 0, 0));
+    if (w[BI_EXT_KB / 2] == 0) {
+        wanted = 1;
+        bytes = DS_CACHE_SMALL * DS_CACHE_BLOCK;
+    } else if (wanted == 0) {
+        wanted = 1;
+    } else if (wanted > DS_CACHE_SEGMENTS) {
+        wanted = DS_CACHE_SEGMENTS;
+    }
+    for (k = 0; k < wanted && disk_segment(bytes, ring) == 0; k++)
+        must(copy(disk_space, SCRATCH, (rx_u16)((DS_SLOT_CACHE + k) * 8 + 4), COPY_MOVE, 0, 0));
+}
+
+/* build_disk - the disk server (disk-scheduler.md M3): its endpoint, which
+ * the OS server gets a copy of; the root's ROOT_PANIC, badged
+ * ROOT_BADGE_DISK; the disk drivers' endpoints; its cache; and its
+ * threads, each on a stack of its own with a notification, started at its
+ * entry with SP DS_STACK times its number, their faults the root's
+ * (SERVE_BADGE), the threads kept in its own slots */
+static void build_disk(void)
+{
+    unsigned module, n;
+    entry_ptr e;
+    rx_u16 entry;
+    rx_u8 priority, ring;
+
+    if (disk == 0)
+        return;
+    program_slots(disk);
+    disk_space = s.space;
+    e = entry_of(disk);
+    entry = ENTRY_W(e, M_ENTRY);
+    priority = ENTRY_B(e, M_PRIORITY);
+    ring = ENTRY_B(e, M_RING);
+    must(retype(ARENA, CAP_ENDPOINT, s.ep, 0, 0));
+    give(s.ep, DS_SLOT_EP * 8 + 4);
+    if (server)
+        must(copy(server_space, s.ep, OS_SLOT_DISK * 8 + 4, COPY_COPY, 0, 0));
+    must(copy(disk_space, FAULT_EP, DS_SLOT_ROOT * 8 + 4, COPY_MINT, ROOT_BADGE_DISK,
+              RIGHT_SEND));
+    for (module = 1; module <= programs; module++) {
+        e = entry_of(module);
+        if (!(ENTRY_B(e, M_FLAGS) & MF_DRIVER))
+            continue;
+        program_slots(module);
+        if (ENTRY_B(e, M_SERVICE) == SERVICE_DISKETTE)
+            must(copy(disk_space, s.ep, DS_SLOT_DISKETTE * 8 + 4, COPY_COPY, 0, 0));
+        if (ENTRY_B(e, M_SERVICE) == SERVICE_FIXED_DISK)
+            must(copy(disk_space, s.ep, DS_SLOT_FIXED_DISK * 8 + 4, COPY_COPY, 0, 0));
+    }
+    disk_cache(ring);
+    program_slots(disk);
+    must(server_stacks_keep(disk, (rx_u16)(DS_THREADS * (DS_THREAD_STACK / 16))));
+    for (n = 1; n <= DS_THREADS; n++) {
+        must(server_stack(disk, ring, disk_space, DS_THREAD_STACK,
+                          (rx_u16)((DS_SLOT_STACK + n) * 8 + 4)));
+        must(retype(ARENA, CAP_NOTIFY, s.notify, 0, 0));
+        must(copy(disk_space, s.notify, (rx_u16)((DS_SLOT_NOTIFY + n) * 8 + 4), COPY_MOVE, 0,
+                  0));
+        must(retype(ARENA, CAP_THREAD, s.thread, 0, 0));
+        fault_to(s.thread, FAULT_EP, (rx_u16)(SERVE_BADGE | disk));
+        must(thread_call(s.thread, THREAD_CONFIGURE, disk_space, entry, (rx_u16)(n * DS_STACK)));
+        must(thread_call(s.thread, THREAD_START, 0, 0, priority));
+        must(copy(disk_space, s.thread, (rx_u16)((DS_SLOT_THREAD + n) * 8 + 4), COPY_MOVE, 0, 0));
     }
 }
 
@@ -939,12 +1042,16 @@ int RX_MAIN_CALL main(void)
             if (module != 1)            /* the second module, or none: its programs' */
                 failed(KE_ARG);         /* slots, 8n on, must miss its own (mkimage) */
         }
+        if (e[M_NAME] == 'd' && e[M_NAME + 1] == 'i' && e[M_NAME + 2] == 's'
+                && e[M_NAME + 3] == 'k' && e[M_NAME + 4] == 0)
+            disk = module;              /* the disk server's (disk-scheduler.md M3) */
     }
     for (module = 1; module <= programs; module++)      /* the programs' endpoints */
         program_endpoint(module);
     for (module = 1; module <= programs; module++)
         build(module);
     build_server();
+    build_disk();
 #ifdef TEST_ROOT_REPORT
     module_report();
 #endif
@@ -982,6 +1089,11 @@ int RX_MAIN_CALL main(void)
             }
 #endif
             service(r.ax & 0xFF, &r);
+        } else if (r.dx == ROOT_BADGE_DISK) {  /* the disk server's: ROOT_PANIC alone */
+            if ((r.ax & 0xFF) == ROOT_PANIC)
+                server_panic(disk, r.bx);   /* (does not return) */
+            r.bx = E_INVAL;
+            r.cx = 0;
         } else if (r.dx & SERVE_BADGE) {    /* a server's thread: its policy runs at */
             module = r.dx & 0xFF;           /*    its entry after a fault (M6) */
             if (!(r.di & FAULT_COUNTED))

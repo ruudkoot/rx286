@@ -66,17 +66,9 @@ static const char msg_interrupt[] = "rx286: Ctrl+Break: SIGINT\n";
 static const char vector_names[] =
     "#DE #DB NMI #BP #OF #BR #UD #NM #DF #MP #TS #NP #SS #GP #14 #15 "
     "#MF #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 ";
-/* Each drive's geometry: disks.inc's until disk_geometry asks its driver,
- * which has the BIOS's (disk-scheduler.md M2, D16) */
-static struct {
-    rx_u16 cylinders;
-    rx_u8 heads, track;
-} geometry[DRIVES] = {
-    { DISK_A_CYLINDERS, DISK_A_HEADS, DISK_A_SECTORS },
-    { DISK_B_CYLINDERS, DISK_B_HEADS, DISK_B_SECTORS },
-    { DISK_C_CYLINDERS, DISK_C_HEADS, DISK_C_SECTORS },
-    { DISK_D_CYLINDERS, DISK_D_HEADS, DISK_D_SECTORS },
-};
+/* Each drive's volume's sectors, once the disk server has said them
+ * (disk_volume), as many as the server's 16-bit numbers reach */
+static rx_u16 volume_sectors[DRIVES];
 
 /* call - KCALL_CALL, the reply into *r if there is an r */
 int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, rx_u16 bp,
@@ -96,74 +88,48 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
     return rx_kcall(r);
 }
 
-/* driver_of - a drive's driver, and its unit on it: the diskettes' for A and
- * B, the fixed disks' for C and D */
-static rx_u16 driver_of(unsigned drive, rx_u16 *unit)
-{
-    *unit = (rx_u16)(drive >= DRIVE_C ? drive - DRIVE_C : drive);
-    return OS_SERVICE(drive >= DRIVE_C ? SERVICE_FIXED_DISK : SERVICE_DISKETTE);
-}
-
-/* disk_geometry - each drive's geometry, from its driver (at the server's
- * start); a drive whose driver does not answer keeps disks.inc's */
-void disk_geometry(void)
+/* disk_volume - a drive's volume, as the disk server says it (DS_VOLUME;
+ * disk-scheduler.md M3): 0, or the error (E_NOT_FAT12, E_TIMEOUT); its
+ * sectors kept for drive_sectors */
+rx_u16 disk_volume(unsigned drive)
 {
     struct rx_kregs r;
-    rx_u16 unit, driver;
-    unsigned d;
+    rx_u32 n;
 
-    for (d = 0; d < DRIVES; d++) {
-        driver = driver_of(d, &unit);
-        if (call(driver, DRV_DISK_GEOMETRY, unit, 0, 0, 0, 0, &r) || r.bx
-                || r.cx == 0 || (r.si & 0xFF) == 0 || (r.si >> 8) == 0)
-            continue;
-        geometry[d].cylinders = r.cx;
-        geometry[d].heads = (rx_u8)r.si;
-        geometry[d].track = (rx_u8)(r.si >> 8);
-    }
+    if (call(OS_DISK, DS_VOLUME, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;               /* no disk server answered */
+    if (r.bx)
+        return r.bx;
+    n = r.cx | ((rx_u32)r.si << 16);
+    volume_sectors[drive] = n > 0xFFFFUL ? 0xFFFF : (rx_u16)n;
+    return 0;
 }
 
-/* drive_sectors - a drive's sectors, as many as the server's 16-bit numbers
- * reach (the disk server's are 32-bit: M3) */
+/* drive_sectors - a drive's volume's sectors, 0 until disk_volume */
 rx_u16 drive_sectors(unsigned drive)
 {
-    rx_u32 n = (rx_u32)geometry[drive].cylinders * geometry[drive].heads
-        * geometry[drive].track;
-
-    return n > 0xFFFFUL ? 0xFFFF : (rx_u16)n;
+    return volume_sectors[drive];
 }
 
-/* disk_run - `count` sectors from `sector` of a drive, to or from a segment
- * of the server's (passed) at an offset: by cylinder, head and sector, in
- * runs the drivers take (a fixed disk's DRV_DISK_RUN_MAX; a diskette's
- * cylinder). 0, E_TIMEOUT if no driver answered, or the driver's error */
+/* disk_run - `count` sectors from `sector` of a drive's volume, to or from
+ * a segment of the server's (passed) at an offset, through the disk server
+ * (DS_READ, DS_WRITE: DS_RUN_MAX a call). 0, E_TIMEOUT if it did not
+ * answer, or its error */
 rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segment,
                 rx_u16 offset)
 {
     struct rx_kregs r;
-    rx_u16 unit, driver = driver_of(drive, &unit), n, c, h, s, track, heads;
+    rx_u16 n;
 
-    track = geometry[drive].track;
-    heads = geometry[drive].heads;
     while (count) {
-        c = (rx_u16)(sector / (heads * track));
-        h = (rx_u16)(sector / track % heads);
-        s = (rx_u16)(sector % track + 1);
-        n = count;
-        if (drive >= DRIVE_C) {
-            if (n > DRV_DISK_RUN_MAX)
-                n = DRV_DISK_RUN_MAX;
-        } else if (n > (heads - h) * track - (s - 1)) {
-            n = (rx_u16)((heads - h) * track - (s - 1));    /* to the cylinder's end */
-        }
-        if (call(driver, op, (rx_u16)(unit | (h << 8)), c, offset, (rx_u16)(s | (n << 8)),
-                 segment, &r))
-            return E_TIMEOUT;           /* no driver answered */
+        n = count > DS_RUN_MAX ? DS_RUN_MAX : count;
+        if (call(OS_DISK, op == DRV_DISK_WRITE ? DS_WRITE : DS_READ, (rx_u16)(drive | (n << 8)),
+                 sector, 0, offset, segment, &r))
+            return E_TIMEOUT;
         if (r.bx)
             return r.bx;
-        if (r.cx == 0 || r.cx > n)
-            return E_IO;                /* (a driver that moved nothing) */
-        n = r.cx;                       /* a diskette's DMA buffer held less: the rest next */
+        if (r.cx != n)
+            return E_IO;
         sector = (rx_u16)(sector + n);
         offset = (rx_u16)(offset + n * SECTOR_SIZE);
         count = (rx_u16)(count - n);

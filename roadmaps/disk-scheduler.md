@@ -125,7 +125,7 @@ simulator; none of their code is in the repository.
 | D1-D21 | decided (2026-11-09): as recommended |
 | M1: the copy and the names | done (2026-11-09) |
 | M2: runs through the drivers | done (2026-11-09) |
-| M3: the disk server | not started |
+| M3: the disk server | done (2026-11-09) |
 | M4: waiting without the lock | not started |
 | M5: fairness | not started |
 | M6: read-ahead and write-behind | not started |
@@ -1728,6 +1728,58 @@ less, M a few, L a week.
   - `tests/memory/*` pass at every size the memory suite runs, the least machine among them;
   - the disk server's sizes are recorded against the estimate (10-14 KB of code).
 - **Decisions:** D3, D4, D6, D9, D11, D14.
+- **Done** (2026-11-09). The disk server (`src/disk/`, *docs/disk-server.md*) stands between
+  the OS server and the disk drivers, whose endpoints the root gives it alone. It has three
+  threads: one takes the calls (`DS_VOLUME`, `DS_READ`, `DS_WRITE`, `DS_SYNC`, `DS_EJECT`;
+  `disk.inc`), and one serves each controller. Volumes have 32-bit sectors, and a fixed
+  disk's master boot record is read there (`volume.c`). The cache is 2Q in segments of 125
+  blocks with their records at each head (`cache.c`). Requests are ordered by C-LOOK, with
+  the deadline's batches, the turn between C and D, and Seek first (`sched.c`). The
+  retries have moved out of the drivers, which try a run once. `tests/unit/test_disk.py`
+  runs the three pure parts on the host. `make check` passes on Bochs (137), DOSBox-X (62)
+  and MAME (113), with 212 host tests, and `make check-ia16` passes (137). gcc-ia16 needed
+  one cast: 125 × 524 overflows its 16-bit `int`.
+  - **The sizes:** 9.6 KB of code (9,567 bytes, against the estimate of 10-14 KB) and
+    1 KB of DGROUP. The OS server's code went from 47,508 bytes to 47,164.
+  - **speed.test on MAME** now checks every budget, not D's alone, as M2 meant it to. A's
+    budget is 96 KB in 6 s, scaled to KERNEL.BIN's size (110 KB now: the image grows
+    with each milestone). A took 6.5 s of 6.7. D's 32 KB written took 820 ms of 1 s (420
+    at M2): each call's FAT and directory sectors now take the extra hop too. C's sector of
+    a run, read 20 times, costs 441 µs on Bochs (476 at M2) and 2.2 ms on MAME, served from
+    the cache. B's 45 KB read back takes 200 ms, from the cache, against 3.4 s at M2.
+  - Not as planned:
+    - **The least machine's memory.** On a 512 KB machine without extended memory, the
+      disk server costs about 16 KB below 1 MB: its code in the boot image, its space,
+      its stacks, its data and its cache. M2 had left 2-3 KB to spare there. To make
+      room:
+      - the OS server's cache has 4 sectors there instead of 32, since the disk server
+        caches below it (the root gives the OS server the boot information,
+        `OS_SLOT_BOOT_INFO`);
+      - the disk server's cache is 4 blocks there (`DS_CACHE_SMALL`), not the 8 KB floor
+        planned;
+      - its hash and ghosts sit in an index segment sized to the cache, not in DGROUP;
+      - its space has 64 slots (2 KB: a slot is 32 bytes of the kernel's), so 12
+        requests at once, and the rest wait in the endpoint's queue;
+      - its stacks are 512 bytes (250 used at most).
+
+      `tests/memory/many-small.test` still runs a 60 KB child at 512 KB beside the
+      others, but with 12 children (`TEST_MANY_FEWER`), not 16: the sixteenth fork's last
+      2 KB went to the disk server. Each later milestone's code costs that machine again.
+    - **The cache with extended memory** is a segment of 125 blocks for each 256 KB of
+      extended memory, one at least and 8 at most. MAME's default machine of 1 MB gets
+      256 KB, and 2 MB or more gets the planned 512 KB.
+    - **Neither driver holds a next run yet.** With the OS server's lock (until M4) one
+      request reaches the disk server at a time; M6's read-ahead gives the second call
+      its use.
+    - **A file's partial sectors** still go through the OS server's cache, written
+      through; whole sectors go straight between the disk server and the process.
+    - **Writes go through to the disk** before the reply, until M6's write-behind, so
+      `DS_SYNC` has nothing to write yet.
+    - **Four volumes,** drives A to D. A fixed disk's other partitions wait for M8's `/mnt`.
+    - **Tests that list the modules and threads** (`tests/root/modules.test`,
+      `tests/threads/*`) show the disk server's; `tests/caps/review-spaces.test`'s program
+      makes 114 spaces, not 115; `tests/sh/clock.test` allows the minute that the larger
+      image's slower boot now passes on Bochs.
 
 ### M4. Waiting without the lock (M)
 

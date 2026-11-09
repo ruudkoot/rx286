@@ -16,6 +16,7 @@
 #include "rx/server.h"
 #include "drivers.h"
 #include "layout.h"
+#include "disk.h"
 
 #define RING 2
 #define SLOT(n) ((rx_u16)((n) * 8 + 4 + RING))  /* a slot of the server's, as a selector */
@@ -27,6 +28,7 @@
 #define OS_FOREGROUND SLOT(15)          /* the foreground program's thread */
 #define OS_ROOT SLOT(OS_SLOT_ROOT)      /* the root's endpoint, for requests */
 #define OS_SERVICE(s) SLOT((OS_SLOT_SERVICE + (s)) & 0xFF)  /* a driver's endpoint */
+#define OS_DISK SLOT(OS_SLOT_DISK)      /* the disk server's (disk-scheduler.md M3) */
 #define OS_SLOT_SLEEP 128               /* program n's thread's notification: + n */
 #define OS_PART OS_THREAD_STACK         /* each thread's stack segment (os.inc; M6) */
 #define PROCS OS_PROCS                  /* the processes and threads at once (os.inc;
@@ -57,14 +59,14 @@ struct session {
 int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, rx_u16 bp,
          struct rx_kregs *r);
 /* disk_call - a sector to or from a segment of the server's (passed), through
- * the drive's driver: 0 or the error */
+ * the disk server: 0 or the error */
 rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 offset);
 /* disk_run - `count` sectors to or from a segment of the server's (passed),
- * in the runs the drivers take: 0 or the error */
+ * through the disk server: 0 or the error */
 rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segment,
                 rx_u16 offset);
-/* disk_geometry - each drive's geometry, asked of its driver (at start) */
-void disk_geometry(void);
+/* disk_volume - a drive's volume, as the disk server says it: 0 or the error */
+rx_u16 disk_volume(unsigned drive);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:

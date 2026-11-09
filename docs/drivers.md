@@ -41,7 +41,8 @@ besides its code, data and stack:
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
-service; and a copy of the sound driver's notification, badged
+service, but the disk drivers', which the disk server gets
+(*docs/disk-server.md*); and a copy of the sound driver's notification, badged
 `DRV_STOP_BIT`, in its slot 13, to end a sound with on Ctrl+Break.
 
 A driver's data segment is of DPL 2, so that the root can fill it from the
@@ -165,7 +166,8 @@ and on MAME takes the script's keys from it (`TEST_KEY_BYTE`).
 
 They took the kernel's disk code (roadmap l4.md L9), and since roadmap
 disk-scheduler.md M2 move runs of sectors by cylinder, head and sector
-(*docs/storage.md*). A unit is 0 or 1 on the driver's controller: drives
+(*docs/storage.md*). Since M3 the disk server alone calls them: the root
+gives it their endpoints, not the OS server. A unit is 0 or 1 on the driver's controller: drives
 `DRIVE_A` and `DRIVE_B`, or `DRIVE_C` and `DRIVE_D`, of `DRIVES`. Every
 reply's BX is 0 or the error.
 
@@ -182,15 +184,18 @@ reply's BX is 0 or the error.
 A fixed disk's run goes on across heads and cylinders, `DRV_DISK_RUN_MAX`
 (64) sectors at most; a diskette's ends with its cylinder, and moves as
 many sectors as its DMA buffer holds (`FD_DMA_SECTORS`, 30, or 4 without
-extended memory), CX saying how many. The OS server turns a drive's sector numbers into these
-(`disk_run`), asking each drive's geometry at its start
-(`DRV_DISK_GEOMETRY`). The driver checks every number again. The fixed
+extended memory), CX saying how many. The disk server turns a drive's
+sector numbers into these (*docs/disk-server.md*), asking each drive's
+geometry at its start (`DRV_DISK_GEOMETRY`). The driver checks every number
+again. The fixed
 disk driver takes its drives' geometry from the boot information
 (`DRV_SLOT_BOOT_INFO`), or `disks.inc`'s where the BIOS gave none. The
 diskette driver moves a run through its DMA buffer, and stops the motor two
 seconds after its last transfer on its timer; the fixed disk driver moves
-the words straight to or from the segment passed. Both still try a failed
-run again (until the disk server, roadmap disk-scheduler.md M3).
+the words straight to or from the segment passed. Each tries a run once,
+then resets its controller or forgets the diskette's cylinder before its
+next: the disk server, their only caller, tries again (*docs/disk-server.md*;
+roadmap disk-scheduler.md M3, D14).
 
 ## The serial driver
 

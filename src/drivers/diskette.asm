@@ -17,8 +17,9 @@
 ; has no implied seek: a transfer seeks first, after recalibrating a drive
 ; whose cylinder is not known. The controller is reset and given its
 ; timings (Specify) before the first transfer and after any timeout. A
-; transfer the controller fails is tried FD_TRIES times, recalibrating in
-; between; a timeout ends it at once. The motor runs FD_MOTOR_OFF_TICKS after
+; transfer the controller fails is tried once (FD_TRIES), its drive's
+; cylinder forgotten, so that the next recalibrates: the disk server's
+; retries (disk-scheduler.md M3, D14) come so. The motor runs FD_MOTOR_OFF_TICKS after
 ; the last transfer, as the BIOS's does: the driver's timer looks. The 8237's
 ; channel 2 carries each run to or from the DMA buffer the root gave the
 ; driver (DRV_SLOT_DEVICE: FD_RUN_MAX sectors that do not cross 64 KB), whose
@@ -48,7 +49,7 @@ FD_UNITS            equ 2
 FD_RUN_MAX          equ FD_DMA_SECTORS  ; a run at most: a 1.2 MB cylinder, the DMA buffer's
 FDC_CMD_MT          equ 0x80            ; Read or Write Data's multi-track bit: on to head 1
 FDC_CMD_READ_ID     equ 0x4A            ; Read ID, MFM
-FD_TRIES            equ 3
+FD_TRIES            equ 1               ; the disk server tries again (D14)
 FD_RECALIBRATIONS   equ 2               ; the 765 steps 77 times at most: 80 cylinders may need two
 FD_MOTOR_START_TICKS equ 50 + 1         ; more than 1 s: the BIOS's motor start time
 FD_MOTOR_OFF_TICKS  equ 100             ; 2 s after the last transfer

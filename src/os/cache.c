@@ -32,13 +32,20 @@ static rx_u16 lost[DRIVES];             /* a dirty sector an eviction could not 
                                            drive's next flush says so (P15) */
 static rx_u32 clock;
 static int ready;                       /* the segment is there */
+static unsigned sectors = CACHE_SECTORS;    /* its sectors: fewer without extended memory */
 
-/* cache_init - the cache's segment, from the root (at boot): 0 or KE_* */
+/* cache_init - the cache's segment, from the root (at boot): 0 or KE_*.
+ * Without extended memory CACHE_SECTORS_SMALL: the disk server caches
+ * below it, and a 512 KB machine has no room for both (disk-scheduler.md
+ * M3) */
 int cache_init(void)
 {
     struct rx_kregs r;
 
-    if (call(SLOT(OS_SLOT_ROOT), ROOT_LOAD, CACHE_SECTORS * SECTOR_SIZE, 0, 0, CACHE_SEG, 0, &r)
+    if (rx_lsl(SLOT(OS_SLOT_BOOT_INFO)) >= BI_EXT_KB + 1
+            && ((const rx_u16 RX_FAR *)RX_MK_FP(SLOT(OS_SLOT_BOOT_INFO), 0))[BI_EXT_KB / 2] == 0)
+        sectors = CACHE_SECTORS_SMALL;
+    if (call(SLOT(OS_SLOT_ROOT), ROOT_LOAD, (rx_u16)(sectors * SECTOR_SIZE), 0, 0, CACHE_SEG, 0, &r)
             || r.bx)
         return E_NOMEM;
     ready = 1;
@@ -85,14 +92,14 @@ static rx_u16 flush(int meta, unsigned drive)
 
     for (;;) {
         low = -1;
-        for (k = 0; k < CACHE_SECTORS; k++)
+        for (k = 0; k < (int)sectors; k++)
             if (wanted(k, meta, drive) && (low < 0 || cache[k].drive < cache[low].drive
                     || (cache[k].drive == cache[low].drive
                         && cache[k].sector < cache[low].sector)))
                 low = k;
         if (low < 0)
             return first;
-        for (n = 1; low + n < CACHE_SECTORS && n < DRV_DISK_RUN_MAX && wanted(low + n, meta, drive)
+        for (n = 1; low + n < (int)sectors && n < DRV_DISK_RUN_MAX && wanted(low + n, meta, drive)
                 && cache[low + n].drive == cache[low].drive
                 && cache[low + n].sector == cache[low].sector + n; n++)
             ;
@@ -112,7 +119,7 @@ rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
         return E_IO;
     if (drive >= DRIVES || sector >= drive_sectors(drive))
         return E_INVAL;
-    for (k = 0; k < CACHE_SECTORS; k++) {
+    for (k = 0; k < (int)sectors; k++) {
         if (cache[k].state != C_EMPTY && cache[k].drive == drive && cache[k].sector == sector) {
             cache[k].used = ++clock;
             *slot = k;
@@ -185,7 +192,7 @@ int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count)
 {
     int k;
 
-    for (k = 0; k < CACHE_SECTORS; k++)
+    for (k = 0; k < (int)sectors; k++)
         if (cache[k].state >= C_DIRTY && cache[k].drive == drive && cache[k].sector >= sector
                 && cache[k].sector - sector < count)
             return 1;
@@ -198,7 +205,7 @@ void cache_drop(unsigned drive, rx_u16 sector, rx_u16 count)
 {
     int k;
 
-    for (k = 0; k < CACHE_SECTORS; k++)
+    for (k = 0; k < (int)sectors; k++)
         if (cache[k].state != C_EMPTY && cache[k].drive == drive && cache[k].sector >= sector
                 && cache[k].sector - sector < count)
             cache[k].state = C_EMPTY;

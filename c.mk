@@ -22,10 +22,11 @@ INC_H := $(B)/inc
 
 # The C headers made from the NASM include files (tools/inc2h)
 INC_NAMES := build kcalls os layout disks drivers ports selectors descriptors posix archive \
-    vectors exe
+    vectors exe disk
 INC_HEADERS := $(addprefix $(INC_H)/,$(addsuffix .h,$(INC_NAMES)))
 # (and the servers' own: a change of one rebuilds every object, os-server.md P11)
-C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h src/os/*.h src/root/*.h) \
+C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h src/os/*.h src/root/*.h \
+    src/disk/*.h) \
     $(INC_HEADERS)
 
 $(INC_H)/%.h: src/include/%.inc tools/inc2h tools/rxlib.py
@@ -231,6 +232,18 @@ $(B)/os.rx: $(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.p
 	    --ring 2 --dgroup-max $(SERVER_DGROUP_MAX))
 
 $(FAR_B)/os/%.obj: $(wildcard src/os/*.h)
+
+# The disk server (roadmap disk-scheduler.md M3, D3): a server as the OS
+# server is, in C's compact model with a server's start, each of its
+# threads on a stack segment of its own; its cache, its order and its
+# volumes are pure C, tested on the host too (tests/unit/c/test_disk_*.c)
+DISK_OBJS := $(addprefix $(FAR_B)/disk/,disk.obj cache.obj sched.obj volume.obj)
+DISK_DGROUP_MAX := 16384
+$(B)/disk.rx: $(SERVER_START) $(DISK_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.py
+	$(call wlink_exe,disk,$(SERVER_START) $(DISK_OBJS) $(FAR_LIBS), \
+	    --ring 2 --dgroup-max $(DISK_DGROUP_MAX))
+
+$(FAR_B)/disk/%.obj: $(wildcard src/disk/*.h)
 
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)

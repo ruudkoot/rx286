@@ -28,6 +28,8 @@ int rx_log_far(unsigned segment, unsigned offset, unsigned n);
 void rx_ud2(void);
 /* rx_verr - may the caller read through a selector (VERR)? 1 or 0 */
 int rx_verr(unsigned selector);
+/* rx_verw - may the caller write through a selector (VERW)? 1 or 0 */
+int rx_verw(unsigned selector);
 /* rx_xchg - a word swapped with a value at once (XCHG): its old value */
 int rx_xchg(int *word, int value);
 /* rx_lsl - a segment's limit as the CPU sees it (LSL), or 0 if the caller

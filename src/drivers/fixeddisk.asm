@@ -16,12 +16,13 @@
 ; run's timer is armed once, for the whole command, so that a sector costs
 ; one receive and one acknowledgement of the interrupt (dw_run_wait). The
 ; controller seeks (an implied seek) and retries by itself; the driver tries
-; a run HD_TRIES times, a timeout ending it at once (the disk server's
-; retries come in M3). Before the first transfer, and after any failure,
-; the controller is reset (the fixed disk register's bit 2); before a
-; drive's first transfer the controller is told its heads and sectors a
-; track (Set Parameters), and its heads are sent to cylinder 0 (Restore),
-; as the BIOS does at start: a reset leaves the step rate at 7.5 ms, and
+; a run once (HD_TRIES), and after a failure resets the controller before
+; its next: the disk server tries again (disk-scheduler.md M3, D14). Before
+; the first transfer, and after any failure, the controller is reset (the
+; fixed disk register's bit 2); before a drive's first transfer the
+; controller is told its heads and sectors a track (Set Parameters), and its
+; heads are sent to cylinder 0 (Restore), as the BIOS does at start: a
+; reset leaves the step rate at 7.5 ms, and
 ; Restore sets the rate implied seeks use (IBM, Fixed Disk and Diskette
 ; Adapter, 7-8). A drive that is not there fails with E_TIMEOUT then. The
 ; drive is selected before the reset as well as after: the AT's controller
@@ -50,7 +51,7 @@ NOTIFY              equ SLOT(DRV_SLOT_NOTIFY)
 IRQ                 equ SLOT(DRV_SLOT_IRQ)
 RECV                equ SLOT(DRV_SLOT_RECV)
 BOOT_INFO           equ SLOT(DRV_SLOT_BOOT_INFO)
-HD_TRIES            equ 2
+HD_TRIES            equ 1               ; the disk server tries again (D14)
 HD_TICKS            equ 300 + 1         ; 6 s: the BIOS's fixed disk timeout
 HD_RESET_READS      equ 16              ; the reset held for that many reads of a port
 HD_UNITS            equ 2

@@ -1023,8 +1023,8 @@ static rx_u16 file_cluster(struct ofd *o, rx_u16 index, int grow, rx_u16 *c)
 
 enum { IO_READ, IO_WRITE, IO_ZERO };
 
-#define RUN_FIXED DRV_DISK_RUN_MAX      /* a direct run's sectors at most: a fixed disk's */
-#define RUN_DISKETTE FD_DMA_SECTORS     /*    and a diskette's (disk-scheduler.md M2) */
+#define RUN_MAX DS_RUN_MAX              /* a direct run's sectors at most (disk-scheduler.md
+                                           M2, M3) */
 
 /* file_run - the whole sectors from the description's offset, which is a
  * sector's start, that lie together on the disk and that the call moves: a
@@ -1039,7 +1039,7 @@ static rx_u16 file_run(struct ofd *o, struct vol *v, rx_u16 cluster, rx_u32 with
 {
     rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, whole;
     rx_u16 run, c = cluster, c2, index = (rx_u16)(o->offset / bytes);
-    rx_u16 max = o->drive >= DRIVE_C ? RUN_FIXED : RUN_DISKETTE;
+    rx_u16 max = RUN_MAX;
     rx_u16 room = (rx_u16)((0x10000UL - at) / SECTOR_SIZE);
 
     whole = left;

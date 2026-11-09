@@ -2,7 +2,9 @@
 
 The AT's four drives and two printer ports, as rx286 drives them
 (`roadmaps/storage.md`). Drivers in ring 1 drive them (*docs/drivers.md*;
-roadmap l4.md L7, L9). A process sees the drives' files as `/a` to `/d`,
+roadmap l4.md L7, L9), and the disk server stands between the disk drivers
+and the OS server (*docs/disk-server.md*; roadmap disk-scheduler.md M3). A
+process sees the drives' files as `/a` to `/d`,
 which the OS server keeps (*docs/processes.md*), and so does the shell
 (*docs/shell.md*); it prints through `/dev/lpt1` and `/dev/lpt2`.
 
@@ -23,23 +25,25 @@ none. The emulators' disks have these:
 
 The fixed disks' types are the BIOS's (table `FD_TBL`), with the cylinder
 from which writes are precompensated: `DISK_C_PRECOMP` 300 and
-`DISK_D_PRECOMP` 128. The OS server turns a sector's number *n* into the
-controllers' terms as the BIOS's callers do (`os.c`'s `disk_run`): sector
+`DISK_D_PRECOMP` 128. The disk server turns a drive's sector *n* into the
+controllers' terms as the BIOS's callers do (`src/disk/disk.c`'s `run`): sector
 *n* mod sectors a track, plus 1; head (*n* / sectors a track) mod heads;
 cylinder *n* / (sectors a track × heads).
 
 ## The disks' sectors
 
-The OS server reads and writes the drives in runs of sectors (roadmap
-disk-scheduler.md M2; *docs/drivers.md*): it asks the drive's driver, the
-diskettes' for A and B, the fixed disks' for C and D, passing the segment
-the sectors are in. A process's read or write of two whole sectors or more
-of a file's contiguous clusters goes straight between the disk and the
-process's data: a read through the cache instead if the cache holds one of
-those sectors changed, and a write drops the cache's copies. Everything
-else goes through its cache of 32 sectors (*docs/processes.md*, *Files*),
-which writes its changed sectors in their order on the disk, neighbours as
-one run. The printers it asks for a process's writes to `/dev/lpt1` and
+The OS server reads and writes a drive's volume in runs of sectors
+through the disk server (*docs/disk-server.md*; roadmap disk-scheduler.md
+M2, M3), passing the segment the sectors are in. The disk server caches
+them and asks the drive's driver, the diskettes' for A and B, the fixed
+disks' for C and D. A process's read or write of two whole sectors or more
+of a file's contiguous clusters goes straight between the disk server and
+the process's data. A read goes through the OS server's cache instead if
+that cache holds one of those sectors changed, and a write drops that
+cache's copies. Everything else goes through the OS server's cache of 32
+sectors, 4 without extended memory (*docs/processes.md*, *Files*), which
+writes its changed sectors in their order on the disk, neighbours as one
+run. The printers it asks for a process's writes to `/dev/lpt1` and
 `/dev/lpt2`. Every call is synchronous, and every wait inside a driver has
 a limit:
 

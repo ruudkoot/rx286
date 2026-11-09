@@ -1622,7 +1622,6 @@ void proc_boot(void)
     envp[1] = RX_OFF(env_home);
     take(OS_CONTROL);
     cache_init();                       /* the files' cache (P7) */
-    disk_geometry();                    /* the drives' (disk-scheduler.md M2) */
     pipes_init();                       /* the pipes' buffers (P9) */
     if (cwds_init())                    /* the current directories (P15) */
         rx_log("os: no room for the current directories\n", 40);

@@ -56,7 +56,7 @@ program's thread's notification whenever the keyboard sent it something
 |---|---|
 | 0, 1, 2 | its code, data and stack |
 | 3 | the module table |
-| 3 + s | the endpoint of the driver of service s (`OS_SLOT_SERVICE` + `SERVICE_*`, *docs/drivers.md*) |
+| 3 + s | the endpoint of the driver of service s (`OS_SLOT_SERVICE` + `SERVICE_*`, *docs/drivers.md*), but the disk drivers', which are the disk server's |
 | 13 | the sound driver's notification, badged `DRV_STOP_BIT`: Ctrl+Break ends a sound |
 | 14 | the control notification |
 | 15 | the foreground program's thread, which Ctrl+Break restarts |
@@ -64,10 +64,12 @@ program's thread's notification whenever the keyboard sent it something
 | 8n + 6 | program n's thread's stack (`OS_K_THREAD_STACK`; M6; 8n + 7, its files segment until P14, unused) |
 | 128 + n | a notification program n's thread sleeps on (`OS_SLOT_SLEEP`): the kernel's timer signals it with bit 1; the foreground program's, the keyboard driver too, whenever the keyboard sent something (`KEY_SIGNAL_BIT`) |
 | 148 | a load, while code is read into it |
-| 149 | the files' cache, 32 sectors (*docs/processes.md*, *Files*) |
+| 149 | the files' cache, 32 sectors, 4 without extended memory (*docs/processes.md*, *Files*) |
 | 150 | the pipes' buffers, eight of 1 KB |
 | 151 | the current directories, `PX_PATH_MAX` bytes for each entry of the table (P15) |
 | 152, 153 | the control thread's and the tty thread's stacks (`OS_SLOT_CONTROL_STACK`, `OS_SLOT_TTY_STACK`; M6) |
+| 154 | the disk server's endpoint, which alone it asks for sectors (`OS_SLOT_DISK`; *docs/disk-server.md*; roadmap disk-scheduler.md M3) |
+| 155 | the boot information, read-only, which says whether there is extended memory, and so its cache's size (`OS_SLOT_BOOT_INFO`) |
 | 160 | the root's fault endpoint, badged `ROOT_BADGE_OS` (`OS_SLOT_ROOT`) |
 | 161 | `/z`, the archive of programs, read-only (`OS_SLOT_ARCHIVE`; *docs/processes.md*) |
 | 162 | the processes' keys' notification, when no program the root builds has the keys (`OS_SLOT_KEYS`) |
@@ -140,7 +142,8 @@ server:
   builds a test program makes them too, through a copy badged
   `ROOT_BADGE_TEST`; in `TEST_TWIN` builds a test server of two threads
   (`tests/programs/twin.c`), through one badged `ROOT_BADGE_TWIN`, makes
-  `ROOT_SERVE` and has its own policy. Until P14 the server asked
+  `ROOT_SERVE` and has its own policy. The disk server's copy, badged
+  `ROOT_BADGE_DISK`, makes `ROOT_PANIC` alone (*docs/disk-server.md*). Until P14 the server asked
   the root about the programs too, for their `ps`, `kill` and `start`.
 - **Its own slots:** `/z`, the archive of programs, in `OS_SLOT_ARCHIVE`;
   when no program the root builds has the keys, the processes' keys'

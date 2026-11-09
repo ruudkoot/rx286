@@ -14,7 +14,11 @@
 #include "unistd.h"
 #include "sys/wait.h"
 
+#ifdef TEST_MANY_FEWER
+#define MANY 12                         /* tests/memory/many-small.test: 512 KB alone */
+#else
 #define MANY 16
+#endif
 #define BYTES 0xE000U                   /* 56 KB: the data segment then about 60 KB */
 
 /* child - grow, fill, wait for the go, check: 0 if every byte held, 2 with
@@ -40,7 +44,7 @@ static int child(int n, int go)
 /* main - the children, then their statuses */
 int main(void)
 {
-    static const char go[MANY] = "gggggggggggggggg";
+    static const char go[16] = "gggggggggggggggg";
     int fds[2], i, forked = 0, refused = 0, sound = 0, nomem = 0, other = 0, status;
     pid_t pid;
 

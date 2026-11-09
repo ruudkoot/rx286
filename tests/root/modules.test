@@ -2,7 +2,8 @@
 # capabilities the kernel gave it, the root finds each module's code where
 # the module table says, and its code and data as assembled (Fletcher sums
 # of what it reads, against the image's). The drivers' code, of ring 1, is
-# not the root's to read: "----". Beside the drivers and the servers, a
+# not the root's to read: "----". Beside the drivers and the servers (the
+# OS server, and since disk-scheduler.md M3 the disk server), a
 # program in assembly (idle) and one in C (the counter, TEST_COUNTER).
 program: idle
 define: TEST_COUNTER
@@ -10,6 +11,7 @@ define: TEST_ROOT_REPORT
 ---
 rx286, test build
 root: module os: code at {m:os.base}h, sum {m:os.codesum}, data sum {m:os.datasum}
+root: module disk: code at {m:disk.base}h, sum {m:disk.codesum}, data sum {m:disk.datasum}
 root: module printer: code at {m:printer.base}h, sum ----, data sum {m:printer.datasum}
 root: module mouse: code at {m:mouse.base}h, sum ----, data sum {m:mouse.datasum}
 root: module console: code at {m:console.base}h, sum ----, data sum {m:console.datasum}

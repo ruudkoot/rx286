@@ -14,6 +14,7 @@
 
 #define CACHE_SEG SLOT(149)             /* the cache's segment (ROOT_LOAD at boot) */
 #define CACHE_SECTORS 32
+#define CACHE_SECTORS_SMALL 4          /* without extended memory (disk-scheduler.md M3) */
 
 int cache_init(void);
 int cache_ready(void);

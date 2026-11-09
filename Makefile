@@ -92,7 +92,12 @@ PROGRAM_RING := $(if $(findstring TEST_RING1,$(TEST_DEFINES)),1:3:fg:iopl,$(if \
 # segment of its own
 OS_STACK_BYTES := $(shell $(PYTHON) -c "import sys; sys.path.insert(0, 'tools'); import rxlib; \
     print(rxlib.include_constants('os.inc')['OS_STACK_SIZE'])")
+# The disk server's (disk-scheduler.md M3): its threads' starts' room, between
+# the drivers and the OS server in priority
+DS_STACK_BYTES := $(shell $(PYTHON) -c "import sys; sys.path.insert(0, 'tools'); import rxlib; \
+    print(rxlib.include_constants('disk.inc')['DS_STACK_SIZE'])")
 MODULES := root=$(B)/root.rx:2:6 os=$(B)/os.rx:2:5:stack=$(OS_STACK_BYTES) \
+    disk=$(B)/disk.rx:2:6:stack=$(DS_STACK_BYTES) \
     printer=$(B)/printer.bin:1:7:driver:service=1 mouse=$(B)/mouse.bin:1:7:driver:irq=4:service=2 \
     console=$(B)/console.bin:1:7:driver:service=3 kbd=$(B)/keyboard.bin:1:7:driver:irq=1:service=4 \
     fd=$(B)/diskette.bin:1:7:driver:irq=6:service=5 hd=$(B)/fixeddisk.bin:1:7:driver:irq=14:service=6 \
@@ -115,7 +120,7 @@ FLOPPY_SECTORS := 2400
 FLOPPY_SERIAL := 52583836
 
 IMAGE := $(B)/rx286.img
-BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.rx \
+BINARIES := $(B)/boot-sector.bin $(B)/boot-loader.bin $(B)/root.rx $(B)/os.rx $(B)/disk.rx \
     $(B)/printer.bin $(B)/mouse.bin $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin \
     $(B)/fixeddisk.bin $(B)/serial.bin $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) \
     $(B)/counter.rx $(B)/z.arc $(B)/kernel.bin $(B)/image.bin
@@ -180,7 +185,8 @@ $(B)/kernel.bin: src/kernel/kernel.asm $(KERNEL_SRC)
 
 # The boot image: the kernel, the module table and the modules. On the
 # floppy it is KERNEL.BIN, upper case as FAT12 keeps names.
-$(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.rx $(B)/printer.bin $(B)/mouse.bin \
+$(B)/image.bin: $(B)/kernel.bin $(B)/root.rx $(B)/os.rx $(B)/disk.rx $(B)/printer.bin \
+    $(B)/mouse.bin \
     $(B)/console.bin $(B)/keyboard.bin $(B)/diskette.bin $(B)/fixeddisk.bin $(B)/serial.bin \
     $(B)/sound.bin $(B)/rtc.bin $(PROGRAM_BIN) $(B)/counter.rx $(B)/z.arc \
     tools/mkimage \

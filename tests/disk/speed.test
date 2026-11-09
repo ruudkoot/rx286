@@ -3,6 +3,11 @@
 # and its CPU at the AT's, so the budgets are about the drivers' and the OS
 # server's work; Bochs and DOSBox-X give no AT's time. M1: 32 KB written to D
 # in calls of 4 KB within 1 s (1.86 s before M1's memcpy; 0.74 s in E7).
+# M2: A's KERNEL.BIN at 96 KB in 6 s or better, scaled to its size, since
+# it grows with each milestone; B's 45 KB written and read back within 8 s
+# each; C's NUMBERS.TXT within 0.6 s in calls of 15 KB and 3 s in calls of
+# 512 bytes; and a sector of a run within 3 ms. M3's disk server holds
+# them all.
 program: idle
 define: TEST_POSIX_RDTIME
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
@@ -12,4 +17,10 @@ timeout: 300
 emulators: mame
 ---
 rdtime: D, 32 KB written in calls of 4 KB: within 1000 ms: yes
+rdtime: A, KERNEL.BIN read in calls of 15 KB: within {...} ms: yes
+rdtime: B, 45 KB written in calls of 15 KB: within 8000 ms: yes
+rdtime: B, 45 KB read back in calls of 15 KB: within 8000 ms: yes
+rdtime: C, NUMBERS.TXT read in calls of 15 KB: within 600 ms: yes
+rdtime: C, NUMBERS.TXT read in calls of 512 bytes: within 3000 ms: yes
+rdtime: C, NUMBERS.TXT 20 times in calls of 15 KB: within 3000 us a sector: yes
 rdtime: done
