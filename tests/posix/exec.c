@@ -63,7 +63,7 @@ static int spawned(const char *path, char **argv, int along_path)
 /* main - each way a program comes from disk */
 int main(void)
 {
-    static char *child[] = { "/c/bin/child", "one", 0 };
+    static char *child[] = { "/mnt/rx286c/bin/child", "one", 0 };
     static char *codes_exit[] = { "codes", "exit", 0 };
     static char *codes[] = { "codes", 0 };
     static char *by_name[] = { "child", "x", 0 };
@@ -87,17 +87,17 @@ int main(void)
     }
     printf("exec: child along PATH, by execvp (2): %d\n", waited(pid));
 
-    unlink("/b/bases");
+    unlink("/mnt/rx286b/bases");
     posix_spawnp(&a, "codes", 0, 0, codes, environ);
     posix_spawnp(&b, "codes", 0, 0, codes, environ);
-    for (k = 0; k < 2000 && (stat("/b/bases", &st) < 0 || st.st_size < 14); k++)
+    for (k = 0; k < 2000 && (stat("/mnt/rx286b/bases", &st) < 0 || st.st_size < 14); k++)
         ;
     kill(a, SIGTERM);
     kill(b, SIGTERM);
     waited(a);
     waited(b);
     again = malloc(16);
-    fd = open("/b/bases", O_RDONLY);
+    fd = open("/mnt/rx286b/bases", O_RDONLY);
     n = read(fd, again, 14);
     close(fd);
     shared = n == 14 && memcmp(again, again + 7, 7) == 0;
@@ -110,7 +110,7 @@ int main(void)
     n = read(fd, image, (size_t)st.st_size);
     close(fd);
     size = n;                           /* (for copies on the diskette, below: P15) */
-    bad[0] = "/b/bad";
+    bad[0] = "/mnt/rx286b/bad";
     bad[1] = 0;
     for (k = 0; k < 9; k++) {
         memcpy(again, image, (size_t)n);
@@ -132,7 +132,7 @@ int main(void)
         n2 = spawned(bad[0], bad, 0);   /* (errno read after the call) */
         printf("exec: %s (-1, ENOEXEC 8): %d, %d\n", what[k], n2, errno);
     }
-    n2 = spawned("/c/bin", bad, 0);
+    n2 = spawned("/mnt/rx286c/bin", bad, 0);
     printf("exec: a directory (-1, EACCES 13): %d, %d\n", n2, errno);
 
     t0 = rx_ticks();
@@ -150,7 +150,7 @@ int main(void)
     printf("exec: a file open for writing (-1, ETXTBSY 26): %d, %d\n", n2, errno);
     close(fd);
     {
-        static char long_path[272] = "PATH=/c/";      /* past PATH_MAX, 256 */
+        static char long_path[272] = "PATH=/mnt/rx286c/";      /* past PATH_MAX, 256 */
         char *env[2], **saved = environ;
 
         for (k = 0; k < 255; k++)
@@ -177,16 +177,16 @@ int main(void)
             printf("exec: argv and environ of 16,383 each (E2BIG 7): %d\n", n2);
         }
     }
-    fd = open("/b/junk", O_WRONLY | O_CREAT | O_TRUNC);
+    fd = open("/mnt/rx286b/junk", O_WRONLY | O_CREAT | O_TRUNC);
     for (k = 0; k < 10; k++)
         write(fd, junk, sizeof junk);   /* (20 KB: read, it takes the cache's 32 sectors) */
     close(fd);
     for (k = 0, n = 0; k < 3; k++) {    /* the main thread's call while a thread execs */
-        snprintf(copy, sizeof copy, "/b/copy%d", k);    /*    a new copy from B, which */
+        snprintf(copy, sizeof copy, "/mnt/rx286b/copy%d", k);    /*    a new copy from B, which */
         fd = open(copy, O_WRONLY | O_CREAT | O_TRUNC);  /*    waits for the disk: */
         write(fd, image, (size_t)size);                 /*    dropped, not served to */
         close(fd);                                      /*    the new image (P15) */
-        fd = open("/b/junk", O_RDONLY);
+        fd = open("/mnt/rx286b/junk", O_RDONLY);
         while (read(fd, junk, sizeof junk) > 0)
             ;
         close(fd);

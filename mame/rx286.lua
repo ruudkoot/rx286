@@ -7,6 +7,11 @@
 -- makes the file RX286_MAME_STOP names, and the machine exits as MAME would
 -- at its own end: its diskettes written back, at once.
 --
+-- And a test's media changes (media-at:, disk-scheduler.md M8): a diskette
+-- taken out of A or B, or an image put in, at so many seconds of the
+-- machine's time, as RX286_MAME_MEDIA lists them ("30 eject A ;40 insert A
+-- path"), the drives' images found by their brief names (flop1, flop2).
+--
 -- tools/run-test starts MAME with -autoboot_script pointing here.
 -- ============================================================================
 
@@ -28,8 +33,44 @@ local function stop_asked()
     return false
 end
 
--- periodic - once a frame: the machine's end, if asked
+local changes = {}
+for entry in string.gmatch(os.getenv("RX286_MAME_MEDIA") or "", "[^;]+") do
+    local seconds, what, drive, path = string.match(entry, "^(%S+) (%S+) (%S+) ?(.*)$")
+    if seconds then
+        table.insert(changes, { at = tonumber(seconds), what = what, drive = drive,
+                                path = path, done = false })
+    end
+end
+local names = { A = "flop1", B = "flop2" }
+
+-- image - a drive's image device, by its brief name
+local function image(name)
+    for _, img in pairs(manager.machine.images) do
+        if img.brief_instance_name == name then
+            return img
+        end
+    end
+end
+
+-- media - the changes whose time has come
+local function media()
+    local now = manager.machine.time:as_double()
+    for _, c in ipairs(changes) do
+        if not c.done and now >= c.at then
+            c.done = true
+            local img = image(names[c.drive])
+            if img and c.what == "eject" then
+                img:unload()
+            elseif img and c.what == "insert" then
+                img:load(c.path)
+            end
+        end
+    end
+end
+
+-- periodic - once a frame: the media's changes; the machine's end, if asked
 local function periodic()
+    media()
     if stop_asked() then
         manager.machine:exit()
     end

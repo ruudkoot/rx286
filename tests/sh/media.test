@@ -1,14 +1,16 @@
 # A drive without a diskette, a fixed disk without a partition (roadmap
-# os-server.md P9): errors, never a hang.
+# os-server.md P9): errors, never a hang. By DOS's letters, since a volume
+# not there has no name in /mnt (disk-scheduler.md M8, D20): B's no
+# diskette, ENXIO; D's no FAT12, EIO.
 program: sh
 media: B ejected
 media: D blank
 emulators: bochs mame
-keys: ls /b; ls /d; echo x > /b/x.txt\n
+keys: ls b:; ls d:; echo x > b:/x.txt\n
 ---
 rx286, test build
-/a$ ls /b; ls /d; echo x > /b/x.txt
-/b: input/output error
-/d: input/output error
-sh: /b/x.txt: input/output error
-/a$
+/mnt/rx286$ ls b:; ls d:; echo x > b:/x.txt
+b:: no such device
+d:: input/output error
+sh: b:/x.txt: no such device
+/mnt/rx286$

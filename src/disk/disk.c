@@ -38,6 +38,7 @@
 #include "os.h"
 #include "layout.h"
 #include "disk.h"
+#include "disks.h"
 #include "cache.h"
 #include "sched.h"
 #include "volume.h"
@@ -104,6 +105,13 @@ static rx_u16 wb_error[DS_VOLUMES];     /* a write behind's failure, for the vol
                                            DS_SYNC */
 static const char msg_behind[] = "disk: write-behind failed\n";
 static unsigned segments;               /* the cache's: its own, and those the root lent (M7) */
+static rx_u32 identity[FIXED][2];       /* each diskette drive's diskette: its first two
+                                           sectors hashed, as last read or written (M8, D12) */
+static rx_u8 identified[FIXED], touched[FIXED], checking;
+static rx_u16 seen_at[FIXED];           /* each diskette drive's last word from its driver */
+#define TRUST_TICKS 100                 /* 2 s: a diskette's cache trusted so long after its
+                                           drive's last access, then checked first (DOS's) */
+#define TRUSTED(d) ((rx_u16)((rx_u16)rx_ticks() - seen_at[d]) < TRUST_TICKS)
 #ifdef TEST_DISK_MEMORY
 static int last_change;                 /* the cache's last: 1 grew, -1 shrank */
 static const char msg_grows[] = "disk: the cache grows\n";
@@ -205,6 +213,8 @@ static rx_u16 run(int op, unsigned drive, rx_u32 sector, unsigned n, rx_u16 segm
         if (kcall(KCALL_CALL, op, (rx_u16)(unit | (h << 8)), c, ep, offset,
                   (rx_u16)(s | (k << 8)), segment, &r))
             return E_TIMEOUT;           /* no driver answered */
+        if (drive < FIXED && r.bx != E_CHANGED)
+            seen_at[drive] = (rx_u16)rx_ticks();
         if (r.bx)
             return r.bx;
         if (r.cx == 0 || r.cx > k)
@@ -219,15 +229,37 @@ static rx_u16 run(int op, unsigned drive, rx_u32 sector, unsigned n, rx_u16 segm
 }
 
 /* final - an error no retry mends: no disk, a write-protected diskette, a
- * call the driver refused */
+ * call the driver refused, another diskette */
 static int final(rx_u16 error)
 {
-    return error == E_TIMEOUT || error == E_PROTECTED || error == E_INVAL || error == E_FAULT;
+    return error == E_TIMEOUT || error == E_PROTECTED || error == E_INVAL || error == E_FAULT
+        || error == E_CHANGED || error == E_OFFLINE;
+}
+
+static rx_u16 medium(unsigned drive);
+
+/* words_hash - a sector hashed, for a diskette's identity */
+static rx_u32 words_hash(const rx_u16 RX_FAR *w)
+{
+    rx_u32 h = 0;
+    unsigned i;
+
+    for (i = 0; i < SECTOR_SIZE / 2; i++)
+        h = ((h << 1) | (h >> 31)) ^ w[i];
+    return h;
+}
+
+/* sector_hash - a block's sector hashed */
+static rx_u32 sector_hash(rx_u16 b)
+{
+    return words_hash((const rx_u16 RX_FAR *)dc_bytes(b));
 }
 
 /* tried - a run, tried again as D14 says; a failed run of more than one
  * sector split, so that only the bad sector fails: 0 or the error, *moved
- * the sectors done before it */
+ * the sectors done before it. A diskette the driver says may have changed
+ * is checked first (medium): the run again if it is the same, else
+ * E_CHANGED or E_OFFLINE */
 static rx_u16 tried(int op, unsigned drive, rx_u32 sector, unsigned n, rx_u16 segment,
                     rx_u16 offset, unsigned *moved)
 {
@@ -236,6 +268,13 @@ static rx_u16 tried(int op, unsigned drive, rx_u32 sector, unsigned n, rx_u16 se
 
     for (;;) {
         error = run(op, drive, sector, n, segment, offset, moved);
+        if (error == E_TIMEOUT && drive < FIXED)
+            error = E_OFFLINE;          /* (a diskette drive's: no diskette, M8) */
+        if (error == E_CHANGED && !checking) {
+            if ((error = medium(drive)) != 0)
+                return error;
+            continue;                   /* (the same diskette: the run again) */
+        }
         if (error == 0 || final(error) || --tries == 0)
             break;
         if (drive >= FIXED)
@@ -386,6 +425,11 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
     rx_u16 b, first, error = 0;
     int full;
 
+    if (drive == 0 && drives[0].track != DISK_A_SECTORS) {
+        *moved = 0;                     /* (a 360 KB diskette in A: read-only, D12) */
+        return E_PROTECTED;
+    }
+
     while (i < count) {
         take();
         first = dc_find(key(drive, lba + i));
@@ -406,6 +450,8 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
             break;
         }
         if (n == 0) {                   /* no block free: straight from the segment */
+            if (drive < FIXED && lba + i < 2)
+                identified[drive] = 0;  /* (its identity not followed: taken anew, M8) */
             give();
             error = tried(DRV_DISK_WRITE, drive, lba + i, 1, REQUEST_SEGMENT(q),
                           (rx_u16)(requests[q].offset + i * SECTOR_SIZE), &done);
@@ -433,6 +479,8 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
         take();
         for (k = 0; k < n; k++) {
             b = (rx_u16)(first + k);
+            if (k < done && lba + i + k < 2)
+                identity[drive][lba + i + k] = sector_hash(b);  /* (its own writes: M8) */
             if (k < done)
                 dc_set(b, DC_CLEAN);
             else
@@ -445,6 +493,58 @@ static rx_u16 serve_write(unsigned q, unsigned drive, rx_u32 lba, unsigned *move
     }
     *moved = i;
     return error;
+}
+
+/* medium - a diskette drive's diskette, which the driver says may have
+ * changed (E_CHANGED; M8, D12): A's probed for its medium (DRV_DISK_MEDIA,
+ * D13), its geometry the drive's from now; then its first two sectors read
+ * afresh into the server's own sector (the run being checked may hold every
+ * block of the cache: one without extended memory) and hashed. The first
+ * one seen, or the same: 0, the cache kept and the volume's next answer
+ * saying so (DSV_TOUCHED). Another: its cache dropped, and E_CHANGED. None:
+ * E_OFFLINE */
+static rx_u16 medium(unsigned drive)
+{
+    static rx_u16 probe[SECTOR_SIZE / 2];
+    struct rx_kregs r;
+    rx_u16 unit, ep = driver(drive, &unit), error = 0;
+    unsigned got, done = 0, k;
+    rx_u32 h[2];
+
+    if (kcall(KCALL_CALL, DRV_DISK_MEDIA, unit, 0, ep, 0, 0, 0, &r) || r.bx)
+        return E_OFFLINE;
+    take();
+    drives[drive].cylinders = r.cx;
+    drives[drive].heads = (rx_u8)r.si;
+    drives[drive].track = (rx_u8)(r.si >> 8);
+    volumes[drive].sectors = (rx_u32)r.cx * drives[drive].heads * drives[drive].track;
+    give();
+    h[0] = h[1] = 0;
+    checking = 1;                       /* (run, not tried: no recursion on the stack of */
+    for (got = 0; got < 2 && !error; got++) {   /* 512 bytes, which it overflowed) */
+        for (k = 0; k < DISKETTE_TRIES; k++)    /* E_CHANGED again: the line the probe */
+            if ((error = run(DRV_DISK_READ, drive, got, 1, RX_SEG(probe),       /* left */
+                             RX_OFF(probe), &done)) == 0
+                    || (final(error) && error != E_CHANGED))
+                break;
+        if (error == 0)
+            h[got] = words_hash((const rx_u16 RX_FAR *)probe);
+    }
+    checking = 0;
+    take();
+    if (error == 0) {                   /* (the identity changed by a read alone) */
+        if (identified[drive] && (identity[drive][0] != h[0] || identity[drive][1] != h[1])) {
+            dc_forget(drive);           /* another diskette: what was cached is not its */
+            error = E_CHANGED;
+        } else {
+            touched[drive] = identified[drive];
+        }
+        identity[drive][0] = h[0];
+        identity[drive][1] = h[1];
+        identified[drive] = 1;
+    }
+    give();
+    return error == E_TIMEOUT ? E_OFFLINE : error;
 }
 
 /* flush - a drive's dirty blocks written, every one or only those that
@@ -636,14 +736,24 @@ static void serve(unsigned q)
         return;
     }
     if (requests[q].kind == DS_VOLUME) {
-        error = probe(drive);
+        if (drive < FIXED)              /* (none in: the volume as it was, offline, its */
+            error = (error = medium(drive)) == E_OFFLINE ? 0 : error;  /* cache still read) */
+        else
+            error = probe(drive);
         if (error)
             answer(q, error, 0, 0, 0);
         else
             answer(q, 0, (rx_u16)volumes[drive].sectors, (rx_u16)(volumes[drive].sectors >> 16),
-                   0);
+                   drive < FIXED ? DSV_REMOVABLE : 0);
         return;
     }
+    if (drive < FIXED && !TRUSTED(drive)
+            && (error = medium(drive)) != 0
+            && (error != E_OFFLINE || requests[q].kind != DS_READ)) {
+        answer(q, error, 0, 0, 0);      /* (another diskette, or none for a write: M8) */
+        return;
+    }
+    error = 0;                          /* (none: what the cache holds still read) */
     if (!fits(q))
         error = E_FAULT;
     else if (requests[q].kind == DS_READ) {
@@ -656,7 +766,12 @@ static void serve(unsigned q)
     } else {
         error = serve_write(q, drive, lba, &moved);
     }
-    answer(q, error, (rx_u16)moved, 0, 0);
+    take();
+    d = drive < FIXED && touched[drive] ? DSV_TOUCHED : 0;  /* (said once) */
+    if (drive < FIXED)
+        touched[drive] = 0;
+    give();
+    answer(q, error, (rx_u16)moved, 0, (rx_u16)d);
 }
 
 /* controller - thread 2's or 3's: the controller's requests, for ever, in
@@ -788,8 +903,9 @@ static int take_call(unsigned q, struct rx_kregs *r)
     case DS_VOLUME:
         if (v >= DS_VOLUMES || !drives[v].known) {
             error = E_TIMEOUT;
-        } else if (!volumes[v].known) {
-            requests[q].used = 1;       /* a fixed disk's: its boot record read first */
+        } else if (!volumes[v].known || (v < FIXED && !TRUSTED(v))) {
+            requests[q].used = 1;       /* a fixed disk's: its boot record read first; a */
+                                        /*    diskette's checked after its drive's silence */
             error = queue(q);
             if (error == 0)
                 return 0;
@@ -812,7 +928,9 @@ static int take_call(unsigned q, struct rx_kregs *r)
             break;
         }
         take();
-        if (label == DS_READ && cached(q)) {    /* the cache's alone: at once */
+        if (label == DS_READ && cached(q) && (v >= FIXED || TRUSTED(v))) {  /* the cache's */
+                                        /*    alone, at once; a diskette checked first after
+                                              2 s of its drive's silence (M8) */
             for (k = 0; k < count; k++) {
                 rx_u16 b = dc_find(key(v, volumes[v].start + sector + k));
 
@@ -821,6 +939,10 @@ static int take_call(unsigned q, struct rx_kregs *r)
             }
             next_owner[v] = requests[q].owner;  /* (where it ended: a read from */
             next_read[v] = volumes[v].start + sector + count;  /* there goes on, M6) */
+            if (v < FIXED && touched[v]) {
+                r->di = DSV_TOUCHED;
+                touched[v] = 0;
+            }
             give();
             r->cx = (rx_u16)count;
             break;
@@ -886,6 +1008,8 @@ static int take_call(unsigned q, struct rx_kregs *r)
         changed(-1);
         break;
     case DS_EJECT:
+        if (v < FIXED)
+            identified[v] = 0;          /* (forgotten: the next diskette is new, M8) */
         if (v >= DS_VOLUMES) {
             error = E_INVAL;
             break;

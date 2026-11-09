@@ -37,15 +37,16 @@ int main(void)
     struct stat st;
     int fd;
 
-    fd = open("/b/pad.txt", O_WRONLY);
+    fd = open("/mnt/rx286b/pad.txt", O_WRONLY);
     check("PAD.TXT opened to write (3)", fd);
     check("10 bytes within it (10)", write(fd, "0123456789", 10));
     check("fsync (-1, EROFS 30)", fsync(fd));
     check("fsync again (-1, EROFS 30)", fsync(fd));
     check("close (-1, EROFS 30)", close(fd));
-    chdir("/b/many");
-    check("rename of my directory (-1, EROFS 30)", rename("/b/many", "/b/other"));
-    printf("edges: getcwd after it (/b/many): %s\n", getcwd(cwd, sizeof cwd) ? cwd : "(error)");
+    chdir("/mnt/rx286b/many");
+    check("rename of my directory (-1, EROFS 30)", rename("/mnt/rx286b/many", "/mnt/rx286b/other"));
+    printf("edges: getcwd after it (/mnt/rx286b/many): %s\n",
+           getcwd(cwd, sizeof cwd) ? cwd : "(error)");
     check("stat . (0)", stat(".", &st));
 #elif defined(EDGES_LOOP)
     struct dirent *e;
@@ -53,10 +54,11 @@ int main(void)
     DIR *d;
     unsigned names = 0;
 
-    check("a name in a directory whose chain loops (-1, EIO 5)", stat("/b/many/nothing", &st));
-    check("a file made there (-1, EIO 5)", open("/b/many/new.txt", O_WRONLY | O_CREAT));
+    check("a name in a directory whose chain loops (-1, EIO 5)",
+          stat("/mnt/rx286b/many/nothing", &st));
+    check("a file made there (-1, EIO 5)", open("/mnt/rx286b/many/new.txt", O_WRONLY | O_CREAT));
     errno = 0;
-    if ((d = opendir("/b/many")) != 0) {
+    if ((d = opendir("/mnt/rx286b/many")) != 0) {
         while ((e = readdir(d)) != 0)
             names++;
         printf("edges: its listing ends, EIO (1 5): %d %d\n", names > 0, errno);
@@ -67,58 +69,59 @@ int main(void)
     DIR *d;
 
     check("a name in a directory whose entry says cluster 0 (-1, EIO 5)",
-          stat("/b/many/file01.txt", &st));
+          stat("/mnt/rx286b/many/file01.txt", &st));
     errno = 0;
-    d = opendir("/b/many");             /* (first: Watcom takes arguments right to left) */
+    d = opendir("/mnt/rx286b/many");             /* (first: Watcom takes arguments right to left) */
     printf("edges: its listing (none, EIO 5): %s, %d\n", d ? "some" : "none", errno);
-    mkdir("/b/x", 0755);
-    check("its rename (-1, EIO 5)", rename("/b/many", "/b/x/many"));
+    mkdir("/mnt/rx286b/x", 0755);
+    check("its rename (-1, EIO 5)", rename("/mnt/rx286b/many", "/mnt/rx286b/x/many"));
 #elif defined(EDGES_LONGNAMES)
     struct dirent *e;
     DIR *d;
 
-    if ((d = opendir("/b")) != 0) {
+    if ((d = opendir("/mnt/rx286b")) != 0) {
         printf("edges: B's names:");
         while ((e = readdir(d)) != 0)
             printf(" %s", e->d_name);
         printf("\n");
         closedir(d);
     }
-    check("unlink of a file with a long name (0)", unlink("/b/alongn~1.txt"));
-    check("rename of another, in its directory (0)", rename("/b/anothe~1.txt", "/b/short.txt"));
-    mkdir("/b/x", 0755);
-    check("and into another (0)", rename("/b/short.txt", "/b/x/short.txt"));
+    check("unlink of a file with a long name (0)", unlink("/mnt/rx286b/alongn~1.txt"));
+    check("rename of another, in its directory (0)",
+          rename("/mnt/rx286b/anothe~1.txt", "/mnt/rx286b/short.txt"));
+    mkdir("/mnt/rx286b/x", 0755);
+    check("and into another (0)", rename("/mnt/rx286b/short.txt", "/mnt/rx286b/x/short.txt"));
 #else
     static char buf[4096];
     struct stat st;
     char name[16];
     int fd, n, k;
 
-    fd = open("/b/gap.txt", O_WRONLY | O_CREAT);    /* 3 clusters, freed once B is full */
+    fd = open("/mnt/rx286b/gap.txt", O_WRONLY | O_CREAT);    /* 3 clusters, freed once B is full */
     write(fd, buf, 3072);
     close(fd);
-    fd = open("/b/fill.txt", O_WRONLY | O_CREAT);
+    fd = open("/mnt/rx286b/fill.txt", O_WRONLY | O_CREAT);
     while (write(fd, buf, sizeof buf) == (int)sizeof buf)
         ;
     close(fd);
-    check("B full, then 3 clusters freed (0)", unlink("/b/gap.txt"));
-    fd = open("/b/empty.txt", O_WRONLY | O_CREAT);
+    check("B full, then 3 clusters freed (0)", unlink("/mnt/rx286b/gap.txt"));
+    fd = open("/mnt/rx286b/empty.txt", O_WRONLY | O_CREAT);
     lseek(fd, 10000L, SEEK_SET);
     check("a byte past a hole of 10 clusters (-1, ENOSPC 28)", write(fd, "x", 1));
     fstat(fd, &st);
     check("its size after (0)", (long)st.st_size);
     close(fd);
-    fd = open("/b/after.txt", O_WRONLY | O_CREAT);
+    fd = open("/mnt/rx286b/after.txt", O_WRONLY | O_CREAT);
     check("then 3 KB in another file (3072)", write(fd, buf, 3072));
     close(fd);
     for (k = 0; k < 200; k++) {         /* the root full */
-        snprintf(name, sizeof name, "/b/r%d", k);
+        snprintf(name, sizeof name, "/mnt/rx286b/r%d", k);
         if ((n = open(name, O_WRONLY | O_CREAT)) < 0)
             break;
         close(n);
     }
     printf("edges: the root full (ENOSPC 28): %d\n", errno);
-    check("a rename in it (0)", rename("/b/r0", "/b/q0"));
+    check("a rename in it (0)", rename("/mnt/rx286b/r0", "/mnt/rx286b/q0"));
 #endif
     printf("edges: done\n");
     return 0;

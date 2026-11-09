@@ -10,13 +10,13 @@ install: C /BIN/SPIN z-spin.rx
 keys: spin &\n{wait 50}echo beside it\nfg\n{wait 50}{now ctrl-c}echo $?\n
 match: contains
 ---
-/a$ spin &
+/mnt/rx286$ spin &
 [1] 10
 {...}Spinning; ^C ends it.
 {...}echo beside it
 beside it
-/a$ fg
+/mnt/rx286$ fg
 spin
 ^C
-/a$ echo $?
+/mnt/rx286$ echo $?
 130

@@ -28,7 +28,7 @@ static const char *name(char who, int k, const char **base)
 {
     static char p[32];
 
-    snprintf(p, sizeof p, "/c/onedir/%c%03d.txt", who, k);
+    snprintf(p, sizeof p, "c:/onedir/%c%03d.txt", who, k);
     *base = p + 10;
     return p;
 }
@@ -89,7 +89,7 @@ static int holds(const char *base)
     char path[32], back[16];
     int fd, n;
 
-    snprintf(path, sizeof path, "/c/onedir/%s", base);
+    snprintf(path, sizeof path, "c:/onedir/%s", base);
     fd = open(path, O_RDONLY);
     if (fd < 0)
         return 0;
@@ -104,7 +104,7 @@ static void account(void)
 {
     static unsigned char seen[2][ROUNDS];
     struct dirent *e;
-    DIR *dp = opendir("/c/onedir");
+    DIR *dp = opendir("c:/onedir");
     unsigned entries = 0, wanted = 0;
     int who, k;
 
@@ -140,7 +140,7 @@ int main(void)
     pid_t pid;
     int status;
 
-    if (mkdir("/c/onedir", 0755) < 0) {
+    if (mkdir("c:/onedir", 0755) < 0) {
         printf("onedir: mkdir: errno %d\n", errno);
         return 1;
     }

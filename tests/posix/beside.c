@@ -51,19 +51,19 @@ int main(void)
     pid_t pid;
     int status;
 
-    readall("/c/numbers.txt", 1);       /* (both runs warm alike) */
+    readall("/mnt/rx286c/numbers.txt", 1);       /* (both runs warm alike) */
     start = ms();
-    c = readall("/c/numbers.txt", 10);
+    c = readall("/mnt/rx286c/numbers.txt", 10);
     alone = ms() - start;
     printf("beside: C alone: %ld bytes in %ld ms\n", c, alone);
     start = ms();
     pid = fork();
     if (pid == 0) {
-        a = readall("/a/kernel.bin", 1);
+        a = readall("/mnt/rx286/kernel.bin", 1);
         printf("beside: A: %ld bytes, %s\n", a, a > 0 ? "read" : "not read");
         _exit(0);
     }
-    c = readall("/c/numbers.txt", 10);
+    c = readall("/mnt/rx286c/numbers.txt", 10);
     beside = ms() - start;
     printf("beside: C beside A: %ld bytes in %ld ms\n", c, beside);
     waitpid(pid, &status, 0);

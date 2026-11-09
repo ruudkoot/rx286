@@ -59,7 +59,7 @@ static int reader(void)
     int pass, fd, n, k;
 
     for (pass = 0; pass < PASSES; pass++) {
-        fd = open("/c/trunc.dat", O_RDONLY);
+        fd = open("/mnt/rx286c/trunc.dat", O_RDONLY);
         if (fd < 0)
             continue;
         for (at = 0; (n = (int)read(fd, got, sizeof got)) > 0; at += n)
@@ -81,7 +81,7 @@ int main(void)
     pid_t pid;
     int status, k, fd, e;
 
-    if ((e = written("/c/trunc.dat", 0)) != 0) {
+    if ((e = written("/mnt/rx286c/trunc.dat", 0)) != 0) {
         printf("truncrace: the file: errno %d\n", e);
         return 1;
     }
@@ -89,12 +89,12 @@ int main(void)
     if (pid == 0)
         _exit(reader());
     for (k = 0; k < 4; k++) {
-        fd = open("/c/trunc.dat", O_WRONLY | O_TRUNC);
+        fd = open("/mnt/rx286c/trunc.dat", O_WRONLY | O_TRUNC);
         if (fd >= 0)
             close(fd);
-        written("/c/other.dat", 1);
-        unlink("/c/other.dat");
-        written("/c/trunc.dat", 0);
+        written("/mnt/rx286c/other.dat", 1);
+        unlink("/mnt/rx286c/other.dat");
+        written("/mnt/rx286c/trunc.dat", 0);
     }
     waitpid(pid, &status, 0);
     printf("truncrace: the reader saw the file's bytes alone: %s\n",

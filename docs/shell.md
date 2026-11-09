@@ -11,11 +11,13 @@ commands inside it.
 
 ## The prompt and the line
 
-The prompt is the current directory and `$`: `/a$`, `/c/docs$`. The shell
-starts in `HOME`, `/a`, the boot drive, with the environment init gave it
-(`PATH=/z:/c/bin`, `HOME=/a`). The tree is one: `/a` to `/d` are the
-drives, `/dev` the devices, `/z` the boot image's programs; a path may
-name its drive DOS's way, `c:/docs` or `C:/docs` for `/c/docs`. Names on
+The prompt is the current directory and `$`: `/mnt/rx286$`,
+`/mnt/rx286c/docs$`. The shell starts in `HOME`, `/mnt/a:`, the boot
+drive's volume, with the environment init gave it (`PATH=/z:/mnt/rx286c/bin`,
+`HOME=/mnt/a:`). The tree is one: `/mnt` holds the drives' volumes by
+their labels' names, `/dev` the devices, `/z` the boot image's programs; a
+path may name its drive DOS's way, `c:/docs` or `C:/docs` for the volume C
+holds now (*docs/processes.md*). Names on
 a drive are 8.3 and case-sensitive: shown in lower case, a name with a
 capital refused (*docs/processes.md*).
 
@@ -97,7 +99,8 @@ C has those three alone.
 
 DOS's names are aliases from the start (D14 C): `dir` (`ls -l`), `type`
 (`cat`), `print` (`lp`), `copy`, `del`, `ren`, `md`, `rd`, `cls`, and a
-drive's letter and a colon, `C:` or `c:`, for `cd /c`. A path's `\` is the
+drive's letter and a colon, `C:` or `c:`, for `cd c:`. `eject a:` writes what
+is held of A's diskette and forgets its volume. A path's `\` is the
 shell's quote, so DOS's paths are written with `/`.
 
 ## Beside the shell

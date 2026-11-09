@@ -2,7 +2,7 @@
  * rx286 - src/lib/posix/path.c
  * Finding programs (roadmap os-server.md P8): getenv, and execvp and
  * posix_spawnp, which look for a name without a slash in each directory of
- * PATH, POSIX's colon-separated list (init's: /z:/c/bin); without PATH, in
+ * PATH, POSIX's colon-separated list (init's: /z:/mnt/rx286c/bin); without PATH, in
  * DEFAULT_PATH's (P12: XSH exec leaves that search to the system).
  * ============================================================================ */
 
@@ -14,7 +14,7 @@
 #include "unistd.h"
 #include "sys/stat.h"
 
-#define DEFAULT_PATH "/z:/c/bin"
+#define DEFAULT_PATH "/z:/mnt/rx286c/bin"
 
 /* getenv - an environment variable's value, or NULL */
 char *getenv(const char *name)

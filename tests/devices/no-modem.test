@@ -7,7 +7,7 @@ install: C /BIN/TERM z-term.rx
 keys: term\n
 ---
 rx286, test build
-/a$ term
+/mnt/rx286$ term
 COM2 carries the kernel's log in this build; a release build
 makes it the modem's line.
-/a$
+/mnt/rx286$

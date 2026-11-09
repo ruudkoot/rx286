@@ -2,7 +2,7 @@
  * rx286 - tests/posix/fsrand.c
  * The file system against a model (roadmap os-server.md P15;
  * tests/posix/fsrand.test): init starts it (TEST_POSIX_FSRAND). A seeded
- * random sequence of file operations on B, in /b/r and two directories
+ * random sequence of file operations on B, in /mnt/rx286b/r and two directories
  * below it: writes at random offsets, across clusters, past the end too,
  * whose holes read as zeros; truncations;
  * appends through two descriptions of one file at once; renames, over a
@@ -24,7 +24,7 @@
 #include "sys/wait.h"
 
 #define FILES 8                         /* names F0.TXT to F7.TXT */
-#define DIRS 3                          /* /b/r, /b/r/d1, /b/r/d2 */
+#define DIRS 3                          /* /mnt/rx286b/r, /mnt/rx286b/r/d1, /mnt/rx286b/r/d2 */
 #define MAXLEN 2500                     /* a file's bytes at most: three clusters */
 #define CHUNK 700
 #define HOLE 300                        /* a write's start past the end, at most */
@@ -69,9 +69,9 @@ static const char *path(int f, int dir)
     static char p[24];
 
     if (dir == 0)
-        snprintf(p, sizeof p, "/%c/r/f%d.txt", drive, f);
+        snprintf(p, sizeof p, "%c:/r/f%d.txt", drive, f);
     else
-        snprintf(p, sizeof p, "/%c/r/d%d/f%d.txt", drive, dir, f);
+        snprintf(p, sizeof p, "%c:/r/d%d/f%d.txt", drive, dir, f);
     return p;
 }
 
@@ -123,9 +123,9 @@ static void listing(void)
     DIR *dp;
     int d, f;
 
-    snprintf(dirs[0], sizeof dirs[0], "/%c/r", drive);
-    snprintf(dirs[1], sizeof dirs[1], "/%c/r/d1", drive);
-    snprintf(dirs[2], sizeof dirs[2], "/%c/r/d2", drive);
+    snprintf(dirs[0], sizeof dirs[0], "%c:/r", drive);
+    snprintf(dirs[1], sizeof dirs[1], "%c:/r/d1", drive);
+    snprintf(dirs[2], sizeof dirs[2], "%c:/r/d2", drive);
     for (d = 0; d < DIRS; d++) {
         checks++;
         seen = 0;
@@ -300,9 +300,9 @@ int main(void)
 
     for (f = 0; f < FILES; f++)
         model[f].dir = -1;
-    snprintf(r, sizeof r, "/%c/r", drive);
-    snprintf(d1, sizeof d1, "/%c/r/d1", drive);
-    snprintf(d2, sizeof d2, "/%c/r/d2", drive);
+    snprintf(r, sizeof r, "%c:/r", drive);
+    snprintf(d1, sizeof d1, "%c:/r/d1", drive);
+    snprintf(d2, sizeof d2, "%c:/r/d2", drive);
     if (mkdir(r, 0755) < 0 || mkdir(d1, 0755) < 0 || mkdir(d2, 0755) < 0) {
         printf("fsrand: mkdir: errno %d\n", errno);
         return 1;

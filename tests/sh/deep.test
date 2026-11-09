@@ -1,5 +1,5 @@
 # Deep paths (roadmap os-server.md P9; rxlib.DEEP_PATH): every path DOS
-# reaches, its 64 characters behind "/b", and the one of 66 beyond DOS's
+# reaches, its 64 characters behind "/mnt/rx286b", and the one of 66 beyond DOS's
 # reach; and a path of 82 bytes, past the 80 that were PX_PATH_MAX until
 # P15 (256 now: tests/posix/files.c, whose paths need no key script).
 program: sh
@@ -10,12 +10,12 @@ keys: cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..\n
 keys: ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits\n
 ---
 rx286, test build
-/a$ cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd
-/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff
-/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$ cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..
-/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff/abcdefg.x
-/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff/abcdefgh.xy
-/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits
+/mnt/rx286$ cd b:/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff; pwd
+/mnt/rx286b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff
+/mnt/rx286b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$ cd abcdefg.x; pwd; cd ..; cd abcdefgh.xy; pwd; cd ..
+/mnt/rx286b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff/abcdefg.x
+/mnt/rx286b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff/abcdefgh.xy
+/mnt/rx286b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$ ls ./././././abcdefgh.xy && echo fits; ls ./././././././abcdefgh.xy && echo fits
 fits
 fits
-/b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$
+/mnt/rx286b/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffffffff$

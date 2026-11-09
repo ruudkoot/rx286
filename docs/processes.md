@@ -1,7 +1,7 @@
 # Processes
 
 A process (roadmap os-server.md P6, P8) is a program run from `/z`, the
-archive of programs in the boot image, or from a file of a drive (`/c/bin`),
+archive of programs in the boot image, or from a file of a drive (`/mnt/rx286c/bin`),
 by `fork`, `execve` or `posix_spawn`. Every program is one, init and the
 shell among them, but the kernel's test programs, which the root builds
 from the image's modules (*docs/root.md*, *docs/syscalls.md*). It is C,
@@ -59,7 +59,7 @@ roadmap os-server.md P15; 80 before) bytes at most, its zero too;
 `limits.h` calls it `PATH_MAX`. The current directories are kept out of
 the server's data segment, `PX_PATH_MAX` bytes for each entry in a segment
 of their own (slot 151). A program's names a file of
-`/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and `environ`
+`/z` ("/z/init") or of a volume ("/mnt/rx286c/bin/codes"). `argv` and `environ`
 together, their pointers too, have `PX_ARG_MAX` bytes at most (`E2BIG`).
 
 The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
@@ -168,7 +168,7 @@ code, an entry outside the code, code and data past the file's end, a
 stack too small for `main`'s three words, data past a segment, or more data
 than its own most. A directory is `EACCES`.
 
-init's environment is `PATH=/z:/c/bin` and `HOME=/a`, which its children
+init's environment is `PATH=/z:/mnt/rx286c/bin` and `HOME=/mnt/a:`, which its children
 inherit; libc's `execvp` and `posix_spawnp` look for a name without a slash
 along it, or along `/z:/c/bin` without one (`src/lib/posix/path.c`, with
 `getenv`; XSH exec leaves that to the system). `make run` puts the programs
@@ -184,12 +184,21 @@ again (P12).
 ## Files
 
 The tree is one (D13 C, `src/os/vfs.c`): `/` is the server's own and
-read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
+read-only, with `/mnt` the drives' FAT12 volumes, `/z` the archive of
 programs and `/dev` the devices (`null`; `tty`, the caller's terminal;
 `tty1` to `tty8`, the terminals, as many as the EGA holds pages; `lpt1`,
 `lpt2`; `speaker`, `joystick`, `mouse`, `com2`, `status`: *The devices*
-below). A path may name a drive DOS's way: `c:/docs` and `C:/docs` are
-`/c/docs`. A path is made absolute against the process's current
+below). In `/mnt` each volume is named by its label (roadmap
+disk-scheduler.md M8, D20): in lower case, its spaces `-`, the characters a
+name refuses dropped (`RX286C` is `/mnt/rx286c`); one without a label by its
+drive's letter and the volume's number there (`a1`); one whose name another
+drive's volume has, with its drive's letter added. A path may name a drive
+DOS's way: `c:/docs` and `C:/docs` are `/mnt/c:/docs`, the volume C holds
+now, whose name a current directory made of it takes. A diskette's volume
+follows its diskette: another one in the drive is a new volume, and the
+old one's open files answer `ENXIO`, as a write does with no diskette in
+(*docs/disk-server.md*). `eject` (`PX_EJECT`, rx286's own) writes what is
+held of a diskette's volume and forgets it. A path is made absolute against the process's current
 directory, which starts at its parent's (`/` for init), and its "." and
 ".." taken out before it is followed. Names are case-sensitive (roadmap
 disk-scheduler.md M1, D19): within a volume a name is 8.3, kept upper case
@@ -199,8 +208,8 @@ server's own names (`/dev`, `tty1`, `/z`'s programs) match byte for byte.
 A name another system wrote in lower case is shown as it is and cannot be
 opened, but unlink and rename find it when it has no upper-case twin. A path that ends with "/"
 names a directory: a file's is `ENOTDIR`, a new name's `O_CREAT` `EISDIR`
-(XBD 4.13). A path has 12 names at most once its ".." are taken out
-(`ENAMETOOLONG`).
+(XBD 4.13). A path has 13 names at most once its ".." are taken out
+(`ENAMETOOLONG`): `/mnt`, a volume's name and 11 below its root.
 
 A process has `OPEN_MAX` (20) descriptors, each naming an open file
 description of the server's (32 in all): its kind, its flags, its offset,
@@ -226,7 +235,7 @@ fails. `stat` of an open file gives its size as its descriptions have it
 | `PX_STAT`, `PX_FSTAT` | SI the path or BX the descriptor, DI `ST_BYTES` of room | `ST_MODE` (`S_IFREG`, `S_IFDIR` or `S_IFCHR` within `S_IFMT`, and 0644, 0444 for a read-only file, 0755 for a directory; a file of `/z` 0555, a device, a terminal, a printer and `/dev/null` `S_IFCHR` 0666, a pipe `S_IFIFO` 0600), `ST_INO` (a dword: the entry's place, its sector on the disk times 16 and its slot there; a volume's root 1; the server's own names in `getdents`' order), `ST_NLINK` (1), `ST_SIZE`, `ST_MTIME` (DOS's time stamp, as seconds since 1970), `ST_DEV` (the drive; `ST_DEV_SERVER` for `/`, `/dev`, `/z` and the pipes) |
 | `PX_UNLINK`, `PX_RMDIR` | SI the path | a file's, or an empty directory's (`ENOTEMPTY`), entry and clusters gone; `EBUSY` while open, or while it is a process's current directory; `rmdir` of "." or ".." is `EINVAL` |
 | `PX_MKDIR` | SI the path | a cluster with "." and "..", and its entry; in `/`, `/dev` or `/z`, `EROFS` |
-| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): within one directory the entry's name changed in its place; else the entry made anew in the new directory, the old deleted, a directory's ".." its new parent. A file of the new name is replaced (`EBUSY` while it is open). Its sectors are written before its open descriptions and every current directory in it follow it. A directory into itself or one inside it, or "." or "..", is `EINVAL`; a file to "name/" `ENOTDIR`; over a current directory, `EBUSY`; one that would take a current directory in it past `PX_PATH_MAX` or 12 names, `ENAMETOOLONG` (the files deep in a directory moved deeper may pass those limits: nothing reaches them until it is moved back). A long name's entries, from a disk written elsewhere, go with the old entry, as with `unlink` |
+| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): within one directory the entry's name changed in its place; else the entry made anew in the new directory, the old deleted, a directory's ".." its new parent. A file of the new name is replaced (`EBUSY` while it is open). Its sectors are written before its open descriptions and every current directory in it follow it. A directory into itself or one inside it, or "." or "..", is `EINVAL`; a file to "name/" `ENOTDIR`; over a current directory, `EBUSY`; one that would take a current directory in it past `PX_PATH_MAX` or 13 names, `ENAMETOOLONG` (the files deep in a directory moved deeper may pass those limits: nothing reaches them until it is moved back). A long name's entries, from a disk written elsewhere, go with the old entry, as with `unlink` |
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short, `EINVAL` if there is none) |
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, a dword as `ST_INO` ("." and ".." their directories'; in `/`, a drive's the server's own number, as a mount point's is), and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end; room for less than a record, `EINVAL`. libc's `opendir` and `readdir` read through it (`dirent.h`) |
 | `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk, and every other sector of its volume the disk server held dirty (`DS_SYNC`), or the error (`EROFS` for a diskette protected); a pipe, a terminal or a device is `EINVAL` |
@@ -241,7 +250,7 @@ The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 (past 8.3, or past `PX_PATH_MAX`), `ENOTEMPTY`, `EPIPE`.
 
 The volumes are read and written through a cache of 32 sectors in a segment
-of the server's, 4 without extended memory (`src/os/cache.c`,
+of the server's, 3 without extended memory (`src/os/cache.c`,
 `src/os/vol.c`), whose sectors come from the disk server and its own cache
 (*docs/disk-server.md*): the FAT, in every copy,
 and the directories are written at the end of each call that changed them;
@@ -419,9 +428,11 @@ another (`tests/disk/beside.test`):
   call is over (`end`): its segments are not revoked under a transfer, nor
   its descriptions freed under a call. An exec waits for the process's
   other threads' volume calls the same way.
-- **The paths and nodes** a call works with are in one of three scratch
-  sets (`scratch_take`), taken at the start of a call with a path, a stat
-  or an exec, and given back at its end. Until M4 each function kept its
+- **The paths and nodes** a call works with are in one of two scratch
+  sets (`scratch_take`; three until M8, whose 1.75 KB each a machine of
+  512 KB without extended memory needed back), taken at the start of a call
+  with a path, a stat or an exec, and given back at its end; a third such
+  call waits for one. Until M4 each function kept its
   own statics, which another call could now write over while the first
   waits for the disk. A read, which may wait for ever on a terminal, takes
   none.

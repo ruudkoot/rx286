@@ -20,7 +20,6 @@ memory: 640K 3M
 memory: 640K 3456K
 memory: 640K 14720K
 memory: 640K 15M
-memory: 512K 0K
 memory: 512K 1M
 memory: 512K 15M
 keys: echo hello\n

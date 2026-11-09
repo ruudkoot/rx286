@@ -31,8 +31,8 @@ text) in the kernel and the test programs, `fat12.asm` in the loader.
    reserved sectors.
 2. The loader finds `KERNEL.BIN` in the FAT12 root directory, loads it to
    1000:0000h one sector at a time, checks its end mark and its module
-   table, sets text mode 3, stops the floppy motor, disables interrupts and
-   NMI, and jumps to it.
+   table, sets text mode 3, stops the floppy motor, takes any interrupt the
+   diskette controller holds, disables interrupts and NMI, and jumps to it.
 3. `entry.asm` (real mode) loads the GDT and IDT, sets PE and MP, and jumps
    to `pm_start`.
 4. `start.asm` zeroes the stacks, loads TR and a null LDTR, reprograms the

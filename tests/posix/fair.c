@@ -39,7 +39,7 @@ static void reader(int go, int back)
     read(go, &c, 1);
     start = ms();
     for (k = 0; k < PASSES; k++) {
-        fd = open("/c/numbers.txt", O_RDONLY);
+        fd = open("/mnt/rx286c/numbers.txt", O_RDONLY);
         if (fd < 0)
             _exit(1);
         while ((n = (int)read(fd, buf, sizeof buf)) > 0)

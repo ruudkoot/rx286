@@ -64,7 +64,7 @@ program's thread's notification whenever the keyboard sent it something
 | 8n + 6 | program n's thread's stack (`OS_K_THREAD_STACK`; M6; 8n + 7, its files segment until P14, unused) |
 | 128 + n | a notification program n's thread sleeps on (`OS_SLOT_SLEEP`): the kernel's timer signals it with bit 1; the foreground program's, the keyboard driver too, whenever the keyboard sent something (`KEY_SIGNAL_BIT`) |
 | 148 | a load, while code is read into it |
-| 149 | the files' cache, 32 sectors, 4 without extended memory (*docs/processes.md*, *Files*) |
+| 149 | the files' cache, 32 sectors, 3 without extended memory (*docs/processes.md*, *Files*) |
 | 150 | the pipes' buffers, eight of 1 KB |
 | 151 | the current directories, `PX_PATH_MAX` bytes for each entry of the table (P15) |
 | 152, 153 | the control thread's and the tty thread's stacks (`OS_SLOT_CONTROL_STACK`, `OS_SLOT_TTY_STACK`; M6) |

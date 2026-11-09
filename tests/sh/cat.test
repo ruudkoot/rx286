@@ -7,15 +7,15 @@ keys: cat c:/docs/hello.txt\ncat b:frag.txt\ncat c:/numbers.txt\n
 match: contains
 timeout: 120
 ---
-/a$ cat c:/docs/hello.txt
+/mnt/rx286$ cat c:/docs/hello.txt
 Hello from C:\DOCS.
-/a$ cat b:frag.txt
+/mnt/rx286$ cat b:frag.txt
 line 01 of FRAG.TXT, a file in two pieces on B:
 line 32 of FRAG.TXT, a file in two pieces on B:
 line 33 of FRAG.TXT, a file in two pieces on B:
 line 64 of FRAG.TXT, a file in two pieces on B:
-/a$ cat c:/numbers.txt
+/mnt/rx286$ cat c:/numbers.txt
 line 0001 of C:\NUMBERS.TXT
 line 0500 of C:\NUMBERS.TXT
 line 1000 of C:\NUMBERS.TXT
-/a$
+/mnt/rx286$

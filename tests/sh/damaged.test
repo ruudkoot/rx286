@@ -7,8 +7,8 @@ emulators: bochs mame
 keys: ls b:/many\n
 match: contains
 ---
-/a$ ls b:/many
+/mnt/rx286$ ls b:/many
 file01.txt
 file30.txt
 b:/many: input/output error
-/a$
+/mnt/rx286$

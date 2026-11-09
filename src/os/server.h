@@ -69,6 +69,10 @@ rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segm
 rx_u16 disk_volume(unsigned drive);
 /* disk_sync - a drive's volume's sectors the disk server holds written */
 rx_u16 disk_sync(unsigned drive);
+/* disk_trusted - may the cache's sectors of a drive be used unasked (M8)? */
+int disk_trusted(unsigned drive);
+/* disk_eject - a diskette's volume forgotten by the disk server (DS_EJECT) */
+rx_u16 disk_eject(unsigned drive);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:

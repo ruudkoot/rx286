@@ -103,6 +103,10 @@ DRV_DISK_RESET      equ 5       ; -> BX 0 or the error: the controller reset, ev
                                 ;    cylinder forgotten
 DRV_DISK_GEOMETRY   equ 6       ; BL the unit -> BX 0 or E_INVAL; CX the cylinders, SI's
                                 ;    low byte the heads and its high byte the sectors a track
+DRV_DISK_MEDIA      equ 8       ; BL the unit -> BX 0 or the error; CX the cylinders, SI's
+                                ;    low byte the heads, its high byte the sectors a track:
+                                ;    A's diskette by its data rate, and a 360 KB one there
+                                ;    stepped twice if Read ID says so (M8, D13)
 DRV_DISK_READ_ID    equ 7       ; BL the unit, BH the head -> BX 0 or the error; CX the
                                 ;    cylinder, SI's low byte the head and its high byte the
                                 ;    sector of the first ID found (diskettes)
@@ -110,8 +114,9 @@ DRV_STATUS_CHANGED  equ 1       ; DRV_DISK_STATUS's SI: the diskette's change li
 DRV_STATUS_SEEKING  equ 2       ;    a fixed disk's seek not yet complete
 DRV_DISK_RUN_MAX    equ 64      ; a fixed disk's run at most: 32 KB
 FD_DMA_SECTORS      equ 30      ; a diskette's run at most: a 1.2 MB cylinder, the DMA buffer
-FD_DMA_SMALL_SECTORS equ 4      ;    without extended memory, where a larger buffer left a
-                                ;    512 KB machine's processes too little (the root's choice)
+FD_DMA_SMALL_SECTORS equ 2      ;    without extended memory, where a larger buffer left a
+                                ;    512 KB machine's processes too little (the root's choice;
+                                ;    4 until disk-scheduler.md M8)
 DISK_CYLINDER_UNKNOWN equ 0xFFFF
 ; The serial driver: COM2, the modem's line (l4.md L10)
 DRV_SERIAL_WRITE    equ 1       ; CX bytes (SERIAL_MAX at most), SI their offset in the
@@ -176,5 +181,8 @@ E_NOT_FAT12         equ 16      ; no FAT12 volume: no partition, or no such BPB
 E_NOT_FOUND         equ 17      ; no such file, or no such code (ROOT_FIND)
 E_BROKEN            equ 20      ; a cluster outside the volume, or a chain that loops
 E_NOMEM             equ 21      ; no memory, or no room in a table, for it (os-server.md P4)
+E_CHANGED           equ 22      ; the diskette may have changed: A's change line, or B
+                                ;    idle past its motor's time; the run not done (M8)
+E_OFFLINE           equ 23      ; the volume's diskette is out (disk-scheduler.md M8)
 
 %endif

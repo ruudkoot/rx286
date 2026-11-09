@@ -8,9 +8,9 @@ install: C /BIN/MOUSE z-mouse.rx
 keys: {wait 20}{mouse-bytes 28 4D 53}{mouse-bytes 48 30 30}{mouse-bytes 30 31 29}mouse\n{wait 5}{mouse 8 0 -}{wait 2}{mouse 0 0 LR}
 ---
 rx286, test build
-/a$ mouse
+/mnt/rx286$ mouse
 Move the mouse; Esc or both buttons end.
 x 320, y 100 (column 40, row 12), buttons: none
 x 328, y 100 (column 41, row 12), buttons: none
 x 328, y 100 (column 41, row 12), buttons: both
-/a$
+/mnt/rx286$

@@ -61,6 +61,10 @@ It reads the BPB the boot sector left at 7C00h and:
    - text mode 3, 80x25 colour (INT 10h AX=0003h);
    - the floppy motor off (DOR = `FDC_DOR_MOTORS_OFF`), since the BIOS's
      timer interrupt, which would switch it off, never runs again;
+   - any interrupt the diskette controller holds taken from it (Sense
+     Interrupt Status until it says none is pending): the AT's BIOS leaves
+     none, DOSBox-X's that of the controller's power-on reset, which reached
+     the kernel as an unhandled IRQ 6 once it unmasked the line;
    - interrupts off (`cli`) and NMI off (port 70h bit 7);
    - a far jump to 1000:0000h.
 

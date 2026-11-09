@@ -130,7 +130,7 @@ simulator; none of their code is in the repository.
 | M5: fairness | done (2026-11-09) |
 | M6: read-ahead and write-behind | done (2026-11-09) |
 | M7: the cache's memory | done (2026-11-09) |
-| M8: removable volumes and `/mnt` | not started |
+| M8: removable volumes and `/mnt` | done (2026-11-09) |
 | M9: the formatter | not started |
 | M10: the simulator in `tools/`, the documents, a review and the close | not started |
 
@@ -2077,6 +2077,76 @@ less, M a few, L a week.
     the code is right for an AT;
   - every suite passes.
 - **Decisions:** D12, D13, D20, D21.
+- **Done** (2026-11-09). The diskette driver refuses a run with `E_CHANGED` when the diskette
+  may have changed: A by its change line, which it steps to clear, B when it has been idle
+  past its motor's two seconds. `DRV_DISK_MEDIA` finds A's diskette by Read ID at 500 kbit/s
+  and then 300, and a 360 KB one's step by Read ID on its second track (D13). The disk server
+  knows each drive's diskette by its first two sectors, hashed when it reads them and when it
+  writes them itself. It looks again at `E_CHANGED`, and at a drive's first call after 2 s of
+  silence, before it answers from its cache:
+  - the same diskette keeps its cache, and the next answer says `DSV_TOUCHED`, after which the
+    OS server reads afresh what it holds;
+  - another is `E_CHANGED`: the OS server drops what it held of the old one, its open files
+    answer `ENXIO`, and the lookup mounts the new one;
+  - none is `E_OFFLINE` (`ENXIO`), but reads the cache holds are still answered.
+
+  `eject` (`PX_EJECT`, `src/bin/eject.c`) writes and forgets a diskette's volume. `/mnt` holds
+  the volumes by their labels' names (`/mnt/rx286c`), and DOS's `c:` is `/mnt/c:`, the volume C
+  holds now; `/` holds `dev`, `mnt` and `z`. `HOME` is `/mnt/a:` and `PATH` `/z:/mnt/rx286c/bin`.
+  68 tests and sources moved from `/a`-`/d`. The runner changes MAME's diskettes mid-run by
+  `media-at:` lines (`mame/rx286.lua`). `eject.test`, `swap-b.test` and `move-b.test` pass on
+  MAME: A out, its cached file read and a write `ENXIO`; the same diskette back with its
+  cache; another, the old open file `ENXIO`; B swapped while its motor is off, noticed; B's
+  360 KB diskette read in A and read-only there. `make check` passes on Bochs (149), DOSBox-X
+  (61) and MAME (127), with 211 unit tests, and `make check-ia16` passes (149).
+  - Not as planned:
+    - **A volume belongs to its drive.** D12 keeps a volume, with its cache, while its
+      diskette moves between drives or waits outside them. Here each drive has one volume at
+      a time: another diskette in the drive is a new volume, and the old one's cache goes.
+      Its name moves with it, so `/mnt/rx286b` names B's diskette in A too.
+    - **The identity is the first two sectors, not D12's fingerprint** of the FAT and the
+      root. Two sectors are read at each check; the root's 7 to 14 sectors would cost a
+      revolution more. A twin, or a diskette changed elsewhere, passes either, and
+      `DSV_TOUCHED` covers both: what is cached of it is read afresh.
+    - **A diskette's cache is trusted for 2 s after its drive's last access**, as DOS does,
+      and checked at the next call, a cached read's too. Without it, A's change line said
+      nothing to a cached read, and the old diskette's file was read from the new one.
+    - **MAME clears A's change line a moment after the step,** so the driver looks again a
+      tick later, and after a second step, before it says there is no diskette.
+    - **MAME's uptime begins some 30 s into its machine's time** (the BIOS's memory test,
+      the kernel read from a diskette at its speed), so `media.c`'s steps are 50 s apart and
+      the changes halfway between.
+    - **The OS server forgets what `DSV_TOUCHED` says at the volume's next call,** not at
+      once: a call holds slots across its disk calls, and a slot emptied under it was filled
+      with another sector (`pxrand.test` found a directory entry written over B's boot
+      sector).
+    - **A volume's root is now two names deep** (`/mnt/rx286b`). The checks that took one
+      name for a volume's root let a rename write a directory entry into sector 0, which
+      `pxrand.test` found; a path holds 13 names now, so that a volume keeps 11 below its root.
+    - **A volume not there has no name in `/mnt`:** `ls /mnt/rx286b` with no diskette in B is
+      `ENOENT`; `ls b:` is `ENXIO`.
+    - **On a clash a name takes its drive's letter,** not the serial D20 asks for.
+    - **DOSBox-X has drives after all.** Its 765 and its IDE controller, enabled in its
+      configuration, take rx286's drivers, with four changes for the 765's ways: the loader
+      takes the interrupt DOSBox-X's BIOS leaves pending; the reset's senses stop at an
+      invalid command; Read ID comes after a recalibrate, which gives it a fresh ST0; and A's
+      change line, which never drops there (3F7h reads FFh), gives way to B's rule once one
+      Read ID of 0.6 s finds a diskette in. On an AT whose line works nothing changes; an
+      empty A whose line was never seen to drop costs that 0.6 s at each look. With them
+      `drives.test` passes there on A to D, and DOSBox-X mounts all four from now on.
+    - **The identity's sectors go into the disk server's own sector,** not a cache block: the
+      run being checked may hold them all, and without extended memory the cache was one
+      block, so every check of a diskette there failed. No test had looked.
+    - **`speed.test` learns `/mnt`'s names before its first check** (`rdtime.c`): the first
+      lookup of a name reads each drive's label until it finds it, which cost D's write 120
+      ms and B's 800 ms on MAME.
+    - **The least machine paid again.** M8's code made the image 3 KB larger, and at 512 KB
+      without extended memory the shell had no fork for `echo` (`sizes.test`). There the disk
+      server's cache is now one block, the OS server's three sectors and the diskette's DMA
+      buffer two sectors; and the OS server has two scratch sets, not three, on every machine.
+      Once DOSBox-X had drives, its shell mounted A there, and `echo` was out of memory again:
+      `sizes.test` no longer runs 512 KB without extended memory, a machine the owner's
+      decisions after M8 leave behind (M8b).
 
 ### M9. The formatter (M)
 
@@ -2119,6 +2189,9 @@ Each needs a roadmap of its own, or a real AT:
 - **RAID and LVM** (D18).
 - **FAT16 and VFAT long names:** volumes past 32 MB, mixed case.
 - **Shares per user,** with the multi-user roadmap (D5).
+- **Volumes apart from their drives** (D12): a volume kept, with its cache, while its
+  diskette is out or in the other drive; a name's clash settled by the volume's serial (D20);
+  the double step checked on a real AT (D13).
 - **Read-between and read-behind** (D7; M6 did read-ahead alone), and **the driver holding
   the read-ahead as its next run** (D2), which needs the driver's queue of runs.
 

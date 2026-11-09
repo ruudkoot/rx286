@@ -5,12 +5,16 @@
  * (TEST_POSIX_RDTIME). Each check writes or reads a file whole, in calls of
  * the size given, times it by the monotonic clock (20 ms ticks), says the
  * time on a line of its own, and then whether it kept within its budget.
- * The budgets are MAME's AT's, the only emulator with an AT's speed.
+ * The budgets are MAME's AT's, the only emulator with an AT's speed. The
+ * volumes' names in /mnt are learnt before the first check (M8): the
+ * first lookup of a name reads each drive's label until it finds it,
+ * which is not what any budget is about.
  * ============================================================================ */
 
 #include <stdio.h>
 #include <string.h>
 #include "fcntl.h"
+#include "sys/stat.h"
 #include "time.h"
 #include "unistd.h"
 
@@ -96,13 +100,16 @@ static void per_sector(const char *what, const char *path, int times, long budge
 /* main - the checks of the milestones so far, against their budgets */
 int main(void)
 {
-    written("D, 32 KB written in calls of 4 KB", "/d/w4k.dat", 4096, 32768L, 1000L);
-    read_whole("A, KERNEL.BIN read in calls of 15 KB", "/a/kernel.bin", 15360, -6000L);
-    written("B, 45 KB written in calls of 15 KB", "/b/big.dat", 15360, 46080L, 8000L);
-    read_whole("B, 45 KB read back in calls of 15 KB", "/b/big.dat", 15360, 1000L);
-    read_whole("C, NUMBERS.TXT read in calls of 15 KB", "/c/numbers.txt", 15360, 500L);
-    read_whole("C, NUMBERS.TXT read in calls of 512 bytes", "/c/numbers.txt", 512, 1100L);
-    per_sector("C, NUMBERS.TXT 20 times in calls of 15 KB", "/c/numbers.txt", 20, 2600L);
+    struct stat st;
+
+    stat("/mnt/rx286b", &st);           /* (/mnt's names learnt: C, D, A, B) */
+    written("D, 32 KB written in calls of 4 KB", "/mnt/rx286d/w4k.dat", 4096, 32768L, 1000L);
+    read_whole("A, KERNEL.BIN read in calls of 15 KB", "/mnt/rx286/kernel.bin", 15360, -6000L);
+    written("B, 45 KB written in calls of 15 KB", "/mnt/rx286b/big.dat", 15360, 46080L, 8000L);
+    read_whole("B, 45 KB read back in calls of 15 KB", "/mnt/rx286b/big.dat", 15360, 1000L);
+    read_whole("C, NUMBERS.TXT read in calls of 15 KB", "/mnt/rx286c/numbers.txt", 15360, 500L);
+    read_whole("C, NUMBERS.TXT read in calls of 512 bytes", "/mnt/rx286c/numbers.txt", 512, 1100L);
+    per_sector("C, NUMBERS.TXT 20 times in calls of 15 KB", "/mnt/rx286c/numbers.txt", 20, 2600L);
     printf("rdtime: done\n");
     return 0;
 }

@@ -89,6 +89,20 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
     return rx_kcall(r);
 }
 
+#define DRIVE_FIXED 2                   /* drives C and D: the fixed disks */
+#define TRUST_TICKS 100                 /* a diskette's sectors trusted 2 s after the disk
+                                           server's last word of it (M8; disk.c's too) */
+
+static rx_u16 ds_seen[DRIVE_FIXED];     /* the disk server's last answer for each diskette */
+
+/* disk_trusted - may what the cache holds of a drive be used without
+ * asking the disk server, which checks a diskette after 2 s of its
+ * drive's silence (server.h; disk-scheduler.md M8, D12)? */
+int disk_trusted(unsigned drive)
+{
+    return drive >= DRIVE_FIXED || (rx_u16)((rx_u16)rx_ticks() - ds_seen[drive]) < TRUST_TICKS;
+}
+
 /* disk_call_ds - a call to the disk server for a drive's volume, whose lock
  * the calling thread's call holds; the server's lock given up while it
  * waits, if the thread holds it (disk-scheduler.md M4, D15): the call's
@@ -105,6 +119,14 @@ static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 
     status = call(OS_DISK, label, bx, cx, si, di, bp, r);
     if (had)
         lock_take(self_notify());
+    if (status == 0 && drive < DRIVE_FIXED)
+        ds_seen[drive] = (rx_u16)rx_ticks();
+    if (status == 0 && had && drive < DRIVE_FIXED) {    /* a diskette's (M8, D12): */
+        if (r->bx == E_CHANGED)
+            vfs_medium(drive);          /* another: the old one's gone */
+        else if ((label == DS_READ || label == DS_WRITE) && (r->di & DSV_TOUCHED))
+            cache_forget(drive);        /* the same: read afresh before a write */
+    }
     return status;
 }
 
@@ -132,6 +154,17 @@ rx_u16 disk_sync(unsigned drive)
     struct rx_kregs r;
 
     if (disk_call_ds(drive, DS_SYNC, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;
+    return r.bx;
+}
+
+/* disk_eject - a diskette's volume forgotten by the disk server (DS_EJECT;
+ * disk-scheduler.md M8): 0 or the error */
+rx_u16 disk_eject(unsigned drive)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_EJECT, (rx_u16)drive, 0, 0, 0, 0, &r))
         return E_TIMEOUT;
     return r.bx;
 }

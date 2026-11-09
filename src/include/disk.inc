@@ -44,6 +44,11 @@ DS_RUN_MAX          equ 64      ; a read's or write's sectors at most: 32 KB
 DS_ALL              equ 0xFF
 DS_VOLUMES          equ 4       ; volumes 0 to 3: drives A to D
 DSV_REMOVABLE       equ 1       ; DS_VOLUME's DI: a diskette's
+DSV_TOUCHED         equ 2       ; DS_READ's and DS_WRITE's DI: the diskette was found again
+                                ;    after its change line or its motor's stop, the same
+                                ;    by its first two sectors: what the caller holds of it
+                                ;    to be read again before it writes (M8, D12). Another
+                                ;    diskette is E_CHANGED, none E_OFFLINE
 
 ; The disk server's slots, which the root fills (src/root/root.c's
 ; build_disk): its endpoint; the root's for ROOT_PANIC, badged
@@ -86,7 +91,8 @@ DS_THREAD_STACK     equ 512     ; (250 bytes used at most: tests/disk, M3)
 ; the index of DS_INDEX_SMALL
 DS_CACHE_PER_SEGMENT equ 125
 DS_CACHE_BLOCK      equ 524     ; a sector and its record
-DS_CACHE_SMALL      equ 2       ; (4 until M7, whose code left the shell no fork at 512 KB)
+DS_CACHE_SMALL      equ 1       ; (4 until M7, 2 until M8: their code left the shell no
+                                ;    fork at 512 KB)
 DS_LEND_SEGMENTS    equ 4       ; 4 * 65,500 bytes: a block of 256 KB
 DS_LEND_MAX         equ 56      ; 14 MB
 DS_SEGMENTS_MAX     equ 1 + DS_LEND_SEGMENTS * DS_LEND_MAX

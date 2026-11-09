@@ -9,7 +9,7 @@ keys: cat c:/numbers.txt | head -n2\nhead nothing; head -n x\n
 timeout: 60
 ---
 rx286, test build
-/a$ head b:frag.txt
+/mnt/rx286$ head b:frag.txt
 line 01 of FRAG.TXT, a file in two pieces on B:
 line 02 of FRAG.TXT, a file in two pieces on B:
 line 03 of FRAG.TXT, a file in two pieces on B:
@@ -20,20 +20,20 @@ line 07 of FRAG.TXT, a file in two pieces on B:
 line 08 of FRAG.TXT, a file in two pieces on B:
 line 09 of FRAG.TXT, a file in two pieces on B:
 line 10 of FRAG.TXT, a file in two pieces on B:
-/a$ head -n 2 b:frag.txt c:/docs/hello.txt
+/mnt/rx286$ head -n 2 b:frag.txt c:/docs/hello.txt
 ==> b:frag.txt <==
 line 01 of FRAG.TXT, a file in two pieces on B:
 line 02 of FRAG.TXT, a file in two pieces on B:
 ==> c:/docs/hello.txt <==
 Hello from C:\DOCS.
-/a$ head -3 c:/numbers.txt
+/mnt/rx286$ head -3 c:/numbers.txt
 line 0001 of C:\NUMBERS.TXT
 line 0002 of C:\NUMBERS.TXT
 line 0003 of C:\NUMBERS.TXT
-/a$ cat c:/numbers.txt | head -n2
+/mnt/rx286$ cat c:/numbers.txt | head -n2
 line 0001 of C:\NUMBERS.TXT
 line 0002 of C:\NUMBERS.TXT
-/a$ head nothing; head -n x
+/mnt/rx286$ head nothing; head -n x
 nothing: no such file or directory
 usage: head [-n LINES] [FILE...]
-/a$
+/mnt/rx286$

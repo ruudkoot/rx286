@@ -218,6 +218,8 @@ FDC_MSR_RQM         equ 0x80        ; the data register is ready
 FDC_MSR_DIO         equ 0x40        ; set: controller to processor
 FDC_RATE_500K       equ 0x00        ; 1.2 MB media in a 1.2 MB drive
 FDC_RATE_250K       equ 0x02        ; 360 KB media in a 360 KB drive
+FDC_RATE_300K       equ 0x01        ; 360 KB media in a 1.2 MB drive (disk-scheduler.md D13)
+FDC_DIR_CHANGED     equ 0x80        ; FDC_DIR's change line: no diskette since the last step
 FDC_CMD_SPECIFY     equ 0x03
 FDC_CMD_RECALIBRATE equ 0x07
 FDC_CMD_SENSE_INT   equ 0x08
@@ -232,6 +234,8 @@ FDC_GAP_1200K       equ 0x1B        ; gap 3: 1.2 MB media in a 1.2 MB drive (BIO
 FDC_GAP_360K        equ 0x2A        ; 360 KB media in a 360 KB drive
 FDC_ST0_CODE        equ 0xC0        ; ST0's interrupt code: 0 when the command succeeded
 FDC_ST0_SEEK_END    equ 0x20
+FDC_ST0_INVALID     equ 0x80        ; ST0 of an invalid command: Sense Interrupt Status with
+                                    ;    no interrupt pending
 FDC_ST1_NOT_WRITABLE equ 0x02       ; the diskette is write-protected
 
 ; ---------------------------------------------------------------- Bochs only (test builds)

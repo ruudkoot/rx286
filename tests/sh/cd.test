@@ -6,24 +6,24 @@
 # name FAT cannot hold.
 program: sh
 emulators: bochs mame
-keys: cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /c/docs/../docs; pwd\n
-keys: cd /D; cd /d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere\n
+keys: cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /mnt/rx286c/docs/../docs; pwd\n
+keys: cd /D; cd /mnt/rx286d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere\n
 keys: cd /; cd ..; pwd; cd; pwd\n
 ---
 rx286, test build
-/a$ cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /c/docs/../docs; pwd
-/c
-/c/docs
-/c
-/c/docs
-/c/docs$ cd /D; cd /d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere
+/mnt/rx286$ cd c:/; pwd; cd docs; cd .; pwd; cd ..; pwd; cd /mnt/rx286c/docs/../docs; pwd
+/mnt/rx286c
+/mnt/rx286c/docs
+/mnt/rx286c
+/mnt/rx286c/docs
+/mnt/rx286c/docs$ cd /D; cd /mnt/rx286d; pwd; cd B:/MANY; cd B:/many; pwd; cd ..; cd readme.txt; cd nowhere
 sh: /D: no such file or directory
-/d
+/mnt/rx286d
 sh: B:/MANY: invalid argument
-/b/many
+/mnt/rx286b/many
 sh: readme.txt: not a directory
 sh: nowhere: no such file or directory
-/b$ cd /; cd ..; pwd; cd; pwd
+/mnt/rx286b$ cd /; cd ..; pwd; cd; pwd
 /
-/a
-/a$
+/mnt/rx286
+/mnt/rx286$

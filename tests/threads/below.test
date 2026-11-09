@@ -2,21 +2,16 @@
 # shell answers as ever, and the counter runs whenever the shell waits. The
 # shell is the shell in C, a process, among init's (os-server.md P12; each
 # with a thread of the OS server's), and the counter the module the root
-# builds (TEST_COUNTER). DOSBox-X's shell starts in /: it cannot read the
-# drives (docs/emulators.md).
+# builds (TEST_COUNTER).
 program: shell
 define: TEST_COUNTER
 define: TEST_THREAD_REPORT
 keys: echo hello\n
 ---
 rx286, test build
-@bochs /a$ echo hello
-@mame /a$ echo hello
-@dosbox-x /$ echo hello
+/mnt/rx286$ echo hello
 hello
-@bochs /a$
-@mame /a$
-@dosbox-x /$
+/mnt/rx286$
 rx286: thread root ran
 rx286: thread printer ran
 rx286: thread mouse ran

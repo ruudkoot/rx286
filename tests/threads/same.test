@@ -1,24 +1,17 @@
 # The counter at the shell's priority (roadmap l4.md L2): it never waits, so
 # only the time slices let the shell in; the shell still answers. The shell
-# is the shell in C, a process among init's (os-server.md P12); DOSBox-X's
-# starts in /.
+# is the shell in C, a process among init's (os-server.md P12).
 program: shell
 define: TEST_COUNTER_SAME
 define: TEST_THREAD_REPORT
 keys: echo one\necho two\n
 ---
 rx286, test build
-@bochs /a$ echo one
-@mame /a$ echo one
-@dosbox-x /$ echo one
+/mnt/rx286$ echo one
 one
-@bochs /a$ echo two
-@mame /a$ echo two
-@dosbox-x /$ echo two
+/mnt/rx286$ echo two
 two
-@bochs /a$
-@mame /a$
-@dosbox-x /$
+/mnt/rx286$
 rx286: thread root ran
 rx286: thread printer ran
 rx286: thread mouse ran

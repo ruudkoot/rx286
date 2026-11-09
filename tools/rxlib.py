@@ -904,7 +904,7 @@ def normalise_transcript(raw):
 DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
 
 
-def run_dosbox(directory, image, serial, timeout, until,
+def run_dosbox(directory, image, serial, timeout, until, disks,
                printers=('/dev/null', '/dev/null'), log_port='com2', modem=None, machine=None):
     """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
     `until(lines)` holds of the transcript, the log in `serial` (from
@@ -915,6 +915,8 @@ def run_dosbox(directory, image, serial, timeout, until,
     log = 'file file:' + serial
     host, _, port = (modem or '').partition(':')
     text = text.replace('@IMAGE@', image)
+    for name in DISK_IMAGES:                # B, C and D: the run's own copies
+        text = text.replace('@%s@' % name.split('.')[0].upper(), os.path.join(disks, name))
     text = text.replace('@COM2@', log if log_port == 'com2' else
                         'nullmodem server:%s port:%s transparent:1' % (host, port) if modem
                         else 'dummy')
@@ -984,7 +986,17 @@ MAME_DISKS = (('hd0.img', 'c.chd', '%d,%d,%d' % (615, 4, 17)),    # AT types 2 a
 MAME_STOP_SECONDS = 10       # for MAME to exit when mame/rx286.lua is asked, before a kill
 
 
-def run_mame(directory, image, serial, timeout, until, disks=None, media=(), machine=None):
+def blank_diskette(path, label, kb=1200):
+    """A fresh FAT12 volume of 1.2 MB or 360 KB, empty, of that label
+    (media-at: other)."""
+    with open(path, 'wb') as f:
+        f.truncate(kb * 1024)
+    subprocess.run(['mformat', '-i', path, '-f', str(kb), '-N', '4F544852', '-v', label, '::'],
+                   check=True, env=dict(os.environ, MTOOLS_SKIP_CHECK='1'))
+
+
+def run_mame(directory, image, serial, timeout, until, disks=None, media=(), machine=None,
+             media_at=()):
     """Run MAME's IBM PC/AT (a real 80286 core, IBM's BIOS; roadmap M9) on an
     image without a window, until `until(lines)` holds of the serial
     transcript or `timeout` seconds. `disks` is the run's own directory of
@@ -997,7 +1009,9 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
     to stop, the runner makes a file that mame/rx286.lua watches for, and
     the machine exits as at its own end, its diskettes written back;
     MAME_STOP_SECONDS later it is killed. (tools/run-test fails a test whose
-    diskette it checks if MAME left its image as it was.) SDL's dummy
+    diskette it checks if MAME left its image as it was.) `media_at` are
+    (seconds, 'eject' or 'insert', 'A' or 'B', image) changes that
+    mame/rx286.lua makes at those seconds of the machine's time (M8). SDL's dummy
     drivers keep MAME
     from opening any window: `-video none` alone still opens one under
     WSLg."""
@@ -1039,7 +1053,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
          '-seconds_to_run', str(int(timeout * 10))] + args,
         stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory,
         env=dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy',
-                 RX286_MAME_STOP=stop))
+                 RX286_MAME_STOP=stop,
+                 RX286_MAME_MEDIA=';'.join('%g %s %s %s' % c for c in media_at)))
     status = 'exit'
     while proc.poll() is None:
         if time.monotonic() - started > timeout:

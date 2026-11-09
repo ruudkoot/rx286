@@ -94,7 +94,11 @@ PX_FUTEX            equ 51      ; BX FUTEX_WAIT or FUTEX_WAKE, SI a word of the 
                                 ;    the value it should hold (WAIT), or how many (WAKE) ->
                                 ;    WAIT: 0 once woken, or -1, EAGAIN if the word differs,
                                 ;    EINTR; WAKE: how many were woken
-PX_CALLS            equ 52
+PX_EJECT            equ 52      ; SI a path of a diskette's volume: what the server holds of
+                                ;    it written, then the volume forgotten, its open files
+                                ;    gone (ENXIO) -> 0, or -1, EINVAL for no diskette's
+                                ;    (rx286's own; disk-scheduler.md M8, D12)
+PX_CALLS            equ 53
 FUTEX_WAIT          equ 0
 FUTEX_WAKE          equ 1
 THREAD_RUNNING      equ 1       ; a thread's state word, libc's (pthread.h)

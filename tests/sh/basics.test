@@ -1,5 +1,5 @@
 # The shell in C (roadmap os-server.md P9): init starts it from /z in the
-# boot drive's directory, /a; a command, a listing in DOS's drive syntax,
+# boot drive's directory, /mnt/rx286; a command, a listing in DOS's drive syntax,
 # and the milestone's pipeline into a file and back.
 program: sh
 # DOSBox-X has no disk controller rx286 can use (docs/emulators.md).
@@ -8,12 +8,12 @@ install: C /BIN/WC z-wc.rx
 keys: echo hello\nls c:/docs\nls c:/docs | wc -l > c:/n.txt\ncat c:/n.txt\n
 ---
 rx286, test build
-/a$ echo hello
+/mnt/rx286$ echo hello
 hello
-/a$ ls c:/docs
+/mnt/rx286$ ls c:/docs
 hello.txt
 printme.txt
-/a$ ls c:/docs | wc -l > c:/n.txt
-/a$ cat c:/n.txt
+/mnt/rx286$ ls c:/docs | wc -l > c:/n.txt
+/mnt/rx286$ cat c:/n.txt
 2
-/a$
+/mnt/rx286$

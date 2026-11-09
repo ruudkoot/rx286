@@ -13,5 +13,5 @@ match: contains
 timeout: 120
 emulators: bochs mame
 ---
-/c/docs$ exit
+/mnt/rx286c/docs$ exit
 os: a thread's stack: a quarter of it or more to spare: yes

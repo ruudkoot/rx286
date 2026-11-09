@@ -9,23 +9,10 @@ keys: beep\nplay\n
 timeout: 60
 ---
 rx286, test build
-/a$ beep
+/mnt/rx286$ beep
 probe: the speaker sounds at the frequency asked
 probe: silent
-/a$ play
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: silent
+/mnt/rx286$ play
 probe: the speaker sounds at the frequency asked
 probe: silent
 probe: the speaker sounds at the frequency asked
@@ -38,4 +25,17 @@ probe: the speaker sounds at the frequency asked
 probe: silent
 probe: the speaker sounds at the frequency asked
 probe: silent
-/a$
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+/mnt/rx286$

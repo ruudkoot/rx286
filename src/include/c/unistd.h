@@ -40,6 +40,9 @@ int isatty(int fd);
 unsigned alarm(unsigned seconds);
 unsigned sleep(unsigned seconds);
 int rmdir(const char *path);
+/* eject - a diskette's volume forgotten, what is held of it written first
+ * (rx286's own: disk-scheduler.md M8) */
+int eject(const char *path);
 int chdir(const char *path);
 char *getcwd(char *room, size_t n);
 int fsync(int fd);

@@ -9,26 +9,26 @@ install: C /BIN/RM z-rm.rx
 install: C /BIN/MKDIR z-mkdir.rx
 install: C /BIN/RMDIR z-rmdir.rx
 install: C /BIN/WC z-wc.rx
-keys: cd /b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d\n
+keys: cd /mnt/rx286b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d\n
 keys: cat a.txt d/b.txt | wc; wc -l -c a.txt\nrm d/b.txt; rmdir d; ls\n
-keys: rmdir /b/many; cp nothing x; mv a.txt /c/a.txt\n
+keys: rmdir /mnt/rx286b/many; cp nothing x; mv a.txt /mnt/rx286c/a.txt\n
 match: full
 fsck: B
 ---
 rx286, test build
-/a$ cd /b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d
+/mnt/rx286$ cd /mnt/rx286b; mkdir d; echo text > a.txt; cp a.txt d; mv d/a.txt d/b.txt; ls d
 b.txt
-/b$ cat a.txt d/b.txt | wc; wc -l -c a.txt
+/mnt/rx286b$ cat a.txt d/b.txt | wc; wc -l -c a.txt
 2 2 10
 1 5 a.txt
-/b$ rm d/b.txt; rmdir d; ls
+/mnt/rx286b$ rm d/b.txt; rmdir d; ls
 readme.txt
 frag.txt
 pad.txt
 many
 a.txt
-/b$ rmdir /b/many; cp nothing x; mv a.txt /c/a.txt
-/b/many: directory not empty
+/mnt/rx286b$ rmdir /mnt/rx286b/many; cp nothing x; mv a.txt /mnt/rx286c/a.txt
+/mnt/rx286b/many: directory not empty
 nothing: no such file or directory
 a.txt: across drives
-/b$
+/mnt/rx286b$

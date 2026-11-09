@@ -12,7 +12,9 @@
 # NUMBERS.TXT within 0.5 s in calls of 15 KB and 1.1 s in calls of 512
 # bytes, a sector of a run within 2.6 ms (M6: 260, 420, 980 ms, 2.37 ms).
 # D's write in calls of 4 KB, 920 ms, keeps its 1 s; B's, 7.2-8.0 s with
-# the diskette's rotation, its 8 s.
+# the diskette's rotation, its 8 s. M8: /mnt's names are learnt before the
+# first check, and B's write and read back include the look at its
+# diskette that M8 adds (B: 7.8 s, 0.48 s).
 program: idle
 define: TEST_POSIX_RDTIME
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}

@@ -73,7 +73,7 @@ static void drive(char d)
     int f, ok = 0, all = 0, fd, k, files = d == 'b' ? 4 : 6;
 
     for (f = 0; f < files; f++) {
-        snprintf(path, sizeof path, "/%c/run%d.dat", d, f);
+        snprintf(path, sizeof path, "%c:/run%d.dat", d, f);
         all += 2;
         ok += one(path, f, sectors[f], 0, sizes[f % 3], sizes[(f + 1) % 3]);
         ok += one(path, f + 10, sectors[f], 300, sizes[(f + 2) % 3], sizes[f % 3]);
@@ -81,12 +81,12 @@ static void drive(char d)
     printf("runs: %c: %d of %d files read back the same\n", d, ok, all);
     for (k = 0; k < 32; k++)            /* two sectors of text, one call */
         snprintf(text + k * 32, 33, "runs: %c, line %02d of 32 lines...\n", d, k);
-    snprintf(path, sizeof path, "/%c/runs.txt", d);
+    snprintf(path, sizeof path, "%c:/runs.txt", d);
     fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     printf("runs: %c: the text written: %d\n", d, (int)write(fd, text, 1024));
     close(fd);
     for (f = 0; f < files; f++) {       /* room for the next drive's (B is small) */
-        snprintf(path, sizeof path, "/%c/run%d.dat", d, f);
+        snprintf(path, sizeof path, "%c:/run%d.dat", d, f);
         unlink(path);
     }
 }

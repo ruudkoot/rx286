@@ -43,7 +43,7 @@ static void fill(int f, long at)
 /* written - the files, none fsync'd: 0, or the errno */
 static int written(void)
 {
-    static char path[] = "/c/memN.txt", line[] = "memory N\n";
+    static char path[] = "c:/memN.txt", line[] = "memory N\n";
     int f, fd;
     long at;
 
@@ -74,7 +74,7 @@ static int written(void)
 /* same - the large files as written? */
 static int same(void)
 {
-    static char path[] = "/c/memN.dat";
+    static char path[] = "c:/memN.dat";
     static unsigned char want[512];
     int f, fd;
     long at;

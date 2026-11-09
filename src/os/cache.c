@@ -49,6 +49,8 @@ static rx_u8 holder[DRIVES];            /* the thread (its number + 1) whose cal
 static rx_u16 ticket[DRIVES], served[DRIVES];   /* each volume's next ticket, and the one
                                            whose turn it is: the lock goes in their order (M5) */
 static rx_u8 waiter[DRIVES][VOL_WAITERS];   /* a ticket's thread (its number + 1) */
+static rx_u8 forget[DRIVES];            /* cache_forget's: the drive's clean sectors out at
+                                           its volume's next call (M8) */
 
 /* me - the calling thread, as a holder */
 static rx_u8 me(void)
@@ -74,6 +76,12 @@ void vol_hold(unsigned drive)
     waiter[drive][mine % VOL_WAITERS] = 0;
     holder[drive] = me();
     proc_in_volume(1);
+    if (forget[drive]) {                /* (no call holds a slot of it now: M8) */
+        forget[drive] = 0;
+        for (mine = 0; mine < sectors; mine++)
+            if (cache[mine].state == C_CLEAN && !cache[mine].busy && cache[mine].drive == drive)
+                cache[mine].state = C_EMPTY;
+    }
 }
 
 /* vol_mine - does the calling thread's call hold a volume's lock? */
@@ -213,6 +221,9 @@ rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
     if (drive >= DRIVES)
         return E_INVAL;
     vol_hold(drive);
+    if (!disk_trusted(drive) && (error = disk_volume(drive)) != 0)
+        return error;                   /* (a diskette after its drive's silence: checked,
+                                           another's E_CHANGED, its sectors gone; M8) */
     if (sector >= drive_sectors(drive))
         return E_INVAL;
     for (;;) {
@@ -319,6 +330,15 @@ int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count)
                 && cache[k].sector - sector < count)
             return 1;
     return 0;
+}
+
+/* cache_forget - a drive's clean sectors out of the cache (fs.h;
+ * disk-scheduler.md M8): when a call next takes its volume's lock, since
+ * the call that learnt of it may hold one, which emptied now another call
+ * would fill with another sector under its feet */
+void cache_forget(unsigned drive)
+{
+    forget[drive] = 1;
 }
 
 /* cache_drop - `count` sectors from `sector` of a drive out of the cache, dirty

@@ -8,8 +8,8 @@ emulators: bochs mame
 keys: cat\n{wait 20}{ctrl-break}{wait 20}echo $?\n
 ---
 rx286, test build
-/a$ cat
+/mnt/rx286$ cat
 rx286: Ctrl+Break: SIGINT
-/a$ echo $?
+/mnt/rx286$ echo $?
 130
-/a$
+/mnt/rx286$

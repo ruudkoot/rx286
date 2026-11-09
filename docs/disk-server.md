@@ -109,7 +109,7 @@ that the root lends it (roadmap disk-scheduler.md M7, D10 A):
 | Machine | Its own | Lent | Index |
 |---|---|---|---|
 | with extended memory | a segment of 125 blocks | up to one block for each 256 KB of extended memory, `DS_LEND_MAX` (56, 14 MB) at most | `DS_INDEX_BYTES`, and `DS_INDEX_PER_LENT` more for each block it may be lent, `DS_INDEX_MOST` (65,520) at most |
-| without extended memory | `DS_CACHE_SMALL` (2) blocks in one segment | none | `DS_INDEX_SMALL` |
+| without extended memory | `DS_CACHE_SMALL` (1) block in one segment | none | `DS_INDEX_SMALL` |
 
 The root lends while more than its reserve for the processes would stay
 free: an eighth of the extended memory, 64 KB at least. It lends a block
@@ -145,7 +145,13 @@ On a 512 KB machine without extended memory, the disk server costs about
 - its data, 1 KB;
 - its cache.
 
-The OS server's cache, 4 sectors there instead of 32, pays for most of it.
+The OS server's cache, 3 sectors there instead of 32, pays for most of it.
+Each milestone's code comes out of that machine's memory for processes,
+since the image's code runs where it lies: M7's and M8's left the shell no
+fork for a command at 512 KB, and the cache there went from 4 blocks to 1,
+the OS server's from 4 sectors to 3, the diskette's DMA buffer from 4
+sectors to 2, and the OS server's scratch sets from 3 to 2
+(`tests/memory/sizes.test` is the canary).
 
 ## The order of the requests
 
@@ -231,6 +237,36 @@ A sector that a write-behind pass fails to write is dropped from the cache,
 as any refused write is, and the failure is said on the log. The error is
 kept for the volume: its next `DS_SYNC`, and so the next `fsync` of a file
 on it, returns it.
+
+## Diskettes
+
+A diskette's volume follows its diskette (roadmap disk-scheduler.md M8,
+D12). The disk server knows each diskette drive's diskette by its first two
+sectors, the boot sector and the FAT's first, hashed when it first reads
+them and again whenever it writes one of them itself. It looks at the
+diskette again:
+- when the driver refuses a run with `E_CHANGED` (A's change line, or B
+  idle past its motor's time: *docs/storage.md*);
+- at the first call of a drive that has been silent for 2 s
+  (`TRUST_TICKS`), before it answers from its cache: a diskette taken out
+  and put back while the motor was off, which no line tells of.
+
+To look, it asks the driver for the medium (`DRV_DISK_MEDIA`, which finds a
+360 KB diskette in A by its data rate) and reads the two sectors afresh,
+into a sector of its own, since the run that met `E_CHANGED` may hold every
+block of the cache:
+- **the same diskette**: the cache is kept, and the volume's next answer
+  says so with `DSV_TOUCHED`, so that the OS server reads afresh what it
+  holds before it writes: a twin, or a directory changed on another
+  machine, passes the check;
+- **another**: the drive's cached sectors are dropped, and the call is
+  answered `E_CHANGED`: the OS server mounts the new volume;
+- **none**: `E_OFFLINE`. A read of sectors the cache holds is still
+  answered; a write, or a read of others, is refused. `DS_VOLUME` answers
+  the volume as it was, so that its cached files can still be read.
+
+A 360 KB diskette in A is read-only (`E_PROTECTED`; D12). `DS_EJECT` also
+forgets the drive's diskette, so that the next is taken as new.
 
 ## Retries
 

@@ -1,14 +1,11 @@
 # help, a built-in (roadmap os-server.md P12): the built-ins, the programs
-# and the keys. On all three emulators: DOSBox-X's shell starts in /, as it
-# cannot read the drives (docs/emulators.md), so it goes there first.
+# and the keys. On all three emulators.
 program: sh
 emulators: bochs mame dosbox-x
 keys: cd /\nhelp\n
 ---
 rx286, test build
-@bochs /a$ cd /
-@mame /a$ cd /
-@dosbox-x /$ cd /
+/mnt/rx286$ cd /
 /$ help
 Built in:  cd [DIR], pwd, exit [STATUS], export NAME=VALUE, unset NAME, set,
            alias NAME=VALUE, unalias NAME, jobs, fg [%N], bg [%N], true,

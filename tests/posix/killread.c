@@ -41,11 +41,11 @@ int main(void)
     pid_t pid;
     int status;
 
-    before = bytes_of("/a/kernel.bin");
+    before = bytes_of("/mnt/rx286/kernel.bin");
     pid = fork();
     if (pid == 0) {
         for (;;)
-            bytes_of("/a/kernel.bin");
+            bytes_of("/mnt/rx286/kernel.bin");
     }
     nanosleep(&second, 0);
     printf("killread: kill (0): %d\n", kill(pid, SIGKILL));
@@ -55,7 +55,7 @@ int main(void)
     }
     printf("killread: the child ended by SIGKILL: %s\n",
            WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL ? "yes" : "no");
-    after = bytes_of("/a/kernel.bin");
+    after = bytes_of("/mnt/rx286/kernel.bin");
     printf("killread: KERNEL.BIN read again whole: %s\n",
            after > 0 && after == before ? "yes" : "no");
     printf("killread: done\n");

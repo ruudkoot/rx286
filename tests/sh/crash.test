@@ -14,51 +14,51 @@ keys: crash tf\ncrash nt\necho $?\n
 timeout: 60
 ---
 rx286, test build
-/a$ crash
+/mnt/rx286$ crash
 crash what? The kinds: gp ud de ss io cli hlt int kernel call write fpu tf nt
-/a$ crash gp
+/mnt/rx286$ crash gp
 crash: jump past the end of my code
 rx286: crash[11] fault #GP(0000) at 0007:{z:crash.crash_gp}
-/a$ crash ud
+/mnt/rx286$ crash ud
 crash: an instruction that does not exist
 rx286: crash[12] fault #UD at 0007:{z:crash.crash_ud}
-/a$ crash de
+/mnt/rx286$ crash de
 crash: divide by zero
 rx286: crash[13] fault #DE at 0007:{z:crash.crash_de}
-/a$ crash ss
+/mnt/rx286$ crash ss
 crash: push past the end of my stack
 rx286: crash[14] fault #SS(0000) at 0007:{z:crash.crash_ss_push}
-/a$ crash io
+/mnt/rx286$ crash io
 crash: read the keyboard's port myself
 rx286: crash[15] fault #GP(0000) at 0007:{z:crash.crash_io}
-/a$ crash cli
+/mnt/rx286$ crash cli
 crash: turn interrupts off
 rx286: crash[16] fault #GP(0000) at 0007:{z:crash.crash_cli}
-/a$ crash hlt
+/mnt/rx286$ crash hlt
 crash: halt the CPU
 rx286: crash[17] fault #GP(0000) at 0007:{z:crash.crash_hlt}
-/a$ crash int
+/mnt/rx286$ crash int
 crash: INT 32h, beyond the IDT
 rx286: crash[18] fault #GP(0192) at 0007:{z:crash.crash_int}
-/a$ crash kernel
+/mnt/rx286$ crash kernel
 crash: load the kernel's data selector
 rx286: crash[19] fault #GP(0010) at 0007:{z:crash.crash_kernel}
-/a$ crash call
+/mnt/rx286$ crash call
 crash: call into the kernel's code
 rx286: crash[20] fault #GP(0008) at 0007:{z:crash.crash_call}
-/a$ crash write
+/mnt/rx286$ crash write
 crash: write over my own code
 rx286: crash[21] fault #GP(0000) at 0007:{z:crash.crash_write}
-/a$ crash fpu
+/mnt/rx286$ crash fpu
 crash: divide by zero on the 287, unmasked
 @bochs rx286: crash[22] fault #MF at 0007:{z:crash.crash_fpu_after}
 @mame crash: no 287 error arrived; is there a 287?
-/a$ crash tf
+/mnt/rx286$ crash tf
 crash: set the trap flag
 rx286: crash[23] fault #DB at 0007:{z:crash.crash_tf_after}
-/a$ crash nt
+/mnt/rx286$ crash nt
 crash: set NT and IRET
 rx286: crash[24] fault #TS(0000) at 0007:{z:crash.crash_nt_iret}
-/a$ echo $?
+/mnt/rx286$ echo $?
 139
-/a$
+/mnt/rx286$

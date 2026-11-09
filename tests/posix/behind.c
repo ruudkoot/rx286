@@ -34,8 +34,10 @@ static int written(const char *path, const char *line, int sync)
 /* main - the two files, then the wait */
 int main(void)
 {
-    printf("behind: written and fsync'd (0): %d\n", written("/c/synced.txt", "synced\n", 1));
-    printf("behind: written, not fsync'd (0): %d\n", written("/c/behind.txt", "behind\n", 0));
+    printf("behind: written and fsync'd (0): %d\n",
+           written("/mnt/rx286c/synced.txt", "synced\n", 1));
+    printf("behind: written, not fsync'd (0): %d\n",
+           written("/mnt/rx286c/behind.txt", "behind\n", 0));
 #ifndef TEST_BEHIND_NOWAIT
     {
         struct timespec wait = { 7, 0 };

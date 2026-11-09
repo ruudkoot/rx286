@@ -25,7 +25,7 @@ terminal's.
 The first terminal's output and echo go to the kernel's log too: it is
 the transcript the tests read. The others' go to their pages alone. In a
 `TEST_SCREEN` build the console driver puts each page `DRV_CON_SHOW` shows
-on the log ("screen 1 03: /a$ echo two"), its attributes as `<XX>`, so
+on the log ("screen 1 03: /mnt/rx286$ echo two"), its attributes as `<XX>`, so
 that a test can read the other terminals.
 
 ## The keys

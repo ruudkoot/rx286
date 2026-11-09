@@ -4,11 +4,11 @@
 # own /, /dev and /z. Names are shown in lower case (disk-scheduler.md D19).
 program: sh
 emulators: bochs mame
-keys: ls -l /a; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /d\n
+keys: ls -l /mnt/rx286; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /mnt/rx286d\n
 keys: ls -l b:/many\nls / /dev /z\n
 ---
 rx286, test build
-/a$ ls -l /a; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /d
+/mnt/rx286$ ls -l /mnt/rx286; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /mnt/rx286d
 -rw-r--r-- {image_size8} kernel.bin
 -rw-r--r--       79 readme.txt
 -rw-r--r--     3136 frag.txt
@@ -20,7 +20,7 @@ c:/docs:
 -rw-r--r--       21 C:/docs/hello.txt
 -rw-r--r--      142 readme.txt
 drwxr-xr-x        0 games
-/a$ ls -l b:/many
+/mnt/rx286$ ls -l b:/many
 -rw-r--r--       29 file01.txt
 -rw-r--r--       29 file02.txt
 -rw-r--r--       29 file03.txt
@@ -61,13 +61,10 @@ drwxr-xr-x        0 games
 -rw-r--r--       29 file38.txt
 -rw-r--r--       29 file39.txt
 -rw-r--r--       29 file40.txt
-/a$ ls / /dev /z
+/mnt/rx286$ ls / /dev /z
 /:
-a
-b
-c
-d
 dev
+mnt
 z
 /dev:
 null
@@ -95,4 +92,4 @@ cat
 ls
 clock
 counter
-/a$
+/mnt/rx286$

@@ -54,7 +54,13 @@ FD_RECALIBRATIONS   equ 2               ; the 765 steps 77 times at most: 80 cyl
 FD_MOTOR_START_TICKS equ 50 + 1         ; more than 1 s: the BIOS's motor start time
 FD_MOTOR_OFF_TICKS  equ 100             ; 2 s after the last transfer
 FD_SETTLE_TICKS     equ 1 + 1           ; more than the BIOS's 15 ms of head settling
+FD_LINE_UNKNOWN     equ 0               ; fd_line: A's change line not yet seen to clear
+FD_LINE_WORKS       equ 1               ;    seen to clear: set and not clearing, no diskette
+FD_LINE_NONE        equ 2               ;    never clears with a diskette in (DOSBox-X,
+                                        ;    whose controller has no DIR): B's rule
 FD_TICKS            equ 100 + 1         ; 2 s for a command: the BIOS's diskette timeout
+FD_PROBE_TICKS      equ 30 + 1          ; 0.6 s for fd_probe's Read ID: a diskette in a 1.2 MB
+                                        ;    drive answers within two turns (0.33 s)
 FD_BYTE_TICKS       equ 2               ; for the controller to take or give a byte
 FD_RESET_READS      equ 16              ; the reset held for that many reads of a port
 FD_SENSES_AFTER_RESET equ 4             ; one Sense Interrupt Status for each drive it polled
@@ -85,6 +91,11 @@ fd_dor              db FDC_DOR_MOTORS_OFF   ; the digital output register as las
 fd_motor_running    db 0                ; a motor runs, and stops FD_MOTOR_OFF_TICKS after
 fd_last             dw 0                ; the tick of the last transfer's end
 fd_unit             db 0                ; the transfer's drive (0 or 1)
+fd_unit_last        dw 0, 0             ; each drive's last transfer's end, in ticks
+fd_line             db FD_LINE_UNKNOWN  ; A's change line: seen to clear, or none (M8)
+fd_id_ticks         dw FD_TICKS         ; fd_read_id's wait: fd_probe's shorter
+fd_double           db 0, 0             ; each drive's: a 360 KB diskette in a 1.2 MB drive,
+                                        ;    its cylinder two tracks apart (M8, D13)
 fd_cylinder         db FD_UNKNOWN, FD_UNKNOWN   ; where each drive's heads are
 fd_moved            db 0                ; fd_seek's: the heads moved, to settle
 fd_tries            db 0
@@ -215,6 +226,8 @@ fd_call:
         je .geometry
         cmp al, DRV_DISK_READ_ID
         je .read_id
+        cmp al, DRV_DISK_MEDIA
+        je .media
 .invalid:
         mov bx, E_INVAL
         xor cx, cx
@@ -281,6 +294,9 @@ fd_call:
         cmp bh, [di + UNIT_HEADS]
         jae .invalid
         jmp fd_read_id
+.media:
+        mov di, dx
+        jmp fd_media
 
 ; ----------------------------------------------------------------------------
 ; fd_ready - the controller reset and given its timings if it needs it, the
@@ -313,11 +329,199 @@ fd_ready:
 fd_done:
         pushf
         push ax
+        push bx
         call dw_ticks
         mov [fd_last], ax
+        mov bl, [fd_unit]
+        xor bh, bh
+        shl bx, 1
+        mov [fd_unit_last + bx], ax
         mov byte [fd_motor_running], 1
+        pop bx
         pop ax
         popf
+        ret
+
+; ----------------------------------------------------------------------------
+;
+; fd_changed - may the drive's diskette have changed since the driver last
+; looked (disk-scheduler.md M8, D12)? A's change line set: a step, which
+; clears it if a diskette is in. A line never yet seen to clear that stays
+; set, with a diskette in (fd_probe): the drive has none (DOSBox-X), and
+; is treated as B is from then on. B, whose drive has no change line: its
+; last transfer longer ago than its motor's time
+;   In:       DI = the drive's entry; fd_unit, fd_head, fd_track_cylinder;
+;             the drive selected, its motor on
+;   Out:      CF clear; or CF set and AX = E_CHANGED, or E_TIMEOUT (no diskette)
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+fd_changed:
+        cmp byte [fd_unit], 0
+        jne .by_time
+        cmp byte [fd_line], FD_LINE_NONE
+        je .by_time
+        mov dx, FDC_DIR
+        in al, dx
+        test al, FDC_DIR_CHANGED
+        jz .clear
+        mov al, [fd_track_cylinder]     ; (the run's, kept)
+        mov ah, [fd_head]
+        push ax
+        call fd_forget_cylinder
+        mov byte [fd_track_cylinder], 1 ; a step pulse clears it, with a diskette in:
+        call fd_seek                    ;    a recalibrate at cylinder 0 gives none
+        jc .stepped
+        call fd_cleared                 ; (MAME's a moment late: again, then a step back)
+        jnc .stepped
+        mov byte [fd_track_cylinder], 0
+        call fd_seek
+        jc .stepped
+        call fd_cleared
+        jnc .stepped
+        cmp byte [fd_line], FD_LINE_WORKS
+        stc
+        je .stepped
+        push bx
+        call fd_probe                   ; a diskette in a drive with no line?
+        cmp bx, E_TIMEOUT
+        pop bx
+        stc
+        je .stepped
+        mov byte [fd_line], FD_LINE_NONE
+        clc
+.stepped:
+        pop cx
+        mov [fd_track_cylinder], cl
+        mov [fd_head], ch
+        jc .none
+        cmp byte [fd_line], FD_LINE_NONE
+        je .changed
+        mov byte [fd_line], FD_LINE_WORKS
+.changed:
+        mov ax, E_CHANGED
+        stc
+        ret
+.none:
+        mov ax, E_TIMEOUT
+        stc
+        ret
+.by_time:
+        push bx
+        mov bl, [fd_unit]
+        xor bh, bh
+        shl bx, 1
+        call dw_ticks
+        mov cx, ax
+        sub ax, [fd_unit_last + bx]
+        cmp ax, FD_MOTOR_OFF_TICKS
+        jb .same_pop
+        mov [fd_unit_last + bx], cx     ; (the check's own reads come at once)
+        pop bx
+        mov ax, E_CHANGED
+        stc
+        ret
+.same_pop:
+        pop bx
+        clc
+        ret
+.clear:
+        mov byte [fd_line], FD_LINE_WORKS
+        clc
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_cleared - has the change line cleared? Looked at again a tick later if not
+;   In:       the drive selected
+;   Out:      CF clear if it has; CF set if it has not
+;   Destroys: AX, CX, DX
+; ----------------------------------------------------------------------------
+fd_cleared:
+        mov dx, FDC_DIR
+        in al, dx
+        test al, FDC_DIR_CHANGED
+        jz .yes
+        mov cx, 1 + 1
+        call dw_sleep
+        mov dx, FDC_DIR
+        in al, dx
+        test al, FDC_DIR_CHANGED
+        jz .yes
+        stc
+        ret
+.yes:
+        clc
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_media - DRV_DISK_MEDIA: A's diskette by Read ID, at 500 kbit/s (1.2 MB)
+; and then 300 (360 KB), the drive's entry set for it; a 360 KB one is read
+; again on its second track, and its cylinder there says whether the
+; drive steps twice (D13). B's is a 360 KB drive's
+;   In:       DI = the drive's entry; fd_unit
+;   Out:      BX = 0 or the error; CX the cylinders; DX the heads (low) and
+;             the sectors a track (high)
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+fd_media:
+        cmp byte [fd_unit], 0
+        jne .found
+        mov byte [fd_double], 0
+        mov word [di + UNIT_CYLINDERS], DISK_A_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_A_SECTORS | (FDC_RATE_500K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_1200K
+        call fd_forget_cylinder
+        mov byte [fd_head], 0
+        mov byte [fd_track_cylinder], 0 ; from track 0, recalibrated to: DOSBox-X's
+        call fd_ready                   ;    765 keeps the ST0 of an invalid command,
+        jc .failed                      ;    as after a reset, for a Read ID's
+        call fd_seek
+        jc .failed
+        call fd_read_id
+        test bx, bx
+        jz .found
+        mov word [di + UNIT_CYLINDERS], DISK_B_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_B_SECTORS | (FDC_RATE_300K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_360K
+        call fd_read_id
+        test bx, bx
+        jnz .out
+        mov byte [fd_track_cylinder], 2 ; its second track, stepped once a track
+        call fd_ready
+        jc .failed
+        call fd_seek
+        jc .failed
+        call fd_read_id
+        test bx, bx
+        jnz .out
+        call fd_forget_cylinder         ; (its tracks counted anew)
+        cmp cl, 1
+        jne .found
+        mov byte [fd_double], 1         ; cylinder 1 there: 48-tpi tracks
+.found:
+        mov cx, [di + UNIT_CYLINDERS]
+        mov dl, [di + UNIT_HEADS]
+        mov dh, [di + UNIT_TRACK]
+        xor bx, bx
+.out:
+        ret
+.failed:
+        call fd_done
+        mov bx, ax
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_probe - is a diskette in the drive? One Read ID at the drive's data rate,
+; within FD_PROBE_TICKS: a diskette answers within two turns, with an ID or,
+; at another rate, with none found; no diskette gives no index pulse, and
+; the controller no answer (then reset)
+;   In:       DI = the drive's entry; fd_unit, fd_head
+;   Out:      BX = E_TIMEOUT if none; else 0 or E_IO
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+fd_probe:
+        mov word [fd_id_ticks], FD_PROBE_TICKS
+        call fd_read_id
+        mov word [fd_id_ticks], FD_TICKS
         ret
 
 ; ----------------------------------------------------------------------------
@@ -340,7 +544,7 @@ fd_read_id:
         mov cx, 2
         call fd_send
         jc .late
-        mov cx, FD_TICKS
+        mov cx, [fd_id_ticks]
         call dw_wait_irq
         jc .late
         mov cx, FD_RESULT_BYTES
@@ -531,6 +735,8 @@ fd_do:
         jc .failed_now
 .specified:
         call fd_motor_on
+        call fd_changed                 ; (the run not done: the disk server checks first)
+        jc .failed_now
         mov byte [fd_tries], FD_TRIES
 .try:
         mov al, [di + UNIT_RATE]        ; before the seek: the step rate
@@ -588,14 +794,7 @@ fd_do:
 .done:
         clc
 .out:
-        pushf
-        push ax
-        call dw_ticks                   ; the motor's time from now
-        mov [fd_last], ax
-        mov byte [fd_motor_running], 1  ; (serve arms its timer)
-        pop ax
-        popf
-        ret
+        jmp fd_done                     ; the motor's time from now (serve arms its timer)
 
 ; ----------------------------------------------------------------------------
 ; fd_motor_timer - while the motor runs, the driver's timer for when it is
@@ -720,6 +919,14 @@ fd_seek:
 .known:
         call fd_unit_cylinder
         mov al, [fd_track_cylinder]
+        push bx
+        mov bl, [fd_unit]
+        xor bh, bh
+        cmp byte [fd_double + bx], 0
+        pop bx
+        je .single
+        shl al, 1                       ; (48-tpi tracks: two steps a cylinder, D13)
+.single:
         cmp [si], al
         je .there
         mov [fd_seek_cylinder], al
@@ -866,11 +1073,22 @@ fd_reset:
         mov cx, 1
         call fd_send
         jc .late_pop
-        mov cx, FD_SENSE_BYTES
+        mov cx, 1                       ; ST0 first: an invalid command's says no
+        call fd_results                 ;    drive has an interrupt pending, and no
+        jc .late_pop                    ;    PCN follows (DOSBox-X's 765 has one to
+        mov al, [fd_result]             ;    sense, not four)
+        and al, FDC_ST0_CODE
+        cmp al, FDC_ST0_INVALID
+        je .sensed
+        mov cx, FD_SENSE_BYTES - 1      ; its present cylinder
         call fd_results
         jc .late_pop
         pop cx
         loop .sense
+        jmp .specify
+.sensed:
+        pop cx
+.specify:
         mov si, fd_specify_command
         mov cx, fd_result - fd_specify_command
         call fd_send

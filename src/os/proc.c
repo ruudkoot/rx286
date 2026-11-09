@@ -1453,6 +1453,7 @@ static int paths_call(int call)
 {
     return call == PX_OPEN || call == PX_STAT || call == PX_FSTAT || call == PX_UNLINK
         || call == PX_RMDIR || call == PX_MKDIR || call == PX_RENAME || call == PX_CHDIR
+        || call == PX_EJECT
         || call == PX_EXECVE || call == PX_SPAWN;
 }
 
@@ -1597,7 +1598,8 @@ static int handle(int i, struct rx_kregs *r)
         if (((r->ax & 0xFF) >= PX_OPEN && (r->ax & 0xFF) <= PX_PIPE)
                 || (r->ax & 0xFF) == PX_TCGETATTR || (r->ax & 0xFF) == PX_TCSETATTR
                 || (r->ax & 0xFF) == PX_TCGETPGRP || (r->ax & 0xFF) == PX_TCSETPGRP
-                || (r->ax & 0xFF) == PX_IOCTL || (r->ax & 0xFF) == PX_POLL)
+                || (r->ax & 0xFF) == PX_IOCTL || (r->ax & 0xFF) == PX_POLL
+                || (r->ax & 0xFF) == PX_EJECT)
             result = vfs_call(i, data, r, &error, &status);
         else
             error = ENOSYS;
@@ -1737,7 +1739,7 @@ void proc_interrupt(void)
 void proc_boot(void)
 {
     static const char path[] = "/z/init";
-    static const char env_path[] = "PATH=/z:/c/bin", env_home[] = "HOME=/a";
+    static const char env_path[] = "PATH=/z:/mnt/rx286c/bin", env_home[] = "HOME=/mnt/a:";
     static rx_u16 argv[2], envp[3];     /* offsets in the server's data, as spawn reads */
     int error;                          /* them: a far pointer is two words (memory.md M5) */
 

@@ -14,7 +14,9 @@
 
 #define CACHE_SEG SLOT(149)             /* the cache's segment (ROOT_LOAD at boot) */
 #define CACHE_SECTORS 32
-#define CACHE_SECTORS_SMALL 4          /* without extended memory (disk-scheduler.md M3) */
+#define CACHE_SECTORS_SMALL 3          /* without extended memory (disk-scheduler.md M3; 4
+                                           until M8, whose code left the shell no fork at 512
+                                           KB): a FAT entry across two sectors, and a third */
 
 int cache_init(void);
 int cache_ready(void);
@@ -49,6 +51,12 @@ void vfs_sync(void);
 int cache_dirty_in(unsigned drive, rx_u16 sector, rx_u16 count);
 /* cache_drop - `count` sectors from `sector` of a drive out of the cache */
 void cache_drop(unsigned drive, rx_u16 sector, rx_u16 count);
+/* cache_forget - a drive's clean sectors out of the cache, but those a call
+ * uses (disk-scheduler.md M8: a diskette found again, to be read afresh) */
+void cache_forget(unsigned drive);
+/* vfs_medium - another diskette in a drive (E_CHANGED; M8, D12): what the
+ * server held of the old one dropped, its open files and directories gone */
+void vfs_medium(unsigned drive);
 
 /* A mounted FAT12 volume (vol.c): where it is on its drive, from its BPB */
 struct vol {

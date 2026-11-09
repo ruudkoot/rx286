@@ -108,6 +108,12 @@ int rmdir(const char *path)
     return px(PX_RMDIR, 0, 0, P(path), 0, 0) < 0 ? -1 : 0;
 }
 
+/* eject - PX_EJECT: a diskette's volume forgotten (rx286's own) */
+int eject(const char *path)
+{
+    return px(PX_EJECT, 0, 0, P(path), 0, 0) < 0 ? -1 : 0;
+}
+
 /* mkdir - PX_MKDIR (a mode, which FAT12 cannot keep, is not taken) */
 int mkdir(const char *path, int mode)
 {

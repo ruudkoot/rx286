@@ -12,7 +12,7 @@ on Bochs; `make test-286` runs them on DOSBox-X's 286 and MAME's IBM PC/AT;
 | Video | VGA | `machine=ega` | IBM's EGA |
 | Configuration | `bochs/rx286.bochsrc.in` | `dosbox-x/rx286.conf.in` | `tools/rxlib.py` (`run_mame`), `mame/rx286.lua` |
 | Debugger | yes, scriptable, with symbols | not in this build | `-debug` (with a window) |
-| Diskettes, fixed disks | both | neither (no IRQ6 from its controller, no fixed disk controller) | both: IBM's BIOS and a 765; the IDE card stands in for the fixed disk controller |
+| Diskettes, fixed disks | both | both: its 765 (`[fdc, primary]`) and an IDE controller at the AT's task file (`[ide, primary]`), with the ways below | both: IBM's BIOS and a 765; the IDE card stands in for the fixed disk controller |
 | Printers | LPT1, LPT2, into files | LPT1, LPT2, into files | none: no slot for the card |
 | Used for | everything daily; the reference of every test | no 386 instruction on any tested path | the 286's own behaviour: protection, faults, the BIOS, the disks |
 | Tests that run | all 57 | 36 | 48 |
@@ -73,8 +73,22 @@ base memory whatever it is: INT 12h is right.
 | a push past a stack segment's limit goes through, SP wrapping to FFFEh past the segment's base (a server thread's overflow, memory.md M6) | #SS(0000) |
 | after the 8042's reset, real-mode code meets protected-mode segment limits | a reset |
 | no IRQ13 for a 287 error | IRQ13 |
-| no IRQ6 from the diskette controller's reset, no fixed-disk controller (IRQ14) | both |
+| the diskette controller's power-on interrupt left pending by its BIOS, which does not drive the controller: an unhandled IRQ 6 once the kernel unmasked the line (the loader now takes it) | none pending after the BIOS |
+| one Sense Interrupt Status after the diskette controller's reset; the next is an invalid command (ST0 80h, one byte) | four, one for each drive the 765 polls |
+| the ST0 of an invalid command kept, and given as a Read ID's (which the driver so does only after a recalibrate) | a fresh ST0 |
+| 3F7h reads FFh: the controller has no digital input register, and A no change line (the driver finds A's diskette by time, as B's) | bit 7 the change line, which a step with a diskette in drops |
+| a diskette's or fixed disk's step, seek and transfer at once | the drives' times |
 | the clock is the host's | |
+
+Its drives (roadmap disk-scheduler.md M8): the template enables its 765
+(`[fdc, primary]`) and its IDE controller (`[ide, primary]`), whose task file
+at 1F0h takes the AT controller's commands; `[autoexec]` mounts A (the
+image) and B (`imgmount b ... -t floppy`), and C and D with the AT's types 2
+and 1 (`imgmount 2 ... -t hdd -fs none -size 512,17,4,615 -ide 1m`, and 306
+cylinders on `-ide 1s`), the run's own copies. Port 3F7h stays the diskette
+controller's. The drivers needed nothing of their own but for the 765's
+ways in the table above. It changes no media mid-run and write-protects
+none (`media:`).
 
 Running it: `tools/run-test --emulator dosbox-x` writes `dosbox-x.conf` from
 the template, runs DOSBox-X with `SDL_VIDEODRIVER=dummy`, and kills it once
@@ -152,7 +166,8 @@ The drives' tests (`tests/posix/drives.test`, `protected.test`;
   diskette (without it, the BIOS starts ROM BASIC). So MAME runs no printer
   test.
 - **DOSBox-X** prints LPT1 and LPT2 into files (`[parallel]`), and runs the
-  printer test; it has no diskette interrupt and no fixed disk controller.
+  printer test; it has all four drives (*DOSBox-X*), but changes no media
+  and write-protects none.
 
 ## The serial ports, the speaker and the game port on each
 

@@ -57,6 +57,7 @@ is one past the last call's number.
 | 48 | `PX_NICE` | `nice` | P12 |
 | 49, 50 | `PX_THREAD`, `PX_THREAD_EXIT` | `pthread_create`, `pthread_exit` | P13 |
 | 51 | `PX_FUTEX` | the mutexes, conditions and joins | P13 |
+| 52 | `PX_EJECT` | `eject`, rx286's own: a diskette's volume forgotten | disk-scheduler.md M8 |
 
 The programs the root builds, the kernel's test programs, are answered
 `PX_WRITE`, `PX_READ`, `PX_NANOSLEEP` and `PX_EXIT` alone (P14,
@@ -131,15 +132,15 @@ rx286's own besides: `rx/ps.h` (`rx_ps`, `ps`'s table), `rx/daemon.h`
   `unlink` of an open file, and `rename` over one, are `EBUSY`; a file
   open for writing is `ETXTBSY` to `exec`.
 - **Paths at their limits:** a directory renamed deeper may leave files
-  in it past `PATH_MAX` or 12 names, which nothing reaches until it is
+  in it past `PATH_MAX` or 13 names, which nothing reaches until it is
   moved back (a current directory in it is refused, `ENAMETOOLONG`).
 - **Below the least limits:** `PTHREAD_THREADS_MAX` (the table above):
   the server's data segment, which holds every thread's stack, is the
   bound (roadmap os-server.md, D4); a thread is an entry of the table,
   with a server thread and 1 KB of stack of its own. Both compilers' small
   model keeps it to 64 KB: gcc-ia16 has no model with more than one data
-  segment (P15). A path's 12 names at most bind before `PATH_MAX` with
-  names of 8.3.
+  segment (P15). A path's 13 names at most, `/mnt`, a volume's name and 11
+  below it, bind before `PATH_MAX` with names of 8.3.
 - **Signals:** 20 of them (*docs/processes.md*); no real-time or queued
   signals, no `SA_SIGINFO`'s information, no `sigaltstack`. A thread
   other than the main one may not `sigsuspend` (`ENOSYS`).

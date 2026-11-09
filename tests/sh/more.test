@@ -3,13 +3,13 @@
 program: sh
 emulators: bochs mame
 install: C /BIN/MORE z-more.rx
-keys: more /c/numbers.txt\n q
+keys: more /mnt/rx286c/numbers.txt\n q
 match: contains
 ---
-/a$ more /c/numbers.txt
+/mnt/rx286$ more /mnt/rx286c/numbers.txt
 line 0001 of C:\NUMBERS.TXT
 line 0023 of C:\NUMBERS.TXT
 line 0024 of C:\NUMBERS.TXT
 line 0046 of C:\NUMBERS.TXT
 --More--
-/a$
+/mnt/rx286$

@@ -129,12 +129,17 @@ numbers below are the Technical Reference's.
   keeping the motors and DMA and IRQ6 on, as the BIOS does. In the main status,
   `FDC_MSR_RQM` says the data register is ready and `FDC_MSR_DIO` which way.
   `FDC_CCR` sets the data rate: `FDC_RATE_500K` for A's 1.2 MB, `FDC_RATE_250K`
-  for B's 360 KB. The commands: `FDC_CMD_SPECIFY` with the BIOS's
+  for B's 360 KB, `FDC_RATE_300K` for a 360 KB diskette in A (roadmap
+  disk-scheduler.md D13). `FDC_DIR`'s `FDC_DIR_CHANGED` is the 1.2 MB drive's
+  change line, raised when its diskette came out and dropped at a step with
+  one in (IBM's 360 KB drive has none). The commands: `FDC_CMD_SPECIFY` with the BIOS's
   `FDC_SPECIFY_1` and `FDC_SPECIFY_2` (5-170); `FDC_CMD_RECALIBRATE`,
   `FDC_CMD_SEEK` and `FDC_CMD_SENSE_INT` after their interrupt;
   `FDC_CMD_READ` and `FDC_CMD_WRITE` (MFM) with `FDC_SIZE_512`, `FDC_DTL` and
   the BIOS's gap, `FDC_GAP_1200K` or `FDC_GAP_360K`. In the results,
   `FDC_ST0_CODE` is 0 for success and `FDC_ST0_SEEK_END` follows a seek;
+  `FDC_ST0_INVALID` is an invalid command's, Sense Interrupt Status's with
+  no interrupt pending;
   `FDC_ST1_NOT_WRITABLE` means write-protected.
 - **Fixed disk** (`HDC_*`, the task file of IBM's adapter, 1-2 to 1-9 of its
   section): the status bits `HDC_STATUS_BSY` (no other bit is valid),

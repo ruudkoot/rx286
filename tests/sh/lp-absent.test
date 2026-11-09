@@ -10,6 +10,6 @@ keys: echo two | lp -d lpt2; echo one | lp\n
 lpt1: one
 ---
 rx286, test build
-/a$ echo two | lp -d lpt2; echo one | lp
+/mnt/rx286$ echo two | lp -d lpt2; echo one | lp
 /dev/lpt2: input/output error
-/a$
+/mnt/rx286$

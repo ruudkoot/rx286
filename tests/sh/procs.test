@@ -19,16 +19,16 @@ keys: env | head -n 1; sleep x\n
 timeout: 60
 ---
 rx286, test build
-/a$ sleep 50 &
+/mnt/rx286$ sleep 50 &
 [1] 10
-/a$ ps
+/mnt/rx286$ ps
   PID  PPID  PGID   SID TTY  S NI COMMAND
     2     1     2     2 tty1 S 20 sh
    10     2    10     2 tty1 S 20 sleep
    11     2    11     2 tty1 R 20 ps
-/a$ kill 10
+/mnt/rx286$ kill 10
 [1] Done  sleep 50
-/a$ ps -e
+/mnt/rx286$ ps -e
   PID  PPID  PGID   SID TTY  S NI COMMAND
     1     0     1     1 -    S 20 init
     2     1     2     2 tty1 S 20 sh
@@ -40,30 +40,30 @@ rx286, test build
     8     1     8     8 tty7 S 20 init
     9     1     9     9 tty8 S 20 init
    13     2    13     2 tty1 R 20 ps
-/a$ sleep 30 &
+/mnt/rx286$ sleep 30 &
 [1] 14
-/a$ kill -s STOP 14; ps
+/mnt/rx286$ kill -s STOP 14; ps
   PID  PPID  PGID   SID TTY  S NI COMMAND
     2     1     2     2 tty1 S 20 sh
    14     2    14     2 tty1 T 20 sleep
    16     2    16     2 tty1 R 20 ps
 [1] Stopped  sleep 30
-/a$ kill -CONT 14; kill -9 14
+/mnt/rx286$ kill -CONT 14; kill -9 14
 [1] Done  sleep 30
-/a$ kill -l; kill -l 130; kill 999; kill -s NOPE 1; kill
+/mnt/rx286$ kill -l; kill -l 130; kill 999; kill -s NOPE 1; kill
 HUP INT QUIT ILL TRAP ABRT FPE KILL USR1 SEGV USR2 PIPE ALRM TERM CHLD CONT STOP TSTP TTIN TTOU
 INT
 kill: 999: no such process
 kill: no such signal
 usage: kill [-s NAME | -NAME | -NUMBER] [--] PID...; kill -l [STATUS]
-/a$ env -i A=1 B=2; env -i A=1 env; env -i A=1 A=2; env nothing; echo $?
+/mnt/rx286$ env -i A=1 B=2; env -i A=1 env; env -i A=1 A=2; env nothing; echo $?
 A=1
 B=2
 A=1
 A=2
 env: nothing: no such file or directory
 127
-/a$ env | head -n 1; sleep x
-PATH=/z:/c/bin
+/mnt/rx286$ env | head -n 1; sleep x
+PATH=/z:/mnt/rx286c/bin
 usage: sleep SECONDS
-/a$
+/mnt/rx286$

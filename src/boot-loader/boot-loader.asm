@@ -14,8 +14,8 @@
 ; places every module inside the image (roadmap l4.md L5). It asks the BIOS
 ; for the memory and leaves the answer at BOOT_INFO_PHYS (layout.inc). Then,
 ; with the BIOS's help for the last time (roadmap D14), it sets text mode 3,
-; stops the floppy motor (X2), disables interrupts and NMI, and jumps to
-; 1000:0000h.
+; stops the floppy motor (X2), takes any interrupt the diskette controller
+; still holds, disables interrupts and NMI, and jumps to 1000:0000h.
 ; ============================================================================
 
 cpu 286
@@ -67,10 +67,69 @@ start:
         mov dx, FDC_DOR
         mov al, FDC_DOR_MOTORS_OFF
         out dx, al
+        call fdc_quiet
         cli
         mov al, CMOS_NMI_DISABLE | CMOS_REG_D
         out CMOS_INDEX, al
         jmp KERNEL_SEG:0
+
+; ----------------------------------------------------------------------------
+; fdc_quiet - any interrupt the diskette controller holds taken from it, by
+; Sense Interrupt Status until it says none is pending (ST0 an invalid
+; command's), one for each drive at most. The AT's BIOS leaves none: one
+; command and a byte. DOSBox-X's, which does not drive the controller, leaves
+; the interrupt of its power-on reset, which reached the kernel when it
+; unmasked IRQ 6, before the diskette driver was there (disk-scheduler.md M8)
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX
+; ----------------------------------------------------------------------------
+fdc_quiet:
+        mov bl, 4
+.sense:
+        mov ah, FDC_MSR_RQM             ; its turn to take a byte
+        call fdc_ready
+        jc .out
+        mov al, FDC_CMD_SENSE_INT
+        out dx, al
+        mov ah, FDC_MSR_RQM | FDC_MSR_DIO
+        call fdc_ready
+        jc .out
+        in al, dx                       ; ST0
+        and al, FDC_ST0_CODE
+        cmp al, FDC_ST0_INVALID
+        je .out
+        mov ah, FDC_MSR_RQM | FDC_MSR_DIO
+        call fdc_ready
+        jc .out
+        in al, dx                       ; the present cylinder
+        dec bl
+        jnz .sense
+.out:
+        ret
+
+; ----------------------------------------------------------------------------
+; fdc_ready - wait for the main status's RQM and DIO to be AH, a while at
+; most (65,535 reads)
+;   In:       AH = the RQM and DIO bits wanted
+;   Out:      CF clear and DX = FDC_DATA; or CF set
+;   Destroys: AL, CX
+; ----------------------------------------------------------------------------
+fdc_ready:
+        mov cx, 0xFFFF
+        mov dx, FDC_MSR
+.poll:
+        in al, dx
+        and al, FDC_MSR_RQM | FDC_MSR_DIO
+        cmp al, ah
+        je .ready
+        loop .poll
+        stc
+        ret
+.ready:
+        mov dx, FDC_DATA
+        clc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; geometry - check the BPB and work out where the root and data begin

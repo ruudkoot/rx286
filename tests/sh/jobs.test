@@ -16,30 +16,30 @@ keys: cat &\n{wait 20}jobs\nfg %1\nworld\n{ctrl-d}
 keys: cat\n{ctrl-c}{wait 20}echo $?\nabc{ctrl-c}echo still here\n
 ---
 rx286, test build
-/a$ cat
+/mnt/rx286$ cat
 ^Z
 [1] Stopped  cat
-/a$ jobs
+/mnt/rx286$ jobs
 [1] Stopped  cat
-/a$ fg
+/mnt/rx286$ fg
 cat
 hello
 hello
-/a$ echo $?
+/mnt/rx286$ echo $?
 0
-/a$ cat &
+/mnt/rx286$ cat &
 [1] 12
-/a$ jobs
+/mnt/rx286$ jobs
 [1] Stopped  cat
-/a$ fg %1
+/mnt/rx286$ fg %1
 cat
 world
 world
-/a$ cat
+/mnt/rx286$ cat
 ^C
-/a$ echo $?
+/mnt/rx286$ echo $?
 130
-/a$ abc^C
-/a$ echo still here
+/mnt/rx286$ abc^C
+/mnt/rx286$ echo still here
 still here
-/a$
+/mnt/rx286$

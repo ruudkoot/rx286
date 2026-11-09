@@ -16,17 +16,17 @@ keys: {wait 100}ps -e\nkill 11\n{wait 20}clock\n{wait 100}ps -e\nnice -n 5 ps\n
 match: contains
 timeout: 60
 ---
-/a$ ps -e
+/mnt/rx286$ ps -e
 status, clock: {...}
   PID  PPID  PGID   SID TTY  S NI COMMAND
     1     0     1     1 -    S 20 init
    11     1    11    11 -    {...} clock
    13     1    13    13 -    R 39 counter
-/a$ kill 11
-/a$ clock
-/a$ ps -e
+/mnt/rx286$ kill 11
+/mnt/rx286$ clock
+/mnt/rx286$ ps -e
 status, counter: idle {...}k/s
    17     1    17    17 -    {...} clock
    13     1    13    13 -    R 39 counter
-/a$ nice -n 5 ps
+/mnt/rx286$ nice -n 5 ps
    19     2    19     2 tty1 R 25 ps

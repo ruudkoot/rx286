@@ -12,14 +12,14 @@ install: C /BIN/CLEAR z-clear.rx
 match: contains
 keys: uptime\ndate\ndate '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'\ndate x\nclear\n
 ---
-/a$ uptime
+/mnt/rx286$ uptime
 up 0:00:{...}
-/a$ date
+/mnt/rx286$ date
 @bochs Sun Jan  1 00:{...} UTC 1989
-/a$ date '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'
+/mnt/rx286$ date '+%F %A %B %j %C %y %u %w %p %I %Z %% %T'
 @bochs 1989-01-01 Sunday January 001 19 89 7 0 AM 12 UTC % 00:{...}
-/a$ date x
+/mnt/rx286$ date x
 usage: date [-u] [+FORMAT]
-/a$ clear
+/mnt/rx286$ clear
 [form feed]
-/a$
+/mnt/rx286$

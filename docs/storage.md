@@ -4,7 +4,7 @@ The AT's four drives and two printer ports, as rx286 drives them
 (`roadmaps/storage.md`). Drivers in ring 1 drive them (*docs/drivers.md*;
 roadmap l4.md L7, L9), and the disk server stands between the disk drivers
 and the OS server (*docs/disk-server.md*; roadmap disk-scheduler.md M3). A
-process sees the drives' files as `/a` to `/d`,
+process sees the drives' volumes in `/mnt`, by their labels' names,
 which the OS server keeps (*docs/processes.md*), and so does the shell
 (*docs/shell.md*); it prints through `/dev/lpt1` and `/dev/lpt2`.
 
@@ -41,7 +41,7 @@ of a file's contiguous clusters goes straight between the disk server and
 the process's data. A read goes through the OS server's cache instead if
 that cache holds one of those sectors changed, and a write drops that
 cache's copies. Everything else goes through the OS server's cache of 32
-sectors, 4 without extended memory (*docs/processes.md*, *Files*), which
+sectors, 3 without extended memory (*docs/processes.md*, *Files*), which
 writes its changed sectors in their order on the disk, neighbours as one
 run. While a call waits for the disk server the OS server's lock is given
 up, the call holding its volume's lock alone (roadmap disk-scheduler.md
@@ -87,7 +87,7 @@ The NEC 765 of IBM's adapter, IRQ6 and DMA channel 2, driven by the
 diskette driver (`src/drivers/diskette.asm`), which resets the DMA
 controllers at its start. Channel 2 moves each run into or out of a DMA
 buffer of a 1.2 MB cylinder, 30 sectors (`FD_DMA_SECTORS`), the root gives
-the driver (4 sectors, `FD_DMA_SMALL_SECTORS`, on a machine without extended
+the driver (2 sectors, `FD_DMA_SMALL_SECTORS`, on a machine without extended
 memory, whose processes a larger one left too little at 512 KB; a run then
 moves what the buffer holds, and the OS server asks again for the rest): a segment it retypes for it, whose physical base the driver
 asks the kernel for (`KCALL_SEGMENT`; the root retries until the buffer
@@ -96,7 +96,9 @@ A run starts at any sector of a cylinder and ends at its end at the
 latest. For each run the driver:
 
 1. resets the controller and gives it IBM's timings (Specify), the first
-   time and after a timeout;
+   time and after a timeout; the reset's interrupt is acknowledged once for
+   each drive (Sense Interrupt Status), or until the controller says none
+   is pending (an invalid command's ST0: DOSBox-X's has one);
 2. selects the drive and runs its motor, waiting a second if it was off;
 3. sets the data rate (500 kbit/s for A, 250 kbit/s for B) first, since
    the step rate scales with it, then recalibrates the drive if its
@@ -115,7 +117,32 @@ A failed transfer is tried three times, the drive recalibrated in between; a
 write-protected diskette fails at once with `E_PROTECTED`, a timeout (no
 diskette) with `E_TIMEOUT`. The motor stops two seconds after the last
 transfer, as the BIOS's does: the driver's timer, which it sets again
-before each wait for a call. The diskette change line is not read.
+before each wait for a call.
+
+Before each run the driver asks whether the diskette may have changed
+(roadmap disk-scheduler.md M8, D12), and if so refuses the run with
+`E_CHANGED`, for the disk server to look at the diskette first:
+- **A** by its change line (`FDC_DIR`'s `FDC_DIR_CHANGED`), which the 1.2 MB
+  drive raises when its diskette comes out and drops at a step with one in.
+  The driver steps to cylinder 1 to drop it, and looks again a tick later
+  and after a step back, since MAME drops it a moment late; still raised,
+  there is no diskette: `E_TIMEOUT`. But a line never yet seen to drop
+  may be none at all: DOSBox-X's controller has no `FDC_DIR`, and 3F7h
+  reads FFh. So before its first `E_TIMEOUT` the driver tries one Read ID
+  (`fd_probe`), for 0.6 s: a diskette answers within two turns, with an
+  ID or, at another data rate, with none found, while an empty drive gives
+  no index pulse and no answer. A diskette there, A is taken from then on
+  as B is, by time.
+- **B**, whose 360 KB drive has no change line (IBM's interface; E2): when
+  its last transfer was longer ago than its motor's two seconds.
+
+`DRV_DISK_MEDIA` finds A's diskette by Read ID on cylinder 0, recalibrated
+to first, at 500 kbit/s and then 300 (`FDC_RATE_300K`), and sets the drive's geometry, data rate and gap for it:
+a 360 KB diskette in the 1.2 MB drive is read at 300 kbit/s, and stepped
+twice a cylinder when Read ID on its second track finds cylinder 1 (its
+48-tpi tracks, D13). No emulator here has such tracks (E2): Bochs and MAME
+put cylinder 1 on track 1, so the step stays single there, and the double
+step waits for a real AT.
 
 ## The fixed disks
 

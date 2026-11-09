@@ -48,25 +48,25 @@ int main(void)
 #if defined(NAMES_LOWERCASE)
     int fd;
 
-    check("frag.txt listed as it is (1)", listed("/b", "frag.txt"));
-    check("FRAG.TXT not listed (0)", listed("/b", "FRAG.TXT"));
-    check("frag.txt opened (-1, ENOENT 2)", open("/b/frag.txt", O_RDONLY));
-    check("renamed to two.txt (0)", rename("/b/frag.txt", "/b/two.txt"));
-    check("two.txt opened (3)", fd = open("/b/two.txt", O_RDONLY));
+    check("frag.txt listed as it is (1)", listed("/mnt/rx286b", "frag.txt"));
+    check("FRAG.TXT not listed (0)", listed("/mnt/rx286b", "FRAG.TXT"));
+    check("frag.txt opened (-1, ENOENT 2)", open("/mnt/rx286b/frag.txt", O_RDONLY));
+    check("renamed to two.txt (0)", rename("/mnt/rx286b/frag.txt", "/mnt/rx286b/two.txt"));
+    check("two.txt opened (3)", fd = open("/mnt/rx286b/two.txt", O_RDONLY));
     close(fd);
-    check("removed (0)", unlink("/b/two.txt"));
+    check("removed (0)", unlink("/mnt/rx286b/two.txt"));
 #else
     struct stat st;
-    int fd = open("/b/a.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fd = open("/mnt/rx286b/a.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
     check("a.txt made (3)", fd);
     check("written (6)", write(fd, "names\n", 6));
     check("closed (0)", close(fd));
-    check("a.txt listed (1)", listed("/b", "a.txt"));
-    check("A.TXT not listed (0)", listed("/b", "A.TXT"));
-    check("A.TXT opened (-1, EINVAL 22)", open("/b/A.TXT", O_RDONLY));
-    check("Docs made (-1, EINVAL 22)", mkdir("/b/Docs", 0755));
-    check("readme.txt, the disk's README.TXT (0)", stat("/b/readme.txt", &st));
+    check("a.txt listed (1)", listed("/mnt/rx286b", "a.txt"));
+    check("A.TXT not listed (0)", listed("/mnt/rx286b", "A.TXT"));
+    check("A.TXT opened (-1, EINVAL 22)", open("/mnt/rx286b/A.TXT", O_RDONLY));
+    check("Docs made (-1, EINVAL 22)", mkdir("/mnt/rx286b/Docs", 0755));
+    check("readme.txt, the disk's README.TXT (0)", stat("/mnt/rx286b/readme.txt", &st));
     check("/dev/NULL (-1, ENOENT 2)", open("/dev/NULL", O_RDONLY));
     check("/dev/null (3)", open("/dev/null", O_RDONLY));
     check("/B/readme.txt (-1, ENOENT 2)", stat("/B/readme.txt", &st));
