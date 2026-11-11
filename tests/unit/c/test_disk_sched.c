@@ -327,11 +327,35 @@ static void shares(void)
           wait_bfq, wait_clook);
 }
 
+/* batch_ended - a batch on one diskette drive, its queue emptied, then the
+ * other drive's reader: every pick a request (M10's review found job 255,
+ * no request, handed out at the reader's second call) */
+static void batch_ended(void)
+{
+    struct sched_choice ch;
+    rx_u16 now = 1000;
+    int k, how;
+
+    sched_init();
+    sched_add(1, 100, 5, 2, 0, 9, now); /* B's read, past its deadline */
+    now = (rx_u16)(now + SCHED_READ_TICKS + 1);
+    for (k = 0; k < 3; k++) {
+        if (k > 0)
+            sched_add(0, (rx_u32)(10 + 15 * k), 0, 15, 0, 5, now++);    /* A's reader */
+        how = sched_pick(0, now, &ch);
+        CHECK(how == SCHED_SERVE && ch.job < SCHED_JOBS,
+              "batch ended: pick %d gave %d, job %u", k, how, ch.job);
+        if (how == SCHED_SERVE && ch.job < SCHED_JOBS)
+            sched_done(ch.job, 0, now);
+    }
+}
+
 /* main - every case; 0 if all passed */
 int main(void)
 {
     clook();
     deadline();
+    batch_ended();
     turns();
     seek_first();
     full();

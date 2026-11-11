@@ -99,6 +99,8 @@ int main(int argc, char **argv)
         skew = drive == 0 ? FMT_SKEW_A : drive == 1 ? FMT_SKEW_B
                : fmt_fixed_skew(v.spt, interleave);
     fmt_label(&v, label);
+    if (drive < 2)
+        v.skew = (unsigned char)(skew < 10 ? skew : 9);    /* (said in the OEM name) */
     v.serial = (unsigned long)time(0) ^ 0x52580000UL;   /* (DOS's: a time, as a number) */
     fmt_fat(&v, fat);
     for (c = 0; c < v.cylinders; c++)

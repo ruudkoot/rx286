@@ -284,6 +284,7 @@ static int volume_name(int d)
  * path of theirs spins no diskette up; -1 if none */
 static int mnt_drive(const char *name)
 {
+    unsigned keep = vol_held();
     int k, d;
 
     if (name[0] >= 'a' && name[0] < 'a' + DRIVES && name[1] == ':' && name[2] == 0)
@@ -292,6 +293,8 @@ static int mnt_drive(const char *name)
         d = (k + 2) % DRIVES;           /* (C, D, A, B) */
         if (volume_name(d) == 0 && strcmp(vol_names[d], name) == 0)
             return d;
+        vol_release(keep);              /* (a volume only named: not kept while the next is
+                                           waited for, M10) */
     }
     return -1;
 }
@@ -1143,11 +1146,14 @@ void vfs_forked(int child, int parent)
 /* vfs_exec - the descriptors that close on exec, closed */
 void vfs_exec(int i)
 {
+    unsigned keep = vol_held();
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
-        if (FILES(i).fd[fd] != NO_FD && FILES(i).cloexec[fd])
+        if (FILES(i).fd[fd] != NO_FD && FILES(i).cloexec[fd]) {
             fd_close(i, fd);
+            vol_release(keep);          /* (each close's volume given back: M10) */
+        }
 }
 
 static void format_end(unsigned d);
@@ -1160,9 +1166,10 @@ void vfs_exit(int i)
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
-        if (FILES(i).fd[fd] != NO_FD)
-            fd_close(i, fd);
-    vol_release(keep);                  /* (those its files' entries took: M4) */
+        if (FILES(i).fd[fd] != NO_FD) {
+            fd_close(i, fd);            /* each close's volume given back before the next */
+            vol_release(keep);          /*    close takes another: holding one while it */
+        }                               /*    waits for the next deadlocked two exits (M10) */
     for (d = 0; d < DRIVES; d++)
         if (vfs_formatter(d) == i + 1)
             format_end(d);
@@ -2573,6 +2580,8 @@ static int px_format(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 
             *error = EBUSY;
             return -1;
         }
+        formatter[d] = me;              /* the drive the caller's before any wait: another
+                                           FMT_BEGIN meanwhile is EBUSY (M10's review) */
         vol_hold(d);
         e = cache_flush(d);
         if (e == 0 && d >= 2)
@@ -2580,10 +2589,10 @@ static int px_format(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 
         if (e == 0)
             e = disk_geometry(d, &cylinders, &heads_track);
         if (e) {
+            formatter[d] = 0;
             *error = errno_of(e);
             return -1;
         }
-        formatter[d] = me;
         vfs_medium(d);                  /* its volume forgotten: mounted anew later */
         *si_out = heads_track;
         return (int)cylinders;
@@ -2741,12 +2750,13 @@ static int px_poll(int i, rx_u16 data, struct rx_kregs *r, int *error)
  * give up */
 void vfs_sync(void)
 {
-    unsigned d;
+    unsigned keep = vol_held(), d;
 
     for (d = 0; d < DRIVES; d++)
         if (drive_sectors(d)) {         /* (mounted: its volume asked of the disk server) */
             cache_flush(d);
             disk_sync(d);
+            vol_release(keep);          /* (one at a time: M10) */
         }
 }
 

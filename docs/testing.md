@@ -53,7 +53,14 @@ sequential readers, an interactive reader beside a scan; M5); a fixed
 disk's partitions; and the formatter's layouts (`test_formatter.py`; M9):
 DOS's diskettes, a fixed disk's partition as `tools/mkdisks` makes it,
 the tracks' tables against the AT adapter's own 2:1 example, the skews and
-the bad clusters, and the volumes it writes read by `fsck.fat` and mtools.
+the bad clusters, and the volumes it writes read by `fsck.fat` and mtools;
+and the disk model's regression (`test_disksim.py`; M10): `tools/disksim`,
+E6's discrete-event model of the AT's drives, runs the disk server's own
+order of requests, `sched.c` built for the host and driven through ctypes,
+beside E6's first-come-first-served: two readers of C faster than FCFS and
+each with its share, C and D both served, an interactive reader beside a
+scan answered within a second, and A read faster from a skewed diskette
+(`python3 tools/disksim/regression.py` prints the table).
 
 ## 4. Boot tests in Bochs
 

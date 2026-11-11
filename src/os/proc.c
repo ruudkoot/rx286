@@ -136,7 +136,8 @@ static rx_u16 limit(rx_u16 segment)
     r.ax = KCALL_SEGMENT << 8;
     r.dx = segment;
     r.bp = 0;
-    rx_kcall(&r);
+    if (rx_kcall(&r) != 0)
+        return 0;                       /* (none there: revoked, M10's review) */
     return r.cx;
 }
 
@@ -599,6 +600,10 @@ static int image_take(struct image *img, int i, const char *path, rx_u16 segment
     if (img->most == 0)
         img->most = 0xFFF0;
     img->args_at = (rx_u16)end;
+    if (proc_self() >= 0 && !proc_still(proc_self())) {
+        error = EINTR;                  /* ended while its exec waited (its turn, the disk): */
+        goto failed;                    /*    its segment revoked, no one to answer (M10) */
+    }
     if ((error = args_take(img, segment, argv, envp)) != 0)
         goto failed;
     end += img->args_size;
@@ -992,6 +997,11 @@ static int px_exec(int i, int t, const char *path, rx_u16 argv, rx_u16 envp, int
     vol_release(0);                     /* (the file read: its volume no longer needed) */
     while (volume_busy(i))              /* another thread's call waits for the disk with */
         lock_nap();                     /*    the old segment lent: it ends first (M4) */
+    if (!proc_still(t)) {               /* ended meanwhile, by that call's end: its root */
+        image_done(&img);               /*    number another's now, perhaps (M10) */
+        root(ROOT_UNLOAD, img.code, 0, 0, 0, 0);
+        return NO_REPLY;
+    }
     same = img.code == procs[i].code;   /* its own file again: its code kept (P12) */
     root(ROOT_EXIT, procs[i].root, (rx_u16)same, 0, 0, 0);  /* its threads, in this call, too */
     threads_end(i);

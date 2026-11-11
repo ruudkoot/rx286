@@ -76,6 +76,17 @@ int main(int argc, char **argv)
     CHECK(fmt_fixed(&v, 306, 4, 17) == 0);
     CHECK(v.cluster == 8);
     CHECK(fmt_fixed(&v, 0, 4, 17) == -1);
+    CHECK(fmt_fixed(&v, 977, 5, 17) == 0);  /* a 40 MB type 17: 771 cylinders of it */
+    CHECK(v.sectors == 771UL * 85 - 17 && v.sectors <= FMT_FIXED_MOST && v.cluster == 32);
+    CHECK(fmt_fixed(&v, 1024, 16, 17) == 0 && v.sectors <= FMT_FIXED_MOST);
+    /* a skewed diskette's OEM name says its skew */
+    CHECK(fmt_diskette(&v, 1200) == 0);
+    v.skew = 7;
+    fmt_boot(&v, table);
+    CHECK(memcmp(table + 3, "RX286 S7", 8) == 0);
+    v.skew = 0;
+    fmt_boot(&v, table);
+    CHECK(memcmp(table + 3, "RX286   ", 8) == 0);
     /* the label: upper case, of a name's characters, blanks after */
     fmt_label(&v, "rx286 x?y");
     CHECK(memcmp(v.label, "RX286 XY   ", 11) == 0);

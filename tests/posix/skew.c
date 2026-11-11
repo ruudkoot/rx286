@@ -6,8 +6,8 @@
  * (media-at:), format makes it without a skew, KERNEL.BIN is copied onto it
  * from C, A's volume ejected (its caches forgotten), and the file read back
  * whole in calls of 15 KB, timed; then the same with format's skew of 7.
- * The skewed read must be faster, by 3% at least: on MAME it takes 5.82 s
- * against 6.82 s, 14.7% less (M9's notes; E10's 23% kept the drive
+ * The skewed read must be faster, by 3% at least: on MAME it takes 6.74 s
+ * against 7.58 s, 11% less (14.7% at M9; E10's 23% kept the drive
  * streaming, where the gaps between the calls still cost a turn).
  * ============================================================================ */
 

@@ -20,7 +20,11 @@
 # 6.6 s for 96 KB. B's read back finds what was just written in the cache,
 # or part of it read again, as 2Q's evictions fall with the timing: 0.5 or
 # 1.7 s, within 2 s. C's calls of 512 bytes take 0.98-1.12 s as the code's
-# size moves its timing, within 1.2 s.
+# size moves its timing, within 1.2 s. M10: a diskette's first call, since
+# the start or an eject, looks at the diskette before anything of it is
+# cached (the review's), which costs B's write a turn: 8.18 s, within 8.5 s;
+# and the next cylinder is read ahead only on a diskette rx286 skewed, so
+# A's read, of the boot diskette, is 7.56 s.
 program: idle
 define: TEST_POSIX_RDTIME
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
@@ -31,7 +35,7 @@ emulators: mame
 ---
 rdtime: D, 32 KB written in calls of 4 KB: within 1000 ms: yes
 rdtime: A, KERNEL.BIN read in calls of 15 KB: within {...} ms: yes
-rdtime: B, 45 KB written in calls of 15 KB: within 8000 ms: yes
+rdtime: B, 45 KB written in calls of 15 KB: within 8500 ms: yes
 rdtime: B, 45 KB read back in calls of 15 KB: within 2000 ms: yes
 rdtime: C, NUMBERS.TXT read in calls of 15 KB: within 500 ms: yes
 rdtime: C, NUMBERS.TXT read in calls of 512 bytes: within 1200 ms: yes

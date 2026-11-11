@@ -180,7 +180,9 @@ drive its own meanwhile, and writes a new FAT12 volume:
   on from the last's, 7 on A and 3 on B (`-s`), so that after a step the
   next cylinder's first sector comes under the head in time, not a turn
   later. On MAME KERNEL.BIN reads back from a skewed 1.2 MB diskette in
-  5.82 s, against 6.82 s from one without (`tests/disk/skew.test`).
+  6.74 s, against 7.58 s from one without (`tests/disk/skew.test`); the
+  disk server reads the next cylinder ahead on such a diskette alone, which
+  `format` marks in its boot sector's OEM name ("RX286 S7").
 - **C or D**, after a yes (or `-y`), a track at a time by the adapter's
   Format Track, an interleave table of 3:1 (`-i`) and a skew for the seek
   to the next cylinder, then each track verified: a track whose verify

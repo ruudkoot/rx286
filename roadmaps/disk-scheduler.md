@@ -2288,6 +2288,58 @@ The owner decided on 2026-11-09, after M8, in two steps.
 - **Done when:** `make check` runs disksim's regression; the review's findings are fixed and
   recorded.
 - **Decisions:** none.
+- **Done** (2026-11-11). `tools/disksim` holds E6's model (`model.py`, `policies.py`,
+  `workloads.py`) and `rxsched.py`, which builds the disk server's `sched.c` for the host and
+  drives it through ctypes; `tests/unit/test_disksim.py` runs four of E6's workloads in
+  `make check` (*docs/disk-server.md*, *The model*). An independent review of M1-M9 (a fresh
+  agent, reading only) found eleven defects, all fixed, each with its case on the host where
+  one could be made:
+  - **High:** `sched_pick` handed out job 255, no request, after a deadline's batch on one
+    drive of a controller emptied its queue: step 1 swapped the drive and left the other
+    one's name stale. The disk server would have served past its tables. Fixed in
+    `sched_pick` (and a batch now ends with its drive's queue), with a guard in the disk
+    server's loop; `test_disk_sched.c`'s `batch_ended` fails on the old code. A random
+    workload of two million picks gave some 31,000 such picks a seed before, none after.
+  - **Medium:**
+    - another diskette found by the server's own read-ahead was said to no one: it is now
+      said at the drive's next answer, whatever it is for;
+    - after `DS_EJECT` the next diskette, taken as the first seen, kept what the cache had
+      read of the old one since: the first one seen now has the drive's cache dropped;
+    - volume locks were taken in any order and held while waiting, so two exits (one with
+      A then C open, the other C then A) could deadlock: an exit, an exec's closes,
+      `/mnt`'s naming and a sync now give each volume back before taking the next, and an
+      eviction never waits for a volume another call holds or waits for;
+    - `format` of a fixed disk past 65,535 sectors made a volume the OS server refuses: the
+      partition now ends at the last whole cylinder within 65,535, the rest left out.
+  - **Low:**
+    - an exec that waited (its turn, the disk) went on for a process ended meanwhile: it
+      now stops there, and `limit` says 0 for a segment not there;
+    - one `checking` flag served both controllers' threads: one a drive now;
+    - the diskette driver changed A's entry before it knew it could: `fd_media` puts A's
+      1.2 MB entry back when it finds nothing, and `fd_format` checks first and puts the
+      entry back after a failure, answering the entry either way;
+    - the trust windows' 16-bit ticks wrapped after 22 minutes: 32 bits now;
+    - a deadline's batch outlived its drive's queue, keeping the shares off: ended now;
+    - two `FMT_BEGIN`s at once could both win: the drive is claimed before the first wait.
+
+  The fix of the eject's case has a drive's first call, since the start or an eject, look at
+  its diskette before anything of it is cached; it costs B's first write in `speed.test` a
+  turn, and B's write budget is 8.5 s.
+  - Not as planned:
+    - **M9's read-ahead of the next cylinder is a skewed diskette's alone.** On the boot
+      diskette, which mformat does not skew, it made A's read 16% slower (6.94 s in M8b,
+      8.06 s at M9) for what only a skewed diskette repays. `format` now marks a skewed
+      diskette in its boot sector's OEM name ("RX286 S7"), which the disk server reads in
+      its look at the diskette. A's read is 7.56 s; a skewed diskette reads 11% faster
+      than one without (6.74 s against 7.58 s), not M9's 14.7%, which had the unskewed one
+      read ahead too.
+    - **`term.test` lost its last command once under `make check`'s load** (Bochs in real
+      time against the runner's modem), and passed alone three times.
+
+  The model shows the shares' price: an interactive reader beside a scan of C waits 816 ms
+  at its 95th percentile under the disk server, 344 ms first come, first served (*At the
+  close*). `make check` passes on Bochs (150), DOSBox-X (122) and MAME (130), with 213
+  unit tests, and `make check-ia16` passes (150).
 
 ### Later
 

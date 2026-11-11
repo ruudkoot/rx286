@@ -94,6 +94,8 @@ fd_last             dw 0                ; the tick of the last transfer's end
 fd_unit             db 0                ; the transfer's drive (0 or 1)
 fd_unit_last        dw 0, 0             ; each drive's last transfer's end, in ticks
 fd_line             db FD_LINE_UNKNOWN  ; A's change line: seen to clear, or none (M8)
+fd_format_set       db 0                ; fd_format changed A's entry: fd_saved holds it
+fd_saved            dw 0, 0, 0          ; its cylinders, its track word, its gap and double
 fd_id_ticks         dw FD_TICKS         ; fd_read_id's wait: fd_probe's shorter
 fd_double           db 0, 0             ; each drive's: a 360 KB diskette in a 1.2 MB drive,
                                         ;    its cylinder two tracks apart (M8, D13)
@@ -515,18 +517,23 @@ fd_media:
         mov dl, [di + UNIT_HEADS]
         mov dh, [di + UNIT_TRACK]
         xor bx, bx
-.out:
         ret
 .failed:
         call fd_done
         mov bx, ax
+.out:
+        cmp byte [fd_unit], 0           ; none found: A's 1.2 MB entry again, as the
+        jne .none                       ;    disk server, which keeps its geometry on a
+        call fd_entry_a                 ;    failure, has it (M10's review)
+.none:
         ret
 
 ; ----------------------------------------------------------------------------
 ; fd_format - DRV_DISK_FORMAT: a track formatted, its sectors' IDs the
 ; caller's, in the order they are to pass the head (its skew: disk-
 ; scheduler.md M9, D17), each sector filled with FDC_FILLER: A as 1.2 MB,
-; B as 360 KB, the drive's entry set so from now on
+; B as 360 KB. A's entry is 1.2 MB's once the checks pass, and as it was
+; again if the format fails; CX and DX say the entry either way
 ;   In:       DI = the drive's entry; fd_unit, fd_head; CX = the cylinder;
 ;             AL = the track's sectors; SI = the table's offset; BP = the
 ;             segment passed (0: none came)
@@ -536,22 +543,24 @@ fd_media:
 ; ----------------------------------------------------------------------------
 fd_format:
         mov [fd_format_sc], al
+        mov byte [fd_format_set], 0
         mov byte [fd_format_gpl], FDC_FORMAT_GAP_360K
         cmp byte [fd_unit], 0
-        jne .set
-        mov byte [fd_double], 0         ; A: 1.2 MB, its 96-tpi tracks
-        mov word [di + UNIT_CYLINDERS], DISK_A_CYLINDERS
-        mov word [di + UNIT_TRACK], DISK_A_SECTORS | (FDC_RATE_500K << 8)
-        mov byte [di + UNIT_GAP], FDC_GAP_1200K
-        mov byte [fd_format_gpl], FDC_FORMAT_GAP_1200K
-.set:
+        jne .b
+        cmp cx, DISK_A_CYLINDERS        ; A's checked against 1.2 MB, its entry left as
+        jae .invalid                    ;    it is until the command goes (M10's review)
+        cmp al, DISK_A_SECTORS
+        jne .invalid
+        jmp .checked
+.b:
         cmp cx, [di + UNIT_CYLINDERS]
-        jae .invalid
-        mov ah, [fd_head]
-        cmp ah, [di + UNIT_HEADS]
         jae .invalid
         cmp al, [di + UNIT_TRACK]       ; every sector of the track
         jne .invalid
+.checked:
+        mov ah, [fd_head]
+        cmp ah, [di + UNIT_HEADS]       ; (2 on both: 1.2 MB's and 360 KB's)
+        jae .invalid
         test bp, bp
         jz .fault
         mov [fd_track_cylinder], cl
@@ -573,6 +582,19 @@ fd_format:
         pop di
         push ds
         pop es
+        cmp byte [fd_unit], 0
+        jne .set
+        mov ax, [di + UNIT_CYLINDERS]   ; A's entry kept, for a failure, then 1.2 MB's
+        mov [fd_saved], ax
+        mov ax, [di + UNIT_TRACK]
+        mov [fd_saved + 2], ax
+        mov al, [di + UNIT_GAP]
+        mov ah, [fd_double]
+        mov [fd_saved + 4], ax
+        mov byte [fd_format_set], 1
+        call fd_entry_a
+        mov byte [fd_format_gpl], FDC_FORMAT_GAP_1200K
+.set:
         call fd_ready
         jc .failed
         call fd_seek
@@ -608,11 +630,8 @@ fd_format:
         mov bx, E_IO
         jmp .out
 .done:
-        mov cx, [di + UNIT_CYLINDERS]
-        mov dl, [di + UNIT_HEADS]
-        mov dh, [di + UNIT_TRACK]
         xor bx, bx
-        ret
+        jmp .geometry
 .late:
         call fd_reset
         call fd_done
@@ -628,8 +647,32 @@ fd_format:
 .fault:
         mov bx, E_FAULT
 .out:
-        xor cx, cx
-        xor dx, dx
+        cmp byte [fd_format_set], 0     ; A's entry as it was before the failure
+        je .geometry
+        mov ax, [fd_saved]
+        mov [di + UNIT_CYLINDERS], ax
+        mov ax, [fd_saved + 2]
+        mov [di + UNIT_TRACK], ax
+        mov ax, [fd_saved + 4]
+        mov [di + UNIT_GAP], al
+        mov [fd_double], ah
+.geometry:
+        mov cx, [di + UNIT_CYLINDERS]   ; what the entry says now, either way, for the
+        mov dl, [di + UNIT_HEADS]       ;    disk server's
+        mov dh, [di + UNIT_TRACK]
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_entry_a - A's entry and double step as a 1.2 MB diskette's
+;   In:       DI = A's entry
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+fd_entry_a:
+        mov byte [fd_double], 0
+        mov word [di + UNIT_CYLINDERS], DISK_A_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_A_SECTORS | (FDC_RATE_500K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_1200K
         ret
 
 ; ----------------------------------------------------------------------------

@@ -93,14 +93,15 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
 #define TRUST_TICKS 100                 /* a diskette's sectors trusted 2 s after the disk
                                            server's last word of it (M8; disk.c's too) */
 
-static rx_u16 ds_seen[DRIVE_FIXED];     /* the disk server's last answer for each diskette */
+static rx_u32 ds_seen[DRIVE_FIXED];     /* the disk server's last answer for each diskette:
+                                           32 bits, as 16 wrap in 22 minutes (M10) */
 
 /* disk_trusted - may what the cache holds of a drive be used without
  * asking the disk server, which checks a diskette after 2 s of its
  * drive's silence (server.h; disk-scheduler.md M8, D12)? */
 int disk_trusted(unsigned drive)
 {
-    return drive >= DRIVE_FIXED || (rx_u16)((rx_u16)rx_ticks() - ds_seen[drive]) < TRUST_TICKS;
+    return drive >= DRIVE_FIXED || rx_ticks() - ds_seen[drive] < TRUST_TICKS;
 }
 
 /* disk_call_ds - a call to the disk server for a drive's volume, whose lock
@@ -125,7 +126,7 @@ static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 
     if (had)
         lock_take(self_notify());
     if (status == 0 && drive < DRIVE_FIXED)
-        ds_seen[drive] = (rx_u16)rx_ticks();
+        ds_seen[drive] = rx_ticks();
     if (status == 0 && had && drive < DRIVE_FIXED) {    /* a diskette's (M8, D12): */
         if (r->bx == E_CHANGED)
             vfs_medium(drive);          /* another: the old one's gone */

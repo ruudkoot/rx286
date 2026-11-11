@@ -9,6 +9,9 @@
 #define FMTLAY_H
 
 #define FMT_SECTOR 512
+#define FMT_OEM_SKEWED "RX286 S"        /* the boot sector's OEM name on a skewed diskette,
+                                           its skew the eighth character: the disk server
+                                           reads such a one's next cylinder ahead (M10) */
 #define FMT_SKEW_A 7                    /* a cylinder's skew on A, in sectors, and on B: */
 #define FMT_SKEW_B 3                    /*    past rx286's step, settling (20-40 ms) and
                                            calls (M9: E10's 5 on A missed on MAME) */
@@ -19,6 +22,8 @@
                                            track */
 #define FMT_FAT_MOST (12 * FMT_SECTOR)  /* a FAT12's at most: 4,084 clusters */
 #define FMT_ROOT_FIXED 512              /* a fixed disk's root directory's entries */
+#define FMT_FIXED_MOST 65535UL          /* a fixed disk's volume's sectors at most: the
+                                           OS server's are 16 bits (M10's review) */
 
 /* A FAT12 volume as format lays it out: DOS's, on a diskette the whole of
  * it, on a fixed disk one partition from cylinder 0's second track */
@@ -31,6 +36,8 @@ struct fmt_volume {
     unsigned root;                      /* the root directory's entries */
     unsigned char media;                /* the media byte */
     unsigned char unit;                 /* the BPB's drive: 0, or 80h a fixed disk */
+    unsigned char skew;                 /* a diskette's cylinder skew, said in the OEM
+                                           name (FMT_OEM_SKEWED), or 0 */
     unsigned long serial;
     char label[11];                     /* upper case, blanks after */
 };
@@ -38,7 +45,8 @@ struct fmt_volume {
 /* fmt_diskette - a diskette's volume of 1200 or 360 KB: 0, or -1 */
 int fmt_diskette(struct fmt_volume *v, unsigned kb);
 /* fmt_fixed - a fixed disk's volume: one partition from cylinder 0, head 1,
- * to the end, the smallest cluster that keeps FAT12's 4,084: 0, or -1 */
+ * to the end, or to the last whole cylinder within FMT_FIXED_MOST sectors,
+ * the smallest cluster that keeps FAT12's 4,084: 0, or -1 */
 int fmt_fixed(struct fmt_volume *v, unsigned cylinders, unsigned heads, unsigned spt);
 /* fmt_label - the volume's label, upper case, of the characters a name
  * may hold; NO NAME without one */

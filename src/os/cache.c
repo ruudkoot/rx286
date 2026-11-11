@@ -174,8 +174,17 @@ static int wanted(int k, int meta, unsigned drive)
  * busy, and empty or of a volume no other call holds */
 static int evictable(int k)
 {
-    return !cache[k].busy && (cache[k].state == C_EMPTY || holder[cache[k].drive] == 0
-                              || holder[cache[k].drive] == me());
+    unsigned d = cache[k].drive;
+
+    if (cache[k].busy)
+        return 0;
+    if (cache[k].state == C_EMPTY || holder[d] == me())
+        return 1;
+    if (holder[d] != 0)
+        return 0;                       /* (another call's volume's, perhaps in its use) */
+    return cache[k].state < C_DIRTY || served[d] == ticket[d];  /* a dirty one's write takes
+                                           its volume: only one no call holds or waits for,
+                                           so that no call waits holding another (M10) */
 }
 
 /* flush - the sectors `wanted` says written, in the order of drive and
@@ -210,6 +219,7 @@ static rx_u16 flush(int meta, unsigned drive)
 rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
 {
     int k, oldest;
+    unsigned held;
     rx_u16 error;
 
     if (!ready)
@@ -249,8 +259,10 @@ rx_u16 cache_get(unsigned drive, rx_u16 sector, int fill, int *slot)
         k = oldest;
         if (cache[k].state < C_DIRTY)
             break;
+        held = vol_held();
         if ((error = put(k, 1)) != 0 && !lost[cache[k].drive])
             lost[cache[k].drive] = error;   /* (dropped: not this call's error, its owner's) */
+        vol_release(held);              /* (the evicted sector's volume, if it took it: M10) */
     }
     cache[k].drive = (rx_u8)drive;
     cache[k].sector = sector;

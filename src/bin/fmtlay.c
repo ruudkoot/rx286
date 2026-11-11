@@ -94,17 +94,21 @@ int fmt_fixed(struct fmt_volume *v, unsigned cylinders, unsigned heads, unsigned
     v->heads = heads;
     v->spt = spt;
     v->first = spt;                     /* cylinder 0, head 1, sector 1, as FDISK does */
-    v->sectors = (unsigned long)cylinders * heads * spt - spt;
+    if ((unsigned long)cylinders * heads * spt - spt > FMT_FIXED_MOST)
+        cylinders = (unsigned)((FMT_FIXED_MOST + spt) / ((unsigned long)heads * spt));
+    v->sectors = (unsigned long)cylinders * heads * spt - spt;  /* (whole cylinders, at
+                                           most what the OS server's 16-bit sectors reach:
+                                           the rest of a larger disk left out, M10) */
     v->root = FMT_ROOT_FIXED;
     v->media = 0xF8;
     v->unit = 0x80;
-    for (v->cluster = 1; v->cluster <= 128; v->cluster *= 2) {
+    for (v->cluster = 1; v->cluster <= 64; v->cluster *= 2) {
         fat_fit(v);
         if (fmt_clusters(v) <= CLUSTERS_MOST && v->fat * FMT_SECTOR <= FMT_FAT_MOST)
             break;
     }
-    if (v->cluster > 128)
-        return -1;                      /* (past FAT12, at 128 sectors a cluster) */
+    if (v->cluster > 64)
+        return -1;                      /* (past FAT12, at DOS's 64 sectors a cluster) */
     fmt_label(v, 0);
     return 0;
 }
@@ -203,6 +207,10 @@ void fmt_boot(const struct fmt_volume *v, unsigned char *s)
     s[1] = 0x3C;
     s[2] = 0x90;
     memcpy(s + 3, "RX286   ", 8);
+    if (v->skew > 0 && v->skew < 10) {  /* a skewed diskette says so: "RX286 S7" */
+        memcpy(s + 3, FMT_OEM_SKEWED, 7);
+        s[10] = (unsigned char)('0' + v->skew);
+    }
     put16(s + 0x0B, FMT_SECTOR);
     s[0x0D] = (unsigned char)v->cluster;
     put16(s + 0x0E, 1);                 /* reserved: the boot sector */

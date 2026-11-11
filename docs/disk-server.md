@@ -150,9 +150,9 @@ server answers once none of the block's segments is used:
 The write-behind passes walk only the segments that hold dirty blocks, as
 each segment counts its own, so a large cache costs them nothing more.
 
-Below 1 MB the disk server costs about 17 KB: its code in the boot image,
-12 KB; its space, 2 KB (`DS_SLOTS` of 32 bytes each); its stacks, 1.5 KB;
-and its data, 1 KB. Its cache is in extended memory, which every machine
+Below 1 MB the disk server costs about 20 KB: its code in the boot image,
+15 KB at M9 (`make sizes`); its space, 2 KB (`DS_SLOTS` of 32 bytes each);
+its stacks, 1.5 KB; and its data, 1.8 KB. Its cache is in extended memory, which every machine
 rx286 runs on has since disk-scheduler.md M8b: 384 KB at least. Until then
 a machine of 512 KB without any was the canary, and each milestone's code,
 which runs where it lies in the image, came out of its processes' memory:
@@ -210,11 +210,13 @@ Since roadmap disk-scheduler.md M6 (D7, D8):
 - **Read-ahead:** a read that missed the cache and began where the same
   process's last read of the drive ended has the rest of its cylinder read
   after it, into the cache, as the server's own request (`READ_AHEAD`), one
-  at a time a drive. A diskette's reads its next cylinder too, so that the
-  step comes between the server's own runs, where a skew of the formatter's
-  finds the next cylinder's first sector under the head (M9); and a
-  diskette's reader that goes on in what was read ahead has the read-ahead
-  go on ahead of it. It is the reader's, so that it comes next in the
+  at a time a drive. On a diskette that rx286's `format` skewed, whose boot
+  sector says so ("RX286 S7", its OEM name), it reads the next cylinder too,
+  so that the step comes between the server's own runs, where the skew finds
+  the next cylinder's first sector under the head (M9); and a reader that
+  goes on in what was read ahead has the read-ahead go on ahead of it. On
+  another diskette the step would cost a turn, which the reader may not
+  want (M10: the boot diskette read 16% slower). It is the reader's, so that it comes next in the
   reader's turn and is charged to its share: as anyone else's, the turn's
   wait for the reader's next read let that read come first and fetch the
   sectors itself. It takes a free request's record, no more than
@@ -276,6 +278,13 @@ block of the cache:
   answered; a write, or a read of others, is refused. `DS_VOLUME` answers
   the volume as it was, so that its cached files can still be read.
 
+A drive's first call, at the start or after `DS_EJECT`, looks at its
+diskette before anything of it is cached, and the first diskette seen has
+the drive's cache dropped: what a read-ahead read since may be the old
+one's (M10's review).
+Another diskette that the server's own read-ahead finds is said at the
+drive's next answer, whatever it is for, as no one waits on a read-ahead.
+
 A 360 KB diskette in A is read-only (`E_PROTECTED`; D12). `DS_EJECT` also
 forgets the drive's diskette, so that the next is taken as new.
 
@@ -311,3 +320,29 @@ Its space has `DS_SLOTS` (64), 2 KB of the kernel's, when the root may lend
 it nothing. Otherwise the space is the power of two that holds the slots
 for every block it may be lent, 512 at 16 MB (16 KB), made from extended
 memory.
+
+## The model
+
+No emulator turns a fixed disk at the AT's speed, and only MAME turns a
+diskette at it (roadmap disk-scheduler.md E1). `tools/disksim` is E6's
+discrete-event model of the AT's drives instead: IBM's 20 MB drive and a
+10 MB one behind one task file, the 1.2 MB and 360 KB diskette drives
+behind the 765, the CPU's costs from E4. It runs the disk server's own
+order of requests, `sched.c` built for the host and driven through ctypes
+(`rxsched.py`), beside the policies E6 compared (`policies.py`), on the
+workloads of E6 (`workloads.py`). `python3 tools/disksim/regression.py`
+prints the table, and `tests/unit/test_disksim.py` holds, in `make check`,
+what the disk server was chosen for:
+
+| Workload | The disk server | E6's first come, first served |
+|---|---|---|
+| two readers of C, a cylinder a call | 127.9 KB/s, each its share | 101.4 KB/s |
+| a reader of C and one of D | 141.8 KB/s, both served | 150.4 KB/s |
+| an interactive reader beside a scan of C | its p95 816 ms | 344 ms |
+| A read whole, a cylinder a call, without a skew and with 7 | 24.1 and 28.1 KB/s | the same |
+
+The third row is the shares' price: a process's turn is 136 sectors, and an
+interactive reader that thinks 50 ms between its reads gives the scan a
+whole turn each time (roadmap *At the close*). The skew's 16% here is
+close to what MAME measures (11% to 15% as the code around it changed:
+`tests/disk/skew.test`).

@@ -136,11 +136,15 @@ static unsigned clook(unsigned d, unsigned owner)
 }
 
 /* expired - once no batch is running on a drive, the most overdue of its
- * expired requests starts one, the sweep moved to it: is a batch running? */
+ * expired requests starts one, the sweep moved to it: is a batch running? A
+ * batch ends with its drive's queue (M10's review: one that outlived it
+ * kept the shares off, and sent a pick to the empty drive) */
 static int expired(unsigned d, rx_u16 now)
 {
     unsigned k, old = SCHED_NONE;
 
+    if (!drv[d].queued)
+        drv[d].batch = 0;
     if (drv[d].batch == 0) {
         for (k = 0; k < SCHED_JOBS; k++)
             if (mine(k, d, SCHED_NONE) && (rx_i16)(now - jobs[k].due) >= 0
@@ -190,8 +194,10 @@ int sched_pick(unsigned controller, rx_u16 now, struct sched_choice *choice)
         return SCHED_EMPTY;
     /* 1. an expired deadline: its batch, whoever's turn it is */
     if (expired(d, now) || expired(u, now)) {
-        if (!drv[d].batch)
-            d = u;
+        if (!drv[d].batch) {
+            d = u;                      /* (the other drive's batch: and u this one, */
+            u = d ^ 1;                  /*    or step 3 sent the pick nowhere: M10) */
+        }
     } else if (sched_fair) {
         /* 2. the process whose turn it is: on, or waiting for its next read */
         if (share[c].ended || (share[c].active != SCHED_NONE && share[c].left == 0))
@@ -232,6 +238,10 @@ int sched_pick(unsigned controller, rx_u16 now, struct sched_choice *choice)
     u = d ^ 1;
     /* 4. C-LOOK; and a Seek first on the fixed disks */
     j = clook(d, drv[d].batch ? SCHED_NONE : owner);
+    if (j == SCHED_NONE)                /* (never, by the steps above: but no pick is */
+        j = clook(d, SCHED_NONE);       /*    made without a request, M10) */
+    if (j == SCHED_NONE)
+        return SCHED_EMPTY;
     choice->job = (rx_u8)j;
     choice->seek_drive = SCHED_NONE;
     choice->seek_cylinder = 0;

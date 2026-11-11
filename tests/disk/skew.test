@@ -4,8 +4,8 @@
 # copies KERNEL.BIN onto each from C and reads it back from the diskette:
 # with the skew each cylinder's first sector comes under the head after the
 # step, not a turn later. The read must be faster by 3% at least: it takes
-# 5.82 s against 6.82 s, 14.7% less, not E10's 23%, as the gaps between the
-# reader's calls still cost a turn each (roadmap M9's notes).
+# 6.74 s against 7.58 s, 11% less (14.7% at M9), not E10's 23%, as the gaps
+# between the reader's calls still cost a turn each (roadmap M9's notes).
 program: idle
 define: TEST_POSIX_SKEW
 emulators: mame
