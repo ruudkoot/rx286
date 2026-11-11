@@ -133,7 +133,108 @@ simulator; none of their code is in the repository.
 | M8: removable volumes and `/mnt` | done (2026-11-09) |
 | M8b: the owner's decisions after M8 | done (2026-11-09) |
 | M9: the formatter | done (2026-11-09) |
-| M10: the simulator in `tools/`, the documents, a review and the close | not started |
+| M10: the simulator in `tools/`, the documents, a review and the close | done (2026-11-11): eleven findings of the review fixed; *At the close* below |
+
+## At the close
+
+### What the owner asked for (2026-11-09 to 2026-11-11)
+
+"please record that i take all decisions as per your recommendations ... please implement the
+roadmap and all its milestones", then "please proceed"; after M8 the decisions of M8b, in two
+steps; "please pause after commiting m9", and "please proceed". Every milestone is done, on the
+branch `disk`, from `master`'s 038f9f0 (this roadmap and its decisions), one commit a milestone,
+M8b's besides, each with `make check` and `make check-ia16` green. Nothing is pushed: the owner
+merges and pushes.
+
+| Commit | What |
+|---|---|
+| 27b2449 | M1: the copy and the names |
+| ddf3aaf | M2: runs through the drivers |
+| f623eae | M3: the disk server |
+| dfda329 | M4: waiting without the lock |
+| 3eb4d4d | M5: fair shares |
+| d467861 | M6: read-ahead and write-behind |
+| b99d334 | M7: the cache's memory |
+| c192d99 | M8: removable volumes and `/mnt` |
+| 1758531 | M8b: the owner's decisions after M8 |
+| 810247d | M9: the formatter |
+| 7b41aec | M10: the disk model in `tools/disksim`, and the review of M1-M9 fixed |
+| this record | M10: the close |
+
+### The last checks
+
+From a fresh clone of the branch at 7b41aec, on this machine (16 CPUs), `make check` passed
+in 1,198 s: the host tests (213), Bochs (150 of 150), DOSBox-X (122 of 122), MAME's IBM PC/AT
+(130 of 130), `check-286` over 22,601 listings and disassemblies, `check-image`, `check-repro`
+(171 files, twice), `lint` (249 files) and `check-docs`; and `make check-ia16` in 181 s (150
+of 150 on Bochs, `check-286` over 7,929). `tests/devices/term.test`, the modem's, which runs
+Bochs in real time against the runner's peer, lost its last command once under the load of a
+`make check` and passed alone three times after (M10's notes).
+
+The release build (`make sizes`), against memory.md's close:
+
+| Part | Bytes | At memory.md's close |
+|---|---|---|
+| the boot loader | 1,449 of 1,536 | 1,304 |
+| the kernel: code, data | 13,247; 3,901 | 13,208; 3,827 |
+| the diskette driver, the fixed disk driver: code | 2,531; 1,680 | (one sector a call) |
+| the root (C): code, data | 11,737; 10,284 | 9,969; 10,152 |
+| the OS server (C): code, data | 52,760; 36,122 | 46,009; 36,010 |
+| the disk server (C): code, data | 15,249; 1,786 | (none) |
+| `/z` | 3,144: init | the shell and its first commands |
+| the boot image (`KERNEL.BIN`) | 118,368 of 196,608 (60%) | 128,752 |
+
+### What the roadmap promised, and what it gave
+
+Every milestone's *Done when* holds but M9's last: a skewed diskette reads 11% faster on MAME
+(14.7% at M9), not 15%. Where one departed from the plan, and why (each milestone's *Done*
+says more):
+
+- **M1.** `names.test` ran on Bochs and MAME alone until M8b gave DOSBox-X its disks; two
+  tests had races of their own, which M1's timing on MAME exposed.
+- **M2.** Neither driver holds a next run, since one request reached a driver at a time until
+  the disk server; the timer is armed at each wait (MAME); MAME's fixed disks are CHDs.
+- **M3.** The cache with extended memory is one segment and the lent blocks (M7); writes went
+  through to the disk until M6; four volumes, drives A to D.
+- **M4.** A call holds its volume to its end, so the calls on one volume run one at a time; a
+  process ended during such a call ends when it is over; the statics became three scratch sets.
+- **M5.** A read's deadline is 2 s, not 500 ms, which undid the shares; the wait for a
+  reader's next request runs to the second tick.
+- **M6.** Read-ahead alone, on a sequential miss, not read-between or read-behind; half the
+  cache dirty writes it all; a write-behind's failure is kept for the volume's next sync.
+- **M7.** The dirty sectors of a block the root takes back are moved, not written; the root
+  lends at the end of a call that starts something, never in the first 10 s.
+- **M8.** A volume belongs to its drive; its identity is its first two sectors, trusted 2 s
+  after its drive's last word; DOSBox-X's 765 and IDE controller take rx286's drivers, after
+  four changes for the 765's ways.
+- **M8b.** The owner's decisions after M8, in two steps: all three emulators, the least
+  machine 639 KB and 384 KB, `/z` init alone, and the 512 KB machine's cuts undone. On the
+  way: two execs at once from disks were never safe (M4's), and DOSBox-X ends a multi-track
+  run at its first head.
+- **M9.** The skew paid 14.7% and A's is 7, not E10's 5; the interleave is not measured, no
+  emulator turning a fixed disk; a diskette's read-ahead took the next cylinder too.
+- **M10.** The model drives the disk server's own `sched.c`. The review found eleven defects,
+  all fixed: one high (the scheduler handed out a job that was none, after a deadline's batch
+  emptied its drive), four medium (another diskette found by a read-ahead and the diskette
+  after an eject, both of which could have the old one's sectors written on the new; a
+  deadlock of two volumes' locks; fixed-disk volumes past 65,535 sectors), six low. M9's read
+  of the next cylinder ahead is a skewed diskette's alone, which `format` marks: on the boot
+  diskette it cost 16%. The fixes and that change moved the skew's gain to 11%.
+
+### What is left
+
+- **The driver holding the next run** (D2, D7): the diskettes' reads would stream, and the
+  skew pay E10's 23%, where the gaps between a reader's calls now cost a turn each.
+- **The shares' price** for an interactive reader beside a scan (the model: p95 816 ms against
+  344 ms first come, first served): a turn shorter for a process that reads a sector at a
+  time, or the turn ended by its think time.
+- **A real AT:** the interleave measured, the fixed disk's Format Track, the double step,
+  settling, B's missing change line.
+- **The boot loader is 94% full** (1,449 of 1,536 bytes; 1,304 at memory.md's close).
+- **DOSBox-X's CPU:** 15 tests still leave it out, each saying why.
+- **`speed.test`'s budgets** moved in M9 and M10, each with its reason in the test: on MAME
+  a change of the code's size moves the diskettes' timing by up to a tenth, and whether B's
+  sectors just written are still cached falls with it.
 
 ## The request
 
