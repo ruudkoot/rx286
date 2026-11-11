@@ -1,0 +1,33 @@
+# The cache's lent memory (roadmap disk-scheduler.md M7, D10 A), on MAME's AT
+# with 1 MB of extended memory: as memory.test, but the 40 children of 60 KB
+# do not all fit even once the cache has given back every block it was
+# lent: those that do not are told there is no memory, and nothing else
+# fails. The files are as written, on the host's image too, and fsck.fat
+# finds C sound.
+program: idle
+define: TEST_POSIX_DISKMEM
+define: TEST_DISK_MEMORY
+emulators: mame
+memory: 640K 1M
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+fsck: C
+file: C /MEM0.TXT memory 0\n
+file: C /MEM1.TXT memory 1\n
+file: C /MEM2.TXT memory 2\n
+file: C /MEM3.TXT memory 3\n
+file: C /MEM4.TXT memory 4\n
+file: C /MEM5.TXT memory 5\n
+file: C /MEM6.TXT memory 6\n
+file: C /MEM7.TXT memory 7\n
+---
+disk: the cache grows
+diskmem: files written (0): 0
+disk: the cache shrinks
+diskmem: 40 children of 60 KB: forked {...}, refused {...}, sound {...}, no memory {...}, other 0
+disk: the cache grows
+diskmem: files as written: yes
+diskmem: done

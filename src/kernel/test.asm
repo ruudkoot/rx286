@@ -79,6 +79,7 @@ TR_HEAD             equ 0               ; a test ring: the next byte to take
 TR_TAIL             equ 1               ;    where the next byte goes
 TR_BYTES            equ 2
 TEST_SOUND_SLACK    equ 2               ; changes of channel 2's output either way
+TEST_SOUND_HANDLER_MS equ 1             ; and fewer for the tick's own handler, up to so long
 TEST_PROBE_TICKS    equ 5               ; how long a probe waits for its interrupt
 TEST_RTC_TICKS      equ 10              ; how long the RTC probe keeps re-arming
 TEST_LPT_LIMIT      equ 10000           ; polls of the printer's BUSY
@@ -112,6 +113,8 @@ test_mouse_ring     times TR_BYTES + TEST_RING_SIZE db 0   ; the mouse driver's
 test_key_ring       times TR_BYTES + TEST_RING_SIZE db 0   ; the keyboard driver's (MAME)
 test_reader         db TEST_READER_NONE                 ; KCALL_TEST's TEST_READER
 test_keys_ready     db 0                ; the keyboard driver has started (TEST_KEYS_READY)
+test_end_notify     dw 0                ; the notification a key script's end signals
+test_end_wait       dw 0                ;    (TEST_END_SYNC), and the ticks left after
 test_fpu_cw         dw TEST_FPU_CW_ZM
 msg_test_end        db "TEST END", CHAR_LF, 0
 msg_shutdown        db "Shutdown", 0
@@ -339,7 +342,7 @@ test_tick:
 %else
         jne .now
         cmp byte [test_reader], TEST_READER_FOREVER
-        je test_end
+        je test_end_soon
         ret                             ; a wait with a limit: not the end
 %endif
 .now:
@@ -474,7 +477,10 @@ test_probes:
 ; ----------------------------------------------------------------------------
 ; test_sound - count the changes of channel 2's output (port B's OUT2) over a
 ; whole tick, letting interrupts in: twice the frequency a second, so BX / 25
-; a tick, within TEST_SOUND_SLACK
+; a tick, within TEST_SOUND_SLACK. The count begins once the tick's timer
+; interrupt has returned, so the window is short by that handler's time:
+; fewer are allowed for TEST_SOUND_HANDLER_MS of it too (three changes at
+; 2000 Hz once disk-scheduler.md M2's OS server had a timer more due then)
 ;   In:       BX = the frequency asked, the speaker on; DS = SEL_KDATA
 ;   Out:      a probe line
 ;   Destroys: AX, DX, SI, DI
@@ -518,11 +524,21 @@ test_sound:
         xor dx, dx
         mov di, PIT_HZ
         div di                          ; AX = the changes a tick should have
-        sub ax, cx
-        jns .slack
-        neg ax
+        sub ax, cx                      ;    less those counted
+        mov di, TEST_SOUND_SLACK
+        jns .fewer
+        neg ax                          ; more: the slack alone
+        jmp .slack
+.fewer:
+        push ax                         ; fewer: and the handler's share, f / 500 for 1 ms
+        mov ax, bx
+        xor dx, dx
+        mov si, 1000 / (2 * TEST_SOUND_HANDLER_MS)
+        div si
+        add di, ax
+        pop ax
 .slack:
-        cmp ax, TEST_SOUND_SLACK
+        cmp ax, di
         ja .bad
         mov si, msg_sound_ok
         call kputs
@@ -1375,6 +1391,33 @@ test_thread_report:
         jmp .thread
 .done:
         ret
+%endif
+
+; ----------------------------------------------------------------------------
+; test_end_soon - a key script's end (disk-scheduler.md M6): the server that
+; asked (TEST_END_SYNC) told to write what it holds, with TEST_END_BIT; it
+; ends the test (TEST_END_NOW), or the kernel does after TEST_SYNC_TICKS.
+; Without such a server, or in TEST_END_NOSYNC builds, the end at once
+;   In:       DS = SEL_KDATA; interrupts off (the timer's)
+;   Out:      nothing, or never (the end)
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+test_end_soon:
+%ifndef TEST_END_NOSYNC
+        cmp word [test_end_notify], 0
+        je test_end
+        cmp word [test_end_wait], 0
+        jne .waiting
+        mov word [test_end_wait], TEST_SYNC_TICKS
+        mov si, [test_end_notify]
+        mov ax, TEST_END_BIT
+        jmp ntf_signal
+.waiting:
+        dec word [test_end_wait]
+        jz test_end
+        ret
+%else
+        jmp test_end
 %endif
 
 ; ----------------------------------------------------------------------------

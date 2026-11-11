@@ -1,8 +1,13 @@
-# Too little memory (roadmap memory.md M2, D4): a 320 KB machine, whose
-# memory for programs below 1 MB is under UMEM_LEAST once the image is
-# loaded. The kernel says so and stops, where it once handed out what was
-# not there or left the root unable to build (E3).
+# Too little memory (roadmap memory.md M2, D4; disk-scheduler.md M8b): the
+# least machine is 639 KB of base memory and 384 KB of extended memory, the
+# owner's (2026-11-09). With less of either - 320 KB or 640 KB without
+# extended memory, 512 KB with 1 MB of it - the kernel says so and stops,
+# where it once handed out what was not there or left the root unable to
+# build (memory.md E3).
 memory: 320K 0K
+memory: 639K 0K
+memory: 640K 0K
+memory: 512K 1M
 ---
 rx286, test build
-rx286 PANIC: too little memory for programs below 1 MB (UMEM_LEAST)
+rx286 PANIC: too little memory: rx286 needs 639 KB below 1 MB and 384 KB above

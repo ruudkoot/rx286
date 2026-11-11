@@ -7,7 +7,7 @@ its programs in ring 3 as POSIX-like processes, where nothing they do can
 crash the system: a shell on each of eight terminals, its commands, and
 two daemons on the status line. Drivers outside the kernel drive the AT's
 diskettes, fixed disks and printers, its speaker, game port, a serial
-mouse and a modem's line; the drives' FAT12 volumes are `/a` to `/d`.
+mouse and a modem's line; the drives' FAT12 volumes are in `/mnt`, by their labels.
 
 ```
 make doctor     # are the tools here?
@@ -18,8 +18,8 @@ make check      # every test and check, on Bochs, DOSBox-X's 286 and MAME's IBM 
 ```
 
 In the shell, `help` lists the commands. `ls`, `cd`, `cat` and `lp` (or
-DOS's `dir`, `type` and `print`) work on the drives, `/a` to `/d` (`b:`
-changes to B), whose sample files `make disks` puts there (`disks/`); `make
+DOS's `dir`, `type` and `print`) work on the drives' volumes, `/mnt/rx286` to
+`/mnt/rx286d` (`b:` changes to B's), whose sample files `make disks` puts there (`disks/`); `make
 run` puts the commands in C's `/BIN`; what `lp` prints goes to
 `build/debug/lpt1.txt`. `beep`, `play`, `joy`, `mouse` and `term` try the
 speaker, the game port, the mouse on COM1 (capture it in Bochs' window

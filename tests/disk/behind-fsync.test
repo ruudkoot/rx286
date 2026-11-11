@@ -1,0 +1,16 @@
+# fsync with write-behind (roadmap disk-scheduler.md M6, D8):
+# tests/posix/behind.c without its wait (TEST_BEHIND_NOWAIT), the test ended
+# without its sync (TEST_END_NOSYNC): the file fsync'd is on the host's
+# image, since fsync returns once the disk server has written it.
+program: idle
+define: TEST_POSIX_BEHIND
+define: TEST_BEHIND_NOWAIT
+define: TEST_END_NOSYNC
+keys: {wait 100}
+match: contains
+timeout: 300
+file: C /SYNCED.TXT synced\n
+---
+behind: written and fsync'd (0): 0
+behind: written, not fsync'd (0): 0
+behind: done

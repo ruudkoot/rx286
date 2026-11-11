@@ -22,10 +22,11 @@ INC_H := $(B)/inc
 
 # The C headers made from the NASM include files (tools/inc2h)
 INC_NAMES := build kcalls os layout disks drivers ports selectors descriptors posix archive \
-    vectors exe
+    vectors exe disk
 INC_HEADERS := $(addprefix $(INC_H)/,$(addsuffix .h,$(INC_NAMES)))
 # (and the servers' own: a change of one rebuilds every object, os-server.md P11)
-C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h src/os/*.h src/root/*.h) \
+C_HEADERS := $(wildcard src/include/c/*.h src/include/rx/*.h src/os/*.h src/root/*.h \
+    src/disk/*.h) \
     $(INC_HEADERS)
 
 $(INC_H)/%.h: src/include/%.inc tools/inc2h tools/rxlib.py
@@ -232,6 +233,18 @@ $(B)/os.rx: $(SERVER_START) $(SERVER_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.p
 
 $(FAR_B)/os/%.obj: $(wildcard src/os/*.h)
 
+# The disk server (roadmap disk-scheduler.md M3, D3): a server as the OS
+# server is, in C's compact model with a server's start, each of its
+# threads on a stack segment of its own; its cache, its order and its
+# volumes are pure C, tested on the host too (tests/unit/c/test_disk_*.c)
+DISK_OBJS := $(addprefix $(FAR_B)/disk/,disk.obj cache.obj sched.obj volume.obj)
+DISK_DGROUP_MAX := 16384
+$(B)/disk.rx: $(SERVER_START) $(DISK_OBJS) $(FAR_LIBS) tools/mkexe tools/rxlib.py
+	$(call wlink_exe,disk,$(SERVER_START) $(DISK_OBJS) $(FAR_LIBS), \
+	    --ring 2 --dgroup-max $(DISK_DGROUP_MAX))
+
+$(FAR_B)/disk/%.obj: $(wildcard src/disk/*.h)
+
 # /z, the archive of programs (roadmap os-server.md P6; tools/mkarchive):
 # init, and the processes' test programs (tests/posix)
 # The tests' programs (tests/posix) only in the builds of those tests
@@ -248,7 +261,13 @@ Z_TESTS := proc=$(C_B)/tests/posix/proc.$(OBJ) child=$(C_B)/tests/posix/child.$(
     pxrand=$(C_B)/tests/posix/pxrand.$(OBJ) edges=$(C_B)/tests/posix/edges.$(OBJ) \
     late=$(C_B)/tests/posix/late.$(OBJ) many=$(C_B)/tests/posix/many.$(OBJ) \
     held=$(C_B)/tests/posix/held.$(OBJ) overflow=$(C_B)/tests/posix/overflow.$(OBJ) \
-    orphans=$(C_B)/tests/posix/orphans.$(OBJ)
+    orphans=$(C_B)/tests/posix/orphans.$(OBJ) names=$(C_B)/tests/posix/names.$(OBJ) \
+    rdtime=$(C_B)/tests/posix/rdtime.$(OBJ) runs=$(C_B)/tests/posix/runs.$(OBJ) \
+    beside=$(C_B)/tests/posix/beside.$(OBJ) onedir=$(C_B)/tests/posix/onedir.$(OBJ) \
+    truncrace=$(C_B)/tests/posix/truncrace.$(OBJ) killread=$(C_B)/tests/posix/killread.$(OBJ) \
+    fair=$(C_B)/tests/posix/fair.$(OBJ) behind=$(C_B)/tests/posix/behind.$(OBJ) \
+    diskmem=$(C_B)/tests/posix/diskmem.$(OBJ) media=$(C_B)/tests/posix/media.$(OBJ) \
+    skew=$(C_B)/tests/posix/skew.$(OBJ)
 # The programs whose executables say they use the 287 (mkexe --287; P10)
 Z_287 := sigfpu fpu crash
 WITH_Z_TESTS := $(findstring TEST_POSIX,$(TEST_DEFINES))
@@ -269,6 +288,19 @@ Z_FOR_THREAD := thread
 Z_FOR_DRIVES := drives
 Z_FOR_DEVICES := devices
 Z_FOR_FSRAND := fsrand
+Z_FOR_NAMES := names
+Z_FOR_RDTIME := rdtime
+Z_FOR_RUNS := runs
+Z_FOR_BESIDE := beside
+Z_FOR_FSRAND2 := fsrand
+Z_FOR_ONEDIR := onedir
+Z_FOR_TRUNCRACE := truncrace
+Z_FOR_KILLREAD := killread
+Z_FOR_FAIR := fair
+Z_FOR_BEHIND := behind
+Z_FOR_DISKMEM := diskmem
+Z_FOR_MEDIA := media
+Z_FOR_SKEW := skew
 Z_FOR_PXRAND := pxrand
 Z_FOR_EDGES := edges
 Z_FOR_LATE := late
@@ -280,21 +312,29 @@ Z_WANTED := $(foreach t,$(patsubst -dTEST_POSIX_%,%,$(filter -dTEST_POSIX_%,$(TE
     $(Z_FOR_$(t)))
 Z_TESTS_USED := $(foreach p,$(Z_TESTS),$(if $(filter $(firstword $(subst =, ,$(p))),$(Z_WANTED)),$(p)))
 # The shell and its first commands (P9), where init runs the shell, and
-# the daemons it starts (P12)
-Z_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls clock counter, \
+# the daemons it starts (P12): on the boot diskette's /BIN, not /z, since
+# disk-scheduler.md M8b (the owner's: /z's 37 KB were the image's, and so
+# memory below 1 MB, for good). /z holds init, and a test build's own
+# programs
+A_SHELL := sh=$(C_B)/bin/sh/sh.$(OBJ) $(foreach c,echo cat ls clock counter, \
     $(c)=$(C_B)/bin/$(c).$(OBJ))
-Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED)) \
-    $(if $(filter shell sh,$(PROGRAM)),$(Z_SHELL))
+A_PROGRAMS := $(if $(filter shell sh,$(PROGRAM)),$(A_SHELL))
+A_NAMES := $(foreach p,$(A_PROGRAMS),$(firstword $(subst =, ,$(p))))
+A_FILES := $(addprefix $(B)/z-,$(addsuffix .rx,$(A_NAMES)))
+Z_PROGRAMS := init=$(C_B)/userland/init.$(OBJ) $(if $(WITH_Z_TESTS),$(Z_TESTS_USED))
 # Programs for the disks, not /z (roadmap os-server.md P8): run-test's
 # install: lines put them on a run's drive C, `make run` all of them in
 # /c/bin (tools/install-programs). The shell's commands but its first
 # three are there, as D11 has it (P12): the image holds 128 KB
 BIN_COMMANDS := $(foreach c,cp mv rm mkdir rmdir wc lp more clear uptime date sleep env head \
-    kill ps spin keys mem beep play joy mouse term nice, \
+    kill ps spin keys mem beep play joy mouse term nice eject, \
     $(c)=$(C_B)/bin/$(c).$(OBJ)) crash=$(C_B)/bin/crash.$(OBJ)+$(C_B)/bin/crashes.$(OBJ) \
-    fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ)
+    fpu=$(C_B)/bin/fpu.$(OBJ)+$(C_B)/bin/fpu287.$(OBJ) \
+    format=$(C_B)/bin/format.$(OBJ)+$(C_B)/bin/fmtlay.$(OBJ)
+$(C_B)/bin/format.$(OBJ) $(C_B)/bin/fmtlay.$(OBJ): src/bin/fmtlay.h
 DISK_PROGRAMS := $(if $(WITH_Z_TESTS),codes=$(C_B)/tests/posix/codes.$(OBJ)) \
-    $(if $(filter shell sh,$(PROGRAM)),$(BIN_COMMANDS))
+    $(if $(filter shell sh,$(PROGRAM)),$(BIN_COMMANDS),$(if $(filter -dTEST_POSIX_SKEW, \
+    $(TEST_DEFINES)),format=$(C_B)/bin/format.$(OBJ)+$(C_B)/bin/fmtlay.$(OBJ)))
 DISK_FILES := $(foreach p,$(DISK_PROGRAMS),$(B)/z-$(firstword $(subst =, ,$(p))).rx)
 image: $(DISK_FILES)
 Z_NAMES := $(foreach p,$(Z_PROGRAMS),$(firstword $(subst =, ,$(p))))
@@ -304,7 +344,7 @@ define z_program
 $(B)/z-$(1).rx: $(PROCESS_LIBS) $(subst +, ,$(2)) tools/mkexe tools/rxlib.py
 	$$(call c_link,z-$(1),$(PROCESS_LIBS) $(subst +, ,$(2)),$(if $(filter $(1),$(Z_287)),--287))
 endef
-$(foreach p,$(Z_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
+$(foreach p,$(Z_PROGRAMS) $(A_PROGRAMS) $(DISK_PROGRAMS),$(eval $(call z_program,$(firstword \
     $(subst =, ,$(p))),$(lastword $(subst =, ,$(p))))))
 $(B)/z.arc: $(Z_FILES) tools/mkarchive tools/rxlib.py
 	$(PYTHON) tools/mkarchive $@ $(foreach n,$(Z_NAMES),$(n)=$(B)/z-$(n).rx)

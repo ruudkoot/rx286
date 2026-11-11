@@ -1,0 +1,21 @@
+# A name another system wrote in lower case (roadmap disk-scheduler.md D19;
+# tests/posix/names.c, NAMES_LOWERCASE): B's FRAG.TXT made frag.txt on the
+# image ('B lowercase'). It is listed as it is and cannot be opened, since
+# frag.txt means FRAG.TXT; rename and unlink find it, so it can be put right.
+program: idle
+define: TEST_POSIX_NAMES
+define: NAMES_LOWERCASE
+media: B lowercase
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+fsck: B
+timeout: 120
+emulators: bochs
+---
+names: frag.txt listed as it is (1): 1
+names: FRAG.TXT not listed (0): 0
+names: frag.txt opened (-1, ENOENT 2): -1, errno 2
+names: renamed to two.txt (0): 0
+names: two.txt opened (3): 3
+names: removed (0): 0
+names: done

@@ -15,7 +15,7 @@
  * cd, pwd, exit, export, unset, set, alias, unalias, true, false, jobs, fg,
  * bg and help (P12); any other command is a program, found along PATH
  * (execvp), run in a child. Paths may name a drive DOS's way: "c:/docs" is
- * "/c/docs".
+ * "/mnt/rx286c/docs".
  *
  * Job control (P11, XCU 2.11): at its start on a terminal the shell leads a
  * session whose terminal it is. Each pipeline is a job, a process group of
@@ -69,8 +69,8 @@ static unsigned char exported[VARS];
 static char *aliases[ALIASES];          /* "name=value" */
 static const char *const dos_names[] = {    /* DOS's, its aliases from the start (D14 C) */
     "dir=ls -l", "type=cat", "print=lp", "copy=cp", "del=rm", "ren=mv", "md=mkdir",
-    "rd=rmdir", "cls=clear", "a:=cd /a", "b:=cd /b", "c:=cd /c", "d:=cd /d", "A:=cd /a",
-    "B:=cd /b", "C:=cd /c", "D:=cd /d"
+    "rd=rmdir", "cls=clear", "a:=cd a:", "b:=cd b:", "c:=cd c:", "d:=cd d:", "A:=cd a:",
+    "B:=cd b:", "C:=cd c:", "D:=cd d:"
 };
 static char history[HISTORY][LINE_MAX];
 static unsigned history_count;          /* (unsigned: it wraps within HISTORY, P15) */
@@ -592,7 +592,7 @@ static struct job *job_pick(const char *name)
     return &jobs[n - 1];
 }
 
-/* help's: the built-ins, the programs (in /z and /c/bin), the keys */
+/* help's: the built-ins, the programs (in /z and /mnt/rx286c/bin), the keys */
 static const char help_text[] =
     "Built in:  cd [DIR], pwd, exit [STATUS], export NAME=VALUE, unset NAME, set,\n"
     "           alias NAME=VALUE, unalias NAME, jobs, fg [%N], bg [%N], true,\n"
@@ -1185,7 +1185,7 @@ int main(int argc, char **argv, char **envp)
         if (strchr(*envp, '='))
             var_set(*envp, 1);
     if (var_get("HOME", 4))
-        chdir(var_get("HOME", 4));      /* (init's: /a, the boot drive) */
+        chdir(var_get("HOME", 4));      /* (init's: /mnt/rx286, the boot drive) */
     if (tcgetattr(0, &cooked) == 0) {   /* the editor's: key by key, its own echo */
         terminal = 1;
         take_terminal();

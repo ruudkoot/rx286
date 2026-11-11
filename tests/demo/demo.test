@@ -18,27 +18,28 @@
 program: shell
 define: TEST_DEMO
 define: TEST_SCREEN
+# DOSBox-X faults crash gp's jump past its code as #BR, not #GP(0000)
+# (docs/emulators.md).
 emulators: bochs mame
 install: C /BIN/WC z-wc.rx
 install: C /BIN/MORE z-more.rx
 install: C /BIN/CRASH z-crash.rx
 install: C /BIN/PS z-ps.rx
 install: C /BIN/SPIN z-spin.rx
-keys: {wait 250}ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt\n
+keys: {wait 250}ls c:/docs | wc -l; ls c:/docs > b:/docs.txt; cat b:/docs.txt\n
 keys: {alt-f2}\ncat b:/frag.txt | more\n{wait 20}{ctrl-z}jobs\nfg\nq
 keys: {alt-f3}\ncrash gp\n{alt-f4}\nps -e\n{wait 20}
 keys: {alt-f2}{alt-f3}{alt-f4}{alt-f1}spin\n{wait 150}{now ctrl-c}echo done\n
 timeout: 180
 match: contains
-file: B /DOCS.TXT HELLO.TXT\nPRINTME.TXT\n
+file: B /DOCS.TXT hello.txt\nprintme.txt\n
 ---
 rx286, test build
-/a$ ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt
+/mnt/rx286$ ls c:/docs | wc -l; ls c:/docs > b:/docs.txt; cat b:/docs.txt
 status, clock: {...}
-status, counter: idle {...}k/s
 2
-HELLO.TXT
-PRINTME.TXT
+hello.txt
+printme.txt
 screen 1: shown
 screen 1 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 1 01: rx286 terminal 2: press Enter for a shell
@@ -53,20 +54,20 @@ screen 1: shown
 screen 1 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
 screen 1 17: --More--
 screen 1 18: [1] Stopped  cat b:/frag.txt | more
-screen 1 19: /a$ jobs
+screen 1 19: /mnt/rx286$ jobs
 screen 1 20: [1] Stopped  cat b:/frag.txt | more
-screen 1 21: /a$ fg
+screen 1 21: /mnt/rx286$ fg
 screen 1 22: cat b:/frag.txt | more
-screen 1 24: /a$
+screen 1 24: /mnt/rx286$
 screen 2: shown
 screen 2 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
-screen 2 03: /a$ crash gp
+screen 2 03: /mnt/rx286$ crash gp
 screen 2 04: crash: jump past the end of my code
 screen 2 05: rx286: crash[{...}] fault #GP(0000) at 0007:{...}
-screen 2 06: /a$
+screen 2 06: /mnt/rx286$
 screen 3: shown
 screen 3 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
-screen 3 03: /a$ ps -e
+screen 3 03: /mnt/rx286$ ps -e
 screen 3 04:   PID  PPID  PGID   SID TTY  S NI COMMAND
 screen 3 05:     1     0     1     1 -    S 20 init
 screen 3 06:     2     1     2     2 tty1 S 20 sh
@@ -77,10 +78,10 @@ screen 3 {...} 20 clock
 screen 3 {...} 39 counter
 screen 0: shown
 screen 0 00: {...}<70>{...}idle {...}k/s {...}:{...}:{...}
-screen 0 01: /a$ ls c:/docs | wc -l; ls c:/docs > /b/docs.txt; cat /b/docs.txt
+screen 0 01: /mnt/rx286$ ls c:/docs | wc -l; ls c:/docs > b:/docs.txt; cat b:/docs.txt
 spin
 Spinning; ^C ends it.
 status, clock: {...}
 status, clock: {...}
-/a$ echo done
+/mnt/rx286$ echo done
 done

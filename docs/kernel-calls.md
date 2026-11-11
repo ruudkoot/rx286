@@ -489,6 +489,8 @@ answer `KE_NOSYS`:
 | 6 | `TEST_SILENCE_PROBE` | `TEST_SOUND` builds: the speaker silent over a tick? |
 | 7 | `TEST_PROBE` | `TEST_ATTACK` builds: BL `PROBE_*`, below |
 | 8 | `TEST_GIVE_WAY` | test builds: the next CX interrupt windows of any kernel call give way, a more urgent thread ready or not, so that the calls resume (roadmap os-server.md P3); CX back: the windows that were still to |
+| 10 | `TEST_END_SYNC` | test builds: DX a notification, which the key script's end signals with `TEST_END_BIT`, so that its server writes what it holds and then ends the test with `TEST_END_NOW`; the kernel ends it anyway after `TEST_SYNC_TICKS` (10 s). The OS server's control thread registers it at its start (roadmap disk-scheduler.md M6). `TEST_END_NOSYNC` builds end at once |
+| 11 | `TEST_END_NOW` | test builds: the test's end: `TEST END` on the log, and the emulator stops |
 | 9 | `TEST_OVERRUN` | `TEST_ATTACK` builds: `INT 9` in ring 0, as the 287's overrun of a segment after the CPU had moved on (Intel 9.6.3) arrives: the caller is restarted as the program whose 287 it is (*docs/security.md*); no emulator the suites run raises vector 9 itself (roadmap os-server.md P15) |
 
 In `TEST_FUZZ` builds the fuzz program's own `KCALL_TEST` is `KE_NOSYS`, as

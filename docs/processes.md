@@ -1,7 +1,7 @@
 # Processes
 
 A process (roadmap os-server.md P6, P8) is a program run from `/z`, the
-archive of programs in the boot image, or from a file of a drive (`/c/bin`),
+archive of programs in the boot image, or from a file of a drive (`/mnt/rx286c/bin`),
 by `fork`, `execve` or `posix_spawn`. Every program is one, init and the
 shell among them, but the kernel's test programs, which the root builds
 from the image's modules (*docs/root.md*, *docs/syscalls.md*). It is C,
@@ -59,7 +59,7 @@ roadmap os-server.md P15; 80 before) bytes at most, its zero too;
 `limits.h` calls it `PATH_MAX`. The current directories are kept out of
 the server's data segment, `PX_PATH_MAX` bytes for each entry in a segment
 of their own (slot 151). A program's names a file of
-`/z` ("/z/init") or of a volume ("/c/bin/codes"). `argv` and `environ`
+`/z` ("/z/init") or of a volume ("/mnt/rx286c/bin/codes"). `argv` and `environ`
 together, their pointers too, have `PX_ARG_MAX` bytes at most (`E2BIG`).
 
 The errors are POSIX's, with rx286's numbers: `EPERM`, `ENOENT`, `ESRCH`,
@@ -168,9 +168,10 @@ code, an entry outside the code, code and data past the file's end, a
 stack too small for `main`'s three words, data past a segment, or more data
 than its own most. A directory is `EACCES`.
 
-init's environment is `PATH=/z:/c/bin` and `HOME=/a`, which its children
-inherit; libc's `execvp` and `posix_spawnp` look for a name without a slash
-along it, or along `/z:/c/bin` without one (`src/lib/posix/path.c`, with
+init's environment is `PATH=/z:/mnt/rx286/bin:/mnt/rx286c/bin` and `HOME=/mnt/a:`, which
+its children inherit: `/z`, the boot diskette's `/bin` and C's. libc's
+`execvp` and `posix_spawnp` look for a name without a slash along it, or
+along the same without one (`src/lib/posix/path.c`, with
 `getenv`; XSH exec leaves that to the system). `make run` puts the programs
 a build made in C's `/BIN` (`tools/install-programs`), and run-test's
 `install:` lines put them on a run's drive. A process is named by its
@@ -184,19 +185,41 @@ again (P12).
 ## Files
 
 The tree is one (D13 C, `src/os/vfs.c`): `/` is the server's own and
-read-only, with `/a` to `/d` the drives' FAT12 volumes, `/z` the archive of
+read-only, with `/mnt` the drives' FAT12 volumes, `/z` the archive of
 programs and `/dev` the devices (`null`; `tty`, the caller's terminal;
 `tty1` to `tty8`, the terminals, as many as the EGA holds pages; `lpt1`,
 `lpt2`; `speaker`, `joystick`, `mouse`, `com2`, `status`: *The devices*
-below). A path may name a drive DOS's way: `c:/docs` is `/c/docs`. A path
-is made absolute against the process's current directory, which starts at
-its parent's (`/` for init), and its "." and ".." taken out before it is
-followed; within a volume a name is 8.3, matched in any case and kept upper
-case. The current directory keeps each name in its own case, as the server
-or FAT has it: `cd /C/docs` makes it `/c/DOCS`. A path that ends with "/"
+below). In `/mnt` each volume is named by its label (roadmap
+disk-scheduler.md M8, D20): in lower case, its spaces `-`, the characters a
+name refuses dropped (`RX286C` is `/mnt/rx286c`); one without a label by its
+drive's letter and the volume's number there (`a1`); one whose name another
+drive's volume has, with its drive's letter added. A path may name a drive
+DOS's way: `c:/docs` and `C:/docs` are `/mnt/c:/docs`, the volume C holds
+now, whose name a current directory made of it takes. A diskette's volume
+follows its diskette: another one in the drive is a new volume, and the
+old one's open files answer `ENXIO`, as a write does with no diskette in
+(*docs/disk-server.md*). `eject` (`PX_EJECT`, rx286's own) writes what is
+held of a diskette's volume and forgets it. `format`'s way to a drive is
+`PX_FORMAT` (rx286's own; roadmap disk-scheduler.md M9, D17), BL the drive
+and BH what to do: `FMT_BEGIN` takes the drive for the caller's process,
+refused (`EBUSY`) while a file of it is open or another process has it,
+once what the server and the disk server hold of it is written, and
+answers its geometry; `FMT_TRACK` formats a track by the caller's table;
+`FMT_READ` and `FMT_WRITE` move sectors from the drive's first, past the
+caches, the process's buffer lent meanwhile; `FMT_END`, or the process's
+end, gives the drive back, its volume mounted anew when next named.
+Meanwhile any other call on the drive is `EBUSY`. A path is made absolute against the process's current
+directory, which starts at its parent's (`/` for init), and its "." and
+".." taken out before it is followed. Names are case-sensitive (roadmap
+disk-scheduler.md M1, D19): within a volume a name is 8.3, kept upper case
+on the disk as FAT has it and shown in lower case, and a name with an
+upper-case letter is refused (`EINVAL`), since FAT holds no such name; the
+server's own names (`/dev`, `tty1`, `/z`'s programs) match byte for byte.
+A name another system wrote in lower case is shown as it is and cannot be
+opened, but unlink and rename find it when it has no upper-case twin. A path that ends with "/"
 names a directory: a file's is `ENOTDIR`, a new name's `O_CREAT` `EISDIR`
-(XBD 4.13). A path has 12 names at most once its ".." are taken out
-(`ENAMETOOLONG`).
+(XBD 4.13). A path has 13 names at most once its ".." are taken out
+(`ENAMETOOLONG`): `/mnt`, a volume's name and 11 below its root.
 
 A process has `OPEN_MAX` (20) descriptors, each naming an open file
 description of the server's (32 in all): its kind, its flags, its offset,
@@ -214,7 +237,7 @@ fails. `stat` of an open file gives its size as its descriptions have it
 | Call | Arguments | What the server does |
 |---|---|---|
 | `PX_OPEN` | SI the path, BX the flags | a descriptor, the lowest free: `O_RDONLY`, `O_WRONLY` or `O_RDWR` (`O_ACCMODE`); `O_CREAT` makes a volume's file, `O_EXCL` refuses one there (`EEXIST`), `O_TRUNC` empties it, `O_APPEND` writes at its end, `O_DIRECTORY` refuses a file (`ENOTDIR`), `O_CLOEXEC` marks it; access mode 3 is `EINVAL`, a create in `/`, `/dev` or `/z` `EROFS` |
-| `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written; the error if they are not (`EROFS` for a diskette protected), and they are tried again by a later `fsync` or close of another description |
+| `PX_CLOSE` | BX the descriptor | at its description's last, a file's entry and data written to the disk server (which writes a fixed disk's within 5 s); the error if they are not (`EROFS` for a diskette protected), and they are tried again by a later `fsync` or close of another description |
 | `PX_READ`, `PX_WRITE` | BX the descriptor, DI or SI the bytes, CX how many (32,767 at most, `SSIZE_MAX`: more moves that many) | by the kind: a volume's file, through the cache (a write past its end leaves a hole of zeros; one past what the volume could hold is `EFBIG`; one that fails leaves the file as it was); a terminal (*docs/terminals.md*; a read 0 where the processes have no keys); `/dev/null`; a printer; a device (*The devices* below); a pipe; a file of `/z`, read only |
 | `PX_LSEEK` | BX the descriptor, CX:SI the offset, DI `SEEK_SET`, `SEEK_CUR` or `SEEK_END` | the offset's bits 0-14, its bits 15-30 in SI (so that no result is negative); `ESPIPE` for a pipe, a terminal or a device; past 2 GB, `EOVERFLOW` |
 | `PX_DUP`, `PX_DUP2` | BX the descriptor (CX the one it becomes) | another descriptor of the same description |
@@ -222,10 +245,10 @@ fails. `stat` of an open file gives its size as its descriptions have it
 | `PX_STAT`, `PX_FSTAT` | SI the path or BX the descriptor, DI `ST_BYTES` of room | `ST_MODE` (`S_IFREG`, `S_IFDIR` or `S_IFCHR` within `S_IFMT`, and 0644, 0444 for a read-only file, 0755 for a directory; a file of `/z` 0555, a device, a terminal, a printer and `/dev/null` `S_IFCHR` 0666, a pipe `S_IFIFO` 0600), `ST_INO` (a dword: the entry's place, its sector on the disk times 16 and its slot there; a volume's root 1; the server's own names in `getdents`' order), `ST_NLINK` (1), `ST_SIZE`, `ST_MTIME` (DOS's time stamp, as seconds since 1970), `ST_DEV` (the drive; `ST_DEV_SERVER` for `/`, `/dev`, `/z` and the pipes) |
 | `PX_UNLINK`, `PX_RMDIR` | SI the path | a file's, or an empty directory's (`ENOTEMPTY`), entry and clusters gone; `EBUSY` while open, or while it is a process's current directory; `rmdir` of "." or ".." is `EINVAL` |
 | `PX_MKDIR` | SI the path | a cluster with "." and "..", and its entry; in `/`, `/dev` or `/z`, `EROFS` |
-| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): within one directory the entry's name changed in its place; else the entry made anew in the new directory, the old deleted, a directory's ".." its new parent. A file of the new name is replaced (`EBUSY` while it is open). Its sectors are written before its open descriptions and every current directory in it follow it. A directory into itself or one inside it, or "." or "..", is `EINVAL`; a file to "name/" `ENOTDIR`; over a current directory, `EBUSY`; one that would take a current directory in it past `PX_PATH_MAX` or 12 names, `ENAMETOOLONG` (the files deep in a directory moved deeper may pass those limits: nothing reaches them until it is moved back). A long name's entries, from a disk written elsewhere, go with the old entry, as with `unlink` |
+| `PX_RENAME` | SI the old path, DI the new | within a volume (`EXDEV` across): within one directory the entry's name changed in its place; else the entry made anew in the new directory, the old deleted, a directory's ".." its new parent. A file of the new name is replaced (`EBUSY` while it is open). Its sectors are written before its open descriptions and every current directory in it follow it. A directory into itself or one inside it, or "." or "..", is `EINVAL`; a file to "name/" `ENOTDIR`; over a current directory, `EBUSY`; one that would take a current directory in it past `PX_PATH_MAX` or 13 names, `ENAMETOOLONG` (the files deep in a directory moved deeper may pass those limits: nothing reaches them until it is moved back). A long name's entries, from a disk written elsewhere, go with the old entry, as with `unlink` |
 | `PX_CHDIR`, `PX_GETCWD` | SI the path; DI and CX the room | the current directory (`ERANGE` if the room is short, `EINVAL` if there is none) |
 | `PX_GETDENTS` | BX a directory's descriptor, DI and CX the room | whole records of `DE_SIZE` bytes: `DE_INO`, a dword as `ST_INO` ("." and ".." their directories'; in `/`, a drive's the server's own number, as a mount point's is), and `DE_NAME`, the name and its zero in `DE_NAME_SIZE` bytes; 0 at the end; room for less than a record, `EINVAL`. libc's `opendir` and `readdir` read through it (`dirent.h`) |
-| `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk, or the error (`EROFS` for a diskette protected); a pipe, a terminal or a device is `EINVAL` |
+| `PX_FSYNC` | BX the descriptor | its file's entry and data on the disk, and every other sector of its volume the disk server held dirty (`DS_SYNC`), or the error (`EROFS` for a diskette protected); a pipe, a terminal or a device is `EINVAL` |
 | `PX_PIPE` | | a pipe (P9): its read end's descriptor, and its write end's in SI |
 | `PX_IOCTL` | BX the descriptor, CX a request (`RXIO_*`), SI its argument | a device's request (*The devices* below); `ENOTTY` for any other descriptor or request, `EFAULT` for an argument past the data (P12) |
 | `PX_POLL` | SI the `struct pollfd`s (`PF_FD`, `PF_EVENTS`, `PF_REVENTS`; `PF_BYTES` each), CX how many (`OPEN_MAX` at most), BX the timeout in ms (-1: none; 0: at once) | how many have news, each one's `PF_REVENTS` set: `POLLIN` (bytes, or a pipe's end; a terminal where the processes have no keys, whose read is 0 at once), `POLLOUT` (room: `PIPE_BUF` bytes in a pipe), `POLLERR` (a pipe without a reader), `POLLHUP` (without a writer), `POLLNVAL` (not open; `POLLPRI` never). It waits in the server thread: the terminals it asks about wake it, as their reader; the rest it looks at each tick. A signal's handler ends it with `EINTR`, `SA_RESTART` or not (XSH poll); a stop makes it again (P12) |
@@ -237,18 +260,24 @@ The errors these add: `ENOTDIR`, `EISDIR`, `ENFILE` (no description left),
 (past 8.3, or past `PX_PATH_MAX`), `ENOTEMPTY`, `EPIPE`.
 
 The volumes are read and written through a cache of 32 sectors in a segment
-of the server's (`src/os/cache.c`, `src/os/vol.c`): the FAT, in every copy,
+of the server's (`src/os/cache.c`,
+`src/os/vol.c`), whose sectors come from the disk server and its own cache
+(*docs/disk-server.md*): the FAT, in every copy,
 and the directories are written at the end of each call that changed them;
 a file's data at its close, its `fsync`, or when its sector leaves the
-cache. A sector the driver refuses to write is dropped from the cache: the
+cache. On a fixed disk, the disk server holds what it is given for up to
+5 s before writing it (roadmap disk-scheduler.md M6), so a process that
+must know its file is on the disk calls `fsync`, which waits for the
+volume's `DS_SYNC`. Ctrl+Alt+Del and a test's end write everything first
+(*docs/disk-server.md*). A sector the driver refuses to write is dropped from the cache: the
 call that changed it gets the error, `EROFS` for a write-protected
 diskette, and the disk's copy counts again. A write within a file's
 clusters changes data sectors alone, whose error its `fsync` or close
 gives. A directory's chain is walked once in a scan of it, and one longer
 than the volume has clusters, which loops, is `EIO`; so is a directory's
-entry whose cluster is 0. The diskette driver still moves a sector at a
-time and has no change line: its rework is the disk subsystem's
-(`roadmaps/disk-scheduler.md`).
+entry whose cluster is 0. A process's whole sectors go straight between
+the disk server and the process's data (`roadmaps/disk-scheduler.md` M2,
+M3). The diskette drives' change line is not read yet (M8).
 
 A pipe holds 1 KB, in a segment of the server's; eight may be open at once.
 A read of an empty pipe waits, in the reader's server thread, until a
@@ -385,17 +414,58 @@ it (one within the segment's block keeps it, with every copy: `ROOT_BRK`). A wai
 is still the one whose call it serves: the process may have ended and a new
 one taken its entry meanwhile (`proc_still`).
 
+### The volumes' locks
+
+Since roadmap disk-scheduler.md M4 (D15) the lock is given up across every
+call to the disk server, so that a call on one drive waits for none on
+another (`tests/disk/beside.test`):
+
+- **Each volume has a lock** (`vol_hold`, `src/os/cache.c`). A call takes
+  it before it touches the volume, and keeps it to its end: when its path
+  reaches the drive (`lookup`), or at once for a descriptor of a volume's
+  file or directory, before its offset is used. Calls on one volume run
+  one at a time, in the order they asked (a ticket each: a call that has
+  just given the lock up cannot take it straight back; M5); calls on two
+  volumes run at once. A rename takes both its
+  volumes before it touches either, in their order. No thread waits for a
+  volume's lock with the lock kept.
+- **The files' cache** keeps a slot busy while the disk server reads or
+  writes it. A call never evicts a busy slot, or a slot of a volume another
+  call holds, and naps, the lock given up, when none is left to evict. A
+  call writes its own volumes' changed FAT and directory sectors at its
+  end, no others'.
+- **A process ended while a call of its holds a volume** ends when that
+  call is over (`end`): its segments are not revoked under a transfer, nor
+  its descriptions freed under a call. An exec waits for the process's
+  other threads' volume calls the same way.
+- **An entry a spawn takes is its own** from `entry_new` to its start,
+  though the spawn reads the program's file between, with the lock given
+  up; and one exec at a time builds its arguments and loads its code
+  (`exec_turn`: `args` and the load's slot are the server's one), from its
+  file's opening to its process. Both were found in M8b, once the shell's
+  commands came from the disks: a fork took a spawn's entry, and a
+  pipeline's second exec wrote over the first's arguments.
+- **The paths and nodes** a call works with are in one of three scratch
+  sets (`scratch_take`; two in M8, for a machine of 512 KB without
+  extended memory), taken at the start of a call with a path, a stat or an
+  exec, and given back at its end; a fourth such call waits for one. Until M4 each function kept its
+  own statics, which another call could now write over while the first
+  waits for the disk. A read, which may wait for ever on a terminal, takes
+  none.
+
 ## init
 
 init (`src/userland/init.c`), process 1, is the first process: the server's
 control thread starts it from `/z/init` at boot (not in `TEST_CAPS` builds,
 whose program holds the memory). It waits for ever; the children of a
 process that ends become its own. In an image built with `PROGRAM=shell`
-(`sh` too) it starts the shell, `/z/sh`, on each terminal, as getty does
-(*docs/terminals.md*, *init's terminals*): on the first at once, on the
-others once Enter is pressed there, so that a shell's memory is taken only
-where one is wanted (128 KB in all without extended memory). Once the
-shells are started it starts the daemons, `/z/clock` and `/z/counter` (P12;
+(`sh` too) it starts the shell, the boot diskette's `/mnt/rx286/bin/sh`,
+on each terminal, as getty does (*docs/terminals.md*, *init's terminals*):
+on the first at once, on the others once Enter is pressed there, so that a
+shell's memory is taken only where one is wanted. Without the shell (the
+boot diskette out), the terminal says so and waits for Enter before init
+tries again, as DOS asks for its `COMMAND.COM`. Once the shells are started
+it starts the daemons, `clock` and `counter`, from the same `/bin` (P12;
 not in a test build, unless it asks, `TEST_DAEMONS` or `TEST_DEMO`, as they
 would change every test's pids and timing). Each makes itself a daemon
 (`rx_daemon`, `rx/daemon.h`): its first process ends at once, the second

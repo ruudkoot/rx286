@@ -16,6 +16,7 @@
 #include "rx/server.h"
 #include "drivers.h"
 #include "layout.h"
+#include "disk.h"
 
 #define RING 2
 #define SLOT(n) ((rx_u16)((n) * 8 + 4 + RING))  /* a slot of the server's, as a selector */
@@ -27,6 +28,7 @@
 #define OS_FOREGROUND SLOT(15)          /* the foreground program's thread */
 #define OS_ROOT SLOT(OS_SLOT_ROOT)      /* the root's endpoint, for requests */
 #define OS_SERVICE(s) SLOT((OS_SLOT_SERVICE + (s)) & 0xFF)  /* a driver's endpoint */
+#define OS_DISK SLOT(OS_SLOT_DISK)      /* the disk server's (disk-scheduler.md M3) */
 #define OS_SLOT_SLEEP 128               /* program n's thread's notification: + n */
 #define OS_PART OS_THREAD_STACK         /* each thread's stack segment (os.inc; M6) */
 #define PROCS OS_PROCS                  /* the processes and threads at once (os.inc;
@@ -57,8 +59,31 @@ struct session {
 int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, rx_u16 bp,
          struct rx_kregs *r);
 /* disk_call - a sector to or from a segment of the server's (passed), through
- * the drive's driver: 0 or the error */
+ * the disk server: 0 or the error */
 rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 offset);
+/* disk_run - `count` sectors to or from a segment of the server's (passed),
+ * through the disk server: 0 or the error */
+rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segment,
+                rx_u16 offset);
+/* disk_volume - a drive's volume, as the disk server says it: 0 or the error */
+rx_u16 disk_volume(unsigned drive);
+/* disk_sync - a drive's volume's sectors the disk server holds written */
+rx_u16 disk_sync(unsigned drive);
+/* disk_trusted - may the cache's sectors of a drive be used unasked (M8)? */
+int disk_trusted(unsigned drive);
+/* disk_eject - a diskette's volume forgotten by the disk server (DS_EJECT) */
+rx_u16 disk_eject(unsigned drive);
+/* disk_geometry, disk_format, disk_raw - the formatter's (disk-scheduler.md
+ * M9): a drive's cylinders and its heads and sectors a track; a track
+ * formatted; sectors from the drive's first, past the caches: 0 or the error */
+rx_u16 disk_geometry(unsigned drive, rx_u16 *cylinders, rx_u16 *heads_track);
+rx_u16 disk_format(unsigned drive, rx_u16 cylinder, unsigned head, unsigned sectors,
+                   rx_u16 segment, rx_u16 offset);
+rx_u16 disk_raw(int label, unsigned drive, rx_u32 sector, unsigned count, rx_u16 segment,
+                rx_u16 offset, rx_u16 *moved);
+/* vfs_formatter - the process (its entry + 1) whose formatter holds a
+ * drive, or 0 (vfs.c) */
+int vfs_formatter(unsigned drive);
 /* drive_sectors - a drive's sectors */
 rx_u16 drive_sectors(unsigned drive);
 /* in_segment - may a buffer of a data segment of the server's be used:
@@ -91,9 +116,8 @@ void test_reader(int how);
  * terminal's foreground group, its input dropped (proc.c; P11) */
 int proc_alive(int i);
 void proc_interrupt(void);
-/* proc_break_seen - a Ctrl+Break the control thread's wait for the lock
- * took, since it last asked? (proc.c; P15) */
-int proc_break_seen(void);
+/* proc_control_seen - the control bits the control thread's lock waits took */
+rx_u16 proc_control_seen(void);
 /* proc_lend - entry i's call lends its data segment to a driver, the lock
  * given up (1), or no longer (0): a brk that would replace it waits
  * (proc.c; lock held; P15) */
@@ -167,6 +191,18 @@ void proc_timers(void);
  * thread that finds it taken sleeps a tick on its notification */
 void lock_take(rx_u16 notify);
 void lock_give(void);
+/* self_notify - the calling thread's own notification, to nap on */
+rx_u16 self_notify(void);
+/* notify_thread - thread n woken out of its nap */
+void notify_thread(unsigned n);
+/* lock_mine - does the calling thread hold the lock? */
+int lock_mine(void);
+/* lock_nap - a tick's nap, the lock given up meanwhile (lock held) */
+void lock_nap(void);
+/* proc_self - the entry whose call the calling thread serves, or -1 */
+int proc_self(void);
+/* proc_in_volume - the calling thread's call holds a volume's lock, or not */
+void proc_in_volume(int on);
 
 /* Process entry i's slots of the server's (proc.c) */
 #define P_SLOT(i, k) SLOT(PROC_SLOT0 + PROC_SLOTS_EACH * (i) + (k))

@@ -4,15 +4,14 @@
 # its break. (Where they are, and their limits, change with the build: only
 # the selectors are checked.)
 program: sh
-emulators: bochs mame
 install: C /BIN/MEM z-mem.rx
 keys: mem\n
 match: contains
 ---
-/a$ mem
+/mnt/rx286$ mem
 code:  selector 0007h, base {...}h, limit {...}h
 data:  selector 000Fh, base {...}h, limit {...}h
 stack: selector 000Fh, base {...}h, limit {...}h
 break: {...}h
 Nothing else is reachable: the kernel's selectors fault here.
-/a$
+/mnt/rx286$

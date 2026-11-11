@@ -1,0 +1,34 @@
+# Removable volumes (roadmap disk-scheduler.md M8, D12): tests/posix/media.c
+# on MAME, whose Lua takes A's diskette out and puts it or another back
+# (media-at:). A's change line says so: the volume offline, its cached
+# sectors read, a write ENXIO; the same diskette back, found the same by
+# its first two sectors, online with its cache; another, a new volume, the
+# old one's open file ENXIO; then eject.
+program: idle
+define: TEST_POSIX_MEDIA
+emulators: mame
+media-at: 75 eject A
+media-at: 125 insert A self
+media-at: 175 eject A
+media-at: 177 insert A other
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+---
+media: A's file written (0): 0
+media: read (7): 7
+media: A out, read from the cache (7): 7
+media: A out, a write (ENXIO 6): 6
+media: A back, read (7): 7
+media: A back, a write (0): 0
+media: kept open (0): 0
+media: another, the file (-2): -2
+media: another, the open file (ENXIO 6): 6
+media: another, a write (0): 0
+media: eject (0): 0
+media: done

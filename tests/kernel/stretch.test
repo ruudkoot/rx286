@@ -13,7 +13,6 @@ install: C /BIN/BEEP z-beep.rx
 install: C /BIN/CRASH z-crash.rx
 keys: ls c:/\ncat c:/numbers.txt\njoy\nbeep\ncrash gp\n
 timeout: 60
-emulators: bochs mame
 match: contains
 ---
 rx286: interrupts never off for 10 ms

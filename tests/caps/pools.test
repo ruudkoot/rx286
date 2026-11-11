@@ -2,11 +2,16 @@
 # objects of the memory for segments, the spaces holding copies a revoke deletes, all
 # revoked at once, and a 64 KB retype zeroed in pieces: interrupts never off for half a
 # tick, since no delete looks through every slot (D9). tests/programs/additions.asm.
+# On 1 MB of extended memory or more (disk-scheduler.md M8b): a TEST_CAPS
+# program gets the first piece of extended memory, what the root leaves of
+# it, which on the least machine's 384 KB has too little room for these
+# objects (KE_MEM).
 program: additions
 define: TEST_CAPS
 define: TEST_ADD_POOLS
+memory: 639K 15M
+memory: 640K 1M
 define: TEST_STRETCH
-emulators: bochs mame
 match: contains
 timeout: 120
 ---

@@ -8,7 +8,6 @@ define: TEST_POSIX_POLL
 keys: {wait 250}{wait 250}
 match: contains
 timeout: 120
-emulators: bochs mame
 ---
 poll: an empty pipe, at once (0): 0
 poll: its write end, room (104): 104

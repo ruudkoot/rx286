@@ -1,0 +1,14 @@
+# A truncation while another's read is in flight (roadmap
+# disk-scheduler.md M4, D15, E10): init starts tests/posix/truncrace.c
+# (TEST_POSIX_TRUNCRACE). The reader gets the file's bytes or fewer, never
+# another file's; fsck.fat finds C sound afterwards.
+program: idle
+define: TEST_POSIX_TRUNCRACE
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+fsck: C
+---
+truncrace: the reader saw the file's bytes alone: yes
+truncrace: done

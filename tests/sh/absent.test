@@ -1,19 +1,20 @@
 # No fixed disk D at all (roadmap os-server.md P14): the fixed disks'
-# driver finds none, /d is an error, never a hang, and C works on. On
+# driver finds none, /mnt/rx286d is an error, never a hang, and C works on. On
 # MAME's AT the disks are IDE drives, D the second: the driver selects C
 # before the controller's reset, which D's failure brings, as well as after.
 # A PATH through the missing drive finds nothing there, and says so (P15).
 program: sh
 media: D absent
+# DOSBox-X leaves no drive out (media:).
 emulators: bochs mame
-keys: ls /d; ls c:/docs\nexport PATH=/z:/d/bin; nosuch; echo [$?]\n
+keys: ls /mnt/rx286d; ls c:/docs\nexport PATH=/z:/mnt/rx286d/bin:/mnt/rx286/bin; nosuch; echo [$?]\n
 ---
 rx286, test build
-/a$ ls /d; ls c:/docs
-/d: input/output error
-HELLO.TXT
-PRINTME.TXT
-/a$ export PATH=/z:/d/bin; nosuch; echo [$?]
+/mnt/rx286$ ls /mnt/rx286d; ls c:/docs
+/mnt/rx286d: no such file or directory
+hello.txt
+printme.txt
+/mnt/rx286$ export PATH=/z:/mnt/rx286d/bin:/mnt/rx286/bin; nosuch; echo [$?]
 sh: nosuch: no such file or directory
 [127]
-/a$
+/mnt/rx286$

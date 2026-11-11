@@ -1,0 +1,23 @@
+# B's diskette changed while its motor is off (roadmap disk-scheduler.md M8,
+# D12): tests/posix/media.c (TEST_MEDIA_SWAPB) on MAME, whose Lua puts another
+# diskette into B (media-at:). IBM's 360 KB drive has no change line, so the
+# disk server checks B's first two sectors at the first access after 2 s of
+# its silence: another diskette, the old one's cache dropped, the file it
+# held gone; a file written on the new one and read back.
+program: idle
+define: TEST_POSIX_MEDIA
+define: TEST_MEDIA_SWAPB
+emulators: mame
+media-at: 75 eject B
+media-at: 77 insert B other
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+---
+media: B's readme.txt (bytes): {...}
+media: B's readme.txt, another diskette (-2): -2
+media: a file written on it (0): 0
+media: read back (8): 8
+media: done

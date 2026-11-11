@@ -1,12 +1,16 @@
-# The processes' memory without extended memory (roadmap memory.md M4, E3):
-# a 512 KB AT with none. The root keeps 128 KB of the memory below 1 MB for
-# processes (MEMORY_WITHOUT_EXTENDED), so one of tests/posix/many.c's 16
-# children of 60 KB fits, and the others are told there is no memory.
+# The processes' memory on the least machine (roadmap memory.md M4, E3;
+# disk-scheduler.md M8b): 639 or 640 KB of base memory and 384 KB above 1
+# MB, an AT of 1 MB. tests/posix/many.c's 16 children of 60 KB, 1 MB of
+# processes, cannot all fit: those that do are sound, and the others are
+# told there is no memory, at their fork or at their malloc. How many fit
+# is left open, as the image's code runs where it lies and each KB it grows
+# is a KB less for them; none goes wrong.
 program: idle
 define: TEST_POSIX_MANY
-memory: 512K 0K
+memory: 639K 384K
+memory: 640K 384K
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 120
 ---
-many: 16 children of 60 KB: forked 16, refused 0, sound 1, no memory 15, other 0
+many: 16 children of 60 KB: forked {...}, refused {...}, sound {...}, no memory {...}, other 0

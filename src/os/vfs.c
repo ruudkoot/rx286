@@ -3,11 +3,17 @@
  * The processes' files (roadmap os-server.md P7; D13 C): one tree, paths,
  * descriptors and open file descriptions, and the calls on them.
  *
- * The root, /, is the server's own and read-only: /a to /d are the drives'
- * FAT12 volumes (vol.c), /z the archive of programs, /dev the devices
+ * The root, /, is the server's own and read-only: /mnt holds the drives'
+ * FAT12 volumes (vol.c) by their labels' names, and DOS's a: to d: name
+ * the volume each drive holds now, as /mnt/a: and so on (disk-scheduler.md
+ * M8, D20); /z the archive of programs, /dev the devices
  * (null, tty, lpt1, lpt2). A path is made absolute against the process's
  * current directory and its "." and ".." taken out before it is followed.
- * Within a volume a name is 8.3, matched in any case and kept upper case.
+ * Within a volume a name is 8.3, kept upper case as FAT has it, shown in
+ * lower case, and a name with an upper-case letter refused (EINVAL): rx286's
+ * names are case-sensitive (roadmap disk-scheduler.md M1, D19). DOS's drive
+ * letters, "c:" or "C:", stay. A name another system wrote in lower case is
+ * shown as it is; unlink and rename find it when it has no upper-case twin.
  *
  * A descriptor (OPEN_MAX a process) names an open file description, shared
  * by dup and fork: its kind, flags and offset, and for a file of a volume
@@ -35,7 +41,8 @@
 #define NO_FD 0xFF
 #define COUNT_MAX 0x7FFF                /* a read's, a write's bytes at most: SSIZE_MAX, so
                                            that a result is never one of the VFS_* codes */
-#define PARTS 12                        /* a path's components at most */
+#define PARTS 13                        /* a path's components at most: a volume's root
+                                           /mnt/name, 11 below it (12 until M8's /mnt) */
 #define ATTR_READ_ONLY 0x01
 #define ATTR_ARCHIVE 0x20
 #define DIR_TIME 0x16
@@ -45,7 +52,8 @@
 /* What a node of the tree is: the server's own (the root, /dev, /z and its
  * files, the devices), or a volume's (a directory, a file) */
 enum { K_FREE, K_TOP, K_DEVDIR, K_ZDIR, K_ZFILE, K_NULL, K_TTY, K_LPT, K_DIR, K_FILE, K_PIPE_R,
-       K_PIPE_W, K_DEV };
+       K_PIPE_W, K_DEV, K_GONE, K_MNT };   /* K_GONE: a file of a diskette taken out;
+                                                   K_MNT: /mnt, the volumes (M8) */
 
 #define PIPES 8                         /* the pipes at once (P9) */
 #define PIPE_SIZE 1024                  /* each one's buffer, in the server's segment */
@@ -115,7 +123,78 @@ static int pipes_ready;
 static struct files files_of[PROCS];
 #define FILES(i) files_of[proc_leader(i)]   /* a thread's are its process's (P13) */
 static struct vol vols[DRIVES];
-static const char *const top_names[] = { "a", "b", "c", "d", "dev", "z" };
+
+/* A call's scratch: its paths and nodes, a string or two, and whether its
+ * last name may be lower case. A call takes one of SCRATCHES before it
+ * needs it and keeps it to its end (proc.c's handle): it may give the lock
+ * up while it waits for the disk (disk-scheduler.md M4), and another call
+ * would write over statics meanwhile. Three, of 1.75 KB of the server's data
+ * each (two in disk-scheduler.md M8, for 512 KB without extended memory),
+ * cost less than the statics each function kept until M4; a fourth call
+ * waits for one */
+struct scratch {
+    char in[PX_PATH_MAX], text[PX_PATH_MAX];
+    struct path p, q;
+    struct node a, b;
+    rx_u8 loose_last;                   /* unlink, rename: the last name may be lower case */
+};
+#define SCRATCHES 3
+static struct scratch scratches[SCRATCHES];
+static rx_u8 scratch_user[SCRATCHES];  /* the thread (its number + 1) whose it is, or 0 */
+
+/* scratch_take - a scratch for the calling thread's call (fs.h): its own if
+ * it has one, else a free one, a nap (the lock given up) while none is */
+void scratch_take(void)
+{
+    rx_u8 me = (rx_u8)(server_self() + 1);
+    int k;
+
+    for (;;) {
+        for (k = 0; k < SCRATCHES; k++)
+            if (scratch_user[k] == me)
+                return;
+        for (k = 0; k < SCRATCHES; k++)
+            if (scratch_user[k] == 0) {
+                scratch_user[k] = me;
+                return;
+            }
+        lock_nap();
+    }
+}
+
+/* scratch_give - the calling thread's scratch given back, if it has one */
+void scratch_give(void)
+{
+    rx_u8 me = (rx_u8)(server_self() + 1);
+    int k;
+
+    for (k = 0; k < SCRATCHES; k++)
+        if (scratch_user[k] == me)
+            scratch_user[k] = 0;
+}
+
+/* scratch - the calling thread's scratch, taken if it has none */
+static struct scratch *scratch(void)
+{
+    rx_u8 me = (rx_u8)(server_self() + 1);
+    int k;
+
+    scratch_take();
+    for (k = 0; k < SCRATCHES && scratch_user[k] != me; k++)
+        ;
+    return &scratches[k];
+}
+
+/* scratch_text - the calling thread's scratch's text, for a path (fs.h) */
+char *scratch_text(void)
+{
+    return scratch()->text;
+}
+static const char *const top_names[] = { "dev", "mnt", "z" };
+#define TOP_NAMES 3
+#define VOL_NAME_MAX 12                 /* a volume's name in /mnt: a label's 11, a suffix */
+static char vol_names[DRIVES][VOL_NAME_MAX + 1];    /* each drive's volume's (D20) */
+static rx_u8 vol_named[DRIVES], vol_count[DRIVES];  /* known; volumes seen, for a1, a2 */
 static const char *const dev_names[] = {     /* from "speaker" on, dev.c's (P12) */
     "null", "tty", "lpt1", "lpt2", "speaker", "joystick", "mouse", "com2", "status"
 };
@@ -123,6 +202,7 @@ static const char *const dev_names[] = {     /* from "speaker" on, dev.c's (P12)
 #define DEV_FIRST 4                     /* the first of dev.c's (DEV_SPEAKER) */
 #define TTY_OWN 0xFF                    /* /dev/tty's unit: the opener's terminal */
 #define INO_TOP 0x10                    /* the server's own names' inodes (ino_of, P15): */
+#define INO_MNT 0x20                    /*    /mnt's (M8) */
 #define INO_DEV 0x100                   /*    /'s, /dev's, /z's names, by getdents' */
 #define INO_Z 0x200                     /*    order; a pipe's */
 #define INO_PIPE 0x400
@@ -133,7 +213,111 @@ static int errno_of(rx_u16 e)
 {
     if (e == ENOENT || e == ENOSPC)
         return e;
+    if (e == E_OFFLINE || e == E_CHANGED || e == E_TIMEOUT)
+        return ENXIO;                   /* (the diskette is out, or another: M8, D12) */
+    if (e == E_BUSY)
+        return EBUSY;                   /* (a formatter's drive: M9) */
+    if (e == E_INVAL)
+        return EINVAL;
     return e == E_PROTECTED ? EROFS : EIO;
+}
+
+static int medium_seen;                 /* vfs_medium came during a lookup */
+
+static char lower(char c);
+
+/* vol_mount_of - drive d's volume mounted, its lock held: 0 or the error */
+static rx_u16 vol_mount_of(int d)
+{
+    vol_hold((unsigned)d);
+    return vol_mount(&vols[d], (unsigned)d);
+}
+
+/* volume_name - drive d's volume's name in /mnt (D20), learnt as it is
+ * mounted: its label in lower case, spaces '-', what a name refuses
+ * dropped; without one, the drive's letter and the volume's number there
+ * (a1); a name another drive's volume has, the drive's letter added. 0, or
+ * the errno */
+static int volume_name(int d)
+{
+    rx_u8 entry[DIR_ENTRY_SIZE];
+    struct place where;
+    rx_u16 index, error;
+    int end, k, j = 0, e;
+    char *s = vol_names[d], c;
+
+    if (vol_named[d])
+        return 0;
+    if ((error = vol_mount_of(d)) != 0)
+        return errno_of(error);
+    for (index = 0; vol_dir_entry(&vols[d], 0, index, &where, entry, &end) == 0 && !end
+                    && entry[0] != 0; index++)
+        if (entry[0] != 0xE5 && (entry[11] & 0x08) && (entry[11] & 0x0F) != 0x0F) {
+            for (k = 0; k < 11 && j < VOL_NAME_MAX - 2; k++) {
+                c = lower((char)entry[k]);
+                if (c == ' ')
+                    c = '-';
+                if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')
+                    s[j++] = c;
+            }
+            break;
+        }
+    while (j && s[j - 1] == '-')
+        j--;
+    if (j == 0) {                       /* (no label: a1, a2, ...) */
+        s[j++] = (char)('a' + d);
+        s[j++] = (char)('1' + vol_count[d] % 9);
+    }
+    s[j] = 0;
+    for (e = 0; e < DRIVES; e++)        /* (another's already: its letter added) */
+        if (e != d && vol_named[e] && strcmp(vol_names[e], s) == 0) {
+            s[j++] = '-';
+            s[j++] = (char)('a' + d);
+            s[j] = 0;
+        }
+    vol_named[d] = 1;
+    return 0;
+}
+
+/* mnt_drive - the drive /mnt's name names: DOS's "c:", or a volume's name
+ * (D20), each drive's learnt as needed, the fixed disks' first, so that a
+ * path of theirs spins no diskette up; -1 if none */
+static int mnt_drive(const char *name)
+{
+    unsigned keep = vol_held();
+    int k, d;
+
+    if (name[0] >= 'a' && name[0] < 'a' + DRIVES && name[1] == ':' && name[2] == 0)
+        return name[0] - 'a';
+    for (k = 0; k < DRIVES; k++) {
+        d = (k + 2) % DRIVES;           /* (C, D, A, B) */
+        if (volume_name(d) == 0 && strcmp(vol_names[d], name) == 0)
+            return d;
+        vol_release(keep);              /* (a volume only named: not kept while the next is
+                                           waited for, M10) */
+    }
+    return -1;
+}
+
+/* vfs_medium - another diskette in a drive (fs.h): its unwritten sectors
+ * lost, said on the log; its files' and directories' descriptions gone,
+ * so that nothing of the old one is written to the new (ENXIO) */
+void vfs_medium(unsigned drive)
+{
+    static const char msg_lost[] = "os: a diskette taken out: its unwritten sectors lost\n";
+    int k;
+
+    if (cache_dirty_in(drive, 0, 0xFFFF))
+        rx_log(msg_lost, sizeof msg_lost - 1);
+    cache_drop(drive, 0, 0xFFFF);
+    for (k = 0; k < OFDS; k++)
+        if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == drive)
+            ofds[k].kind = K_GONE;
+    vol_named[drive] = 0;               /* (its name learnt anew: /mnt's, D20) */
+    vol_count[drive]++;
+    vols[drive].next_free = 0;          /* (its free clusters looked for from the first:
+                                           the old one's place meant nothing here, M9) */
+    medium_seen = 1;
 }
 
 /* in_segment - may a buffer of a process's data segment be used, or of a
@@ -236,13 +420,12 @@ static int path_make(const char RX_FAR *cwd, const char *in, struct path *p)
     if (in[0] == 0)
         return ENOENT;
     if (lower(in[0]) >= 'a' && lower(in[0]) < 'a' + DRIVES && in[1] == ':') {
-        n = 2;                          /* a drive DOS's way: "c:/docs" is "/c/docs" */
-        p->copy[0] = '/';
-        p->copy[1] = lower(in[0]);
-        if (n + 1 + strlen(in + 2) >= PX_PATH_MAX)
+        n = 2;                          /* a drive DOS's way: "c:/docs" is "/mnt/c:/docs", */
+        if (n + 6 + strlen(in + 2) >= PX_PATH_MAX)  /* the volume C holds now (D20) */
             return ENAMETOOLONG;
-        p->copy[2] = '/';
-        strcpy(p->copy + 3, in + 2);
+        strcpy(p->copy, "/mnt/c:/");
+        p->copy[5] = lower(in[0]);
+        strcpy(p->copy + 8, in + 2);
         goto split;
     }
     if (in[0] == '/') {                 /* absolute: its PX_PATH_MAX bytes, its zero */
@@ -293,10 +476,10 @@ split:
     return 0;
 }
 
-/* same - two names alike in any case */
+/* same - two names alike, byte for byte (disk-scheduler.md D19) */
 static int same(const char *a, const char *b)
 {
-    while (*a && lower(*a) == lower(*b)) {
+    while (*a && *a == *b) {
         a++;
         b++;
     }
@@ -310,8 +493,10 @@ static int name_char(unsigned char c)
 
     if (c >= 'a' && c <= 'z')
         return c - 'a' + 'A';
-    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+    if (c >= '0' && c <= '9')
         return c;
+    if (c >= 'A' && c <= 'Z')
+        return -1;                      /* case-sensitive: capitals are FAT's own (D19) */
     for (i = 0; punctuation[i]; i++)
         if (c == (unsigned char)punctuation[i])
             return c;
@@ -353,11 +538,11 @@ static unsigned name_text(const rx_u8 *name, char *t)
     unsigned n = 0, i;
 
     for (i = 0; i < FAT_BASE_LENGTH && name[i] != ' '; i++)
-        t[n++] = (char)name[i];
+        t[n++] = lower((char)name[i]);  /* shown in lower case (D19) */
     if (name[FAT_BASE_LENGTH] != ' ') {
         t[n++] = '.';
         for (i = FAT_BASE_LENGTH; i < DIR_NAME_LENGTH && name[i] != ' '; i++)
-            t[n++] = (char)name[i];
+            t[n++] = lower((char)name[i]);
     }
     t[n] = 0;
     return n;
@@ -395,20 +580,54 @@ static int archive_entry(const char *name)
     return -1;
 }
 
-/* tty_unit - a terminal's name, "tty1" to "tty8" in any case: its unit, or
- * -1 if there is no such terminal */
+/* tty_unit - a terminal's name, "tty1" to "tty8": its unit, or -1 if there
+ * is no such terminal */
 static int tty_unit(const char *name)
 {
-    if (!tty_keys() || lower(name[0]) != 't' || lower(name[1]) != 't' || lower(name[2]) != 'y'
+    if (!tty_keys() || name[0] != 't' || name[1] != 't' || name[2] != 'y'
             || name[3] < '1' || name[3] > '0' + tty_terminals() || name[4])
         return -1;
     return name[3] - '1';
 }
 
+/* raw_name - a component as a FAT name of its own bytes, not upper-cased: a
+ * name another system wrote in lower case (D19) */
+static void raw_name(const char *s, rx_u8 *name)
+{
+    unsigned k;
+
+    memset(name, ' ', DIR_NAME_LENGTH);
+    for (k = 0; *s && *s != '.' && k < FAT_BASE_LENGTH; s++)
+        name[k++] = (rx_u8)*s;
+    while (*s && *s != '.')
+        s++;
+    if (*s == '.')
+        s++;
+    for (k = FAT_BASE_LENGTH; *s && k < DIR_NAME_LENGTH; s++)
+        name[k++] = (rx_u8)*s;
+}
+
+
 /* lookup - the node a path names; on a volume the node may be absent, its
  * directory there (exists 0): 0 or the error. Each name found is written in
  * its own case, as the root or FAT has it (path_text puts them together) */
+static int lookup_once(struct path *p, struct node *n);
+
+/* lookup - a path's node (lookup_once), looked up again once if another
+ * diskette was found in its drive meanwhile: the new one mounted (M8) */
 static int lookup(struct path *p, struct node *n)
+{
+    int e;
+
+    medium_seen = 0;
+    e = lookup_once(p, n);
+    if (e == ENXIO && medium_seen)
+        e = lookup_once(p, n);
+    return e;
+}
+
+/* lookup_once - a path's node, once */
+static int lookup_once(struct path *p, struct node *n)
 {
     rx_u16 error;
     unsigned k;
@@ -433,10 +652,7 @@ static int lookup(struct path *p, struct node *n)
                 return 0;
             }
         if (p->parts == 2 && (e = tty_unit(p->part[1])) >= 0) {
-            p->part[1][0] = 't';        /* "tty1" to "tty8" (P11) */
-            p->part[1][1] = 't';
-            p->part[1][2] = 'y';
-            n->kind = K_TTY;
+            n->kind = K_TTY;            /* "tty1" to "tty8" (P11) */
             n->unit = (rx_u16)e;
             return 0;
         }
@@ -453,20 +669,39 @@ static int lookup(struct path *p, struct node *n)
         n->unit = (rx_u16)e;
         return 0;
     }
-    if (strlen(p->part[0]) != 1 || (d = lower(p->part[0][0]) - 'a') < 0 || d >= DRIVES)
+    if (!same(p->part[0], "mnt"))
         return ENOENT;
-    p->part[0][0] = (char)('a' + d);
+    p->part[0][0] = 'm';
+    p->part[0][1] = 'n';
+    p->part[0][2] = 't';
+    n->kind = K_MNT;
+    if (p->parts == 1)
+        return 0;
+    if ((d = mnt_drive(p->part[1])) < 0)
+        return proc_self() >= 0 && !proc_still(proc_self()) ? EINTR : ENOENT;
     n->kind = K_DIR;
     n->drive = (rx_u8)d;
+    vol_hold((unsigned)d);              /* (perhaps a wait, the lock given up: M4, D15) */
+    if (proc_self() >= 0 && !proc_still(proc_self()))
+        return EINTR;                   /* ended meanwhile: the call goes no further */
     if ((error = vol_mount(&vols[d], (unsigned)d)) != 0)
         return errno_of(error);
-    for (k = 1; k < p->parts; k++) {    /* from the volume's root down */
+    if (volume_name(d) == 0)
+        p->part[1] = vol_names[d];      /* (its name, for a path made of it: "c:" too) */
+    for (k = 2; k < p->parts; k++) {    /* from the volume's root down */
         if (n->kind != K_DIR)
             return ENOTDIR;
         if ((e = fat_name(p->part[k], n->name)) != 0)
             return e;
         n->parent = n->first;
         error = vol_dir_find(&vols[d], n->parent, n->name, &n->where, n->entry, &n->index);
+        if (error == ENOENT && k == p->parts - 1 && scratch()->loose_last) {
+            raw_name(p->part[k], n->name);      /* another system's lower case (D19) */
+            error = vol_dir_find(&vols[d], n->parent, n->name, &n->where, n->entry,
+                                 &n->index);
+            if (error == ENOENT)
+                fat_name(p->part[k], n->name);
+        }
         if (error == ENOENT && k == p->parts - 1) {
             n->exists = 0;              /* to be made, in n->parent */
             n->kind = K_FILE;
@@ -490,7 +725,7 @@ static int lookup(struct path *p, struct node *n)
  * looked up: 0 or the error */
 static int resolve(int i, rx_u16 data, rx_u16 at, struct path *p, struct node *n)
 {
-    static char in[PX_PATH_MAX];      /* (the lock is held: static) */
+    char *in = scratch()->in;
     int error = string_of(data, at, in);
 
     if (!error)
@@ -498,7 +733,8 @@ static int resolve(int i, rx_u16 data, rx_u16 at, struct path *p, struct node *n
     if (!error)
         error = lookup(p, n);
     if (!error && p->slash && n->exists && !(n->kind == K_TOP || n->kind == K_DEVDIR
-                                             || n->kind == K_ZDIR || n->kind == K_DIR))
+                                             || n->kind == K_ZDIR || n->kind == K_DIR
+                                             || n->kind == K_MNT))
         error = ENOTDIR;                /* "name/" names a directory or nothing (XBD 4.13) */
     return error;
 }
@@ -508,7 +744,8 @@ static int resolve(int i, rx_u16 data, rx_u16 at, struct path *p, struct node *n
 static int in_server(const struct path *p)
 {
     return p->parts == 1 || (p->parts == 2 && (same(p->part[0], "z")
-                                               || same(p->part[0], "dev")));
+                                               || same(p->part[0], "dev")
+                                               || same(p->part[0], "mnt")));
 }
 
 /* cwd_of - a live process's current directory that is a directory of this
@@ -529,7 +766,7 @@ static int cwd_of(const char *text, int inside)
 /* on_volume - is a node an entry of a volume's (not a volume's root)? */
 static int on_volume(const struct node *n, const struct path *p)
 {
-    return (n->kind == K_DIR || n->kind == K_FILE) && p->parts >= 2;
+    return (n->kind == K_DIR || n->kind == K_FILE) && p->parts >= 3;   /* (/mnt/name/...) */
 }
 
 /* busy - is a volume's entry an open file's or directory's? */
@@ -572,6 +809,7 @@ static rx_u16 entry_back(struct ofd *o)
 
     if (o->kind != K_FILE)
         return 0;
+    vol_hold(o->drive);                 /* (a close's, an exit's: M4) */
     if (o->changed) {
         if ((error = vol_dir_entry(v, o->parent, o->index, &o->where, entry, &end)) != 0)
             return error;
@@ -908,21 +1146,33 @@ void vfs_forked(int child, int parent)
 /* vfs_exec - the descriptors that close on exec, closed */
 void vfs_exec(int i)
 {
+    unsigned keep = vol_held();
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
-        if (FILES(i).fd[fd] != NO_FD && FILES(i).cloexec[fd])
+        if (FILES(i).fd[fd] != NO_FD && FILES(i).cloexec[fd]) {
             fd_close(i, fd);
+            vol_release(keep);          /* (each close's volume given back: M10) */
+        }
 }
 
-/* vfs_exit - every descriptor closed */
+static void format_end(unsigned d);
+
+/* vfs_exit - every descriptor closed, and a drive its formatter held given
+ * back */
 void vfs_exit(int i)
 {
+    unsigned keep = vol_held(), d;
     int fd;
 
     for (fd = 0; fd < OPEN_MAX; fd++)
-        if (FILES(i).fd[fd] != NO_FD)
-            fd_close(i, fd);
+        if (FILES(i).fd[fd] != NO_FD) {
+            fd_close(i, fd);            /* each close's volume given back before the next */
+            vol_release(keep);          /*    close takes another: holding one while it */
+        }                               /*    waits for the next deadlocked two exits (M10) */
+    for (d = 0; d < DRIVES; d++)
+        if (vfs_formatter(d) == i + 1)
+            format_end(d);
 }
 
 /* same_file - do two descriptions name one volume's file (its entry)? */
@@ -995,6 +1245,53 @@ static rx_u16 file_cluster(struct ofd *o, rx_u16 index, int grow, rx_u16 *c)
 
 enum { IO_READ, IO_WRITE, IO_ZERO };
 
+#define RUN_MAX DS_RUN_MAX              /* a direct run's sectors at most (disk-scheduler.md
+                                           M2, M3) */
+
+/* file_run - the whole sectors from the description's offset, which is a
+ * sector's start, that lie together on the disk and that the call moves: a
+ * run of contiguous clusters, short enough for one call and for the
+ * process's segment. Its length, 0 if under two (the cache does better
+ * then), and its first sector in *first. A read's run holds no sector dirty
+ * in the cache, which the disk would not have yet; a write's drops the
+ * cache's copies it covers. A write takes the clusters the run needs as it
+ * goes (file_cluster) */
+static rx_u16 file_run(struct ofd *o, struct vol *v, rx_u16 cluster, rx_u32 within,
+                       rx_u32 left, int write, rx_u16 at, rx_u16 *first)
+{
+    rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, whole;
+    rx_u16 run, c = cluster, c2, index = (rx_u16)(o->offset / bytes);
+    rx_u16 max = RUN_MAX;
+    rx_u16 room = (rx_u16)((0x10000UL - at) / SECTOR_SIZE);
+
+    whole = left;
+    if (!write && whole > o->size - o->offset)
+        whole = o->size - o->offset;
+    whole /= SECTOR_SIZE;
+    if (whole > max)
+        whole = max;
+    if (whole > room)
+        whole = room;
+    if (whole < 2)
+        return 0;
+    *first = (rx_u16)(vol_cluster_sector(v, cluster) + within / SECTOR_SIZE);
+    run = (rx_u16)(v->cluster_sectors - within / SECTOR_SIZE);
+    while (run < whole) {
+        if (file_cluster(o, (rx_u16)(index + 1), write, &c2) != 0 || c2 != c + 1)
+            break;
+        c = c2;
+        index++;
+        run = (rx_u16)(run + v->cluster_sectors);
+    }
+    if (run > whole)
+        run = (rx_u16)whole;
+    if (run < 2 || (!write && cache_dirty_in(o->drive, *first, run)))
+        return 0;
+    if (write)
+        cache_drop(o->drive, *first, run);
+    return run;
+}
+
 /* file_move - bytes moved between a volume's file at the description's
  * offset and a process's data segment (IO_READ, IO_WRITE), or zeros
  * written into the file (IO_ZERO), a sector of the cache at a time: 0 or
@@ -1004,7 +1301,7 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
 {
     struct vol *v = &vols[o->drive];
     rx_u32 bytes = (rx_u32)v->cluster_sectors * SECTOR_SIZE, within;
-    rx_u16 chunk, in, cluster, e, k;
+    rx_u16 chunk, in, cluster, e, first;
     int slot, write = how != IO_READ;
     rx_u8 RX_FAR *p;
     rx_u8 RX_FAR *q;
@@ -1017,6 +1314,25 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
         if (cluster == 0)
             return E_BROKEN;            /* a chain shorter than its size */
         in = (rx_u16)(within % SECTOR_SIZE);
+        if (in == 0 && how != IO_ZERO
+                && (chunk = file_run(o, v, cluster, within, n - *done, write,
+                                     (rx_u16)(at + *done), &first)) != 0) {
+            /* whole sectors straight between the process and the drive, one call
+             * (disk-scheduler.md M2; E7): no copy through the cache */
+            proc_lend(proc_self(), 1);  /* (the lock given up: a brk waits, M4) */
+            e = disk_run(write ? DRV_DISK_WRITE : DRV_DISK_READ, o->drive, first, chunk, data,
+                         (rx_u16)(at + *done));
+            proc_lend(proc_self(), 0);
+            if (e)
+                return e;
+            *done += (rx_u32)chunk * SECTOR_SIZE;
+            o->offset += (rx_u32)chunk * SECTOR_SIZE;
+            if (write)
+                o->changed = 1;
+            if (o->offset > o->size)
+                o->size = o->offset;
+            continue;
+        }
         chunk = (rx_u16)(SECTOR_SIZE - in);
         if (chunk > n - *done)
             chunk = (rx_u16)(n - *done);
@@ -1028,11 +1344,12 @@ static rx_u16 file_move(struct ofd *o, rx_u16 data, rx_u16 at, rx_u32 n, int how
             return e;
         p = cache_bytes(slot) + in;
         q = (rx_u8 RX_FAR *)RX_MK_FP(data, (rx_u16)(at + *done));
-        for (k = 0; k < chunk; k++)
-            if (how == IO_READ)
-                q[k] = p[k];
-            else
-                p[k] = how == IO_WRITE ? q[k] : 0;
+        if (how == IO_READ)             /* rep movsw (memory-far.asm), not a byte at a time: */
+            memcpy(q, p, chunk);        /*    about 9 ms a sector less (disk-scheduler.md M1) */
+        else if (how == IO_WRITE)
+            memcpy(p, q, chunk);
+        else
+            memset(p, 0, chunk);
         if (write) {
             cache_dirty(slot);
             o->changed = 1;
@@ -1179,6 +1496,9 @@ static int px_write(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *err
         return r.cx;                    /* (a failure part way: the bytes taken, P15) */
     case K_FILE:
         return file_io(o, data, at, n, 1, error);
+    case K_GONE:
+        *error = ENXIO;
+        return -1;
     case K_PIPE_W:
         return pipe_write(i, o, data, at, n);
     case K_DEV:
@@ -1214,6 +1534,9 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
         return 0;
     case K_FILE:
         return file_io(o, data, at, n, 0, error);
+    case K_GONE:
+        *error = ENXIO;
+        return -1;
     case K_ZFILE:
         return zfile_io(o, data, at, n);
     case K_DEV:
@@ -1222,6 +1545,7 @@ static int px_read(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *erro
     case K_TOP:
     case K_DEVDIR:
     case K_ZDIR:
+    case K_MNT:
         *error = EISDIR;
         return -1;
     }
@@ -1249,8 +1573,8 @@ static rx_u16 entry_new(struct node *n, rx_u8 attributes, rx_u16 first)
  * O_CREAT, emptied with O_TRUNC */
 static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
 {
-    static struct path p;               /* (the lock is held: static) */
-    static struct node n;
+    struct path *p = &scratch()->p;
+    struct node *n = &scratch()->a;
     struct ofd *o;
     rx_u16 e, index, first;
     rx_u32 size;
@@ -1260,15 +1584,16 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
         *error = EINVAL;                /* (XSH open: one of the three; P15) */
         return -1;
     }
-    if ((*error = resolve(i, data, at, &p, &n)) != 0) {
-        if (*error == ENOENT && (flags & O_CREAT) && in_server(&p))
+    if ((*error = resolve(i, data, at, p, n)) != 0) {
+        if (*error == ENOENT && (flags & O_CREAT) && in_server(p))
             *error = EROFS;             /* (P15) */
         return -1;
     }
-    dir = n.kind == K_TOP || n.kind == K_DEVDIR || n.kind == K_ZDIR || n.kind == K_DIR;
-    if (!n.exists) {
-        if (!(flags & O_CREAT) || p.slash) {
-            *error = p.slash && (flags & O_CREAT) ? EISDIR : ENOENT;
+    dir = n->kind == K_TOP || n->kind == K_DEVDIR || n->kind == K_ZDIR || n->kind == K_DIR
+        || n->kind == K_MNT;
+    if (!n->exists) {
+        if (!(flags & O_CREAT) || p->slash) {
+            *error = p->slash && (flags & O_CREAT) ? EISDIR : ENOENT;
             return -1;
         }
         for (k = 0; k < OFDS && ofds[k].kind != K_FREE; k++)
@@ -1279,13 +1604,13 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
             *error = k == OFDS ? ENFILE : fd == OPEN_MAX ? EMFILE : ENOTDIR;
             return -1;
         }
-        if ((e = entry_new(&n, ATTR_ARCHIVE, 0)) != 0
-                || (e = vol_dir_find(&vols[n.drive], n.parent, n.name, &n.where, n.entry,
+        if ((e = entry_new(n, ATTR_ARCHIVE, 0)) != 0
+                || (e = vol_dir_find(&vols[n->drive], n->parent, n->name, &n->where, n->entry,
                                      &index)) != 0) {
             *error = errno_of(e);
             return -1;
         }
-        n.index = index;
+        n->index = index;
     } else if ((flags & O_CREAT) && (flags & O_EXCL)) {
         *error = EEXIST;
         return -1;
@@ -1298,38 +1623,38 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
         *error = ENOTDIR;
         return -1;
     }
-    if (access != O_RDONLY && (n.kind == K_ZFILE
-            || (n.kind == K_FILE && (n.entry[DIR_ATTRIBUTES] & ATTR_READ_ONLY)))) {
-        *error = n.kind == K_ZFILE ? EROFS : EACCES;
+    if (access != O_RDONLY && (n->kind == K_ZFILE
+            || (n->kind == K_FILE && (n->entry[DIR_ATTRIBUTES] & ATTR_READ_ONLY)))) {
+        *error = n->kind == K_ZFILE ? EROFS : EACCES;
         return -1;
     }
-    if ((k = ofd_new(n.kind)) < 0) {
+    if ((k = ofd_new(n->kind)) < 0) {
         *error = ENFILE;
         return -1;
     }
-    if (n.kind == K_DEV && (*error = dev_open(n.unit, k)) != 0) {
+    if (n->kind == K_DEV && (*error = dev_open(n->unit, k)) != 0) {
         ofds[k].kind = K_FREE;          /* no mouse; COM2 the log; no field (P12) */
         return -1;
     }
     if ((fd = fd_new(i, k, 0)) < 0) {
-        if (n.kind == K_DEV)
-            dev_close(n.unit, k);
+        if (n->kind == K_DEV)
+            dev_close(n->unit, k);
         ofds[k].kind = K_FREE;
         *error = EMFILE;
         return -1;
     }
     o = &ofds[k];
     o->flags = flags & (O_ACCMODE | O_APPEND);
-    o->drive = n.drive;
-    o->unit = n.unit;
-    if (n.kind == K_TTY && n.unit == TTY_OWN)       /* /dev/tty: the opener's own */
+    o->drive = n->drive;
+    o->unit = n->unit;
+    if (n->kind == K_TTY && n->unit == TTY_OWN)       /* /dev/tty: the opener's own */
         o->unit = (rx_u16)(tty_controlling(i) >= 0 ? tty_controlling(i) : 0);
-    o->first = n.first;
-    o->where = n.where;
-    o->parent = n.parent;
-    o->index = n.index;
-    if (n.kind == K_FILE) {
-        o->size = w16(n.entry + DIR_FILE_SIZE) | (rx_u32)w16(n.entry + DIR_FILE_SIZE + 2) << 16;
+    o->first = n->first;
+    o->where = n->where;
+    o->parent = n->parent;
+    o->index = n->index;
+    if (n->kind == K_FILE) {
+        o->size = w16(n->entry + DIR_FILE_SIZE) | (rx_u32)w16(n->entry + DIR_FILE_SIZE + 2) << 16;
         for (j = 0; j < OFDS; j++)      /* open already: its entry is written at the */
             if (same_file(&ofds[j], o)) {   /* last close, so the file is as its */
                 o->first = ofds[j].first;   /* descriptions have it */
@@ -1339,7 +1664,7 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
         first = o->first;
         size = o->size;
         if ((flags & O_TRUNC) && access != O_RDONLY && (o->first || o->size)) {
-            vol_free_chain(&vols[n.drive], o->first);
+            vol_free_chain(&vols[n->drive], o->first);
             o->first = 0;
             o->size = 0;
             o->changed = 1;
@@ -1358,7 +1683,7 @@ static int px_open(int i, rx_u16 data, rx_u16 at, rx_u16 flags, int *error)
     }
     if (flags & O_CLOEXEC)
         FILES(i).cloexec[fd] = 1;
-    if (n.kind == K_TTY)
+    if (n->kind == K_TTY)
         tty_open(i, o->unit);           /* a session's leader's: its terminal (P11) */
     return fd;
 }
@@ -1396,9 +1721,11 @@ static rx_u32 ino_of(int kind, const struct place *where, rx_u16 unit)
     case K_TOP:
         return 1;
     case K_DEVDIR:
-        return INO_TOP + 4;             /* top_names' "dev" */
+        return INO_TOP;                 /* top_names' "dev" */
+    case K_MNT:
+        return INO_TOP + 1;
     case K_ZDIR:
-        return INO_TOP + 5;
+        return INO_TOP + 2;
     case K_NULL:
         return INO_DEV;
     case K_TTY:
@@ -1465,8 +1792,8 @@ static rx_u16 zfile_size(rx_u16 unit)
 /* px_stat - PX_STAT, PX_FSTAT */
 static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error)
 {
-    static struct path p;               /* (the lock is held: static) */
-    static struct node n;
+    struct path *p = &scratch()->p;
+    struct node *n = &scratch()->a;
     rx_u8 entry[DIR_ENTRY_SIZE];
     struct place where;
     struct ofd *o;
@@ -1494,24 +1821,24 @@ static int px_stat(int i, rx_u16 data, struct rx_kregs *r, int by_fd, int *error
                  o->kind == K_ZFILE ? zfile_size(o->unit) : o->size, dev_of(o->kind, o->drive));
         return 0;
     }
-    if ((*error = resolve(i, data, r->si, &p, &n)) != 0)
+    if ((*error = resolve(i, data, r->si, p, n)) != 0)
         return -1;
-    if (!n.exists) {
+    if (!n->exists) {
         *error = ENOENT;
         return -1;
     }
-    if (n.kind == K_FILE) {
-        size = w16(n.entry + DIR_FILE_SIZE) | (rx_u32)w16(n.entry + DIR_FILE_SIZE + 2) << 16;
+    if (n->kind == K_FILE) {
+        size = w16(n->entry + DIR_FILE_SIZE) | (rx_u32)w16(n->entry + DIR_FILE_SIZE + 2) << 16;
         for (k = 0; k < OFDS; k++)      /* open: its size is its descriptions' (P15) */
-            if (ofds[k].kind == K_FILE && ofds[k].drive == n.drive
-                    && ofds[k].where.sector == n.where.sector && ofds[k].where.at == n.where.at) {
+            if (ofds[k].kind == K_FILE && ofds[k].drive == n->drive
+                    && ofds[k].where.sector == n->where.sector && ofds[k].where.at == n->where.at) {
                 size = ofds[k].size;
                 break;
             }
-    } else if (n.kind == K_ZFILE)
-        size = zfile_size(n.unit);
-    stat_put(data, r->di, n.kind, on_volume(&n, &p) ? n.entry : 0,
-             ino_of(n.kind, &n.where, n.unit), size, dev_of(n.kind, n.drive));
+    } else if (n->kind == K_ZFILE)
+        size = zfile_size(n->unit);
+    stat_put(data, r->di, n->kind, on_volume(n, p) ? n->entry : 0,
+             ino_of(n->kind, &n->where, n->unit), size, dev_of(n->kind, n->drive));
     return 0;
 }
 
@@ -1559,35 +1886,38 @@ static rx_u16 lfn_gone(struct vol *v, rx_u16 dir, rx_u16 index, const rx_u8 *ent
 /* px_remove - PX_UNLINK (a file) or PX_RMDIR (an empty directory) */
 static int px_remove(int i, rx_u16 data, rx_u16 at, int directory, int *error)
 {
-    static struct path p;               /* (the lock is held: static) */
-    static struct node n;
+    struct path *p = &scratch()->p;
+    struct node *n = &scratch()->a;
     rx_u16 e;
     int empty;
 
-    if ((*error = resolve(i, data, at, &p, &n)) != 0)
+    scratch()->loose_last = 1;          /* the name may be another system's (D19) */
+    *error = resolve(i, data, at, p, n);
+    scratch()->loose_last = 0;
+    if (*error)
         return -1;
-    if (!n.exists) {
+    if (!n->exists) {
         *error = ENOENT;
         return -1;
     }
-    if (directory && p.dots) {
+    if (directory && p->dots) {
         *error = EINVAL;                /* rmdir of "." or ".." (XSH rmdir) */
         return -1;
     }
-    if (!on_volume(&n, &p)) {
-        *error = n.kind == K_DIR ? EBUSY : EROFS;   /* a volume's root; the server's own */
+    if (!on_volume(n, p)) {
+        *error = n->kind == K_DIR ? EBUSY : EROFS;   /* a volume's root; the server's own */
         return -1;
     }
-    if (directory != (n.kind == K_DIR)) {
+    if (directory != (n->kind == K_DIR)) {
         *error = directory ? ENOTDIR : EISDIR;
         return -1;
     }
-    if (busy(n.drive, &n.where)) {
+    if (busy(n->drive, &n->where)) {
         *error = EBUSY;
         return -1;
     }
     if (directory) {
-        if ((e = vol_dir_empty(&vols[n.drive], n.first, &empty)) != 0) {
+        if ((e = vol_dir_empty(&vols[n->drive], n->first, &empty)) != 0) {
             *error = errno_of(e);
             return -1;
         }
@@ -1595,13 +1925,13 @@ static int px_remove(int i, rx_u16 data, rx_u16 at, int directory, int *error)
             *error = ENOTEMPTY;
             return -1;
         }
-        path_text(&p);                  /* (each name in its own case, as a cwd keeps it) */
-        if (cwd_of(p.text, 0) >= 0) {
+        path_text(p);                  /* (each name in its own case, as a cwd keeps it) */
+        if (cwd_of(p->text, 0) >= 0) {
             *error = EBUSY;             /* a process's current directory (P15) */
             return -1;
         }
     }
-    if ((e = entry_gone(&n, 1)) != 0) {
+    if ((e = entry_gone(n, 1)) != 0) {
         *error = errno_of(e);
         return -1;
     }
@@ -1611,24 +1941,24 @@ static int px_remove(int i, rx_u16 data, rx_u16 at, int directory, int *error)
 /* px_mkdir - PX_MKDIR: a cluster with "." and "..", and its entry */
 static int px_mkdir(int i, rx_u16 data, rx_u16 at, int *error)
 {
-    static struct path p;               /* (the lock is held: static) */
-    static struct node n;
+    struct path *p = &scratch()->p;
+    struct node *n = &scratch()->a;
     struct vol *v;
     rx_u8 dots[DIR_ENTRY_SIZE];
     struct place where;
     rx_u16 e, cluster, date, time;
     int k;
 
-    if ((*error = resolve(i, data, at, &p, &n)) != 0) {
-        if (*error == ENOENT && in_server(&p))
+    if ((*error = resolve(i, data, at, p, n)) != 0) {
+        if (*error == ENOENT && in_server(p))
             *error = EROFS;             /* (P15) */
         return -1;
     }
-    if (n.exists) {
+    if (n->exists) {
         *error = EEXIST;
         return -1;
     }
-    v = &vols[n.drive];
+    v = &vols[n->drive];
     if ((e = vol_alloc(v, 0, 1, &cluster)) != 0) {
         *error = errno_of(e);
         return -1;
@@ -1641,7 +1971,7 @@ static int px_mkdir(int i, rx_u16 data, rx_u16 at, int *error)
         if (k)
             dots[1] = '.';
         dots[DIR_ATTRIBUTES] = DIR_ATTR_DIRECTORY;
-        put16(dots + DIR_FIRST_CLUSTER, k ? n.parent : cluster);
+        put16(dots + DIR_FIRST_CLUSTER, k ? n->parent : cluster);
         put16(dots + DIR_DATE, date);
         put16(dots + DIR_TIME, time);
         where.sector = vol_cluster_sector(v, cluster);
@@ -1649,7 +1979,7 @@ static int px_mkdir(int i, rx_u16 data, rx_u16 at, int *error)
         if ((e = vol_entry_put(v, &where, dots)) != 0)
             break;
     }
-    if (e || (e = entry_new(&n, DIR_ATTR_DIRECTORY, cluster)) != 0) {
+    if (e || (e = entry_new(n, DIR_ATTR_DIRECTORY, cluster)) != 0) {
         vol_free_chain(v, cluster);
         *error = errno_of(e);
         return -1;
@@ -1663,7 +1993,7 @@ static int px_mkdir(int i, rx_u16 data, rx_u16 at, int *error)
  * lookup fails (ENOENT) */
 static void cwds_moved(const char *old, struct path *q, struct node *b)
 {
-    static char moved[PX_PATH_MAX];     /* (the lock is held: static) */
+    char *moved = scratch()->text;
     size_t n = strlen(old);
     int j;
 
@@ -1725,95 +2055,122 @@ static int inside(struct vol *v, rx_u16 cluster, rx_u16 dir)
     return cluster == 0 ? 0 : -(int)E_BROKEN;  /* (a loop) */
 }
 
+/* path_drive - the drive a path names a volume of, or -1 */
+static int path_drive(const struct path *p)
+{
+    if (p->parts < 2 || !same(p->part[0], "mnt"))
+        return -1;
+    return mnt_drive(p->part[1]);
+}
+
 /* px_rename - PX_RENAME, within a volume: the entry made anew in the new
  * name's directory, the old one deleted; a file of the new name replaced;
  * a directory's ".." its new parent; a directory into itself, or into one
  * inside it, refused (EINVAL, XSH rename) */
 static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
 {
-    static struct path p, q;            /* (the lock is held: static) */
-    static struct node a, b;
+    struct path *p = &scratch()->p;
+    struct path *q = &scratch()->q;
+    struct node *a = &scratch()->a;
+    struct node *b = &scratch()->b;
     struct vol *v;
     rx_u8 dots[DIR_ENTRY_SIZE];
     struct place where, old;
     rx_u16 e, e_dots = 0;
     int end, k, empty;
 
-    if ((*error = resolve(i, data, from, &p, &a)) != 0
-            || (*error = resolve(i, data, to, &q, &b)) != 0)
+    if (string_of(data, from, scratch()->in) == 0
+            && path_make(CWD(proc_leader(i)), scratch()->in, p) == 0
+            && string_of(data, to, scratch()->text) == 0
+            && path_make(CWD(proc_leader(i)), scratch()->text, q) == 0) {
+        k = path_drive(p);              /* both volumes held, in their order, before */
+        end = path_drive(q);            /*    either is touched (the locks' order: M4) */
+        if (k >= 0 && (end < 0 || k <= end))
+            vol_hold((unsigned)k);
+        if (end >= 0)
+            vol_hold((unsigned)end);
+        if (k >= 0)
+            vol_hold((unsigned)k);
+        if (!proc_still(i))
+            return VFS_GONE;
+    }
+    scratch()->loose_last = 1;          /* the old name may be another system's (D19) */
+    *error = resolve(i, data, from, p, a);
+    scratch()->loose_last = 0;
+    if (*error || (*error = resolve(i, data, to, q, b)) != 0)
         return -1;
-    if (!a.exists) {
+    if (!a->exists) {
         *error = ENOENT;
         return -1;
     }
-    if (p.dots || q.dots) {
+    if (p->dots || q->dots) {
         *error = EINVAL;                /* "." or ".." (XSH rename) */
         return -1;
     }
-    if (q.slash && a.kind != K_DIR) {
+    if (q->slash && a->kind != K_DIR) {
         *error = ENOTDIR;               /* a file to "name/" (XBD 4.13; P15) */
         return -1;
     }
-    path_text(&p);                      /* (as a cwd keeps it) */
-    path_text(&q);
-    if (b.exists && b.kind == K_DIR && cwd_of(q.text, 0) >= 0) {
+    path_text(p);                      /* (as a cwd keeps it) */
+    path_text(q);
+    if (b->exists && b->kind == K_DIR && cwd_of(q->text, 0) >= 0) {
         *error = EBUSY;                 /* over a process's current directory (P15) */
         return -1;
     }
-    if (!on_volume(&a, &p) || !(b.kind == K_DIR || b.kind == K_FILE) || q.parts < 2) {
-        *error = a.drive != b.drive || !on_volume(&a, &p) ? EXDEV : EROFS;
+    if (!on_volume(a, p) || !(b->kind == K_DIR || b->kind == K_FILE) || q->parts < 3) {
+        *error = a->drive != b->drive || !on_volume(a, p) ? EXDEV : EROFS;
         return -1;
     }
-    if (a.drive != b.drive) {
+    if (a->drive != b->drive) {
         *error = EXDEV;
         return -1;
     }
-    v = &vols[a.drive];
-    if (a.kind == K_DIR && (k = inside(v, b.parent, a.first)) != 0) {
+    v = &vols[a->drive];
+    if (a->kind == K_DIR && (k = inside(v, b->parent, a->first)) != 0) {
         *error = k > 0 ? EINVAL : errno_of((rx_u16)-k);
         return -1;
     }
-    if (a.kind == K_DIR && (*error = cwds_fit(p.text, &q)) != 0)
+    if (a->kind == K_DIR && (*error = cwds_fit(p->text, q)) != 0)
         return -1;
-    if (b.exists) {
-        if (b.where.sector == a.where.sector && b.where.at == a.where.at)
+    if (b->exists) {
+        if (b->where.sector == a->where.sector && b->where.at == a->where.at)
             return 0;
-        if ((a.kind == K_DIR) != (b.kind == K_DIR)) {
-            *error = a.kind == K_DIR ? ENOTDIR : EISDIR;
+        if ((a->kind == K_DIR) != (b->kind == K_DIR)) {
+            *error = a->kind == K_DIR ? ENOTDIR : EISDIR;
             return -1;
         }
-        if (busy(b.drive, &b.where)) {
+        if (busy(b->drive, &b->where)) {
             *error = EBUSY;
             return -1;
         }
-        if (b.kind == K_DIR && ((e = vol_dir_empty(v, b.first, &empty)) != 0 || !empty)) {
+        if (b->kind == K_DIR && ((e = vol_dir_empty(v, b->first, &empty)) != 0 || !empty)) {
             *error = e ? errno_of(e) : ENOTEMPTY;
             return -1;
         }
-        if ((e = entry_gone(&b, 1)) != 0) {
+        if ((e = entry_gone(b, 1)) != 0) {
             *error = errno_of(e);
             return -1;
         }
     }
-    old = a.where;
-    if (a.parent == b.parent) {         /* in its directory: the name changed in its */
-        e = lfn_gone(v, a.parent, a.index, a.entry);    /*    place (P15) */
-        memcpy(a.entry, b.name, DIR_NAME_LENGTH);
+    old = a->where;
+    if (a->parent == b->parent) {         /* in its directory: the name changed in its */
+        e = lfn_gone(v, a->parent, a->index, a->entry);    /*    place (P15) */
+        memcpy(a->entry, b->name, DIR_NAME_LENGTH);
         if (e == 0)
-            e = vol_entry_put(v, &a.where, a.entry);
-        memcpy(b.entry, a.entry, DIR_ENTRY_SIZE);
+            e = vol_entry_put(v, &a->where, a->entry);
+        memcpy(b->entry, a->entry, DIR_ENTRY_SIZE);
     } else {
-        memcpy(b.entry, a.entry, DIR_ENTRY_SIZE);
-        memcpy(b.entry, b.name, DIR_NAME_LENGTH);
-        if ((e = vol_dir_add(v, b.parent, b.entry, &where)) == 0) {
-            a.where = old;
-            e = entry_gone(&a, 0);
+        memcpy(b->entry, a->entry, DIR_ENTRY_SIZE);
+        memcpy(b->entry, b->name, DIR_NAME_LENGTH);
+        if ((e = vol_dir_add(v, b->parent, b->entry, &where)) == 0) {
+            a->where = old;
+            e = entry_gone(a, 0);
         }
-        if (e == 0 && a.kind == K_DIR) {    /* its ".." */
-            where.sector = vol_cluster_sector(v, a.first);
+        if (e == 0 && a->kind == K_DIR) {    /* its ".." */
+            where.sector = vol_cluster_sector(v, a->first);
             where.at = DIR_ENTRY_SIZE;
-            if ((e_dots = vol_dir_entry(v, a.first, 1, &where, dots, &end)) == 0) {
-                put16(dots + DIR_FIRST_CLUSTER, b.parent);
+            if ((e_dots = vol_dir_entry(v, a->first, 1, &where, dots, &end)) == 0) {
+                put16(dots + DIR_FIRST_CLUSTER, b->parent);
                 e_dots = vol_entry_put(v, &where, dots);
             }
         }
@@ -1824,15 +2181,15 @@ static int px_rename(int i, rx_u16 data, rx_u16 from, rx_u16 to, int *error)
         *error = errno_of(e);
         return -1;
     }
-    if (a.parent != b.parent)
+    if (a->parent != b->parent)
         for (k = 0; k < OFDS; k++)      /* its open descriptions follow it */
-            if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == a.drive
+            if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == a->drive
                     && ofds[k].where.sector == old.sector && ofds[k].where.at == old.at) {
-                vol_dir_find(v, b.parent, b.name, &ofds[k].where, dots, &ofds[k].index);
-                ofds[k].parent = b.parent;
+                vol_dir_find(v, b->parent, b->name, &ofds[k].where, dots, &ofds[k].index);
+                ofds[k].parent = b->parent;
             }
-    if (a.kind == K_DIR)
-        cwds_moved(p.text, &q, &b);     /* and the current directories in it (P15) */
+    if (a->kind == K_DIR)
+        cwds_moved(p->text, q, b);     /* and the current directories in it (P15) */
     return e_dots ? (*error = errno_of(e_dots), -1) : 0;
 }
 
@@ -1876,7 +2233,7 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
     if (n > COUNT_MAX)
         n = COUNT_MAX;
     if (!o || !(o->kind == K_DIR || o->kind == K_TOP || o->kind == K_DEVDIR
-                || o->kind == K_ZDIR)) {
+                || o->kind == K_ZDIR || o->kind == K_MNT)) {
         *error = o ? ENOTDIR : EBADF;
         return -1;
     }
@@ -1890,7 +2247,7 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
             break;                      /* (an offset past the server's names: P15) */
         k = (rx_u16)o->offset;
         if (o->kind == K_TOP || o->kind == K_DEVDIR) {
-            count = o->kind == K_TOP ? 6 : DEV_NAMES + (tty_keys() ? tty_terminals() : 0);
+            count = o->kind == K_TOP ? TOP_NAMES : DEV_NAMES + (tty_keys() ? tty_terminals() : 0);
             if (k >= count)
                 break;
             if (o->kind == K_TOP || k < DEV_NAMES) {
@@ -1899,6 +2256,17 @@ static int px_getdents(int i, rx_u16 data, rx_u16 fd, rx_u16 at, rx_u16 n, int *
                 strcpy((char *)record + DE_NAME, "tty1");
                 record[DE_NAME + 3] = (rx_u8)('1' + k - DEV_NAMES);
             }
+        } else if (o->kind == K_MNT) {  /* the drives' volumes, by name (D20) */
+            if (k >= DRIVES)
+                break;
+            o->offset++;
+            if (volume_name(k) != 0)
+                continue;               /* (none there now) */
+            strcpy((char *)record + DE_NAME, vol_names[k]);
+            put16(record + DE_INO, (rx_u16)(INO_MNT + k));
+            far_bytes(data, (rx_u16)(at + done), record, DE_SIZE);
+            done = (rx_u16)(done + DE_SIZE);
+            continue;
         } else if (o->kind == K_ZDIR) {
             a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, 0);
             count = (rx_u16)(a[ARH_COUNT] | (a[ARH_COUNT + 1] << 8));
@@ -2029,54 +2397,54 @@ static rx_u16 zfile_io(struct ofd *o, rx_u16 data, rx_u16 at, rx_u16 n)
 /* vfs_exe_open - an executable's file (fs.h) */
 int vfs_exe_open(int i, const char *path, struct exe_file *f)
 {
-    static struct path p;               /* (the lock is held: static) */
-    static struct node n;
+    struct path *p = &scratch()->p;
+    struct node *n = &scratch()->a;
     const rx_u8 RX_FAR *a;
     const char *last;
     int error, k;
 
-    if ((error = path_make(i < 0 ? (const char RX_FAR *)"/" : CWD(proc_leader(i)), path, &p))
+    if ((error = path_make(i < 0 ? (const char RX_FAR *)"/" : CWD(proc_leader(i)), path, p))
             != 0
-            || (error = lookup(&p, &n)) != 0)
+            || (error = lookup(p, n)) != 0)
         return error;
-    if (!n.exists)
+    if (!n->exists)
         return ENOENT;
-    if (n.kind != K_FILE && n.kind != K_ZFILE)
+    if (n->kind != K_FILE && n->kind != K_ZFILE)
         return EACCES;
-    if (p.slash)
+    if (p->slash)
         return ENOTDIR;                 /* "file/" (XBD 4.13; P15) */
     for (k = 0; k < OFDS; k++)          /* open for writing: its bytes not yet whole */
-        if (ofds[k].kind == K_FILE && ofds[k].drive == n.drive
-                && ofds[k].where.sector == n.where.sector && ofds[k].where.at == n.where.at
+        if (ofds[k].kind == K_FILE && ofds[k].drive == n->drive
+                && ofds[k].where.sector == n->where.sector && ofds[k].where.at == n->where.at
                 && (ofds[k].flags & O_ACCMODE) != O_RDONLY)
             return ETXTBSY;             /*    (XSH exec; P15) */
-    if ((k = ofd_new(n.kind)) < 0)
+    if ((k = ofd_new(n->kind)) < 0)
         return ENFILE;
     ofds[k].exe = 1;
-    ofds[k].drive = n.drive;
-    ofds[k].unit = n.unit;
-    ofds[k].first = n.first;
+    ofds[k].drive = n->drive;
+    ofds[k].unit = n->unit;
+    ofds[k].first = n->first;
     f->ofd = k;
-    if (n.kind == K_ZFILE) {
-        a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, AR_HEADER_SIZE + n.unit * AR_ENTRY_SIZE);
-        f->size = zfile_size(n.unit);
-        f->key[0] = (rx_u16)(0x5A00 | n.unit);  /* /z's: its entry, its place, its size */
+    if (n->kind == K_ZFILE) {
+        a = (const rx_u8 RX_FAR *)RX_MK_FP(ARCHIVE, AR_HEADER_SIZE + n->unit * AR_ENTRY_SIZE);
+        f->size = zfile_size(n->unit);
+        f->key[0] = (rx_u16)(0x5A00 | n->unit);  /* /z's: its entry, its place, its size */
         f->key[1] = (rx_u16)(a[AR_OFFSET] | (a[AR_OFFSET + 1] << 8));
         f->key[2] = (rx_u16)f->size;
     } else {
-        ofds[k].size = w16(n.entry + DIR_FILE_SIZE)
-                       | (rx_u32)w16(n.entry + DIR_FILE_SIZE + 2) << 16;
+        ofds[k].size = w16(n->entry + DIR_FILE_SIZE)
+                       | (rx_u32)w16(n->entry + DIR_FILE_SIZE + 2) << 16;
         f->size = ofds[k].size;
-        f->key[0] = (rx_u16)(0xD000 | n.drive); /* a volume's: its drive, its first cluster,
+        f->key[0] = (rx_u16)(0xD000 | n->drive); /* a volume's: its drive, its first cluster,
                                                    its size and time stamp mixed */
-        f->key[1] = n.first;
-        f->key[2] = (rx_u16)(f->size ^ (f->size >> 16) ^ w16(n.entry + DIR_DATE)
-                             ^ w16(n.entry + DIR_TIME));
+        f->key[1] = n->first;
+        f->key[2] = (rx_u16)(f->size ^ (f->size >> 16) ^ w16(n->entry + DIR_DATE)
+                             ^ w16(n->entry + DIR_TIME));
     }
-    last = p.parts ? p.part[p.parts - 1] : "";
+    last = p->parts ? p->part[p->parts - 1] : "";
     for (k = 0; k < (int)sizeof f->name - 1 && last[k]; k++) {
         f->name[k] = last[k];
-        if (n.kind == K_FILE && last[k] >= 'A' && last[k] <= 'Z')
+        if (n->kind == K_FILE && last[k] >= 'A' && last[k] <= 'Z')
             f->name[k] += 'a' - 'A';    /* FAT's names in lower case, as ps says them */
     }
     f->name[k] = 0;
@@ -2166,6 +2534,104 @@ int vfs_call(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
         return -1;
     }
     return result;
+}
+
+/* The formatter's drives (disk-scheduler.md M9, D17): each held by the
+ * process (its entry + 1) whose PX_FORMAT began, or 0 */
+static rx_u8 formatter[DRIVES];
+
+/* vfs_formatter - the process whose formatter holds a drive (server.h) */
+int vfs_formatter(unsigned drive)
+{
+    return drive < DRIVES ? formatter[drive] : 0;
+}
+
+/* format_end - a formatter's drive given back: its volume mounted anew when
+ * it is next named */
+static void format_end(unsigned d)
+{
+    formatter[d] = 0;
+    vfs_medium(d);
+}
+
+/* px_format - PX_FORMAT: the formatter's way to a drive (posix.inc's FMT_*).
+ * FMT_BEGIN takes the drive for the caller's process, refused while a file
+ * of it is open or another holds it, once what the server and the disk
+ * server hold of it is written: its geometry. The others then format a
+ * track, or read or write sectors from the drive's first, past the caches,
+ * the process's buffer lent meanwhile; FMT_END, or the process's end, gives
+ * it back. Meanwhile any other call on the drive is EBUSY (os.c) */
+static int px_format(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
+{
+    unsigned d = r->bx & 0xFF, op = r->bx >> 8, n = r->si >> 8, k;
+    rx_u8 me = (rx_u8)(proc_leader(i) + 1);
+    rx_u16 e, cylinders = 0, heads_track = 0, moved = 0;
+
+    if (d >= DRIVES || (op != FMT_BEGIN && formatter[d] != me)) {
+        *error = EINVAL;
+        return -1;
+    }
+    switch (op) {
+    case FMT_BEGIN:
+        for (k = 0; k < OFDS && !formatter[d]; k++)
+            if ((ofds[k].kind == K_FILE || ofds[k].kind == K_DIR) && ofds[k].drive == d)
+                break;                  /* (a file of it open) */
+        if (formatter[d] || k < OFDS) {
+            *error = EBUSY;
+            return -1;
+        }
+        formatter[d] = me;              /* the drive the caller's before any wait: another
+                                           FMT_BEGIN meanwhile is EBUSY (M10's review) */
+        vol_hold(d);
+        e = cache_flush(d);
+        if (e == 0 && d >= 2)
+            e = disk_sync(d);           /* (a fixed disk's write-behind: M6) */
+        if (e == 0)
+            e = disk_geometry(d, &cylinders, &heads_track);
+        if (e) {
+            formatter[d] = 0;
+            *error = errno_of(e);
+            return -1;
+        }
+        vfs_medium(d);                  /* its volume forgotten: mounted anew later */
+        *si_out = heads_track;
+        return (int)cylinders;
+    case FMT_TRACK:
+        if (!in_segment(data, r->di, SECTOR_SIZE)) {
+            *error = EFAULT;            /* (the table: a sector's room) */
+            return -1;
+        }
+        proc_lend(i, 1);
+        e = disk_format(d, r->cx, r->si & 0xFF, n, data, r->di);
+        proc_lend(i, 0);
+        break;
+    case FMT_READ:
+    case FMT_WRITE:
+        if (n == 0 || n > DS_RUN_MAX) {
+            *error = EINVAL;
+            return -1;
+        }
+        if (!in_segment(data, r->di, (rx_u16)(n * SECTOR_SIZE))) {
+            *error = EFAULT;
+            return -1;
+        }
+        proc_lend(i, 1);
+        e = disk_raw(op == FMT_READ ? DS_RAW_READ : DS_RAW_WRITE, d,
+                     r->cx | ((rx_u32)(r->si & 0xFF) << 16), n, data, r->di, &moved);
+        proc_lend(i, 0);
+        break;
+    case FMT_END:
+        format_end(d);
+        return 0;
+    default:
+        *error = EINVAL;
+        return -1;
+    }
+    if (e) {
+        *error = errno_of(e);
+        return -1;
+    }
+    return (int)moved;
 }
 
 /* px_ioctl - PX_IOCTL: a device's request (dev.c), its argument checked */
@@ -2278,18 +2744,64 @@ static int px_poll(int i, rx_u16 data, struct rx_kregs *r, int *error)
     }
 }
 
+/* vfs_sync - every volume's changed sectors written: the OS server's
+ * cache's, then the disk server's (fs.h; disk-scheduler.md M6): a test's
+ * end, Ctrl+Alt+Del. The lock held; the volumes it takes the caller's to
+ * give up */
+void vfs_sync(void)
+{
+    unsigned keep = vol_held(), d;
+
+    for (d = 0; d < DRIVES; d++)
+        if (drive_sectors(d)) {         /* (mounted: its volume asked of the disk server) */
+            cache_flush(d);
+            disk_sync(d);
+            vol_release(keep);          /* (one at a time: M10) */
+        }
+}
+
+/* fd_volume - a descriptor's volume's lock, held before its description's
+ * offset is used: a call on a volume's file or directory waits for any
+ * other on that volume, which may give the lock up while it waits for the
+ * disk (disk-scheduler.md M4, D15). 0, or VFS_GONE if the process ended
+ * while it waited */
+static int fd_volume(int i, rx_u16 fd)
+{
+    struct ofd *o = ofd_of(i, fd);
+    int k;
+
+    if (!o || (o->kind != K_FILE && o->kind != K_DIR) || vol_mine(o->drive))
+        return 0;
+    k = (int)(o - ofds);
+    o->waits++;                         /* (kept while it waits) */
+    vol_hold(o->drive);
+    o->waits--;
+    ofd_unused(k);                      /* (freed, if closed meanwhile: then EBADF) */
+    return proc_still(i) ? 0 : VFS_GONE;
+}
+
 /* call_files - a file call, by its number */
 static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16 *si_out)
 {
-    static struct path p;               /* (the lock is held: static) */
-    static struct node n;
-    static char in[PX_PATH_MAX];      /* (the lock is held: static) */
+    struct path *p;                     /* (chdir's alone: the scratch is a path call's, */
+    struct node *n;                     /*    never a read's that may wait for ever: M4) */
+    char *in;
     struct ofd *o;
     unsigned len;
     rx_u16 e;
-    int fd;
+    int fd, k;
 
     *si_out = 0;
+    switch (r->ax & 0xFF) {
+    case PX_WRITE:
+    case PX_READ:
+    case PX_LSEEK:
+    case PX_GETDENTS:
+    case PX_FSTAT:
+        if (fd_volume(i, r->bx))
+            return VFS_GONE;
+        break;
+    }
     switch (r->ax & 0xFF) {
     case PX_WRITE:
         return px_write(i, data, r->bx, r->si, r->cx, error);
@@ -2344,17 +2856,42 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
     case PX_RENAME:
         return px_rename(i, data, r->si, r->di, error);
     case PX_CHDIR:
+        p = &scratch()->p;
+        n = &scratch()->a;
+        in = scratch()->in;
         if ((*error = string_of(data, r->si, in)) != 0
-                || (*error = path_make(CWD(proc_leader(i)), in, &p)) != 0
-                || (*error = lookup(&p, &n)) != 0)
+                || (*error = path_make(CWD(proc_leader(i)), in, p)) != 0
+                || (*error = lookup(p, n)) != 0)
             return -1;
-        if (!n.exists || !(n.kind == K_TOP || n.kind == K_DEVDIR || n.kind == K_ZDIR
-                           || n.kind == K_DIR)) {
-            *error = n.exists ? ENOTDIR : ENOENT;
+        if (!n->exists || !(n->kind == K_TOP || n->kind == K_DEVDIR || n->kind == K_ZDIR
+                            || n->kind == K_MNT
+                           || n->kind == K_DIR)) {
+            *error = n->exists ? ENOTDIR : ENOENT;
             return -1;
         }
-        path_text(&p);                  /* each name in its own case: "/c/DOCS" */
-        far_put(CWD(proc_leader(i)), p.text);
+        path_text(p);                  /* each name in its own case: "/mnt/rx286c/DOCS" */
+        far_put(CWD(proc_leader(i)), p->text);
+        return 0;
+    case PX_FORMAT:
+        return px_format(i, data, r, error, si_out);
+    case PX_EJECT:                      /* a diskette's volume forgotten (M8, D12): */
+        p = &scratch()->p;              /*    what the server holds of it written; its */
+        in = scratch()->in;             /*    open files gone */
+        if ((*error = string_of(data, r->si, in)) != 0
+                || (*error = path_make(CWD(proc_leader(i)), in, p)) != 0)
+            return -1;
+        if ((k = path_drive(p)) < 0 || k >= 2) {
+            *error = EINVAL;
+            return -1;
+        }
+        vol_hold((unsigned)k);
+        e = cache_flush((unsigned)k);
+        if (disk_eject((unsigned)k) == 0)
+            vfs_medium((unsigned)k);
+        if (e) {
+            *error = errno_of(e);
+            return -1;
+        }
         return 0;
     case PX_GETCWD:
         len = far_len(CWD(proc_leader(i))) + 1;
@@ -2425,9 +2962,9 @@ static int call_files(int i, rx_u16 data, struct rx_kregs *r, int *error, rx_u16
             *error = EINVAL;            /* nothing to put on a disk (XSH fsync; P15) */
             return -1;
         }
-        if ((e = entry_back(o)) != 0) {
-            *error = errno_of(e);
-            return -1;
+        if ((e = entry_back(o)) != 0 || (o->kind == K_FILE && (e = disk_sync(o->drive)) != 0)) {
+            *error = errno_of(e);       /* (on the disk, not in the disk server's cache: */
+            return -1;                  /*    POSIX's fsync, disk-scheduler.md M6) */
         }
         return 0;
     }

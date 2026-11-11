@@ -27,6 +27,7 @@
 #include "layout.h"
 #include "root.h"
 #include "buddy.h"
+#include "disk.h"
 
 #define PROCS_MAX 64                    /* processes at once (32 until memory.md M7) */
 #define CODES_MAX 64                    /* codes in the table at once: the server's loads,
@@ -78,6 +79,20 @@ struct process {
 rx_u16 services_space;
 unsigned services_module;
 static int ready;                       /* the allocator has its memory */
+/* The disk server's cache, lent blocks of 256 KB beyond the processes'
+ * reserve, and asked for them back, the last lent first, when an
+ * allocation finds no block (disk-scheduler.md M7, D10 A) */
+#define LEND_PARAS 0x4000               /* 256 KB */
+#define LEND_AT_ONCE 1                  /* blocks lent at a call at most, so that no call
+                                           waits long: a segment's zeroing costs the AT 26 ms,
+                                           and 8 a call held the boot up by 4 s */
+#define LEND_AFTER_TICKS 500            /* none lent in the first 10 s: the boot is as fast
+                                           as without (a block a call cost MAME's AT 0.3 s) */
+static rx_u16 lend_ep, lend_space;      /* its endpoint, badged DS_BADGE_ROOT; its space */
+static int lend_ring;
+static unsigned lend_most, lent, lend_segments;     /* blocks it may have, has; segments */
+static rx_u32 lend_reserve;             /* paragraphs kept free for the processes */
+static int lent_block[DS_LEND_MAX];
 static rx_u16 stack_blocks[MODULE_MAX]; /* the untyped each server's stacks come from now */
 static struct code codes[CODES_MAX];
 static struct process procs[PROCS_MAX];
@@ -118,13 +133,105 @@ static void memory(void)
     ready = 1;
 }
 
+/* disk_lend_setup - the disk server's cache, to lend to (root.h) */
+void disk_lend_setup(rx_u16 ep, rx_u16 space, int ring, unsigned segments, unsigned most,
+                     rx_u16 ext_kb)
+{
+    lend_ep = ep;
+    lend_space = space;
+    lend_ring = ring;
+    lend_segments = segments;
+    lend_most = segments == 1 && most <= DS_LEND_MAX ? most : 0;  /* (a cache of its own) */
+    lend_reserve = (rx_u32)ext_kb * 8;  /* (an eighth, in paragraphs) */
+    if (lend_reserve < 0x1000)
+        lend_reserve = 0x1000;          /* (64 KB at least) */
+}
+
+/* disk_call - a call of the root's on the disk server: BX back, or E_TIMEOUT */
+static rx_u16 disk_call(int label, unsigned segments)
+{
+    struct rx_kregs r;
+
+    r.ax = (rx_u16)((KCALL_CALL << 8) | label);
+    r.bx = (rx_u16)segments;
+    r.dx = lend_ep;
+    r.bp = 0;
+    return rx_kcall(&r) ? E_TIMEOUT : r.bx;
+}
+
+/* lend_one - a block of 256 KB lent to the disk server's cache, if more
+ * than the processes' reserve stays free: four segments of it moved to its
+ * next slots, and DS_GROW. 1, or 0 if none was */
+static int lend_one(void)
+{
+    int block;
+    unsigned k;
+
+    if (!ready || lent >= lend_most || rx_ticks() < LEND_AFTER_TICKS
+            || buddy_free_paras() + buddy_reserved() < lend_reserve
+            + LEND_PARAS || (block = buddy_alloc(LEND_PARAS)) < 0)
+        return 0;
+    for (k = 0; k < DS_LEND_SEGMENTS; k++)
+        if (retype(buddy_slot(block), CAP_SEGMENT, SCRATCH,
+                   (rx_u16)(DS_CACHE_PER_SEGMENT * (unsigned)DS_CACHE_BLOCK),
+                   (lend_ring << 5) | ACC_DATA)
+                || copy(lend_space, SCRATCH,
+                        (rx_u16)((DS_SLOT_LENT + lend_segments + k - 1) * 8 + 4), COPY_MOVE, 0, 0))
+            break;
+    if (k < DS_LEND_SEGMENTS || disk_call(DS_GROW, DS_LEND_SEGMENTS)) {
+        revoke(buddy_slot(block));      /* (refused: no more lent) */
+        buddy_free(block);
+        lend_most = lent;
+        return 0;
+    }
+    lent_block[lent++] = block;
+    lend_segments += DS_LEND_SEGMENTS;
+    return 1;
+}
+
+/* lend - blocks lent while there is room beyond the reserve, LEND_AT_ONCE
+ * at a call: the cache grows to its size as the system works */
+static void lend(void)
+{
+    unsigned n;
+
+    for (n = 0; n < LEND_AT_ONCE && lend_one(); n++)
+        ;
+}
+
+/* reclaim - the last block lent, back from the disk server once it has
+ * moved what its segments held (DS_SHRINK): 1, or 0 if none could be */
+static int reclaim(void)
+{
+    int block;
+
+    if (lent == 0 || disk_call(DS_SHRINK, DS_LEND_SEGMENTS))
+        return 0;
+    block = lent_block[--lent];
+    lend_segments -= DS_LEND_SEGMENTS;
+    revoke(buddy_slot(block));          /* (its segments, the disk server's copies too) */
+    buddy_free(block);
+    return 1;
+}
+
+/* alloc - a block of at least so many paragraphs, the cache's lent blocks
+ * asked back while none is free: its number, or -1 */
+static int alloc(rx_u16 paras)
+{
+    int block;
+
+    while ((block = buddy_alloc(paras)) < 0 && reclaim())
+        ;
+    return block;
+}
+
 /* block_segment - a block and a segment of so many bytes (1 to FFFFh) made
  * of it, in a slot of the root's; 0, or the error */
 static int block_segment(rx_u16 bytes, int *block, rx_u16 *segment)
 {
     if (bytes == 0)
         return E_INVAL;
-    *block = buddy_alloc(paragraphs(bytes));
+    *block = alloc(paragraphs(bytes));
     if (*block < 0)
         return E_NOMEM;
     *segment = slot_take();
@@ -252,7 +359,7 @@ static int thread_make(struct process *p, int n, rx_u16 badge, int space)
     rx_u16 objects;
 
     t->thread = t->endpoint = 0;
-    t->objects = buddy_alloc(OBJECT_PARAS);
+    t->objects = alloc(OBJECT_PARAS);
     if (t->objects < 0)
         return E_NOMEM;
     objects = buddy_slot(t->objects);
@@ -448,7 +555,7 @@ static rx_u16 stack_block(void)
     int block;
 
     if (ready) {
-        block = buddy_alloc(STACK_BLOCK_PARAS);
+        block = alloc(STACK_BLOCK_PARAS);
         return block < 0 ? 0 : buddy_slot(block);
     }
     slot = slot_take();
@@ -545,7 +652,7 @@ static int serve(rx_u16 bytes, rx_u16 sp, rx_u16 stack_to, rx_u16 to)
                              || retype(ARENA, CAP_NOTIFY, notify, 0, 0))) {
         kcall(KCALL_DELETE, 0, 0, 0, thread, 0, 0);     /* the arena full: a block */
         kcall(KCALL_DELETE, 0, 0, 0, notify, 0, 0);
-        block = buddy_alloc(OBJECT_PARAS);
+        block = alloc(OBJECT_PARAS);
         if (block < 0 || retype(buddy_slot(block), CAP_THREAD, thread, 0, 0)
                 || retype(buddy_slot(block), CAP_NOTIFY, notify, 0, 0))
             goto failed;
@@ -649,6 +756,10 @@ void service(int what, struct rx_kregs *r)
     default:
         status = E_INVAL;
     }
+    if (what == ROOT_FORK || what == ROOT_SPAWN || what == ROOT_LOAD)
+        lend();                         /* (memory free beyond the reserve, M7: after a
+                                           start, which is slow anyway, not after an exit,
+                                           whose waiter it would hold up) */
     r->bx = (rx_u16)status;
     r->cx = out;
 }

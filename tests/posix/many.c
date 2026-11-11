@@ -40,7 +40,7 @@ static int child(int n, int go)
 /* main - the children, then their statuses */
 int main(void)
 {
-    static const char go[MANY] = "gggggggggggggggg";
+    static const char go[16] = "gggggggggggggggg";
     int fds[2], i, forked = 0, refused = 0, sound = 0, nomem = 0, other = 0, status;
     pid_t pid;
 

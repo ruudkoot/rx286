@@ -35,12 +35,15 @@ besides its code, data and stack:
 | 4 | `DRV_SLOT_NOTIFY` | a notification, bound to its thread: its timer signals `DRV_TIMER_BIT` |
 | 5 | `DRV_SLOT_IRQ` | its interrupt line, which the root bound to that notification with `DRV_IRQ_BIT` |
 | 6 | `DRV_SLOT_RECV` | empty: where a segment passed to it lands |
-| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` (the server's own timers for the processes ring there as `CONTROL_TIMER`); the diskettes', a 512-byte DMA buffer that crosses no 64 KB boundary |
+| 7 | `DRV_SLOT_DEVICE` | what its service needs besides: the console's, the screen's text page; the keyboard's, the OS server's control notification, which it signals with `CONTROL_BREAK` (the server's own timers for the processes ring there as `CONTROL_TIMER`, and a test's end, from the kernel, as `CONTROL_SYNC`: roadmap disk-scheduler.md M6); the diskettes', a DMA buffer of `FD_DMA_SECTORS` sectors, 15 KB, a 1.2 MB cylinder (2 sectors without extended memory until disk-scheduler.md M8b), that crosses no 64 KB boundary (roadmap disk-scheduler.md M2) |
 | 8 | `DRV_SLOT_KEYS` | the keyboard's: the notification of the OS server's thread for the foreground program, badged `KEY_SIGNAL_BIT`, which it signals after every byte it takes, so that a wait for a key sleeps until the keyboard does something (roadmap os-server.md P5) |
+| 9 | `DRV_SLOT_BOOT_INFO` | the disk drivers': the boot information, read-only, for the drives the BIOS knows (*docs/memory-map.md*; roadmap disk-scheduler.md M2) |
+| 10 | `DRV_SLOT_REBOOT` | the keyboard's: the OS server's control notification, badged `CONTROL_REBOOT`, which it signals at Ctrl+Alt+Del (roadmap disk-scheduler.md M6) |
 
 It starts the driver's thread with IOPL, and handles its faults. The OS
 server gets an endpoint to each driver, in slot `OS_SLOT_SERVICE` +
-service; and a copy of the sound driver's notification, badged
+service, but the disk drivers', which the disk server gets
+(*docs/disk-server.md*); and a copy of the sound driver's notification, badged
 `DRV_STOP_BIT`, in its slot 13, to end a sound with on Ctrl+Break.
 
 A driver's data segment is of DPL 2, so that the root can fill it from the
@@ -155,24 +158,51 @@ sleeps until the driver signals it (`DRV_SLOT_KEYS`), which the driver does
 after every byte the keyboard sends (roadmap os-server.md P5). Ctrl+Break is
 never a call (l4.md X13): the driver signals the OS server's control
 notification, whose control thread restarts the foreground program.
-Ctrl+Alt+Del: the driver says so on the log and resets the machine through
-the 8042. Sys Req asks the kernel for the thread dump (`TEST_DUMP`). In
+Ctrl+Alt+Del: the driver says so on the log and signals the OS server's
+control notification with `CONTROL_REBOOT` (roadmap disk-scheduler.md M6).
+The server's control thread writes what it and the disk server hold, and
+calls `DRV_KBD_RESET`, at which the driver resets the machine through the
+8042. The driver resets it anyway after `KBD_REBOOT_TICKS` (10 s), or at
+once at a second Ctrl+Alt+Del. Sys Req asks the kernel for the thread dump (`TEST_DUMP`). In
 test builds it tells the kernel when it has started (`TEST_KEYS_READY`),
 and on MAME takes the script's keys from it (`TEST_KEY_BYTE`).
 
 ## The disk drivers
 
-They took the kernel's disk code as it was (roadmap l4.md L9), and wait as
-above (*docs/storage.md*). The OS server asks them with `DRV_DISK_READ` and
-`DRV_DISK_WRITE` for its cache of sectors (*docs/processes.md*, *Files*):
-BX the unit (0 or 1 on the driver's controller, drives `DRIVE_A` and
-`DRIVE_B`, or `DRIVE_C` and `DRIVE_D`, of `DRIVES`), CX the sector, SI its
-offset in the segment passed, the cache's. The reply's BX is 0 or the
-error. The server has checked the drive and the sector; the driver checks
-them again. The diskette driver moves the sector through
-its DMA buffer, and stops the motor two seconds after its last transfer on
-its timer; the fixed disk driver moves the words straight to or from the
-segment passed.
+They took the kernel's disk code (roadmap l4.md L9), and since roadmap
+disk-scheduler.md M2 move runs of sectors by cylinder, head and sector
+(*docs/storage.md*). Since M3 the disk server alone calls them: the root
+gives it their endpoints, not the OS server. A unit is 0 or 1 on the driver's controller: drives
+`DRIVE_A` and `DRIVE_B`, or `DRIVE_C` and `DRIVE_D`, of `DRIVES`. Every
+reply's BX is 0 or the error.
+
+| Call | Asks | Answers |
+|---|---|---|
+| `DRV_DISK_READ` | BL the unit, BH the head, CX the cylinder, DI's low byte the sector (from 1) and its high byte the count (0 for 1), SI the offset in the segment passed | CX the sectors moved |
+| `DRV_DISK_WRITE` | the same, the sectors from the segment | the same |
+| `DRV_DISK_SEEK` | BL the unit, CX the cylinder | a fixed disk's heads go on moving after the reply |
+| `DRV_DISK_STATUS` | BL the unit | CX the cylinder the driver believes the heads on (`DISK_CYLINDER_UNKNOWN`), SI `DRV_STATUS_CHANGED` (A's change line) and `DRV_STATUS_SEEKING` (a fixed disk's seek not complete) |
+| `DRV_DISK_RESET` | | the controller reset, every unit's cylinder forgotten |
+| `DRV_DISK_GEOMETRY` | BL the unit | CX the cylinders, SI's low byte the heads and its high byte the sectors a track (`E_INVAL`: no such unit) |
+| `DRV_DISK_READ_ID` | BL the unit, BH the head (diskettes) | CX the cylinder, SI's low byte the head and its high byte the sector of the first ID the 765 found |
+| `DRV_DISK_FORMAT` | BL the unit, BH the head, CX the cylinder, DI's low byte the track's sectors, SI the offset of its table in the segment passed | BX 0 or the error; CX the cylinders, SI's low byte the heads and its high byte the sectors a track: a diskette's track by Format Track, its IDs the table's in the order they pass the head, A as 1.2 MB and B as 360 KB; a fixed disk's by the adapter's interleave table, then verified, `E_IO` a bad track (roadmap disk-scheduler.md M9, D17; *docs/storage.md*) |
+| `DRV_DISK_MEDIA` | BL the unit (diskettes) | CX the cylinders, SI's low byte the heads and its high byte the sectors a track: A's diskette found by Read ID on cylinder 0 at 500 kbit/s (1.2 MB) and then 300 (a 360 KB one, stepped twice a cylinder if Read ID on its second track finds cylinder 1); the drive's runs use it from then on (roadmap disk-scheduler.md M8, D13) |
+
+A fixed disk's run goes on across heads and cylinders, `DRV_DISK_RUN_MAX`
+(64) sectors at most; a diskette's ends with its cylinder, and moves as
+many sectors as its DMA buffer holds (`FD_DMA_SECTORS`, 30, or 4 without
+extended memory), CX saying how many. The disk server turns a drive's
+sector numbers into these (*docs/disk-server.md*), asking each drive's
+geometry at its start (`DRV_DISK_GEOMETRY`). The driver checks every number
+again. The fixed
+disk driver takes its drives' geometry from the boot information
+(`DRV_SLOT_BOOT_INFO`), or `disks.inc`'s where the BIOS gave none. The
+diskette driver moves a run through its DMA buffer, and stops the motor two
+seconds after its last transfer on its timer; the fixed disk driver moves
+the words straight to or from the segment passed. Each tries a run once,
+then resets its controller or forgets the diskette's cylinder before its
+next: the disk server, their only caller, tries again (*docs/disk-server.md*;
+roadmap disk-scheduler.md M3, D14).
 
 ## The serial driver
 
@@ -246,3 +276,5 @@ they were the old system calls' errors too.
 | 17 | `E_NOT_FOUND` | no such file, or no such code (`ROOT_FIND`) |
 | 20 | `E_BROKEN` | a cluster outside the volume, or a chain that loops |
 | 21 | `E_NOMEM` | no memory, or no room in a table (the root's services) |
+| 22 | `E_CHANGED` | the diskette may have changed (A's change line, or B idle past its motor's time, and A so too where its line never drops: DOSBox-X): the run not done (M8) |
+| 23 | `E_OFFLINE` | the volume's diskette is out (the disk server's; M8) |

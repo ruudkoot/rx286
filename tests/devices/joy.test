@@ -7,6 +7,6 @@ install: C /BIN/JOY z-joy.rx
 keys: joy\n
 ---
 rx286, test build
-/a$ joy
+/mnt/rx286$ joy
 buttons: none; axes: absent absent absent absent
-/a$
+/mnt/rx286$

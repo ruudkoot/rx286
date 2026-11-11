@@ -10,7 +10,6 @@ define: TEST_POSIX_THREAD
 keys: {wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 120
-emulators: bochs mame
 ---
 thread: eight threads, 300 rounds each, under a mutex (2400): 2400
 thread: their results joined (280): 280

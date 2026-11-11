@@ -17,6 +17,7 @@
 | [terminals.md](terminals.md) | the eight terminals: pages, keys, the line discipline, sessions and job control |
 | [drivers.md](drivers.md) | the drivers outside the kernel: printer, mouse, console, keyboard, disks, serial line, sound, RTC |
 | [storage.md](storage.md) | the drives, their drivers, the files, the printers, the sample disks |
+| [disk-server.md](disk-server.md) | the disk server: its calls, threads, cache, order of requests, retries and slots |
 | [devices.md](devices.md) | the speaker, the game port, the serial mouse, the modem |
 | [shell.md](shell.md) | the shell: its line, job control, its commands, DOS's names; the clock and the counter beside it |
 | [security.md](security.md) | what no program can do, and how the tests show it |
@@ -28,5 +29,6 @@
 | [c.md](c.md) | C: the compilers, the conventions with NASM, the libraries, the executable format |
 
 The plans behind all of it are `roadmaps/rx286.md`, `roadmaps/storage.md`,
-`roadmaps/devices.md`, `roadmaps/l4.md`, `roadmaps/realtime.md` and
-`roadmaps/os-server.md`.
+`roadmaps/devices.md`, `roadmaps/l4.md`, `roadmaps/realtime.md`,
+`roadmaps/os-server.md`, `roadmaps/memory.md` and
+`roadmaps/disk-scheduler.md`.

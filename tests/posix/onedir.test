@@ -1,0 +1,15 @@
+# Two processes making and removing files in one directory at once
+# (roadmap disk-scheduler.md M4, D15): init starts tests/posix/onedir.c
+# (TEST_POSIX_ONEDIR). Every entry left is accounted for, once, holding its
+# name; fsck.fat finds C sound afterwards.
+program: idle
+define: TEST_POSIX_ONEDIR
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 300
+fsck: C
+---
+onedir: 32 entries, 32 wanted: every one there
+onedir: 0 failures
+onedir: done

@@ -7,7 +7,6 @@
 # directory before it makes the target; wc and rm say their usage; ^D at
 # an empty prompt ends the shell, and init starts another.
 program: sh
-emulators: bochs mame
 install: C /BIN/SLEEP z-sleep.rx
 install: C /BIN/KILL z-kill.rx
 install: C /BIN/CP z-cp.rx
@@ -15,43 +14,43 @@ install: C /BIN/MKDIR z-mkdir.rx
 install: C /BIN/WC z-wc.rx
 install: C /BIN/RM z-rm.rx
 keys: false; $EMPTY; echo [$?]\necho a;;echo b\necho [$?]\n
-keys: X=1 > /b/f; echo $X; ls /b/f\necho $\{HOME\necho $1abc\nalias e=echo; e$EMPTY hi\n
-keys: cat > /b/t\necho first\necho last{ctrl-d}{ctrl-d}sh < /b/t > /b/out; cat /b/out\n
-keys: mkdir /b/dd; cp /b/dd /b/x; echo [$?]; ls /b/x\n
+keys: X=1 > /mnt/rx286b/f; echo $X; ls /mnt/rx286b/f\necho $\{HOME\necho $1abc\nalias e=echo; e$EMPTY hi\n
+keys: cat > /mnt/rx286b/t\necho first\necho last{ctrl-d}{ctrl-d}sh < /mnt/rx286b/t > /mnt/rx286b/out; cat /mnt/rx286b/out\n
+keys: mkdir /mnt/rx286b/dd; cp /mnt/rx286b/dd /mnt/rx286b/x; echo [$?]; ls /mnt/rx286b/x\n
 keys: echo hi | wc -q; echo [$?]; rm; echo [$?]\n
 keys: {ctrl-d}echo again\n
 ---
 rx286, test build
-/a$ false; $EMPTY; echo [$?]
+/mnt/rx286$ false; $EMPTY; echo [$?]
 [0]
-/a$ echo a;;echo b
+/mnt/rx286$ echo a;;echo b
 sh: a command is missing
-/a$ echo [$?]
+/mnt/rx286$ echo [$?]
 [2]
-/a$ X=1 > /b/f; echo $X; ls /b/f
+/mnt/rx286$ X=1 > /mnt/rx286b/f; echo $X; ls /mnt/rx286b/f
 1
-/b/f
-/a$ echo ${HOME
+/mnt/rx286b/f
+/mnt/rx286$ echo ${HOME
 sh: a ${ is not closed
-/a$ echo $1abc
+/mnt/rx286$ echo $1abc
 abc
-/a$ alias e=echo; e$EMPTY hi
+/mnt/rx286$ alias e=echo; e$EMPTY hi
 sh: e: no such file or directory
-/a$ cat > /b/t
+/mnt/rx286$ cat > /mnt/rx286b/t
 echo first
-echo last/a$ sh < /b/t > /b/out; cat /b/out
+echo last/mnt/rx286$ sh < /mnt/rx286b/t > /mnt/rx286b/out; cat /mnt/rx286b/out
 first
 last
-/a$ mkdir /b/dd; cp /b/dd /b/x; echo [$?]; ls /b/x
-cp: /b/dd: is a directory
+/mnt/rx286$ mkdir /mnt/rx286b/dd; cp /mnt/rx286b/dd /mnt/rx286b/x; echo [$?]; ls /mnt/rx286b/x
+cp: /mnt/rx286b/dd: is a directory
 [1]
-/b/x: no such file or directory
-/a$ echo hi | wc -q; echo [$?]; rm; echo [$?]
+/mnt/rx286b/x: no such file or directory
+/mnt/rx286$ echo hi | wc -q; echo [$?]; rm; echo [$?]
 usage: wc [-lwc] [FILE]...
 [1]
 usage: rm FILE...
 [1]
-/a$
-/a$ echo again
+/mnt/rx286$
+/mnt/rx286$ echo again
 again
-/a$
+/mnt/rx286$

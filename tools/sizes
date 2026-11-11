@@ -39,7 +39,7 @@ NASM_MODULES = [('printer', 'printer'), ('mouse', 'mouse'), ('console', 'console
                 ('keyboard', 'kbd'), ('diskette', 'fd'), ('fixeddisk', 'hd'),
                 ('serial', 'serial'), ('sound', 'sound'), ('rtc', 'rtc'), ('user', 'program')]
 # The modules in C: an executable, by its name in the module table
-C_MODULES = [('root', 'root'), ('os', 'os'), ('user', 'program'), ('counter', 'counter')]
+C_MODULES = [('root', 'root'), ('os', 'os'), ('disk', 'disk'), ('user', 'program'), ('counter', 'counter')]
 
 
 def section_lengths(path):

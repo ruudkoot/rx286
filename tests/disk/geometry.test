@@ -1,0 +1,17 @@
+# The drives as the BIOS describes them, in the boot information (roadmap
+# disk-scheduler.md M2, D16): the loader asks INT 13h AH=15h for each
+# diskette drive's type (1: 360 KB, no change line; 2: 1.2 MB, a change
+# line), and copies each fixed disk's parameter table, which INT 41h and 46h
+# point to, when CMOS 12h gives the disk a type. Bochs's BIOS gives both
+# disks their geometry; its precompensation is "none" (FFFFh) and its
+# control byte 8 (more than 8 heads: 0, its default). MAME's CMOS says no
+# fixed disk (docs/emulators.md), so its drivers take disks.inc's.
+program: idle
+define: TEST_GEOMETRY
+match: contains
+timeout: 60
+emulators: bochs
+---
+root: diskette drives' types: {...} {...}
+root: fixed disk 0: 615 cylinders, 4 heads, 17 sectors, precompensation from {...}
+root: fixed disk 1: 306 cylinders, 4 heads, 17 sectors, precompensation from {...}

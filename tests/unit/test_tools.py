@@ -118,7 +118,7 @@ def test_header_values_are_checked(tmp_path, header):
 
 
 @pytest.mark.parametrize('header', [
-    'fsck: B', 'file: C /X.TXT x', 'install: D /X z-x.rx', 'media: B ejected',
+    'media: B ejected', 'media: D absent', 'emulators: dosbox-x\nmedia: B protected',
     'emulators: mame\nmedia: B protected', 'emulators: mame\nlpt1: x',
     'emulators: mame\nmedia: LPT2 absent'])
 def test_what_an_emulator_has_not_is_refused(tmp_path, header):
@@ -128,6 +128,7 @@ def test_what_an_emulator_has_not_is_refused(tmp_path, header):
 
 def test_what_an_emulator_has_is_taken(tmp_path):
     a_test(tmp_path, 'emulators: bochs mame\nfsck: B\nmedia: B ejected\n---\nx\n')
+    a_test(tmp_path, 'fsck: B\nfile: C /X.TXT x\ninstall: D /X z-x.rx\n---\nx\n', 'c.test')
     a_test(tmp_path, 'emulators: bochs dosbox-x\nmodem: hayes\nlpt1: x\n---\nx\n', 'b.test')
 
 

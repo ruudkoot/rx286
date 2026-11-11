@@ -33,9 +33,9 @@ static void test_string(void)
     check("strcpy, strcat", strcmp(buf, "rx286") == 0, buf);
     strncpy(buf, "ab", 5);
     check("strncpy pads", buf[0] == 'a' && buf[2] == 0 && buf[4] == 0, buf);
-    check("strchr", strchr("/c/docs", '/') != NULL && *strchr("abc", 0) == 0
+    check("strchr", strchr("/mnt/rx286c/docs", '/') != NULL && *strchr("abc", 0) == 0
           && strchr("abc", 'x') == NULL, "");
-    check("strrchr", strcmp(strrchr("/c/docs/x", '/'), "/x") == 0, "");
+    check("strrchr", strcmp(strrchr("/mnt/rx286c/docs/x", '/'), "/x") == 0, "");
     check("memchr", memchr("abc", 'c', 3) != NULL && memchr("abc", 'c', 2) == NULL, "");
 }
 

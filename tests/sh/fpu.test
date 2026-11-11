@@ -6,7 +6,7 @@ install: C /BIN/FPU z-fpu.rx
 keys: fpu\n
 match: contains
 ---
-/a$ fpu
+/mnt/rx286$ fpu
 sqrt(2) = 1.41421356237309505
 pi      = 3.14159265358979324
-/a$
+/mnt/rx286$

@@ -14,8 +14,8 @@
 ; places every module inside the image (roadmap l4.md L5). It asks the BIOS
 ; for the memory and leaves the answer at BOOT_INFO_PHYS (layout.inc). Then,
 ; with the BIOS's help for the last time (roadmap D14), it sets text mode 3,
-; stops the floppy motor (X2), disables interrupts and NMI, and jumps to
-; 1000:0000h.
+; stops the floppy motor (X2), takes any interrupt the diskette controller
+; still holds, disables interrupts and NMI, and jumps to 1000:0000h.
 ; ============================================================================
 
 cpu 286
@@ -67,10 +67,69 @@ start:
         mov dx, FDC_DOR
         mov al, FDC_DOR_MOTORS_OFF
         out dx, al
+        call fdc_quiet
         cli
         mov al, CMOS_NMI_DISABLE | CMOS_REG_D
         out CMOS_INDEX, al
         jmp KERNEL_SEG:0
+
+; ----------------------------------------------------------------------------
+; fdc_quiet - any interrupt the diskette controller holds taken from it, by
+; Sense Interrupt Status until it says none is pending (ST0 an invalid
+; command's), one for each drive at most. The AT's BIOS leaves none: one
+; command and a byte. DOSBox-X's, which does not drive the controller, leaves
+; the interrupt of its power-on reset, which reached the kernel when it
+; unmasked IRQ 6, before the diskette driver was there (disk-scheduler.md M8)
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: AX, BX, CX, DX
+; ----------------------------------------------------------------------------
+fdc_quiet:
+        mov bl, 4
+.sense:
+        mov ah, FDC_MSR_RQM             ; its turn to take a byte
+        call fdc_ready
+        jc .out
+        mov al, FDC_CMD_SENSE_INT
+        out dx, al
+        mov ah, FDC_MSR_RQM | FDC_MSR_DIO
+        call fdc_ready
+        jc .out
+        in al, dx                       ; ST0
+        and al, FDC_ST0_CODE
+        cmp al, FDC_ST0_INVALID
+        je .out
+        mov ah, FDC_MSR_RQM | FDC_MSR_DIO
+        call fdc_ready
+        jc .out
+        in al, dx                       ; the present cylinder
+        dec bl
+        jnz .sense
+.out:
+        ret
+
+; ----------------------------------------------------------------------------
+; fdc_ready - wait for the main status's RQM and DIO to be AH, a while at
+; most (65,535 reads)
+;   In:       AH = the RQM and DIO bits wanted
+;   Out:      CF clear and DX = FDC_DATA; or CF set
+;   Destroys: AL, CX
+; ----------------------------------------------------------------------------
+fdc_ready:
+        mov cx, 0xFFFF
+        mov dx, FDC_MSR
+.poll:
+        in al, dx
+        and al, FDC_MSR_RQM | FDC_MSR_DIO
+        cmp al, ah
+        je .ready
+        loop .poll
+        stc
+        ret
+.ready:
+        mov dx, FDC_DATA
+        clc
+        ret
 
 ; ----------------------------------------------------------------------------
 ; geometry - check the BPB and work out where the root and data begin
@@ -291,10 +350,15 @@ check_image:
 ; extended memory, called with CF clear, since IBM's leaves CF as it was
 ; (Technical Reference 5-155), else CMOS 30h-31h's; the EBDA's segment, if
 ; 40:0Eh holds INT 12h's end (on IBM's AT that word is the fourth printer's
-; port: 5-29); the boot drive
+; port: 5-29); the boot drive; and the drives (disk-scheduler.md M2, D16):
+; each diskette drive's type (INT 13h AH=15h), and each fixed disk's
+; parameters from the BIOS's table its vector points to, INT 41h for disk 0
+; and 46h for disk 1, when CMOS 12h gives the disk a type (Technical
+; Reference 1-50; AH=08h would say two cylinders fewer and no
+; precompensation)
 ;   In:       DS = ES = 0
 ;   Out:      the structure at BOOT_INFO_PHYS
-;   Destroys: AX, BX, CX, DI
+;   Destroys: AX, BX, CX, DX, SI, DI
 ; ----------------------------------------------------------------------------
 boot_info:
         mov di, BOOT_INFO_PHYS
@@ -332,6 +396,59 @@ boot_info:
 .ebda:
         mov al, [drive]
         mov [BOOT_INFO_PHYS + BI_DRIVE], al
+        xor dx, dx                      ; DL = diskette drive 0
+.diskette:
+        mov ah, 0x15                    ; INT 13h AH=15h: AH = the drive's type
+        push dx
+        int 0x13
+        pop dx
+        jc .untyped
+        mov bl, dl
+        xor bh, bh
+        mov [BOOT_INFO_PHYS + BI_FD_TYPES + bx], ah
+.untyped:
+        inc dx
+        cmp dl, 2
+        jb .diskette
+        mov al, CMOS_DISK_TYPES | CMOS_NMI_DISABLE
+        out CMOS_INDEX, al
+        in al, CMOS_DATA
+        mov dl, al
+        mov si, BIOS_VEC_DISK0_TABLE * 4
+        mov di, BOOT_INFO_PHYS + BI_HD0
+        test dl, 0xF0
+        jz .disk1
+        call disk_table
+.disk1:
+        mov si, BIOS_VEC_DISK1_TABLE * 4
+        mov di, BOOT_INFO_PHYS + BI_HD1
+        test dl, 0x0F
+        jz .tables
+        call disk_table
+.tables:
+        ret
+
+; ----------------------------------------------------------------------------
+; disk_table - a fixed disk's parameters, from the BIOS's table a vector
+; points to (FD_TBL_*), into the boot information (BIH_*, in their order)
+;   In:       SI = the vector's address; DI = the disk's entry; DS = ES = 0
+;   Out:      the entry filled
+;   Destroys: SI
+; ----------------------------------------------------------------------------
+disk_table:
+        push ds
+        push di
+        lds si, [si]                    ; the table
+        movsw                           ; BIH_CYLINDERS
+        movsb                           ; BIH_HEADS
+        add si, FD_TBL_PRECOMP - FD_TBL_HEADS - 1
+        movsw                           ; BIH_PRECOMP
+        add si, FD_TBL_CONTROL - FD_TBL_PRECOMP - 2
+        movsb                           ; BIH_CONTROL
+        add si, FD_TBL_SECTORS - FD_TBL_CONTROL - 1
+        movsb                           ; BIH_SECTORS
+        pop di
+        pop ds
         ret
 
 ; ----------------------------------------------------------------------------

@@ -4,16 +4,15 @@
 # the screen's edge, then both buttons, which end it. It waits in poll for
 # the terminal and the mouse.
 program: sh
-emulators: bochs mame
 install: C /BIN/MOUSE z-mouse.rx
 keys: {wait 20}mouse\n{wait 5}{mouse 16 8 -}{wait 2}{mouse -40 0 L}{wait 2}{mouse 127 127 -}{wait 2}{mouse 0 0 LR}
 ---
 rx286, test build
-/a$ mouse
+/mnt/rx286$ mouse
 Move the mouse; Esc or both buttons end.
 x 320, y 100 (column 40, row 12), buttons: none
 x 336, y 108 (column 42, row 13), buttons: none
 x 296, y 108 (column 37, row 13), buttons: left
 x 423, y 199 (column 52, row 24), buttons: none
 x 423, y 199 (column 52, row 24), buttons: both
-/a$
+/mnt/rx286$

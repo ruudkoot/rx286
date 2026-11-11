@@ -3,12 +3,11 @@
 # then stops with an error.
 program: sh
 media: B damaged
-emulators: bochs mame
 keys: ls b:/many\n
 match: contains
 ---
-/a$ ls b:/many
-FILE01.TXT
-FILE30.TXT
+/mnt/rx286$ ls b:/many
+file01.txt
+file30.txt
 b:/many: input/output error
-/a$
+/mnt/rx286$

@@ -33,6 +33,7 @@
 
 #include <stdio.h>
 #include "server.h"
+#include "fs.h"
 #include "disks.h"
 #include "posix.h"
 #include "vectors.h"
@@ -66,13 +67,9 @@ static const char msg_interrupt[] = "rx286: Ctrl+Break: SIGINT\n";
 static const char vector_names[] =
     "#DE #DB NMI #BP #OF #BR #UD #NM #DF #MP #TS #NP #SS #GP #14 #15 "
     "#MF #17 #18 #19 #20 #21 #22 #23 #24 #25 #26 #27 #28 #29 #30 #31 ";
-#define DRIVE_SECTORS(c, h, s) ((rx_u16)((rx_u32)(c) * (h) * (s)))   /* past 32,767 */
-static const rx_u16 sectors[DRIVES] = {
-    DRIVE_SECTORS(DISK_A_CYLINDERS, DISK_A_HEADS, DISK_A_SECTORS),
-    DRIVE_SECTORS(DISK_B_CYLINDERS, DISK_B_HEADS, DISK_B_SECTORS),
-    DRIVE_SECTORS(DISK_C_CYLINDERS, DISK_C_HEADS, DISK_C_SECTORS),
-    DRIVE_SECTORS(DISK_D_CYLINDERS, DISK_D_HEADS, DISK_D_SECTORS),
-};
+/* Each drive's volume's sectors, once the disk server has said them
+ * (disk_volume), as many as the server's 16-bit numbers reach */
+static rx_u16 volume_sectors[DRIVES];
 
 /* call - KCALL_CALL, the reply into *r if there is an r */
 int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, rx_u16 bp,
@@ -92,26 +89,172 @@ int call(rx_u16 endpoint, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
     return rx_kcall(r);
 }
 
-/* drive_sectors - a drive's sectors (disks.inc) */
-rx_u16 drive_sectors(unsigned drive)
+#define DRIVE_FIXED 2                   /* drives C and D: the fixed disks */
+#define TRUST_TICKS 100                 /* a diskette's sectors trusted 2 s after the disk
+                                           server's last word of it (M8; disk.c's too) */
+
+static rx_u32 ds_seen[DRIVE_FIXED];     /* the disk server's last answer for each diskette:
+                                           32 bits, as 16 wrap in 22 minutes (M10) */
+
+/* disk_trusted - may what the cache holds of a drive be used without
+ * asking the disk server, which checks a diskette after 2 s of its
+ * drive's silence (server.h; disk-scheduler.md M8, D12)? */
+int disk_trusted(unsigned drive)
 {
-    return sectors[drive];
+    return drive >= DRIVE_FIXED || rx_ticks() - ds_seen[drive] < TRUST_TICKS;
 }
 
-/* disk_call - through the diskettes' driver for A and B, the fixed disks'
- * for C and D; E_TIMEOUT if none answered */
-rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 offset)
+/* disk_call_ds - a call to the disk server for a drive's volume, whose lock
+ * the calling thread's call holds; the server's lock given up while it
+ * waits, if the thread holds it (disk-scheduler.md M4, D15): the call's
+ * status */
+static int disk_call_ds(unsigned drive, int label, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di,
+                        rx_u16 bp, struct rx_kregs *r)
+{
+    int had, status, by = vfs_formatter(drive), self = proc_self();
+
+    if (by && (self < 0 || proc_leader(self) + 1 != by)) {
+        r->bx = E_BUSY;                 /* a formatter's drive, its alone (M9) */
+        r->cx = r->si = r->di = 0;
+        return 0;
+    }
+    vol_hold(drive);
+    had = lock_mine();
+    if (had)
+        lock_give();
+    status = call(OS_DISK, label, bx, cx, si, di, bp, r);
+    if (had)
+        lock_take(self_notify());
+    if (status == 0 && drive < DRIVE_FIXED)
+        ds_seen[drive] = rx_ticks();
+    if (status == 0 && had && drive < DRIVE_FIXED) {    /* a diskette's (M8, D12): */
+        if (r->bx == E_CHANGED)
+            vfs_medium(drive);          /* another: the old one's gone */
+        else if ((label == DS_READ || label == DS_WRITE) && (r->di & DSV_TOUCHED))
+            cache_forget(drive);        /* the same: read afresh before a write */
+    }
+    return status;
+}
+
+/* disk_volume - a drive's volume, as the disk server says it (DS_VOLUME;
+ * disk-scheduler.md M3): 0, or the error (E_NOT_FAT12, E_TIMEOUT); its
+ * sectors kept for drive_sectors */
+rx_u16 disk_volume(unsigned drive)
 {
     struct rx_kregs r;
-    rx_u16 driver = OS_SERVICE(SERVICE_DISKETTE);
+    rx_u32 n;
 
-    if (drive >= DRIVE_C) {             /* the fixed disks': C and D */
-        drive -= DRIVE_C;
-        driver = OS_SERVICE(SERVICE_FIXED_DISK);
-    }
-    if (call(driver, op, (rx_u16)drive, sector, offset, 0, segment, &r))
-        return E_TIMEOUT;               /* no driver answered */
+    if (disk_call_ds(drive, DS_VOLUME, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;               /* no disk server answered */
+    if (r.bx)
+        return r.bx;
+    n = r.cx | ((rx_u32)r.si << 16);
+    volume_sectors[drive] = n > 0xFFFFUL ? 0xFFFF : (rx_u16)n;
+    return 0;
+}
+
+/* disk_sync - a drive's volume's sectors the disk server holds written
+ * (DS_SYNC; disk-scheduler.md M6): 0 or the error */
+rx_u16 disk_sync(unsigned drive)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_SYNC, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;
     return r.bx;
+}
+
+/* disk_eject - a diskette's volume forgotten by the disk server (DS_EJECT;
+ * disk-scheduler.md M8): 0 or the error */
+rx_u16 disk_eject(unsigned drive)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_EJECT, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;
+    return r.bx;
+}
+
+/* disk_geometry - a drive's cylinders, and its heads (low byte) and sectors
+ * a track (high), as the disk server knows them (DS_GEOMETRY; M9) */
+rx_u16 disk_geometry(unsigned drive, rx_u16 *cylinders, rx_u16 *heads_track)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_GEOMETRY, (rx_u16)drive, 0, 0, 0, 0, &r))
+        return E_TIMEOUT;
+    *cylinders = r.cx;
+    *heads_track = r.si;
+    return r.bx;
+}
+
+/* disk_format - a track of a drive formatted by the table at an offset of a
+ * segment, passed (DS_FORMAT; M9, D17): 0 or the error */
+rx_u16 disk_format(unsigned drive, rx_u16 cylinder, unsigned head, unsigned sectors,
+                   rx_u16 segment, rx_u16 offset)
+{
+    struct rx_kregs r;
+
+    if (disk_call_ds(drive, DS_FORMAT, (rx_u16)(drive | (sectors << 8)), cylinder,
+                     (rx_u16)(head | ((proc_self() + 1) << 8)), offset, segment, &r))
+        return E_TIMEOUT;
+    return r.bx;
+}
+
+/* disk_raw - sectors from a drive's first, to or from a segment (passed),
+ * past the caches (DS_RAW_READ, DS_RAW_WRITE; M9): 0 or the error, *moved
+ * the sectors moved */
+rx_u16 disk_raw(int label, unsigned drive, rx_u32 sector, unsigned count, rx_u16 segment,
+                rx_u16 offset, rx_u16 *moved)
+{
+    struct rx_kregs r;
+
+    *moved = 0;
+    if (disk_call_ds(drive, label, (rx_u16)(drive | (count << 8)), (rx_u16)sector,
+                     (rx_u16)(((sector >> 16) & 0xFF) | ((proc_self() + 1) << 8)), offset,
+                     segment, &r))
+        return E_TIMEOUT;
+    *moved = r.cx;
+    return r.bx;
+}
+
+/* drive_sectors - a drive's volume's sectors, 0 until disk_volume */
+rx_u16 drive_sectors(unsigned drive)
+{
+    return volume_sectors[drive];
+}
+
+/* disk_run - `count` sectors from `sector` of a drive's volume, to or from
+ * a segment (passed) at an offset, through the disk server (DS_READ,
+ * DS_WRITE: DS_RUN_MAX a call), the lock given up meanwhile. 0, E_TIMEOUT
+ * if it did not answer, or its error */
+rx_u16 disk_run(int op, unsigned drive, rx_u16 sector, rx_u16 count, rx_u16 segment,
+                rx_u16 offset)
+{
+    struct rx_kregs r;
+    rx_u16 n;
+
+    while (count) {
+        n = count > DS_RUN_MAX ? DS_RUN_MAX : count;
+        if (disk_call_ds(drive, op == DRV_DISK_WRITE ? DS_WRITE : DS_READ,
+                         (rx_u16)(drive | (n << 8)), sector, (rx_u16)((proc_self() + 1) << 8),
+                         offset, segment, &r))
+            return E_TIMEOUT;
+        if (r.bx)
+            return r.bx;
+        if (r.cx != n)
+            return E_IO;
+        sector = (rx_u16)(sector + n);
+        offset = (rx_u16)(offset + n * SECTOR_SIZE);
+        count = (rx_u16)(count - n);
+    }
+    return 0;
+}
+
+/* disk_call - a sector to or from a segment of the server's (disk_run) */
+rx_u16 disk_call(int op, unsigned drive, rx_u16 sector, rx_u16 segment, rx_u16 offset)
+{
+    return disk_run(op, drive, sector, 1, segment, offset);
 }
 
 /* console - the console driver's DRV_CON_WRITE (server.h) */
@@ -412,16 +555,42 @@ static void m_call(struct session *s, int call, struct rx_kregs *r)
 static void control(void)
 {
     struct rx_kregs r;
+    rx_u16 bits;
 
+#ifdef WITH_TEST_HOOKS
+    r.ax = (KCALL_TEST << 8) | TEST_END_SYNC;  /* a test's end: a sync first (M6) */
+    r.dx = OS_CONTROL;
+    r.bp = 0;
+    rx_kcall(&r);
+#endif
     for (;;) {
         proc_timers();                  /* the processes' (P10): at every wake */
-        if (!proc_break_seen()) {       /* (one its wait for the lock took: P15) */
+        bits = proc_control_seen();     /* (those its waits for the lock took: P15) */
+        if (!bits) {
             r.ax = KCALL_RECV << 8;
             r.dx = OS_CONTROL;
             r.bp = 0;
-            if (rx_kcall(&r) || !(r.bx & CONTROL_BREAK))
+            if (rx_kcall(&r))
                 continue;
+            bits = r.bx;
         }
+        if (bits & (CONTROL_SYNC | CONTROL_REBOOT)) {   /* everything held written: a */
+            lock_take(OS_CONTROL);      /*    test's end, Ctrl+Alt+Del (M6) */
+            vfs_sync();
+            vol_release(0);
+            lock_give();
+            if (bits & CONTROL_REBOOT)
+                call(OS_SERVICE(SERVICE_KEYBOARD), DRV_KBD_RESET, 0, 0, 0, 0, 0, 0);
+#ifdef WITH_TEST_HOOKS
+            if (bits & CONTROL_SYNC) {
+                r.ax = (KCALL_TEST << 8) | TEST_END_NOW;
+                r.bp = 0;
+                rx_kcall(&r);
+            }
+#endif
+        }
+        if (!(bits & CONTROL_BREAK))
+            continue;
         call(OS_SERVICE(SERVICE_KEYBOARD), DRV_KBD_CLEAR, 0, 0, 0, 0, 0, 0);
         r.ax = (KCALL_THREAD << 8) | THREAD_INFO;  /* a program the root builds: */
         r.dx = OS_FOREGROUND;                       /* restarted */

@@ -15,7 +15,7 @@ numbers below are the Technical Reference's.
 |---|---|---|
 | CPU | Intel 80286, 6 MHz (1-7) | protected mode, 16-bit, only 286 instructions |
 | Coprocessor | Intel 80287 | available to the program; errors on IRQ13 |
-| Memory | 640 KB base; extended memory unused | the base only |
+| Memory | 640 KB base, and extended memory above 1 MB; at least 639 KB and 384 KB, an AT of 1 MB (roadmap disk-scheduler.md M8b) | all of it, up to 15 MB above 1 MB; on less than the least, the kernel stops at boot |
 | Interrupt controllers | two 8259A, the slave on the master's IR2 | vectors 20h-2Fh |
 | Timer | 8254: channel 0 the system timer, 1 DRAM refresh, 2 the speaker | channel 0 at 50 Hz, also the game port's clock; channel 2 the speaker's tone |
 | Keyboard controller | 8042, AT 84-key keyboard, scan codes translated to set 1 | the keyboard driver |
@@ -105,7 +105,9 @@ numbers below are the Technical Reference's.
   the BIOS's shutdown status byte (1-49), 0 for a soft reset (the BIOS
   listing's table of shutdown codes). `CMOS_EXT_LOW` and `CMOS_EXT_HIGH`
   hold the KB of extended memory the POST found (1-45), which the kernel
-  gives the root (roadmap os-server.md P3).
+  gives the root (roadmap os-server.md P3). `CMOS_DISK_TYPES` holds the
+  fixed disks' types, disk 0's in the high nibble (1-50), which the loader
+  looks at before it reads a disk's table (roadmap disk-scheduler.md M2).
   `CMOS_NMI_DISABLE` is bit 7 of the index port: set, NMI is masked (1-28).
 - **80287**: `FPU_CLEAR_BUSY` (F0h) clears the busy latch an error leaves;
   `FPU_RESET` (F1h) would reset the 287 into real mode (2-4).
@@ -127,23 +129,36 @@ numbers below are the Technical Reference's.
   keeping the motors and DMA and IRQ6 on, as the BIOS does. In the main status,
   `FDC_MSR_RQM` says the data register is ready and `FDC_MSR_DIO` which way.
   `FDC_CCR` sets the data rate: `FDC_RATE_500K` for A's 1.2 MB, `FDC_RATE_250K`
-  for B's 360 KB. The commands: `FDC_CMD_SPECIFY` with the BIOS's
+  for B's 360 KB, `FDC_RATE_300K` for a 360 KB diskette in A (roadmap
+  disk-scheduler.md D13). `FDC_DIR`'s `FDC_DIR_CHANGED` is the 1.2 MB drive's
+  change line, raised when its diskette came out and dropped at a step with
+  one in (IBM's 360 KB drive has none). The commands: `FDC_CMD_SPECIFY` with the BIOS's
   `FDC_SPECIFY_1` and `FDC_SPECIFY_2` (5-170); `FDC_CMD_RECALIBRATE`,
   `FDC_CMD_SEEK` and `FDC_CMD_SENSE_INT` after their interrupt;
   `FDC_CMD_READ` and `FDC_CMD_WRITE` (MFM) with `FDC_SIZE_512`, `FDC_DTL` and
-  the BIOS's gap, `FDC_GAP_1200K` or `FDC_GAP_360K`. In the results,
+  the BIOS's gap, `FDC_GAP_1200K` or `FDC_GAP_360K`; `FDC_CMD_FORMAT` with
+  the BIOS's format gaps, `FDC_FORMAT_GAP_1200K` and `FDC_FORMAT_GAP_360K`,
+  and its filler, `FDC_FILLER` (5-170). In the results,
   `FDC_ST0_CODE` is 0 for success and `FDC_ST0_SEEK_END` follows a seek;
+  `FDC_ST0_INVALID` is an invalid command's, Sense Interrupt Status's with
+  no interrupt pending;
   `FDC_ST1_NOT_WRITABLE` means write-protected.
 - **Fixed disk** (`HDC_*`, the task file of IBM's adapter, 1-2 to 1-9 of its
   section): the status bits `HDC_STATUS_BSY` (no other bit is valid),
   `HDC_STATUS_WRITE_FAULT`, `HDC_STATUS_DRQ` and `HDC_STATUS_ERR`; reading the
-  status clears IRQ14. The drive/head register is `HDC_DRIVE_HEAD_BASE`, with
+  status clears IRQ14; `HDC_STATUS_READY` says the drive is ready and
+  `HDC_STATUS_DSC` that its seek is complete. The drive/head register is `HDC_DRIVE_HEAD_BASE`, with
   `HDC_DRIVE_1` for the second drive, and the head. `HDC_PRECOMP` takes the
   precompensation cylinder shifted right by `HDC_PRECOMP_SHIFT`. In the fixed
   disk register, `HDC_CONTROL_RESET` resets the controller and
-  `HDC_CONTROL_RUN` lets it run. The commands: `HDC_CMD_SET_PARAMETERS`,
+  `HDC_CONTROL_RUN` lets it run; `HDC_CONTROL_HEADS` is for a drive of
+  more than eight heads. The commands: `HDC_CMD_SET_PARAMETERS`,
   `HDC_CMD_RESTORE` (whose step rate, 35 us, implied seeks then use),
-  `HDC_CMD_READ`, `HDC_CMD_WRITE`.
+  `HDC_CMD_READ`, `HDC_CMD_WRITE`, `HDC_CMD_SEEK` (which ends once its
+  steps are sent: roadmap disk-scheduler.md M2), and the formatter's
+  `HDC_CMD_FORMAT` (the sector count the track's sectors, the interleave
+  table its one sector of data, no error said: the adapter's p. 9) and
+  `HDC_CMD_VERIFY`, which checks a track's sectors after it (M9).
 - **Printer** (`LPT_*`, offsets `LPT_DATA`, `LPT_STATUS`, `LPT_CONTROL` from
   an `LPT*_BASE`; the Serial/Parallel Adapter's section): `LPT_STATUS_NOT_BUSY`
   set means the printer takes a byte, `LPT_STATUS_PAPER_END` that it has no
@@ -206,8 +221,8 @@ gives the rule for each line.
 | 5-7 | free (16-bit) |
 
 The diskette driver resets both controllers at its start, cascades
-channel 4, and programs channel 2 for each diskette sector, into and out
-of its DMA buffer (*docs/storage.md*).
+channel 4, and programs channel 2 for each run of diskette sectors, up to
+a cylinder, into and out of its DMA buffer (*docs/storage.md*).
 
 ## What Bochs differs in
 

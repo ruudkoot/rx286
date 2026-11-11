@@ -1,0 +1,18 @@
+# Write-behind (roadmap disk-scheduler.md M6, D8): init starts
+# tests/posix/behind.c (TEST_POSIX_BEHIND), which writes a file of C and
+# fsyncs it, writes another and closes it, then waits seven seconds. The
+# test ends without its sync (TEST_END_NOSYNC), yet both files are on the
+# host's image: the disk server writes what it holds of a fixed disk within
+# five seconds.
+program: idle
+define: TEST_POSIX_BEHIND
+define: TEST_END_NOSYNC
+keys: {wait 250}{wait 250}{wait 100}
+match: contains
+timeout: 300
+file: C /BEHIND.TXT behind\n
+file: C /SYNCED.TXT synced\n
+---
+behind: written and fsync'd (0): 0
+behind: written, not fsync'd (0): 0
+behind: done

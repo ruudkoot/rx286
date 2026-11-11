@@ -66,11 +66,11 @@ static void drive(char letter)
     int e, n;
 
     n = snprintf(text, sizeof text, "rx286 wrote this to %c\n", letter - 'a' + 'A');
-    snprintf(path, sizeof path, "/%c/drives.txt", letter);
+    snprintf(path, sizeof path, "%c:/drives.txt", letter);
     e = written(path, text, n);
     printf("drives: %c: a file written: errno %d, read back: %s\n", letter - 'a' + 'A', e,
            same(path, text, n) ? "the same" : "not the same");
-    snprintf(path, sizeof path, "/%c/big.txt", letter);
+    snprintf(path, sizeof path, "%c:/big.txt", letter);
     e = written(path, big, BIG);
     printf("drives: %c: %d bytes written: errno %d, read back: %s\n", letter - 'a' + 'A', BIG,
            e, same(path, big, BIG) ? "the same" : "not the same");
@@ -86,22 +86,22 @@ int main(void)
 #ifdef DRIVES_PROTECTED
     int n;
 
-    printf("drives: B: PAD.TXT read: %ld bytes\n", bytes_of("/b/pad.txt"));
+    printf("drives: B: PAD.TXT read: %ld bytes\n", bytes_of("/mnt/rx286b/pad.txt"));
     drive('b');
-    n = open("/b/drives.txt", O_RDONLY);
+    n = open("/mnt/rx286b/drives.txt", O_RDONLY);
     printf("drives: B: no DRIVES.TXT after (-1, ENOENT 2): %d, errno %d\n", n, errno);
-    printf("drives: C: HELLO.TXT read after: %ld bytes\n", bytes_of("/c/docs/hello.txt"));
+    printf("drives: C: HELLO.TXT read after: %ld bytes\n", bytes_of("/mnt/rx286c/docs/hello.txt"));
 #else
     int fd, n;
 
-    printf("drives: A: KERNEL.BIN read: %ld bytes\n", bytes_of("/a/kernel.bin"));
+    printf("drives: A: KERNEL.BIN read: %ld bytes\n", bytes_of("/mnt/rx286/kernel.bin"));
     drive('a');
     drive('b');
     drive('c');
     drive('d');
     n = open("/e/x", O_RDONLY);
     printf("drives: no drive E (-1, ENOENT 2): %d, errno %d\n", n, errno);
-    fd = open("/c/drives.txt", O_RDONLY);
+    fd = open("/mnt/rx286c/drives.txt", O_RDONLY);
     n = (int)read(fd, (void *)0xFFF0u, 100);
     printf("drives: a read past the data's end (-1, EFAULT 14): %d, errno %d\n", n, errno);
     close(fd);

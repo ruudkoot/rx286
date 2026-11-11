@@ -54,6 +54,18 @@ xms = false
 ems = false
 umb = false
 
+# Its 765 and its IDE controller, which rx286's drivers drive as the AT's
+# (disk-scheduler.md M8): A and B on the one, C and D, of the AT's types 2
+# and 1, on the other
+[fdc, primary]
+enable = true
+
+[ide, primary]
+enable = true
+
 [autoexec]
 imgmount a @IMAGE@ -t floppy
+imgmount b @FDB@ -t floppy
+imgmount 2 @HD0@ -t hdd -fs none -size 512,17,4,615 -ide 1m
+imgmount 3 @HD1@ -t hdd -fs none -size 512,17,4,306 -ide 1s
 boot a:

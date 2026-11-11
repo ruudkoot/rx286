@@ -2,12 +2,10 @@
 # sealed and found by its key; a process spawned of it, forked, its data
 # grown, a thread added; both ended, and the code with them; every refusal
 # (tests/programs/services.c). Then a thousand spawns and exits, after which
-# the memory gives the same segments of 64 KB as before. DOSBox-X has no
-# extended memory, so a TEST_CAPS program holds all the memory for segments.
+# the memory gives the same segments of 64 KB as before.
 program: services
 define: TEST_CAPS
 define: TEST_SERVICES
-emulators: bochs mame
 match: contains
 timeout: 600
 ---

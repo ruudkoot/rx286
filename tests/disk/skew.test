@@ -1,0 +1,43 @@
+# The formatter's skew, timed (roadmap disk-scheduler.md M9, D17): on MAME,
+# whose diskettes turn at the AT's speed, tests/posix/skew.c formats a blank
+# 1.2 MB diskette in A (media-at:) twice, without a skew and with format's 7,
+# copies KERNEL.BIN onto each from C and reads it back from the diskette:
+# with the skew each cylinder's first sector comes under the head after the
+# step, not a turn later. The read must be faster by 3% at least: it takes
+# 6.74 s against 7.58 s, 11% less (14.7% at M9), not E10's 23%, as the gaps
+# between the reader's calls still cost a turn each (roadmap M9's notes).
+program: idle
+define: TEST_POSIX_SKEW
+emulators: mame
+install: C /BIN/FORMAT z-format.rx
+install: C /KERNEL.BIN image.bin
+media-at: 75 eject A
+media-at: 77 insert A other
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+---
+format: a: 1213952 bytes free, 0 in bad clusters
+skew: format without a skew: 0
+skew: KERNEL.BIN copied (bytes): {image_size}
+skew: without a skew: {image_size} bytes read
+format: a: 1213952 bytes free, 0 in bad clusters
+skew: format with a skew of 7: 0
+skew: KERNEL.BIN copied (bytes): {image_size}
+skew: with a skew of 7: {image_size} bytes read
+skew: {...} ms without, {...} ms with
+skew: at most 97% of the time: yes
+skew: done

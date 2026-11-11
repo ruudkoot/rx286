@@ -5,15 +5,13 @@
 # data's end, are refused. After the run fsck.fat finds every volume
 # sound, and mtools reads each file as the program left it. On MAME, whose
 # diskettes take the AT's time, a sector a turn, KERNEL.BIN takes half a
-# minute: the run ends once the lines are all there. DOSBox-X has no drive
-# C, and no interrupt from its diskette controller (docs/emulators.md).
+# minute: the run ends once the lines are all there.
 program: idle
 define: TEST_POSIX_DRIVES
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: prefix
 timeout: 300
-emulators: bochs mame
 fsck: A
 fsck: B
 fsck: C

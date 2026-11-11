@@ -9,6 +9,8 @@ define: TEST_POSIX_SIGNAL
 keys: {wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 240
+# DOSBox-X stops itself at an IRET with NT whose TSS is not busy, where a
+# 286 raises #TS (docs/emulators.md).
 emulators: bochs mame
 ---
 signal: a handler in a busy loop (3): exit 3

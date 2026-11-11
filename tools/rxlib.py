@@ -441,7 +441,11 @@ RUN_DISKS = os.path.join(ROOT, 'build', 'run-disks')    # make run's, which it w
 # `media:`): the first four in the emulator (LPT2's adapter gone: Bochs
 # only), the others in the run's copies of the images (damage_disks).
 MEDIA = ('B ejected', 'B protected', 'D absent', 'LPT2 absent', 'B damaged', 'D blank',
-         'B deep', 'B loop', 'B zerodir', 'B longnames')
+         'B deep', 'B loop', 'B zerodir', 'B longnames', 'B lowercase')
+# Those made to a run's copies of the images (damage_disks), which any
+# emulator takes; the others are an emulator's configuration
+IMAGE_MEDIA = ('B damaged', 'D blank', 'B deep', 'B loop', 'B zerodir', 'B longnames',
+               'B lowercase')
 # 'B deep': directories whose paths reach DOS's 64 characters (PATH_MAX).
 DEEP_PATH = '/'.join(c * 8 for c in 'ABCDEF')      # 54 characters as \AAAAAAAA...
 DEEP_FITS = 'ABCDEFG.X'          # \ and 9 more: exactly 64
@@ -453,8 +457,9 @@ DEEP_TOO_LONG = 'ABCDEFGH.XY'    # 66
 # megabytes, 16 by default: a fully loaded AT, so that every test runs with
 # the extended memory in many pieces (memory.md D13); MAME's AT is 640 KB, its RAM one of its -ramsize options, the
 # CMOS to match or the POST stops at error 164; DOSBox-X is any size, 512 KB
-# with extended memory by its ISA memory hole.
-MACHINES_DEFAULT = {'bochs': (639, 15360), 'mame': (640, 1024), 'dosbox-x': (640, 0)}
+# with extended memory by its ISA memory hole, and by default the least
+# machine rx286 runs on, an AT of 1 MB (disk-scheduler.md M8b).
+MACHINES_DEFAULT = {'bochs': (639, 15360), 'mame': (640, 1024), 'dosbox-x': (640, 384)}
 MAME_RAMSIZES = {0: '640K', 384: '1024K', 1024: '1664K', 1408: '2M', 3456: '4M',
                  7552: '8M', 14720: '15M'}
 EXTENDED_KB_MOST = 15360
@@ -552,7 +557,9 @@ def damage_disks(directory, media):
     'B loop' to itself, its 32 entries all used (os-server.md P15);
     'B zerodir' zeroes the first cluster of MANY's entry; 'B longnames'
     adds two files with long names (VFAT's entries before their 8.3 ones);
-    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG. Two
+    'B deep' adds DEEP_PATH, and in it DEEP_FITS and DEEP_TOO_LONG; 'B
+    lowercase' writes FRAG.TXT's name in B's root in lower case, as another
+    system might (disk-scheduler.md D19). Two
     changes of MANY at once ('B zerodir', 'B damaged', 'B loop') are
     refused, and so is a change of MANY when B has none: a test must never
     run on a drive it believes damaged and is not."""
@@ -575,6 +582,21 @@ def damage_disks(directory, media):
         with open(path, 'r+b') as f:
             f.truncate(0)
             f.truncate(size)
+    if 'B lowercase' in media:
+        path = os.path.join(directory, 'fdb.img')
+        with open(path, 'r+b') as f:
+            boot = f.read(512)
+            reserved = int.from_bytes(boot[0x0E:0x10], 'little')
+            fats, per_fat = boot[0x10], int.from_bytes(boot[0x16:0x18], 'little')
+            roots = int.from_bytes(boot[0x11:0x13], 'little')
+            at = (reserved + fats * per_fat) * 512
+            f.seek(at)
+            root = f.read(roots * 32)
+            found = [k for k in range(roots) if root[k * 32:k * 32 + 11] == b'FRAG    TXT']
+            if len(found) != 1:
+                raise ValueError("media: B lowercase: B's root holds %d FRAG.TXT" % len(found))
+            f.seek(at + found[0] * 32)
+            f.write(b'frag    txt')
     if 'B zerodir' in media:
         path = os.path.join(directory, 'fdb.img')
         with open(path, 'r+b') as f:
@@ -887,7 +909,7 @@ def normalise_transcript(raw):
 DOSBOX_TEMPLATE = os.path.join(ROOT, 'dosbox-x', 'rx286.conf.in')
 
 
-def run_dosbox(directory, image, serial, timeout, until,
+def run_dosbox(directory, image, serial, timeout, until, disks,
                printers=('/dev/null', '/dev/null'), log_port='com2', modem=None, machine=None):
     """Run DOSBox-X (a 286, roadmap M9) on an image without a window, until
     `until(lines)` holds of the transcript, the log in `serial` (from
@@ -898,6 +920,8 @@ def run_dosbox(directory, image, serial, timeout, until,
     log = 'file file:' + serial
     host, _, port = (modem or '').partition(':')
     text = text.replace('@IMAGE@', image)
+    for name in DISK_IMAGES:                # B, C and D: the run's own copies
+        text = text.replace('@%s@' % name.split('.')[0].upper(), os.path.join(disks, name))
     text = text.replace('@COM2@', log if log_port == 'com2' else
                         'nullmodem server:%s port:%s transparent:1' % (host, port) if modem
                         else 'dummy')
@@ -937,7 +961,9 @@ MAME_ROMS = os.path.expanduser('~/mame/roms')     # the IBM 5170 ROM set (docs/e
 def at_cmos(extended_kb=None):
     """The 64 bytes of CMOS of rx286's AT, as IBM's SETUP would leave them, so
     the real BIOS's power-on test passes in MAME: drive A 1.2 MB, B 360 KB, no
-    fixed disk, two diskette drives, a 287, an EGA, 640 KB and `extended_kb`
+    fixed disk (with types 2 and 1, IBM's BIOS on MAME's IDE card did not
+    boot again after Ctrl+Alt+Del: disk-scheduler.md M2), two diskette
+    drives, a 287, an EGA, 640 KB and `extended_kb`
     above 1 MB (MAME's default machine's), the checksum of 10h-2Dh (IBM,
     Technical Reference, 1-45 to 1-50). The extended memory must be what the
     POST finds, or it stops at error 164 (memory.md E1)."""
@@ -960,10 +986,22 @@ def at_cmos(extended_kb=None):
     return bytes(c)
 
 
+MAME_DISKS = (('hd0.img', 'c.chd', '%d,%d,%d' % (615, 4, 17)),    # AT types 2 and 1
+              ('hd1.img', 'd.chd', '%d,%d,%d' % (306, 4, 17)))
 MAME_STOP_SECONDS = 10       # for MAME to exit when mame/rx286.lua is asked, before a kill
 
 
-def run_mame(directory, image, serial, timeout, until, disks=None, media=(), machine=None):
+def blank_diskette(path, label, kb=1200):
+    """A fresh FAT12 volume of 1.2 MB or 360 KB, empty, of that label
+    (media-at: other)."""
+    with open(path, 'wb') as f:
+        f.truncate(kb * 1024)
+    subprocess.run(['mformat', '-i', path, '-f', str(kb), '-N', '4F544852', '-v', label, '::'],
+                   check=True, env=dict(os.environ, MTOOLS_SKIP_CHECK='1'))
+
+
+def run_mame(directory, image, serial, timeout, until, disks=None, media=(), machine=None,
+             media_at=()):
     """Run MAME's IBM PC/AT (a real 80286 core, IBM's BIOS; roadmap M9) on an
     image without a window, until `until(lines)` holds of the serial
     transcript or `timeout` seconds. `disks` is the run's own directory of
@@ -976,7 +1014,9 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
     to stop, the runner makes a file that mame/rx286.lua watches for, and
     the machine exits as at its own end, its diskettes written back;
     MAME_STOP_SECONDS later it is killed. (tools/run-test fails a test whose
-    diskette it checks if MAME left its image as it was.) SDL's dummy
+    diskette it checks if MAME left its image as it was.) `media_at` are
+    (seconds, 'eject' or 'insert', 'A' or 'B', image) changes that
+    mame/rx286.lua makes at those seconds of the machine's time (M8). SDL's dummy
     drivers keep MAME
     from opening any window: `-video none` alone still opens one under
     WSLg."""
@@ -987,16 +1027,19 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
     open(serial, 'wb').close()      # the null modem's file must exist
     args = []
     if disks:
-        # MAME knows a raw fixed disk by its name: .hd.
-        for name, drive in (('hd0.img', 'c.hd'), ('hd1.img', 'd.hd')):
-            link = os.path.join(disks, drive)
-            if not os.path.exists(link):
-                os.symlink(name, link)
+        # The fixed disks as CHDs of the AT's geometry, made from the run's raw
+        # images and taken back into them after the run (disk-scheduler.md D21,
+        # E1): from a raw image MAME's IDE card takes a geometry of its own
+        # (82 cylinders, 10 heads, 51 sectors for C), and its seeks with it.
+        for name, drive, chs in MAME_DISKS:
+            subprocess.run(['chdman', 'createhd', '-f', '-c', 'none', '-chs', chs, '-i',
+                            os.path.join(disks, name), '-o', os.path.join(disks, drive)],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if 'B ejected' not in media:
             args += ['-flop2', os.path.join(disks, 'fdb.img')]
-        args += ['-hard1', os.path.join(disks, 'c.hd')]
+        args += ['-hard1', os.path.join(disks, 'c.chd')]
         if 'D absent' not in media:
-            args += ['-isa4:ide:ide:1', 'hdd', '-hard2', os.path.join(disks, 'd.hd')]
+            args += ['-isa4:ide:ide:1', 'hdd', '-hard2', os.path.join(disks, 'd.chd')]
     stop = os.path.join(directory, 'mame-stop')
     if os.path.exists(stop):
         os.remove(stop)
@@ -1015,7 +1058,8 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
          '-seconds_to_run', str(int(timeout * 10))] + args,
         stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=directory,
         env=dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy',
-                 RX286_MAME_STOP=stop))
+                 RX286_MAME_STOP=stop,
+                 RX286_MAME_MEDIA=';'.join('%g %s %s %s' % c for c in media_at)))
     status = 'exit'
     while proc.poll() is None:
         if time.monotonic() - started > timeout:
@@ -1033,6 +1077,11 @@ def run_mame(directory, image, serial, timeout, until, disks=None, media=(), mac
             proc.kill()
             proc.wait()
     log.close()
+    for name, drive, chs in MAME_DISKS if disks else ():
+        if os.path.exists(os.path.join(disks, drive)):
+            subprocess.run(['chdman', 'extracthd', '-f', '-i', os.path.join(disks, drive),
+                            '-o', os.path.join(disks, name)],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return status, time.monotonic() - started
 
 

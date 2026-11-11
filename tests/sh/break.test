@@ -1,14 +1,13 @@
 # Ctrl+Break in the shell in C (roadmap os-server.md P9): cat, reading the
 # terminal, gets SIGINT, whose default action ends it; the shell, init's
-# child, goes on, and $? says 128 + 2.
+# child, goes on, and $? says 128 + 2. The keys after Ctrl+Break wait for
+# cat's end: typed at once, they could reach cat's read, still pending.
 program: sh
-# DOSBox-X has no disk controller rx286 can use (docs/emulators.md).
-emulators: bochs mame
-keys: cat\n{wait 20}{ctrl-break}echo $?\n
+keys: cat\n{wait 20}{ctrl-break}{wait 20}echo $?\n
 ---
 rx286, test build
-/a$ cat
+/mnt/rx286$ cat
 rx286: Ctrl+Break: SIGINT
-/a$ echo $?
+/mnt/rx286$ echo $?
 130
-/a$
+/mnt/rx286$

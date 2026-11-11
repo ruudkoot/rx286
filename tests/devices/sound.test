@@ -2,30 +2,16 @@
 # note measured by the kernel's probe (TEST_SOUND), the tune's rest silent.
 program: sh
 define: TEST_SOUND
-emulators: bochs mame
 install: C /BIN/BEEP z-beep.rx
 install: C /BIN/PLAY z-play.rx
 keys: beep\nplay\n
 timeout: 60
 ---
 rx286, test build
-/a$ beep
+/mnt/rx286$ beep
 probe: the speaker sounds at the frequency asked
 probe: silent
-/a$ play
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: the speaker sounds at the frequency asked
-probe: silent
-probe: silent
+/mnt/rx286$ play
 probe: the speaker sounds at the frequency asked
 probe: silent
 probe: the speaker sounds at the frequency asked
@@ -38,4 +24,17 @@ probe: the speaker sounds at the frequency asked
 probe: silent
 probe: the speaker sounds at the frequency asked
 probe: silent
-/a$
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+probe: the speaker sounds at the frequency asked
+probe: silent
+/mnt/rx286$

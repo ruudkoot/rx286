@@ -2,17 +2,13 @@
 # D18), the OS server's, which the root gave it: the counter faults once
 # (TEST_COUNTER_FAULT) while the shell waits for a key; the OS server
 # reports it with the module's name, and restarts it; the shell, in C, a
-# process (os-server.md P12), goes on. DOSBox-X's shell starts in /.
+# process (os-server.md P12), goes on.
 program: shell
 define: TEST_COUNTER_FAULT
 keys: {wait 20}echo hi\n
 ---
 rx286, test build
 rx286: counter fault #UD at 0007:{c:rx_ud2}
-@bochs /a$ echo hi
-@mame /a$ echo hi
-@dosbox-x /$ echo hi
+/mnt/rx286$ echo hi
 hi
-@bochs /a$
-@mame /a$
-@dosbox-x /$
+/mnt/rx286$

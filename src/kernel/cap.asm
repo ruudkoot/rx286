@@ -60,6 +60,7 @@ boot_info           times BOOT_INFO_SIZE db 0   ; the loader's (layout.inc; entr
                                         ;    the kernel's sizing: the root's to read (slot 102)
 msg_no_boot_info    db "the loader left no boot information: an older loader?", 0
 msg_too_little      db "too little memory for programs below 1 MB (UMEM_LEAST)", 0
+msg_least           db "too little memory: rx286 needs 639 KB below 1 MB and 384 KB above", 0
 thread_list         times THREAD_MAX dw 0   ; every thread, in the order made
 thread_count        dw 0
 obj_free_count      dw 0                ; the GDT pool's free descriptors (OBJ_FREE_OFF)
@@ -746,8 +747,9 @@ slot_put_descriptor:
 ;   Destroys: AX, CX, DX, SI, DI, ES
 ; ----------------------------------------------------------------------------
 boot_root:
-        call umem_size
         call ext_detect
+        call least_check
+        call umem_size
         push ds
         pop es
         mov si, memory_untyped          ; (its 32 KB: not the arena's, memory.md M4)
@@ -939,6 +941,29 @@ umem_size:
         mov [memory_untyped + SH_SIZE], cx
         pop cx
         pop bx
+        ret
+.stop:
+        xor bp, bp
+        jmp panic
+
+; ----------------------------------------------------------------------------
+; least_check - the least machine rx286 runs on (disk-scheduler.md M8b):
+; BASE_LEAST of base memory, as the BIOS said it to the loader, and
+; EXT_LEAST_KB of extended memory the kernel can use (A20 on: ext_detect).
+; On less the kernel stops, saying so: it does not try what nothing tests
+;   In:       DS = SEL_KDATA; ext_kb
+;   Out:      nothing (returns only on enough)
+;   Destroys: SI
+; ----------------------------------------------------------------------------
+least_check:
+        mov si, msg_no_boot_info
+        cmp word [boot_info + BI_MAGIC], BOOT_INFO_MAGIC
+        jne .stop
+        mov si, msg_least
+        cmp word [boot_info + BI_BASE_KB], BASE_LEAST >> 10
+        jb .stop
+        cmp word [ext_kb], EXT_LEAST_KB
+        jb .stop
         ret
 .stop:
         xor bp, bp
@@ -2308,6 +2333,10 @@ kc_test:
         je .ready
         cmp al, TEST_GIVE_WAY
         je .give_way
+        cmp al, TEST_END_SYNC
+        je .end_sync
+        cmp al, TEST_END_NOW
+        je test_end
         mov bx, test_mouse_ring
         cmp al, TEST_MOUSE_BYTE
         je .byte
@@ -2325,6 +2354,14 @@ kc_test:
         jmp kc_done.ok
 .ready:
         mov byte [test_keys_ready], 1
+        jmp kc_done.ok
+.end_sync:
+        mov ax, [bp + FRAME_DX]         ; the server's notification, for the end
+        mov cl, CAP_NOTIFY
+        call cap_get
+        jc kc_done.cap
+        mov ax, [es:si + SH_OBJECT]
+        mov [test_end_notify], ax
         jmp kc_done.ok
 .give_way:
         mov ax, [bp + FRAME_CX]

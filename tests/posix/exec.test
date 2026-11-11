@@ -1,6 +1,6 @@
 # Programs from disk (roadmap os-server.md P8): init starts
 # tests/posix/exec.c from /z (TEST_POSIX_EXEC), which runs programs from C,
-# finds them along PATH (/z, then /c/bin), runs two copies of one at once
+# finds them along PATH (/z, then /mnt/rx286c/bin), runs two copies of one at once
 # and finds them sharing their code, writes copies of a program with every
 # corruption of its header to B and is refused each, and times an exec from
 # C. run-test installs the programs on C first.
@@ -12,13 +12,12 @@ keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wai
 keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
 match: contains
 timeout: 300
-emulators: bochs mame
 install: C /BIN/CHILD z-child.rx
 install: C /BIN/CODES z-codes.rx
 fsck: B
 fsck: C
 ---
-child: argc 2: /c/bin/child one
+child: argc 2: /mnt/rx286c/bin/child one
 exec: a program on C (2): 2
 exec: codes, on C alone, along PATH (0): 0
 child: argc 2: child x

@@ -1,8 +1,8 @@
 /* ============================================================================
  * rx286 - tests/posix/codes.c
- * A program on C alone (/c/bin/codes, run-test's install:), for
+ * A program on C alone (/mnt/rx286c/bin/codes, run-test's install:), for
  * tests/posix/exec.c: with "exit" it ends at once; else it appends where its
- * code is (KCALL_SEGMENT on its slot 0) to /b/bases and spins until it is
+ * code is (KCALL_SEGMENT on its slot 0) to /mnt/rx286b/bases and spins until it is
  * killed, so that two of it run at once.
  * ============================================================================ */
 
@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     r.bp = 0;
     rx_kcall(&r);
     snprintf(line, sizeof line, "%02X%04X\n", r.dx & 0xFF, r.ax);
-    fd = open("/b/bases", O_WRONLY | O_CREAT | O_APPEND);
+    fd = open("/mnt/rx286b/bases", O_WRONLY | O_CREAT | O_APPEND);
     write(fd, line, 7);
     close(fd);
     for (;;)

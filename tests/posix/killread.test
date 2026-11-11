@@ -1,0 +1,17 @@
+# A process killed while its read of A waits (roadmap disk-scheduler.md
+# M4, D15, E10): init starts tests/posix/killread.c (TEST_POSIX_KILLREAD).
+# The child ends by SIGKILL once its call is over; the server goes on, and
+# A's KERNEL.BIN reads whole again.
+program: idle
+define: TEST_POSIX_KILLREAD
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+---
+killread: kill (0): 0
+killread: the child ended by SIGKILL: yes
+killread: KERNEL.BIN read again whole: yes
+killread: done

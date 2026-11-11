@@ -1,72 +1,70 @@
 # ls -l on every drive (roadmap os-server.md P9): the root, a subdirectory,
-# one file, and a directory of two clusters (B:\MANY: 42 entries of 32
-# bytes, 1 KB clusters); the server's own /, /dev and /z.
+# one file (its drive DOS's way, in capitals), and a directory of two
+# clusters (B:\MANY: 42 entries of 32 bytes, 1 KB clusters); the server's
+# own /, /dev and /z. Names are shown in lower case (disk-scheduler.md D19).
 program: sh
-emulators: bochs mame
-keys: ls -l /a; ls -l b:/; ls -l c:/docs C:/DOCS/HELLO.TXT; ls -l /d\n
+keys: ls -l /mnt/rx286; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /mnt/rx286d\n
 keys: ls -l b:/many\nls / /dev /z\n
 ---
 rx286, test build
-/a$ ls -l /a; ls -l b:/; ls -l c:/docs C:/DOCS/HELLO.TXT; ls -l /d
--rw-r--r-- {image_size8} KERNEL.BIN
--rw-r--r--       79 README.TXT
--rw-r--r--     3136 FRAG.TXT
--rw-r--r--       50 PAD.TXT
-drwxr-xr-x        0 MANY
+/mnt/rx286$ ls -l /mnt/rx286; ls -l b:/; ls -l c:/docs C:/docs/hello.txt; ls -l /mnt/rx286d
+-rw-r--r-- {image_size8} kernel.bin
+drwxr-xr-x        0 bin
+-rw-r--r--       79 readme.txt
+-rw-r--r--     3136 frag.txt
+-rw-r--r--       50 pad.txt
+drwxr-xr-x        0 many
 c:/docs:
--rw-r--r--       21 HELLO.TXT
--rw-r--r--      161 PRINTME.TXT
--rw-r--r--       21 C:/DOCS/HELLO.TXT
--rw-r--r--      142 README.TXT
-drwxr-xr-x        0 GAMES
-/a$ ls -l b:/many
--rw-r--r--       29 FILE01.TXT
--rw-r--r--       29 FILE02.TXT
--rw-r--r--       29 FILE03.TXT
--rw-r--r--       29 FILE04.TXT
--rw-r--r--       29 FILE05.TXT
--rw-r--r--       29 FILE06.TXT
--rw-r--r--       29 FILE07.TXT
--rw-r--r--       29 FILE08.TXT
--rw-r--r--       29 FILE09.TXT
--rw-r--r--       29 FILE10.TXT
--rw-r--r--       29 FILE11.TXT
--rw-r--r--       29 FILE12.TXT
--rw-r--r--       29 FILE13.TXT
--rw-r--r--       29 FILE14.TXT
--rw-r--r--       29 FILE15.TXT
--rw-r--r--       29 FILE16.TXT
--rw-r--r--       29 FILE17.TXT
--rw-r--r--       29 FILE18.TXT
--rw-r--r--       29 FILE19.TXT
--rw-r--r--       29 FILE20.TXT
--rw-r--r--       29 FILE21.TXT
--rw-r--r--       29 FILE22.TXT
--rw-r--r--       29 FILE23.TXT
--rw-r--r--       29 FILE24.TXT
--rw-r--r--       29 FILE25.TXT
--rw-r--r--       29 FILE26.TXT
--rw-r--r--       29 FILE27.TXT
--rw-r--r--       29 FILE28.TXT
--rw-r--r--       29 FILE29.TXT
--rw-r--r--       29 FILE30.TXT
--rw-r--r--       29 FILE31.TXT
--rw-r--r--       29 FILE32.TXT
--rw-r--r--       29 FILE33.TXT
--rw-r--r--       29 FILE34.TXT
--rw-r--r--       29 FILE35.TXT
--rw-r--r--       29 FILE36.TXT
--rw-r--r--       29 FILE37.TXT
--rw-r--r--       29 FILE38.TXT
--rw-r--r--       29 FILE39.TXT
--rw-r--r--       29 FILE40.TXT
-/a$ ls / /dev /z
+-rw-r--r--       21 hello.txt
+-rw-r--r--      161 printme.txt
+-rw-r--r--       21 C:/docs/hello.txt
+-rw-r--r--      142 readme.txt
+drwxr-xr-x        0 games
+/mnt/rx286$ ls -l b:/many
+-rw-r--r--       29 file01.txt
+-rw-r--r--       29 file02.txt
+-rw-r--r--       29 file03.txt
+-rw-r--r--       29 file04.txt
+-rw-r--r--       29 file05.txt
+-rw-r--r--       29 file06.txt
+-rw-r--r--       29 file07.txt
+-rw-r--r--       29 file08.txt
+-rw-r--r--       29 file09.txt
+-rw-r--r--       29 file10.txt
+-rw-r--r--       29 file11.txt
+-rw-r--r--       29 file12.txt
+-rw-r--r--       29 file13.txt
+-rw-r--r--       29 file14.txt
+-rw-r--r--       29 file15.txt
+-rw-r--r--       29 file16.txt
+-rw-r--r--       29 file17.txt
+-rw-r--r--       29 file18.txt
+-rw-r--r--       29 file19.txt
+-rw-r--r--       29 file20.txt
+-rw-r--r--       29 file21.txt
+-rw-r--r--       29 file22.txt
+-rw-r--r--       29 file23.txt
+-rw-r--r--       29 file24.txt
+-rw-r--r--       29 file25.txt
+-rw-r--r--       29 file26.txt
+-rw-r--r--       29 file27.txt
+-rw-r--r--       29 file28.txt
+-rw-r--r--       29 file29.txt
+-rw-r--r--       29 file30.txt
+-rw-r--r--       29 file31.txt
+-rw-r--r--       29 file32.txt
+-rw-r--r--       29 file33.txt
+-rw-r--r--       29 file34.txt
+-rw-r--r--       29 file35.txt
+-rw-r--r--       29 file36.txt
+-rw-r--r--       29 file37.txt
+-rw-r--r--       29 file38.txt
+-rw-r--r--       29 file39.txt
+-rw-r--r--       29 file40.txt
+/mnt/rx286$ ls / /dev /z
 /:
-a
-b
-c
-d
 dev
+mnt
 z
 /dev:
 null
@@ -88,10 +86,4 @@ tty7
 tty8
 /z:
 init
-sh
-echo
-cat
-ls
-clock
-counter
-/a$
+/mnt/rx286$

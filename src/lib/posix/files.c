@@ -108,6 +108,24 @@ int rmdir(const char *path)
     return px(PX_RMDIR, 0, 0, P(path), 0, 0) < 0 ? -1 : 0;
 }
 
+/* eject - PX_EJECT: a diskette's volume forgotten (rx286's own) */
+int eject(const char *path)
+{
+    return px(PX_EJECT, 0, 0, P(path), 0, 0) < 0 ? -1 : 0;
+}
+
+/* rx_format - PX_FORMAT: the formatter's way to a drive (rx286's own;
+ * disk-scheduler.md M9): its result, or -1 and errno; SI out in *si_out */
+int rx_format(int drive, int op, unsigned cx, unsigned si, void *buffer, unsigned *si_out)
+{
+    rx_u16 out = 0;
+    int n = px(PX_FORMAT, (rx_u16)(drive | (op << 8)), (rx_u16)cx, (rx_u16)si, P(buffer), &out);
+
+    if (si_out)
+        *si_out = out;
+    return n;
+}
+
 /* mkdir - PX_MKDIR (a mode, which FAT12 cannot keep, is not taken) */
 int mkdir(const char *path, int mode)
 {

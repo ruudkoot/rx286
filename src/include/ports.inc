@@ -101,6 +101,7 @@ CMOS_REG_D          equ 0x0D
 CMOS_REG_D_VRT      equ 0x80        ; register D: the battery is good, the time valid
 CMOS_SHUTDOWN       equ 0x0F        ; the BIOS's shutdown status byte; 0 = soft reset
 CMOS_CENTURY        equ 0x32
+CMOS_DISK_TYPES     equ 0x12        ; the fixed disks' types: disk 0 high nibble, 1 low
 CMOS_EXT_LOW        equ 0x30        ; the KB of extended memory the POST found
 CMOS_EXT_HIGH       equ 0x31
 CMOS_REG_A_UIP      equ 0x80        ; update in progress
@@ -125,16 +126,24 @@ HDC_STATUS          equ 0x1F7       ; read
 HDC_COMMAND         equ 0x1F7       ; write
 HDC_CONTROL         equ 0x3F6
 HDC_STATUS_BSY      equ 0x80        ; busy: no other bit is valid
+HDC_STATUS_READY    equ 0x40        ; the drive is ready
 HDC_STATUS_WRITE_FAULT equ 0x20
+HDC_STATUS_DSC      equ 0x10        ; Seek Complete: the drive's heads are on their cylinder
 HDC_STATUS_DRQ      equ 0x08        ; data request: the sector buffer wants service
 HDC_STATUS_ERR      equ 0x01        ; the error register says why
 HDC_DRIVE_HEAD_BASE equ 0xA0        ; bits 7 and 5 always set; bit 4 the drive, 0-3 the head
 HDC_DRIVE_1         equ 0x10
 HDC_CONTROL_RESET   equ 0x04        ; the fixed disk register: reset the controller
 HDC_CONTROL_RUN     equ 0x00        ; out of reset, at most 8 heads
+HDC_CONTROL_HEADS   equ 0x08        ; more than 8 heads (head select 3)
 HDC_CMD_RESTORE     equ 0x10        ; heads to cylinder 0; implied seeks step at 35 us
 HDC_CMD_READ        equ 0x20        ; read sectors, with retries
 HDC_CMD_WRITE       equ 0x30        ; write sectors, with retries
+HDC_CMD_VERIFY      equ 0x40        ; read sectors, checking them, none transferred (retries)
+HDC_CMD_FORMAT      equ 0x50        ; format a track: the sector count its sectors, the
+                                    ;    interleave table its one sector of data (p. 9)
+HDC_CMD_SEEK        equ 0x70        ; the heads to the task file's cylinder: done once the
+                                    ;    steps are sent (WD1010-05; disk-scheduler.md W2)
 HDC_CMD_SET_PARAMETERS equ 0x91     ; heads (drive/head register) and sectors a track (count)
 HDC_PRECOMP_SHIFT   equ 2           ; the precompensation register holds the cylinder / 4
 
@@ -212,20 +221,29 @@ FDC_MSR_RQM         equ 0x80        ; the data register is ready
 FDC_MSR_DIO         equ 0x40        ; set: controller to processor
 FDC_RATE_500K       equ 0x00        ; 1.2 MB media in a 1.2 MB drive
 FDC_RATE_250K       equ 0x02        ; 360 KB media in a 360 KB drive
+FDC_RATE_300K       equ 0x01        ; 360 KB media in a 1.2 MB drive (disk-scheduler.md D13)
+FDC_DIR_CHANGED     equ 0x80        ; FDC_DIR's change line: no diskette since the last step
 FDC_CMD_SPECIFY     equ 0x03
 FDC_CMD_RECALIBRATE equ 0x07
 FDC_CMD_SENSE_INT   equ 0x08
 FDC_CMD_SEEK        equ 0x0F
 FDC_CMD_READ        equ 0x46        ; read data, MFM
 FDC_CMD_WRITE       equ 0x45        ; write data, MFM
+FDC_CMD_FORMAT      equ 0x4D        ; format a track, MFM: its sectors' IDs by DMA, four bytes
+                                    ;    each (cylinder, head, sector, size)
 FDC_SPECIFY_1       equ 0xDF        ; step rate and head unload: the BIOS's (5-170)
 FDC_SPECIFY_2       equ 0x02        ; head load 2 ms, DMA
 FDC_SIZE_512        equ 2           ; N: 128 << 2 bytes a sector
 FDC_DTL             equ 0xFF        ; unused with N = 2
 FDC_GAP_1200K       equ 0x1B        ; gap 3: 1.2 MB media in a 1.2 MB drive (BIOS)
 FDC_GAP_360K        equ 0x2A        ; 360 KB media in a 360 KB drive
+FDC_FORMAT_GAP_1200K equ 0x54       ; gap 3 for formatting 1.2 MB media (the BIOS's)
+FDC_FORMAT_GAP_360K equ 0x50        ;    and 360 KB media
+FDC_FILLER          equ 0xF6        ; a formatted sector's bytes (the BIOS's)
 FDC_ST0_CODE        equ 0xC0        ; ST0's interrupt code: 0 when the command succeeded
 FDC_ST0_SEEK_END    equ 0x20
+FDC_ST0_INVALID     equ 0x80        ; ST0 of an invalid command: Sense Interrupt Status with
+                                    ;    no interrupt pending
 FDC_ST1_NOT_WRITABLE equ 0x02       ; the diskette is write-protected
 
 ; ---------------------------------------------------------------- Bochs only (test builds)

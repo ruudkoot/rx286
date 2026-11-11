@@ -10,20 +10,17 @@
 
 #include "fs.h"
 
-#define MBR_SIGNATURE 0x1FE
-#define MBR_PARTITIONS 0x1BE
-#define PARTITION_FAT12 0x01
-#define BOOT_SIGNATURE 0xAA55
 #define FAT12_FREE 0
 #define FAT12_LAST 0xFFF                /* the end of a chain, as written */
 #define ENTRIES (SECTOR_SIZE / DIR_ENTRY_SIZE)
 
-/* The last directory walked (vol_dir_entry): its drive and first cluster,
- * and the cluster its walk reached, that step along its chain (P15) */
+/* The last directory walked on each drive (vol_dir_entry): its first
+ * cluster, and the cluster its walk reached, that step along its chain
+ * (P15); a drive's own, since calls on two volumes run at once (M4) */
 static struct {
-    rx_u8 valid, drive;
+    rx_u8 valid;
     rx_u16 first, step, cluster;
-} walk;
+} walks[DRIVES];
 
 /* w16 - a little-endian word of a segment */
 static rx_u16 w16(const rx_u8 RX_FAR *p)
@@ -45,34 +42,21 @@ static void bytes_out(rx_u8 RX_FAR *to, const rx_u8 *from, unsigned n)
         *to++ = *from++;
 }
 
-/* vol_mount - a drive's FAT12 volume: on a fixed disk, the master boot
- * record's first FAT12 partition; its BPB checked */
+/* vol_mount - a drive's FAT12 volume, as the disk server gives it: a
+ * diskette whole, or a fixed disk's first FAT12 partition, which the disk
+ * server finds (disk-scheduler.md M3); its BPB checked */
 rx_u16 vol_mount(struct vol *v, unsigned drive)
 {
     const rx_u8 RX_FAR *io;
-    const rx_u8 RX_FAR *p = 0;
     rx_u16 error, total, entries, clusters;
     rx_u32 fats;
-    int slot, i;
+    int slot;
 
-    walk.valid = 0;                     /* (another disk, perhaps) */
+    walks[drive].valid = 0;             /* (another disk, perhaps) */
     v->drive = (rx_u8)drive;
-    v->start = 0;
-    if (drive >= DRIVE_C) {
-        if ((error = cache_get(drive, 0, 1, &slot)) != 0)
-            return error;
-        io = cache_bytes(slot);
-        if (w16(io + MBR_SIGNATURE) != BOOT_SIGNATURE)
-            return E_NOT_FAT12;
-        for (i = 0; i < 4; i++) {
-            p = io + MBR_PARTITIONS + i * 16;
-            if (p[4] == PARTITION_FAT12)
-                break;
-        }
-        if (i == 4 || w16(p + 10) != 0)
-            return E_NOT_FAT12;
-        v->start = w16(p + 8);
-    }
+    v->start = 0;                       /* (the disk server's volumes: M3) */
+    if ((error = disk_volume(drive)) != 0)
+        return error;
     if ((error = cache_get(drive, v->start, 1, &slot)) != 0)
         return error;
     io = cache_bytes(slot);
@@ -153,7 +137,7 @@ rx_u16 vol_fat_set(struct vol *v, rx_u16 cluster, rx_u16 value)
     rx_u16 at = (rx_u16)(cluster + cluster / 2), error;
     unsigned copy;
 
-    walk.valid = 0;                     /* (a chain may change) */
+    walks[v->drive].valid = 0;          /* (a chain may change) */
     if (cluster < FAT12_FIRST_CLUSTER || cluster >= v->clusters + FAT12_FIRST_CLUSTER)
         return E_BROKEN;
     for (copy = 0; copy < v->fats; copy++) {
@@ -262,9 +246,10 @@ rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *wher
         target = index / per;
         step = 0;
         c = dir;
-        if (walk.valid && walk.drive == v->drive && walk.first == dir && walk.step <= target) {
-            step = walk.step;
-            c = walk.cluster;
+        if (walks[v->drive].valid && walks[v->drive].first == dir
+                && walks[v->drive].step <= target) {
+            step = walks[v->drive].step;
+            c = walks[v->drive].cluster;
         }
         for (; step < target; step++) {
             if ((error = vol_fat_get(v, c, &c)) != 0)
@@ -277,11 +262,10 @@ rx_u16 vol_dir_entry(struct vol *v, rx_u16 dir, rx_u16 index, struct place *wher
                     || step + 1u >= v->clusters)
                 return E_BROKEN;
         }
-        walk.valid = 1;
-        walk.drive = (rx_u8)v->drive;
-        walk.first = dir;
-        walk.step = target;
-        walk.cluster = c;
+        walks[v->drive].valid = 1;
+        walks[v->drive].first = dir;
+        walks[v->drive].step = target;
+        walks[v->drive].cluster = c;
         sector = (rx_u16)(vol_cluster_sector(v, c) + (index % per) / ENTRIES);
     }
     if ((error = cache_get(v->drive, sector, 1, &slot)) != 0)

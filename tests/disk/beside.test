@@ -1,0 +1,17 @@
+# Two volumes at once (roadmap disk-scheduler.md M4, D15, E8): init starts
+# tests/posix/beside.c (TEST_POSIX_BESIDE), which reads C's NUMBERS.TXT ten
+# times alone, then ten times beside a child reading A's KERNEL.BIN. The OS
+# server gives its lock up while it waits for the disk server, and a call
+# holds its own volume's lock alone, so the reader of C waits for none of
+# A's reads: it takes at most three times as long beside A (E8: 2.3).
+program: idle
+define: TEST_POSIX_BESIDE
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+---
+beside: C beside A within three times C alone: yes
+beside: done

@@ -6,7 +6,6 @@
 # any case; a command of redirections alone opens its files; a lone Esc
 # eats no key. tests/sh/review3.test has the rest.
 program: sh
-emulators: bochs mame
 install: C /BIN/SLEEP z-sleep.rx
 install: C /BIN/KILL z-kill.rx
 install: C /BIN/CP z-cp.rx
@@ -17,33 +16,33 @@ keys: echo 012345678901234567890123456789012345678901234567890123456789012345678
 keys: sleep 5 &\nsleep 1 &\n{wait 150}fg; echo [$?]\n
 keys: echo "a\\b" "c:\\dos"\n
 keys: kill -0 32100; echo [$?]\nkill -9; echo [$?]\nkill -s term 99; echo [$?]\n
-keys: > /b/new.txt; ls /b/new.txt\n
+keys: > /mnt/rx286b/new.txt; ls /mnt/rx286b/new.txt\n
 keys: {esc}xecho hi\n
 ---
 rx286, test build
-/a$ echo 01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678;c:
+/mnt/rx286$ echo 01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678;c:
 sh: the line is too long
-/a$ sleep 5 &
+/mnt/rx286$ sleep 5 &
 [1] 10
-/a$ sleep 1 &
+/mnt/rx286$ sleep 1 &
 [2] 11
-/a$ fg; echo [$?]
+/mnt/rx286$ fg; echo [$?]
 sleep 5
 [0]
 [2] Done  sleep 1
-/a$ echo "a\b" "c:\dos"
+/mnt/rx286$ echo "a\b" "c:\dos"
 a\b c:\dos
-/a$ kill -0 32100; echo [$?]
+/mnt/rx286$ kill -0 32100; echo [$?]
 kill: 32100: no such process
 [1]
-/a$ kill -9; echo [$?]
+/mnt/rx286$ kill -9; echo [$?]
 usage: kill [-s NAME | -NAME | -NUMBER] [--] PID...; kill -l [STATUS]
 [1]
-/a$ kill -s term 99; echo [$?]
+/mnt/rx286$ kill -s term 99; echo [$?]
 kill: 99: no such process
 [1]
-/a$ > /b/new.txt; ls /b/new.txt
-/b/new.txt
-/a$ xecho hi
+/mnt/rx286$ > /mnt/rx286b/new.txt; ls /mnt/rx286b/new.txt
+/mnt/rx286b/new.txt
+/mnt/rx286$ xecho hi
 sh: xecho: no such file or directory
-/a$
+/mnt/rx286$

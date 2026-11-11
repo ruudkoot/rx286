@@ -25,7 +25,7 @@ terminal's.
 The first terminal's output and echo go to the kernel's log too: it is
 the transcript the tests read. The others' go to their pages alone. In a
 `TEST_SCREEN` build the console driver puts each page `DRV_CON_SHOW` shows
-on the log ("screen 1 03: /a$ echo two"), its attributes as `<XX>`, so
+on the log ("screen 1 03: /mnt/rx286$ echo two"), its attributes as `<XX>`, so
 that a test can read the other terminals.
 
 ## The keys
@@ -40,7 +40,8 @@ A to D, Home and End ESC [ H and F, Insert, Delete, Page Up and Page Down
 ESC [ 2 ~, 3 ~, 5 ~ and 6 ~, F1 to F4 ESC O P to S, F5 to F10 ESC [ 15 ~
 and 17 ~ to 21 ~. Alt+F1 to F8 are the server's, and never reach a
 terminal. Ctrl+Break is INTR for the terminal shown; Ctrl+Alt+Del is the
-keyboard driver's, which resets the machine.
+keyboard driver's, which has the OS server write what it holds and then
+resets the machine.
 
 A queue holds `MAX_CANON` (255) bytes. A process's read waits in its
 server thread until there is enough, which the tty thread wakes it for; a
@@ -121,7 +122,7 @@ the terminal's modes, and `fg` gives them back (XCU 2.11).
 
 init (*docs/processes.md*, *init*) runs a shell on each terminal, as getty
 does: a child of its own leads a session, opens `/dev/ttyN`, which so
-becomes its session's, as descriptors 0 to 2, and runs `/z/sh`. On the
+becomes its session's, as descriptors 0 to 2, and runs the boot diskette's `/mnt/rx286/bin/sh`. On the
 first terminal it does so at once; on the others it says "rx286 terminal
 N: press Enter for a shell" and waits for Enter, so that a shell's memory
 is taken only where one is wanted. A shell that ends is started again.

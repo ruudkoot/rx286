@@ -3,7 +3,6 @@
 # cd, in either case; alias lists them, and unalias takes one away, from
 # the next line on (an alias is put in as its line is read: XCU 2.3.1).
 program: shell
-emulators: bochs mame
 install: C /BIN/CP z-cp.rx
 install: C /BIN/MV z-mv.rx
 install: C /BIN/RM z-rm.rx
@@ -14,21 +13,21 @@ keys: dir d\ndel d/g.txt; rd d; C:\npwd\nalias\nunalias dir; dir\ndir\n
 timeout: 60
 ---
 rx286, test build
-/a$ dir c:/docs
--rw-r--r--       21 HELLO.TXT
--rw-r--r--      161 PRINTME.TXT
-/a$ type c:/docs/hello.txt
+/mnt/rx286$ dir c:/docs
+-rw-r--r--       21 hello.txt
+-rw-r--r--      161 printme.txt
+/mnt/rx286$ type c:/docs/hello.txt
 Hello from C:\DOCS.
-/a$ b:
-/b$ pwd
-/b
-/b$ md d; copy frag.txt d/f.txt; ren d/f.txt d/g.txt
-/b$ dir d
--rw-r--r--     3136 G.TXT
-/b$ del d/g.txt; rd d; C:
-/c$ pwd
-/c
-/c$ alias
+/mnt/rx286$ b:
+/mnt/rx286b$ pwd
+/mnt/rx286b
+/mnt/rx286b$ md d; copy frag.txt d/f.txt; ren d/f.txt d/g.txt
+/mnt/rx286b$ dir d
+-rw-r--r--     3136 g.txt
+/mnt/rx286b$ del d/g.txt; rd d; C:
+/mnt/rx286c$ pwd
+/mnt/rx286c
+/mnt/rx286c$ alias
 alias dir=ls -l
 alias type=cat
 alias print=lp
@@ -38,19 +37,19 @@ alias ren=mv
 alias md=mkdir
 alias rd=rmdir
 alias cls=clear
-alias a:=cd /a
-alias b:=cd /b
-alias c:=cd /c
-alias d:=cd /d
-alias A:=cd /a
-alias B:=cd /b
-alias C:=cd /c
-alias D:=cd /d
-/c$ unalias dir; dir
--rw-r--r--      142 README.TXT
-drwxr-xr-x        0 DOCS
--rw-r--r--    29000 NUMBERS.TXT
-drwxr-xr-x        0 BIN
-/c$ dir
+alias a:=cd a:
+alias b:=cd b:
+alias c:=cd c:
+alias d:=cd d:
+alias A:=cd a:
+alias B:=cd b:
+alias C:=cd c:
+alias D:=cd d:
+/mnt/rx286c$ unalias dir; dir
+-rw-r--r--      142 readme.txt
+drwxr-xr-x        0 docs
+-rw-r--r--    29000 numbers.txt
+drwxr-xr-x        0 bin
+/mnt/rx286c$ dir
 sh: dir: no such file or directory
-/c$
+/mnt/rx286c$

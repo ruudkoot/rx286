@@ -2,6 +2,7 @@
 program: additions
 define: TEST_CAPS
 define: TEST_ADD_SEAL
+# DOSBox-X lets a write through CS go through (docs/emulators.md).
 emulators: bochs mame
 match: contains
 timeout: 120

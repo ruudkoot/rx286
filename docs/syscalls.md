@@ -82,7 +82,7 @@ sound.
 A key without ASCII (an arrow, a function key) has 0 in its first byte; a
 program looks at its scancode, and `drivers.inc` names those the shell
 used: `SC_ESC`, `SC_UP`, `SC_DOWN`, `SC_LEFT`, `SC_RIGHT`. Ctrl+Alt+Del
-never reaches a program: the kernel acts on it.
+never reaches a program: the keyboard driver acts on it.
 
 A program's fault comes to the server on the same endpoint, badged
 `FAULT_BADGE`: it reports the fault as the kernel did, "rx286: attack fault

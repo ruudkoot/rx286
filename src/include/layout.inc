@@ -31,7 +31,7 @@ LOADER_BUF_END      equ 0x10000
 ; part comes first, then the kernel's sizing (BI_UMEM_*). A later roadmap
 ; adds to it: 0 is "not given" in every field.
 BOOT_INFO_PHYS      equ 0x00600     ; past the BIOS's byte at 500h (its print-screen status)
-BOOT_INFO_SIZE      equ 32
+BOOT_INFO_SIZE      equ 40
 BOOT_INFO_MAGIC     equ 'BI'
 BI_MAGIC            equ 0           ; BOOT_INFO_MAGIC
 BI_SIZE             equ 2           ; the bytes the loader gave
@@ -43,6 +43,26 @@ BI_EBDA             equ 10          ; the EBDA's segment, if 40:0Eh holds INT 12
 BI_DRIVE            equ 12          ; the boot drive (a byte)
 BI_UMEM_START       equ 16          ; the kernel's: the memory for programs below 1 MB,
 BI_UMEM_END         equ 18          ;    from and to (paragraphs)
+; The drives (roadmap disk-scheduler.md M2, D16): the loader's again
+BI_FD_TYPES         equ 20          ; INT 13h AH=15h for diskette drives 0 and 1, a byte each:
+                                    ;    1 no change line (360 KB), 2 a change line (1.2 MB),
+                                    ;    0 none or not asked
+BI_HD0              equ 24          ; fixed disk 0's parameters, from the table INT 41h points
+BI_HD1              equ 32          ;    to (46h for disk 1), when CMOS 12h gives it a type;
+                                    ;    else all 0, and the driver takes disks.inc's
+BIH_CYLINDERS       equ 0           ; a word
+BIH_HEADS           equ 2           ; a byte
+BIH_PRECOMP         equ 3           ; a word: the cylinder from which writes are precompensated
+BIH_CONTROL         equ 5           ; a byte: the table's control byte
+BIH_SECTORS         equ 6           ; a byte: sectors a track
+BIH_SIZE            equ 8
+BIOS_VEC_DISK0_TABLE equ 0x41       ; real-mode vectors that point to the fixed disks' tables
+BIOS_VEC_DISK1_TABLE equ 0x46
+FD_TBL_CYLINDERS    equ 0           ; the BIOS's table of a fixed disk type (FD_TBL)
+FD_TBL_HEADS        equ 2
+FD_TBL_PRECOMP      equ 5
+FD_TBL_CONTROL      equ 8
+FD_TBL_SECTORS      equ 14
 
 ; ---------------------------------------------------------------- the boot image
 KERNEL_PHYS         equ 0x10000     ; KERNEL.BIN, the boot image, is loaded here (64 KB aligned)
@@ -126,7 +146,10 @@ UMEM_ALIGN          equ 0x400
 UMEM_END            equ 0xA0000
 UMEM_LEAST          equ 0x30000     ; the least the kernel runs with: what the root needs to
                                     ;    build the boot modules (memory.md D4, E3)
-BASE_LEAST          equ 0x80000     ; the least base memory of the machines rx286 is for
+BASE_LEAST          equ 0x9FC00     ; the least machine (the owner's, disk-scheduler.md M8b):
+                                    ;    639 KB of base memory (the BIOS's own 1 KB at the
+EXT_LEAST_KB        equ 384         ;    top of 640) and 384 KB of extended memory, as an AT
+                                    ;    of 1 MB had; the kernel stops on less (least_check)
 SPACE_MAX           equ 128         ; spaces (space_list)
 THREAD_MAX          equ 192         ; threads (thread_list)
 
@@ -140,7 +163,7 @@ GDT_OFF             equ GDT_PHYS - KDATA_BASE           ; the GDT
 OBJ_FREE_OFF        equ OBJ_FREE_PHYS - KDATA_BASE      ; its pool's free descriptors
 
 %if KERNEL_PHYS + IMAGE_MAX + UMEM_LEAST > BASE_LEAST
-  %error "layout.inc: the image's room leaves a 512 KB machine too little for programs"
+  %error "layout.inc: the image's room leaves the least machine too little for programs"
 %endif
 %if BOOT_INFO_PHYS < 0x510 || BOOT_INFO_PHYS + BOOT_INFO_SIZE > DFSTACK_PHYS + DFSTACK_SIZE
   %error "layout.inc: the boot information must lie past 50Fh, in the double fault's stack"

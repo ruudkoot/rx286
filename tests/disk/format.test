@@ -1,0 +1,27 @@
+# The formatter (roadmap disk-scheduler.md M9, D17): format b: lays B out
+# anew as DOS does, 360 KB, each cylinder's sector 1 three places on from
+# the last's; a file written there afterwards is on the host's image, and
+# fsck.fat finds the volume sound. format c: -y: the emulators' IDE drives
+# abort Format Track (E1), so its first track is bad, where the volume's
+# tables go, and format stops there: C as it was, and working.
+# DOSBox-X's 765 has no Format Track (docs/emulators.md).
+program: sh
+emulators: bochs mame
+install: C /BIN/FORMAT z-format.rx
+keys: format b:\necho made by rx286 > b:/new.txt; ls -l b:\n
+keys: format c: -y\nls c:/docs\n
+fsck: B
+file: B /NEW.TXT made by rx286\n
+timeout: 240
+---
+rx286, test build
+/mnt/rx286$ format b:
+format: b: 362496 bytes free, 0 in bad clusters
+/mnt/rx286$ echo made by rx286 > b:/new.txt; ls -l b:
+-rw-r--r--       14 new.txt
+/mnt/rx286$ format c: -y
+format: c: track 0/0 is bad, where the volume's tables go
+/mnt/rx286$ ls c:/docs
+hello.txt
+printme.txt
+/mnt/rx286$

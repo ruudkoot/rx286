@@ -32,13 +32,20 @@
 #   debugger: info gdt 0 11     ...and commands to run there; may repeat. The
 #                               one needs the other
 #   emulators: bochs dosbox-x   where the test applies (default: all)
+#   media-at: 30 eject A        a diskette taken out of A or B, or put in, at
+#   media-at: 40 insert A self  so many seconds of the machine's time: its own
+#                               image (self), B's 360 KB one (b), or a fresh
+#                               volume labelled OTHER of the drive's size
+#                               (other). MAME's
+#                               alone (mame/rx286.lua; disk-scheduler.md M8)
 #   media: B ejected            change a drive: B ejected, B protected, D absent,
 #                               LPT2 absent (no adapter),
 #                               B damaged (MANY's chain leaves the volume),
 #                               D blank (no partition), B deep (paths of 64
 #                               characters: rxlib.DEEP_PATH), B loop (MANY's
 #                               chain to itself), B zerodir (MANY's cluster
-#                               0), B longnames (two VFAT names); may repeat
+#                               0), B longnames (two VFAT names), B lowercase
+#                               (FRAG.TXT's name in lower case); may repeat
 #   lpt1: text\r                a line LPT1 must have printed, then LF; may
 #                               repeat: byte for byte the whole of what it
 #                               printed (\r CR, \f a form feed, \t, \s a
@@ -144,12 +151,14 @@ TIMEOUT_SCALE = {'bochs': 1, 'dosbox-x': 2, 'mame': 4}
 FLOPPY_DATA_BYTES = (2400 - 4 - 2 * 7 - 14) * 512
 # What each emulator can do of what a test asks (docs/emulators.md): the
 # drives it has (fsck:, file:, install:, media:), the media changes it makes,
-# its printers and the modem. DOSBox-X mounts drive A alone; MAME's AT has no
+# its printers and the modem. DOSBox-X takes the changes made to the images
+# alone (rxlib.IMAGE_MEDIA); MAME's AT has no
 # printer port, no COM3 for the log, and no write protection from its
 # command line (rxlib.run_mame).
 CAN = {'bochs': {'drives': 'ABCD', 'media': set(rxlib.MEDIA), 'printers': True,
                  'modem': True},
-       'dosbox-x': {'drives': 'A', 'media': set(), 'printers': True, 'modem': True},
+       'dosbox-x': {'drives': 'ABCD', 'media': set(rxlib.IMAGE_MEDIA), 'printers': True,
+                    'modem': True},
        'mame': {'drives': 'ABCD', 'media': set(rxlib.MEDIA) - {'B protected', 'LPT2 absent'},
                 'printers': False, 'modem': False}}
 MATCHES = ('full', 'prefix', 'contains')
@@ -185,6 +194,7 @@ class Test:
         self.expected = []
         self.forbidden = []                 # lines the transcript must not hold
         self.machines = []                  # (base, extended) KB: memory: lines
+        self.media_at = []                  # (seconds, eject|insert, A|B, image): media-at:
         self.machine = None                 # the run's, of machines (None: the default)
         self.parse(open(path, encoding='utf-8').read())
 
@@ -249,6 +259,14 @@ class Test:
                 if not value:
                     raise ValueError('%s: an empty forbid line' % self.path)
                 self.forbidden.append(value)
+            elif key == 'media-at':
+                parts = value.split()
+                if (len(parts) not in (3, 4) or parts[1] not in ('eject', 'insert')
+                        or parts[2] not in ('A', 'B') or (parts[1] == 'insert') != (len(parts) == 4)
+                        or (len(parts) == 4 and parts[3] not in ('self', 'b', 'other'))):
+                    raise ValueError('%s: bad media-at line %r' % (self.path, line))
+                self.media_at.append((float(parts[0]), parts[1], parts[2],
+                                      parts[3] if len(parts) == 4 else ''))
             elif key == 'memory':
                 sizes = value.split()
                 if len(sizes) != 2 or not all(re.fullmatch(r'\d+[KM]', x) for x in sizes):
@@ -296,6 +314,8 @@ class Test:
             return 'no printers'
         if self.modem and not can['modem']:
             return 'no modem (the log moves to COM3)'
+        if self.media_at and emulator != 'mame':
+            return 'no media change mid-run'
         return None
 
     @property
@@ -827,13 +847,26 @@ def run_one(test):
         status, _ = rxlib.run_bochs(bochsrc, rc, timeout, until=until, serial=serial,
                                     log=os.path.join(r, 'bochs.log'), disks=disks)
     elif EMULATOR == 'dosbox-x':
-        status, _ = rxlib.run_dosbox(r, os.path.join(r, 'run.img'), serial, timeout, until,
+        status, _ = rxlib.run_dosbox(r, os.path.join(r, 'run.img'), serial, timeout, until, disks,
                                      printers=printers, modem=modem,
                                      log_port='com3' if test.modem else 'com2',
                                      machine=test.machine)
     else:
+        changes = []                    # media-at: the images, by path
+        for seconds, what, drive, image in test.media_at:
+            path = ''
+            if image == 'self':
+                path = os.path.join(r, DRIVE_IMAGES[drive])
+            elif image == 'b':
+                path = os.path.join(r, DRIVE_IMAGES['B'])
+            elif image == 'other':          # (A's 1.2 MB, B's 360 KB)
+                path = os.path.join(disks, 'other-%s.img' % drive.lower())
+                if not os.path.exists(path):
+                    rxlib.blank_diskette(path, 'OTHER', 1200 if drive == 'A' else 360)
+            changes.append((seconds, what, drive, path))
         status, _ = rxlib.run_mame(r, os.path.join(r, 'run.img'), serial, timeout, until,
-                                   disks=disks, media=test.media, machine=test.machine)
+                                   disks=disks, media=test.media, machine=test.machine,
+                                   media_at=changes)
     if peer:
         peer.close()
     transcript = rxlib.normalise_transcript(open(serial, 'rb').read()) \

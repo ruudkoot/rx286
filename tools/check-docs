@@ -37,6 +37,7 @@ COVERED = {
     'os.inc': 'docs/os-server.md',
     'drivers.inc': 'docs/drivers.md',
     'disks.inc': 'docs/storage.md',
+    'disk.inc': 'docs/disk-server.md',
     'exe.inc': 'docs/c.md',
     'posix.inc': ('docs/processes.md', 'docs/terminals.md', 'docs/posix.md'),
     'archive.inc': 'docs/processes.md',

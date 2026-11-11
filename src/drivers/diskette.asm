@@ -4,18 +4,25 @@
 ; and B on the NEC uPD765 of the AT's fixed disk and diskette adapter,
 ; IRQ6 and DMA channel 2, in ring 1 with IOPL 1.
 ;
-; One sector at a time, synchronous, every wait with a limit (dwait.asm), so
-; a missing diskette or a dead controller is an error, never a hang. Each
+; A run of sectors a call (disk-scheduler.md M2, D2): by cylinder, head and
+; sector, one Read or Write Data for the run, going on to head 1 (MT) if it
+; does, never past its cylinder; the 8237's channel 2 carries the run
+; through a DMA buffer of FD_RUN_MAX sectors, or of fewer, which the root
+; gives a machine without extended memory: a run longer than the buffer
+; moves what it holds, and says how much (CX). Every wait has a limit
+; (dwait.asm), so a missing diskette or a dead controller is an error, never
+; a hang. Each
 ; drive's media is fixed (docs/disks.md): A 1.2 MB at 500 kbit/s, B 360 KB
 ; at 250 kbit/s, with the gaps of IBM's BIOS (5-170, 5-60). The controller
 ; has no implied seek: a transfer seeks first, after recalibrating a drive
 ; whose cylinder is not known. The controller is reset and given its
 ; timings (Specify) before the first transfer and after any timeout. A
-; transfer the controller fails is tried FD_TRIES times, recalibrating in
-; between; a timeout ends it at once. The motor runs FD_MOTOR_OFF_TICKS after
+; transfer the controller fails is tried once (FD_TRIES), its drive's
+; cylinder forgotten, so that the next recalibrates: the disk server's
+; retries (disk-scheduler.md M3, D14) come so. The motor runs FD_MOTOR_OFF_TICKS after
 ; the last transfer, as the BIOS's does: the driver's timer looks. The 8237's
-; channel 2 carries each sector to or from the DMA buffer the root gave the
-; driver (DRV_SLOT_DEVICE: 512 bytes that do not cross 64 KB), whose
+; channel 2 carries each run to or from the DMA buffer the root gave the
+; driver (DRV_SLOT_DEVICE: FD_RUN_MAX sectors that do not cross 64 KB), whose
 ; physical address the kernel says (KCALL_SEGMENT); the driver copies it
 ; from or to the segment the OS server passes (DRV_DISK_READ,
 ; DRV_DISK_WRITE; drivers.inc), and deletes that segment once it is done. At
@@ -39,22 +46,32 @@ IRQ                 equ SLOT(DRV_SLOT_IRQ)
 RECV                equ SLOT(DRV_SLOT_RECV)
 DMA_BUFFER          equ SLOT(DRV_SLOT_DEVICE)
 FD_UNITS            equ 2
-FD_TRIES            equ 3
+FD_RUN_MAX          equ FD_DMA_SECTORS  ; a run at most: a 1.2 MB cylinder, the DMA buffer's
+FDC_CMD_MT          equ 0x80            ; Read or Write Data's multi-track bit: on to head 1
+FDC_CMD_READ_ID     equ 0x4A            ; Read ID, MFM
+FD_TRIES            equ 1               ; the disk server tries again (D14)
 FD_RECALIBRATIONS   equ 2               ; the 765 steps 77 times at most: 80 cylinders may need two
 FD_MOTOR_START_TICKS equ 50 + 1         ; more than 1 s: the BIOS's motor start time
 FD_MOTOR_OFF_TICKS  equ 100             ; 2 s after the last transfer
 FD_SETTLE_TICKS     equ 1 + 1           ; more than the BIOS's 15 ms of head settling
+FD_LINE_UNKNOWN     equ 0               ; fd_line: A's change line not yet seen to clear
+FD_LINE_WORKS       equ 1               ;    seen to clear: set and not clearing, no diskette
+FD_LINE_NONE        equ 2               ;    never clears with a diskette in (DOSBox-X,
+                                        ;    whose controller has no DIR): B's rule
 FD_TICKS            equ 100 + 1         ; 2 s for a command: the BIOS's diskette timeout
+FD_PROBE_TICKS      equ 30 + 1          ; 0.6 s for fd_probe's Read ID: a diskette in a 1.2 MB
+                                        ;    drive answers within two turns (0.33 s)
 FD_BYTE_TICKS       equ 2               ; for the controller to take or give a byte
 FD_RESET_READS      equ 16              ; the reset held for that many reads of a port
 FD_SENSES_AFTER_RESET equ 4             ; one Sense Interrupt Status for each drive it polled
 FD_UNKNOWN          equ 0xFF            ; a cylinder not known: recalibrate first
 FD_TRANSFER_BYTES   equ 9               ; a read's or write's command
 FD_RESULT_BYTES     equ 7               ; and its result: ST0, ST1, ST2, C, H, R, N
+FD_FORMAT_BYTES     equ 6               ; Format Track's command (M9)
 FD_SENSE_BYTES      equ 2               ; Sense Interrupt Status's result: ST0, PCN
 
 ; A drive's entry in units
-UNIT_SECTORS        equ 0               ; sectors on the disk
+UNIT_CYLINDERS      equ 0
 UNIT_HEADS          equ 2
 UNIT_TRACK          equ 3               ; sectors a track
 UNIT_RATE           equ 4               ; its data rate (FDC_RATE_*)
@@ -63,9 +80,9 @@ UNIT_SIZE           equ 6
 
 begin_udata
 units:
-        dw DISK_A_CYLINDERS * DISK_A_HEADS * DISK_A_SECTORS
+        dw DISK_A_CYLINDERS
         db DISK_A_HEADS, DISK_A_SECTORS, FDC_RATE_500K, FDC_GAP_1200K
-        dw DISK_B_CYLINDERS * DISK_B_HEADS * DISK_B_SECTORS
+        dw DISK_B_CYLINDERS
         db DISK_B_HEADS, DISK_B_SECTORS, FDC_RATE_250K, FDC_GAP_360K
 dma_base            dw 0                ; the DMA buffer's physical address
 dma_page            db 0
@@ -75,14 +92,24 @@ fd_dor              db FDC_DOR_MOTORS_OFF   ; the digital output register as las
 fd_motor_running    db 0                ; a motor runs, and stops FD_MOTOR_OFF_TICKS after
 fd_last             dw 0                ; the tick of the last transfer's end
 fd_unit             db 0                ; the transfer's drive (0 or 1)
+fd_unit_last        dw 0, 0             ; each drive's last transfer's end, in ticks
+fd_line             db FD_LINE_UNKNOWN  ; A's change line: seen to clear, or none (M8)
+fd_format_set       db 0                ; fd_format changed A's entry: fd_saved holds it
+fd_saved            dw 0, 0, 0          ; its cylinders, its track word, its gap and double
+fd_id_ticks         dw FD_TICKS         ; fd_read_id's wait: fd_probe's shorter
+fd_double           db 0, 0             ; each drive's: a 360 KB diskette in a 1.2 MB drive,
+                                        ;    its cylinder two tracks apart (M8, D13)
 fd_cylinder         db FD_UNKNOWN, FD_UNKNOWN   ; where each drive's heads are
 fd_moved            db 0                ; fd_seek's: the heads moved, to settle
 fd_tries            db 0
 fd_dma_mode         db 0
+fd_base_command     db 0                ; FDC_CMD_READ or FDC_CMD_WRITE
+fd_count            dw 0                ; the run's sectors
+fd_run_max          db FD_RUN_MAX       ; the DMA buffer's sectors (entry)
 fd_head             db 0                ; where the sector is
 fd_track_cylinder   db 0
 fd_sector           db 0                ; from 1, as the controller counts
-fd_transfer_command db 0                ; FDC_CMD_READ or FDC_CMD_WRITE; then:
+fd_transfer_command db 0                ; fd_base_command, with MT if the run needs it; then:
 fd_unit_head        db 0                ; the head (bit 2) and the drive (bits 0-1)
 fd_c                db 0
 fd_h                db 0
@@ -91,6 +118,12 @@ fd_n                db FDC_SIZE_512
 fd_eot              db 0
 fd_gpl              db 0
 fd_dtl              db FDC_DTL
+fd_format_command   db FDC_CMD_FORMAT   ; Format Track (M9): then the head and drive, the
+fd_format_unit_head db 0                ;    size, the sectors, the gap and the filler
+fd_format_n         db FDC_SIZE_512
+fd_format_sc        db 0
+fd_format_gpl       db 0
+fd_format_d         db FDC_FILLER
 fd_seek_command     db FDC_CMD_SEEK
 fd_seek_unit_head   db 0
 fd_seek_cylinder    db 0
@@ -99,6 +132,8 @@ fd_recal_unit       db 0
 fd_sense_command    db FDC_CMD_SENSE_INT
 fd_specify_command  db FDC_CMD_SPECIFY, FDC_SPECIFY_1, FDC_SPECIFY_2
 fd_result           times FD_RESULT_BYTES db 0
+fd_id_command       db FDC_CMD_READ_ID  ; (after fd_result: fd_reset sends Specify up to it)
+fd_id_unit_head     db 0
 end_udata
 
 ; ----------------------------------------------------------------------------
@@ -117,14 +152,16 @@ entry:
         xor al, al                      ; and unmask it
         out DMA2_MASK, al
         mov dx, DMA_BUFFER
-        kcall KCALL_SEGMENT             ; DL:AX = its physical address
+        kcall KCALL_SEGMENT             ; DL:AX = its physical address, CX its limit
         mov [dma_base], ax
         mov [dma_page], dl
+        inc cx
+        shr cx, SECTOR_SHIFT
+        mov [fd_run_max], cl            ; the sectors it holds: the root's choice
         ; falls through
 
 ; ----------------------------------------------------------------------------
-; serve - a sector to or from the segment passed, for each call; the motor
-; stopped once its time has run out
+; serve - each call, for ever; the motor stopped once its time has run out
 ;   In:       nothing
 ;   Out:      does not return
 ;   Destroys: everything
@@ -142,70 +179,635 @@ serve:
         call fd_motor_check             ; the timer: the motor's time?
         jmp serve
 .call:
-        mov ah, FDC_CMD_READ
-        mov dl, DMA_MODE_TO_MEMORY
-        cmp al, DRV_DISK_READ
-        je .transfer
-        mov ah, FDC_CMD_WRITE
-        mov dl, DMA_MODE_FROM_MEMORY
-        cmp al, DRV_DISK_WRITE
-        je .transfer
-        mov bx, E_INVAL
-        jmp .reply
-.transfer:
-        call fd_transfer                ; BX = 0 or the error
-.reply:
+        push bp
+        call fd_call                    ; BX = 0 or the error; CX, DX the answer
+        pop bp
         push bx
+        push cx
+        push dx
+        test bp, bp
+        jz .no_segment
         mov dx, RECV                    ; the segment, used: room for the next
         kcall KCALL_DELETE
+.no_segment:
         call fd_motor_timer             ; the motor's time: no wait's timer is left
-        pop bx                          ;    to make the driver look (P15)
+        pop dx                          ;    to make the driver look (P15)
+        pop cx
+        pop bx
+        mov si, dx                      ; (the reply's third word)
+        mov di, 0
         mov dx, EP
         mov bp, RECV
         kcall KCALL_REPLY_RECV
         jmp .message
 
 ; ----------------------------------------------------------------------------
-; fd_transfer - one sector between the segment passed and a diskette
-;   In:       AH = FDC_CMD_READ or FDC_CMD_WRITE; DL = the DMA's mode; BX =
-;             the drive (0 or 1); CX = the sector; SI = its offset in the
-;             segment; BP = the segment (0: none came)
-;   Out:      BX = 0, or E_INVAL, E_FAULT, E_IO, E_TIMEOUT, E_PROTECTED
-;   Destroys: AX, CX, DX, SI, DI, ES
+; fd_call - one call
+;   In:       AL = the label; BL = the unit; BH = the head; CX = the cylinder;
+;             DI = the sector and count; SI = the offset; BP = the segment
+;             passed (0: none came)
+;   Out:      BX = 0 or the error; CX and DX (sent in SI) its answer
+;   Destroys: AX, SI, DI, ES
 ; ----------------------------------------------------------------------------
-fd_transfer:
-        cmp bx, FD_UNITS
+fd_call:
+        cmp bl, FD_UNITS
+        jae .invalid
+        mov [fd_unit], bl
+        mov [fd_head], bh
+        push ax
+        mov al, bl
+        mov ah, UNIT_SIZE
+        mul ah
+        add ax, units
+        mov dx, ax                      ; DX = the drive's entry
+        pop ax
+        cmp al, DRV_DISK_READ
+        je .read
+        cmp al, DRV_DISK_WRITE
+        je .write
+        cmp al, DRV_DISK_SEEK
+        je .seek
+        cmp al, DRV_DISK_STATUS
+        je .status
+        cmp al, DRV_DISK_RESET
+        je .reset
+        cmp al, DRV_DISK_GEOMETRY
+        je .geometry
+        cmp al, DRV_DISK_READ_ID
+        je .read_id
+        cmp al, DRV_DISK_MEDIA
+        je .media
+        cmp al, DRV_DISK_FORMAT
+        je .format
+.invalid:
+        mov bx, E_INVAL
+        xor cx, cx
+        xor dx, dx
+        ret
+.read:
+        mov ah, FDC_CMD_READ
+        mov al, DMA_MODE_TO_MEMORY
+        jmp fd_transfer
+.write:
+        mov ah, FDC_CMD_WRITE
+        mov al, DMA_MODE_FROM_MEMORY
+        jmp fd_transfer
+.seek:
+        mov di, dx
+        cmp cx, [di + UNIT_CYLINDERS]
+        jae .invalid
+        mov [fd_track_cylinder], cl
+        mov byte [fd_head], 0
+        call fd_ready
+        jc .failed
+        call fd_seek
+        jc .failed
+        call fd_done
+        xor bx, bx
+        xor cx, cx
+        xor dx, dx
+        ret
+.failed:
+        call fd_done
+        mov bx, ax
+        xor cx, cx
+        xor dx, dx
+        ret
+.status:
+        call fd_unit_cylinder
+        mov cl, [si]
+        xor ch, ch
+        cmp cl, FD_UNKNOWN
+        jne .known
+        mov cx, DISK_CYLINDER_UNKNOWN
+.known:
+        xor bx, bx
+        xor dx, dx                      ; (the change line: M8)
+        ret
+.reset:
+        call fd_reset
+        mov bx, 0
+        jnc .reset_done
+        mov bx, ax
+.reset_done:
+        xor cx, cx
+        xor dx, dx
+        ret
+.geometry:
+        mov di, dx
+        mov cx, [di + UNIT_CYLINDERS]
+        mov dl, [di + UNIT_HEADS]
+        mov dh, [di + UNIT_TRACK]
+        xor bx, bx
+        ret
+.read_id:
+        mov di, dx
+        cmp bh, [di + UNIT_HEADS]
+        jae .invalid
+        jmp fd_read_id
+.media:
+        mov di, dx
+        jmp fd_media
+.format:
+        mov ax, di                      ; AL = the track's sectors
+        mov di, dx
+        jmp fd_format
+
+; ----------------------------------------------------------------------------
+; fd_ready - the controller reset and given its timings if it needs it, the
+;            drive selected and its motor up to speed, its data rate set
+;   In:       DI = the drive's entry; fd_unit
+;   Out:      CF clear; or CF set and AX = E_TIMEOUT
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+fd_ready:
+        mov byte [fd_motor_running], 0  ; the motor runs while the driver works
+        cmp byte [fd_specified], 0
+        jne .specified
+        call fd_reset
+        jc .out
+.specified:
+        call fd_motor_on
+        mov al, [di + UNIT_RATE]        ; before any seek: the step rate scales
+        mov dx, FDC_CCR                 ;    with the data rate (IBM's SRT table,
+        out dx, al                      ;    and the BIOS's order)
+        clc
+.out:
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_done - the motor's time from now (serve arms its timer)
+;   In:       nothing
+;   Out:      nothing
+;   Destroys: nothing (flags kept)
+; ----------------------------------------------------------------------------
+fd_done:
+        pushf
+        push ax
+        push bx
+        call dw_ticks
+        mov [fd_last], ax
+        mov bl, [fd_unit]
+        xor bh, bh
+        shl bx, 1
+        mov [fd_unit_last + bx], ax
+        mov byte [fd_motor_running], 1
+        pop bx
+        pop ax
+        popf
+        ret
+
+; ----------------------------------------------------------------------------
+;
+; fd_changed - may the drive's diskette have changed since the driver last
+; looked (disk-scheduler.md M8, D12)? A's change line set: a step, which
+; clears it if a diskette is in. A line never yet seen to clear that stays
+; set, with a diskette in (fd_probe): the drive has none (DOSBox-X), and
+; is treated as B is from then on. B, whose drive has no change line: its
+; last transfer longer ago than its motor's time
+;   In:       DI = the drive's entry; fd_unit, fd_head, fd_track_cylinder;
+;             the drive selected, its motor on
+;   Out:      CF clear; or CF set and AX = E_CHANGED, or E_TIMEOUT (no diskette)
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+fd_changed:
+        cmp byte [fd_unit], 0
+        jne .by_time
+        cmp byte [fd_line], FD_LINE_NONE
+        je .by_time
+        mov dx, FDC_DIR
+        in al, dx
+        test al, FDC_DIR_CHANGED
+        jz .clear
+        mov al, [fd_track_cylinder]     ; (the run's, kept)
+        mov ah, [fd_head]
+        push ax
+        call fd_forget_cylinder
+        mov byte [fd_track_cylinder], 1 ; a step pulse clears it, with a diskette in:
+        call fd_seek                    ;    a recalibrate at cylinder 0 gives none
+        jc .stepped
+        call fd_cleared                 ; (MAME's a moment late: again, then a step back)
+        jnc .stepped
+        mov byte [fd_track_cylinder], 0
+        call fd_seek
+        jc .stepped
+        call fd_cleared
+        jnc .stepped
+        cmp byte [fd_line], FD_LINE_WORKS
+        stc
+        je .stepped
+        push bx
+        call fd_probe                   ; a diskette in a drive with no line?
+        cmp bx, E_TIMEOUT
+        pop bx
+        stc
+        je .stepped
+        mov byte [fd_line], FD_LINE_NONE
+        clc
+.stepped:
+        pop cx
+        mov [fd_track_cylinder], cl
+        mov [fd_head], ch
+        jc .none
+        cmp byte [fd_line], FD_LINE_NONE
+        je .changed
+        mov byte [fd_line], FD_LINE_WORKS
+.changed:
+        mov ax, E_CHANGED
+        stc
+        ret
+.none:
+        mov ax, E_TIMEOUT
+        stc
+        ret
+.by_time:
+        push bx
+        mov bl, [fd_unit]
+        xor bh, bh
+        shl bx, 1
+        call dw_ticks
+        mov cx, ax
+        sub ax, [fd_unit_last + bx]
+        cmp ax, FD_MOTOR_OFF_TICKS
+        jb .same_pop
+        mov [fd_unit_last + bx], cx     ; (the check's own reads come at once)
+        pop bx
+        mov ax, E_CHANGED
+        stc
+        ret
+.same_pop:
+        pop bx
+        clc
+        ret
+.clear:
+        mov byte [fd_line], FD_LINE_WORKS
+        clc
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_cleared - has the change line cleared? Looked at again a tick later if not
+;   In:       the drive selected
+;   Out:      CF clear if it has; CF set if it has not
+;   Destroys: AX, CX, DX
+; ----------------------------------------------------------------------------
+fd_cleared:
+        mov dx, FDC_DIR
+        in al, dx
+        test al, FDC_DIR_CHANGED
+        jz .yes
+        mov cx, 1 + 1
+        call dw_sleep
+        mov dx, FDC_DIR
+        in al, dx
+        test al, FDC_DIR_CHANGED
+        jz .yes
+        stc
+        ret
+.yes:
+        clc
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_media - DRV_DISK_MEDIA: A's diskette by Read ID, at 500 kbit/s (1.2 MB)
+; and then 300 (360 KB), the drive's entry set for it; a 360 KB one is read
+; again on its second track, and its cylinder there says whether the
+; drive steps twice (D13). B's is a 360 KB drive's
+;   In:       DI = the drive's entry; fd_unit
+;   Out:      BX = 0 or the error; CX the cylinders; DX the heads (low) and
+;             the sectors a track (high)
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+fd_media:
+        cmp byte [fd_unit], 0
+        jne .found
+        mov byte [fd_double], 0
+        mov word [di + UNIT_CYLINDERS], DISK_A_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_A_SECTORS | (FDC_RATE_500K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_1200K
+        call fd_forget_cylinder
+        mov byte [fd_head], 0
+        mov byte [fd_track_cylinder], 0 ; from track 0, recalibrated to: DOSBox-X's
+        call fd_ready                   ;    765 keeps the ST0 of an invalid command,
+        jc .failed                      ;    as after a reset, for a Read ID's
+        call fd_seek
+        jc .failed
+        call fd_read_id
+        test bx, bx
+        jz .found
+        mov word [di + UNIT_CYLINDERS], DISK_B_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_B_SECTORS | (FDC_RATE_300K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_360K
+        call fd_read_id
+        test bx, bx
+        jnz .out
+        mov byte [fd_track_cylinder], 2 ; its second track, stepped once a track
+        call fd_ready
+        jc .failed
+        call fd_seek
+        jc .failed
+        call fd_read_id
+        test bx, bx
+        jnz .out
+        call fd_forget_cylinder         ; (its tracks counted anew)
+        cmp cl, 1
+        jne .found
+        mov byte [fd_double], 1         ; cylinder 1 there: 48-tpi tracks
+.found:
+        mov cx, [di + UNIT_CYLINDERS]
+        mov dl, [di + UNIT_HEADS]
+        mov dh, [di + UNIT_TRACK]
+        xor bx, bx
+        ret
+.failed:
+        call fd_done
+        mov bx, ax
+.out:
+        cmp byte [fd_unit], 0           ; none found: A's 1.2 MB entry again, as the
+        jne .none                       ;    disk server, which keeps its geometry on a
+        call fd_entry_a                 ;    failure, has it (M10's review)
+.none:
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_format - DRV_DISK_FORMAT: a track formatted, its sectors' IDs the
+; caller's, in the order they are to pass the head (its skew: disk-
+; scheduler.md M9, D17), each sector filled with FDC_FILLER: A as 1.2 MB,
+; B as 360 KB. A's entry is 1.2 MB's once the checks pass, and as it was
+; again if the format fails; CX and DX say the entry either way
+;   In:       DI = the drive's entry; fd_unit, fd_head; CX = the cylinder;
+;             AL = the track's sectors; SI = the table's offset; BP = the
+;             segment passed (0: none came)
+;   Out:      BX = 0, or E_INVAL, E_FAULT, E_IO, E_TIMEOUT, E_PROTECTED; CX
+;             the cylinders, DX the heads (low) and the sectors a track (high)
+;   Destroys: AX, SI, DI, ES
+; ----------------------------------------------------------------------------
+fd_format:
+        mov [fd_format_sc], al
+        mov byte [fd_format_set], 0
+        mov byte [fd_format_gpl], FDC_FORMAT_GAP_360K
+        cmp byte [fd_unit], 0
+        jne .b
+        cmp cx, DISK_A_CYLINDERS        ; A's checked against 1.2 MB, its entry left as
+        jae .invalid                    ;    it is until the command goes (M10's review)
+        cmp al, DISK_A_SECTORS
+        jne .invalid
+        jmp .checked
+.b:
+        cmp cx, [di + UNIT_CYLINDERS]
+        jae .invalid
+        cmp al, [di + UNIT_TRACK]       ; every sector of the track
+        jne .invalid
+.checked:
+        mov ah, [fd_head]
+        cmp ah, [di + UNIT_HEADS]       ; (2 on both: 1.2 MB's and 360 KB's)
         jae .invalid
         test bp, bp
         jz .fault
-        mov [fd_transfer_command], ah
-        mov [fd_dma_mode], dl
-        mov [fd_unit], bl
-        mov ax, UNIT_SIZE
-        mul bx
-        mov di, ax
-        add di, units                   ; DI = its entry
-        cmp cx, [di + UNIT_SECTORS]
-        jae .invalid
-        mov ax, cx                      ; the sector: cylinder, head, sector
-        xor dx, dx
-        mov cl, [di + UNIT_TRACK]
+        mov [fd_track_cylinder], cl
+        xor ah, ah
+        shl ax, 2                       ; the table's bytes
+        mov cx, ax
+        call dw_fits
+        jc .fault
+        call dw_readable
+        jnz .fault
+        push di                         ; the table into the DMA buffer
+        push ds
+        mov ax, DMA_BUFFER
+        mov es, ax
+        mov ds, bp
+        xor di, di
+        rep movsb
+        pop ds
+        pop di
+        push ds
+        pop es
+        cmp byte [fd_unit], 0
+        jne .set
+        mov ax, [di + UNIT_CYLINDERS]   ; A's entry kept, for a failure, then 1.2 MB's
+        mov [fd_saved], ax
+        mov ax, [di + UNIT_TRACK]
+        mov [fd_saved + 2], ax
+        mov al, [di + UNIT_GAP]
+        mov ah, [fd_double]
+        mov [fd_saved + 4], ax
+        mov byte [fd_format_set], 1
+        call fd_entry_a
+        mov byte [fd_format_gpl], FDC_FORMAT_GAP_1200K
+.set:
+        call fd_ready
+        jc .failed
+        call fd_seek
+        jc .failed
+        mov byte [fd_dma_mode], DMA_MODE_FROM_MEMORY
+        mov cl, [fd_format_sc]
         xor ch, ch
-        div cx
-        inc dx
-        mov [fd_sector], dl
+        shl cx, 2
+        dec cx
+        call fd_dma_bytes
+        mov al, [fd_head]
+        shl al, 2
+        or al, [fd_unit]
+        mov [fd_format_unit_head], al
+        mov byte [irq_seen], 0
+        mov si, fd_format_command
+        mov cx, FD_FORMAT_BYTES
+        call fd_send
+        jc .late
+        mov cx, FD_TICKS
+        call dw_wait_irq
+        jc .late
+        mov cx, FD_RESULT_BYTES
+        call fd_results
+        jc .late
+        call fd_done
+        test byte [fd_result], FDC_ST0_CODE
+        jz .done
+        mov bx, E_PROTECTED
+        test byte [fd_result + 1], FDC_ST1_NOT_WRITABLE
+        jnz .out
+        call fd_forget_cylinder         ; recalibrate before the next
+        mov bx, E_IO
+        jmp .out
+.done:
+        xor bx, bx
+        jmp .geometry
+.late:
+        call fd_reset
+        call fd_done
+        mov bx, E_TIMEOUT
+        jmp .out
+.failed:
+        call fd_done
+        mov bx, ax
+        jmp .out
+.invalid:
+        mov bx, E_INVAL
+        jmp .out
+.fault:
+        mov bx, E_FAULT
+.out:
+        cmp byte [fd_format_set], 0     ; A's entry as it was before the failure
+        je .geometry
+        mov ax, [fd_saved]
+        mov [di + UNIT_CYLINDERS], ax
+        mov ax, [fd_saved + 2]
+        mov [di + UNIT_TRACK], ax
+        mov ax, [fd_saved + 4]
+        mov [di + UNIT_GAP], al
+        mov [fd_double], ah
+.geometry:
+        mov cx, [di + UNIT_CYLINDERS]   ; what the entry says now, either way, for the
+        mov dl, [di + UNIT_HEADS]       ;    disk server's
+        mov dh, [di + UNIT_TRACK]
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_entry_a - A's entry and double step as a 1.2 MB diskette's
+;   In:       DI = A's entry
+;   Out:      nothing
+;   Destroys: nothing
+; ----------------------------------------------------------------------------
+fd_entry_a:
+        mov byte [fd_double], 0
+        mov word [di + UNIT_CYLINDERS], DISK_A_CYLINDERS
+        mov word [di + UNIT_TRACK], DISK_A_SECTORS | (FDC_RATE_500K << 8)
+        mov byte [di + UNIT_GAP], FDC_GAP_1200K
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_probe - is a diskette in the drive? One Read ID at the drive's data rate,
+; within FD_PROBE_TICKS: a diskette answers within two turns, with an ID or,
+; at another rate, with none found; no diskette gives no index pulse, and
+; the controller no answer (then reset)
+;   In:       DI = the drive's entry; fd_unit, fd_head
+;   Out:      BX = E_TIMEOUT if none; else 0 or E_IO
+;   Destroys: AX, CX, DX, SI
+; ----------------------------------------------------------------------------
+fd_probe:
+        mov word [fd_id_ticks], FD_PROBE_TICKS
+        call fd_read_id
+        mov word [fd_id_ticks], FD_TICKS
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_read_id - DRV_DISK_READ_ID: the first ID the head finds, on the
+;              cylinder the heads are on
+;   In:       DI = the drive's entry; fd_unit, fd_head
+;   Out:      BX = 0 or the error; CX = its cylinder; DX = its head (low)
+;             and sector (high)
+;   Destroys: AX, SI
+; ----------------------------------------------------------------------------
+fd_read_id:
+        call fd_ready
+        jc .failed
+        mov al, [fd_head]
+        shl al, 2
+        or al, [fd_unit]
+        mov [fd_id_unit_head], al
+        mov byte [irq_seen], 0
+        mov si, fd_id_command
+        mov cx, 2
+        call fd_send
+        jc .late
+        mov cx, [fd_id_ticks]
+        call dw_wait_irq
+        jc .late
+        mov cx, FD_RESULT_BYTES
+        call fd_results
+        jc .late
+        call fd_done
+        test byte [fd_result], FDC_ST0_CODE
+        jnz .error
+        mov cl, [fd_result + 3]         ; C, H, R
+        xor ch, ch
+        mov dl, [fd_result + 4]
+        mov dh, [fd_result + 5]
+        xor bx, bx
+        ret
+.error:
+        mov bx, E_IO
+        jmp .none
+.late:
+        call fd_reset
+        call fd_done
+        mov ax, E_TIMEOUT
+.failed:
+        mov bx, ax
+.none:
+        xor cx, cx
         xor dx, dx
-        mov cl, [di + UNIT_HEADS]
-        div cx
-        mov [fd_track_cylinder], al
-        mov [fd_head], dl
-        cmp byte [fd_transfer_command], FDC_CMD_WRITE
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_transfer - a run of sectors between the segment passed and a diskette,
+;               one command, through the DMA buffer
+;   In:       AH = FDC_CMD_READ or FDC_CMD_WRITE; AL = the DMA's mode; DX =
+;             the drive's entry; fd_unit, fd_head; CX = the cylinder; DI =
+;             the sector (low byte, from 1) and the count (high byte, 0: 1);
+;             SI = the offset; BP = the segment (0: none came)
+;   Out:      BX = 0, or E_INVAL, E_FAULT, E_IO, E_TIMEOUT, E_PROTECTED; CX =
+;             the sectors moved; DX = 0
+;   Destroys: AX, SI, DI, ES
+; ----------------------------------------------------------------------------
+fd_transfer:
+        mov [fd_base_command], ah
+        mov [fd_dma_mode], al
+        mov ax, di
+        mov di, dx                      ; DI = the drive's entry
+        test ah, ah
+        jnz .counted
+        inc ah
+.counted:
+        mov [fd_sector], al
+        mov [fd_count], ah
+        mov byte [fd_count + 1], 0
+        test bp, bp
+        jz .fault
+        cmp ah, [fd_run_max]
+        jbe .held
+        mov ah, [fd_run_max]            ; more than the buffer holds: what it holds,
+        mov [fd_count], ah              ;    the caller told so (CX)
+.held:
+        cmp cx, [di + UNIT_CYLINDERS]
+        jae .invalid
+        mov [fd_track_cylinder], cl
+        mov bl, [fd_head]
+        cmp bl, [di + UNIT_HEADS]
+        jae .invalid
+        test al, al
+        jz .invalid
+        cmp al, [di + UNIT_TRACK]
+        ja .invalid
+        ; the run within the cylinder: (heads - head) x track - (sector - 1)
+        push ax
+        mov al, [di + UNIT_HEADS]
+        sub al, [fd_head]
+        mul byte [di + UNIT_TRACK]
+        mov cl, [fd_sector]
+        xor ch, ch
+        dec cx
+        sub ax, cx
+        cmp ax, [fd_count]
+        pop ax
+        jb .invalid
+        mov ah, [fd_base_command]       ; MT if the run goes on to head 1
+        mov al, [fd_sector]
+        dec al
+        add al, [fd_count]
+        cmp al, [di + UNIT_TRACK]
+        jbe .one_track
+        or ah, FDC_CMD_MT
+.one_track:
+        mov [fd_transfer_command], ah
+        mov cx, [fd_count]
+        shl cx, SECTOR_SHIFT
+        call dw_fits                    ; the run within the segment's limit
+        jc .fault
+        cmp byte [fd_base_command], FDC_CMD_WRITE
         jne .moved_in
         call dw_readable                ; (a program killed meanwhile: l4.md L12)
         jnz .fault
-        mov cx, SECTOR_SIZE
-        call dw_fits                    ; its bytes within its limit (P15)
-        jc .fault
         call buffer_in                  ; a write: its bytes into the DMA buffer
 .moved_in:
         push si                         ; (the controller's commands use SI)
@@ -213,39 +815,46 @@ fd_transfer:
         pop si
         mov bx, ax                      ; (0 if done)
         jc .out
+        mov bx, E_IO
+        call fd_dma_moved               ; what the DMA moved: the run, or less
+        jc .out
         xor bx, bx
-        cmp byte [fd_transfer_command], FDC_CMD_READ
-        jne .out
+        cmp byte [fd_base_command], FDC_CMD_READ
+        jne .whole
         call dw_writable                ; gone while it waited?
         jnz .fault
-        mov cx, SECTOR_SIZE
-        call dw_fits                    ; or shorter? (P15)
-        jc .fault
         call buffer_out                 ; a read: its bytes to the segment passed
-.out:
+.whole:
+        mov cx, [fd_count]
+        xor dx, dx
         ret
 .invalid:
         mov bx, E_INVAL
-        ret
+        jmp .out
 .fault:
         mov bx, E_FAULT
+.out:
+        xor cx, cx
+        xor dx, dx
         ret
 
 ; ----------------------------------------------------------------------------
-; buffer_in - a write's sector, from the segment passed into the DMA buffer
-;   In:       BP:SI = the sector in the segment passed
+; buffer_in - a write's sectors (fd_count), from the segment passed into the
+; DMA buffer
+;   In:       BP:SI = the sectors in the segment passed
 ;   Out:      nothing
 ;   Destroys: AX, CX
 ; ----------------------------------------------------------------------------
 buffer_in:
         push di                         ; (the drive's entry, for fd_do)
         push si
+        mov cx, [fd_count]
+        shl cx, SECTOR_SHIFT - 1        ; words
         push ds
         mov ax, DMA_BUFFER
         mov es, ax
         mov ds, bp
         xor di, di
-        mov cx, SECTOR_SIZE / 2
         rep movsw
         pop ds
         pop si
@@ -255,23 +864,27 @@ buffer_in:
         ret
 
 ; ----------------------------------------------------------------------------
-; buffer_out - a read's sector, from the DMA buffer into the segment passed
-;   In:       BP:SI = where the sector goes in the segment passed
+; buffer_out - a read's sectors (fd_count), from the DMA buffer into the
+; segment passed
+;   In:       BP:SI = where the sectors go in the segment passed
 ;   Out:      nothing
-;   Destroys: AX, CX, DI, ES
+;   Destroys: AX, CX, ES
 ; ----------------------------------------------------------------------------
 buffer_out:
+        push di
         push si
+        mov cx, [fd_count]
+        shl cx, SECTOR_SHIFT - 1
         push ds
         mov es, bp
         mov di, si
         mov ax, DMA_BUFFER
         mov ds, ax
         xor si, si
-        mov cx, SECTOR_SIZE / 2
         rep movsw
         pop ds
         pop si
+        pop di
         push ds
         pop es
         ret
@@ -291,6 +904,8 @@ fd_do:
         jc .failed_now
 .specified:
         call fd_motor_on
+        call fd_changed                 ; (the run not done: the disk server checks first)
+        jc .failed_now
         mov byte [fd_tries], FD_TRIES
 .try:
         mov al, [di + UNIT_RATE]        ; before the seek: the step rate
@@ -348,14 +963,7 @@ fd_do:
 .done:
         clc
 .out:
-        pushf
-        push ax
-        call dw_ticks                   ; the motor's time from now
-        mov [fd_last], ax
-        mov byte [fd_motor_running], 1  ; (serve arms its timer)
-        pop ax
-        popf
-        ret
+        jmp fd_done                     ; the motor's time from now (serve arms its timer)
 
 ; ----------------------------------------------------------------------------
 ; fd_motor_timer - while the motor runs, the driver's timer for when it is
@@ -380,13 +988,29 @@ fd_motor_timer:
         ret
 
 ; ----------------------------------------------------------------------------
-; fd_dma - channel 2 ready for one sector between the controller and the
-; DMA buffer
-;   In:       fd_dma_mode
+; fd_dma - channel 2 ready for the run between the controller and the DMA
+; buffer
+;   In:       fd_dma_mode, fd_count
 ;   Out:      nothing
 ;   Destroys: AL
 ; ----------------------------------------------------------------------------
 fd_dma:
+        push cx
+        mov cx, [fd_count]              ; the run's bytes, less one
+        shl cx, SECTOR_SHIFT
+        dec cx
+        call fd_dma_bytes
+        pop cx
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_dma_bytes - channel 2 ready for so many bytes between the controller and
+; the DMA buffer
+;   In:       CX = the bytes, less one; fd_dma_mode
+;   Out:      nothing
+;   Destroys: AL
+; ----------------------------------------------------------------------------
+fd_dma_bytes:
         mov al, DMA_MASK_SET | DMA_CHANNEL_DISKETTE
         out DMA1_MASK, al
         out DMA1_CLEAR_FLIPFLOP, al     ; any value
@@ -399,12 +1023,47 @@ fd_dma:
         out DMA1_CH2_ADDRESS, al
         mov al, [dma_page]
         out DMA_PAGE_CH2, al
-        mov al, (SECTOR_SIZE - 1) & 0xFF
+        mov al, cl
         out DMA1_CH2_COUNT, al
-        mov al, (SECTOR_SIZE - 1) >> 8
+        mov al, ch
         out DMA1_CH2_COUNT, al
         mov al, DMA_CHANNEL_DISKETTE    ; unmasked
         out DMA1_MASK, al
+        ret
+
+; ----------------------------------------------------------------------------
+; fd_dma_moved - after a transfer the controller ended well: the sectors the
+; DMA moved, by channel 2's count, which wraps to FFFFh (terminal count)
+; with the run's last byte. A controller that stops short leaves it above,
+; and then the run is what it moved, the caller asking again for the rest:
+; DOSBox-X's 765 ends a multi-track run at the first head's last sector,
+; and a cylinder's second track came back as the DMA buffer's old bytes
+; (disk-scheduler.md M8b). On an AT's the count always ends at FFFFh
+;   In:       fd_count
+;   Out:      CF clear and fd_count the sectors moved; or CF set: none
+;   Destroys: AX, CX
+; ----------------------------------------------------------------------------
+fd_dma_moved:
+        out DMA1_CLEAR_FLIPFLOP, al     ; any value
+        in al, DMA1_CH2_COUNT
+        mov cl, al
+        in al, DMA1_CH2_COUNT
+        mov ch, al
+        inc cx                          ; the bytes left: 0 at terminal count
+        jz .all
+        mov ax, [fd_count]
+        shl ax, SECTOR_SHIFT            ; the run's bytes
+        cmp cx, ax
+        jae .none
+        sub ax, cx                      ; the bytes moved
+        shr ax, SECTOR_SHIFT            ; whole sectors of them
+        jz .none
+        mov [fd_count], ax
+.all:
+        clc
+        ret
+.none:
+        stc
         ret
 
 ; ----------------------------------------------------------------------------
@@ -475,6 +1134,14 @@ fd_seek:
 .known:
         call fd_unit_cylinder
         mov al, [fd_track_cylinder]
+        push bx
+        mov bl, [fd_unit]
+        xor bh, bh
+        cmp byte [fd_double + bx], 0
+        pop bx
+        je .single
+        shl al, 1                       ; (48-tpi tracks: two steps a cylinder, D13)
+.single:
         cmp [si], al
         je .there
         mov [fd_seek_cylinder], al
@@ -621,11 +1288,22 @@ fd_reset:
         mov cx, 1
         call fd_send
         jc .late_pop
-        mov cx, FD_SENSE_BYTES
+        mov cx, 1                       ; ST0 first: an invalid command's says no
+        call fd_results                 ;    drive has an interrupt pending, and no
+        jc .late_pop                    ;    PCN follows (DOSBox-X's 765 has one to
+        mov al, [fd_result]             ;    sense, not four)
+        and al, FDC_ST0_CODE
+        cmp al, FDC_ST0_INVALID
+        je .sensed
+        mov cx, FD_SENSE_BYTES - 1      ; its present cylinder
         call fd_results
         jc .late_pop
         pop cx
         loop .sense
+        jmp .specify
+.sensed:
+        pop cx
+.specify:
         mov si, fd_specify_command
         mov cx, fd_result - fd_specify_command
         call fd_send

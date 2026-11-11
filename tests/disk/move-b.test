@@ -1,0 +1,24 @@
+# A 360 KB diskette moved from B into A (roadmap disk-scheduler.md M8, D12,
+# D13): tests/posix/media.c (TEST_MEDIA_MOVEB) on MAME, whose Lua takes both
+# diskettes out and puts B's into A (media-at:). A's change line says so, the
+# driver finds the diskette at 300 kbit/s, 360 KB in a 1.2 MB drive, and
+# Read ID on its second track says whether to step twice (MAME's tracks are
+# a cylinder each, an AT's 48-tpi diskette's two); B's file is read there,
+# and the volume is read-only in A.
+program: idle
+define: TEST_POSIX_MEDIA
+define: TEST_MEDIA_MOVEB
+emulators: mame
+media-at: 75 eject A
+media-at: 75 eject B
+media-at: 77 insert A b
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+keys: {wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}{wait 250}
+match: contains
+timeout: 600
+---
+media: B's readme.txt (bytes): {...}
+media: A's readme.txt, B's diskette (bytes): {...}
+media: a write there (EROFS 30): 30
+media: done

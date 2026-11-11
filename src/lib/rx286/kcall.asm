@@ -27,7 +27,7 @@ KR_SI               equ 8
 KR_DI               equ 10
 KR_BP               equ 12
 
-global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_xchg
+global rx_kcall, rx_ticks, rx_log, rx_log_far, rx_ud2, rx_verr, rx_verw, rx_xchg
 global rx_lsl, rx_cs, rx_ds, rx_ss, rx_sp
 
 code_section
@@ -123,6 +123,26 @@ rx_verr:
         mov bp, sp
         mov ax, ARG(0)
         verr ax
+        mov ax, 0
+        jnz .done
+        inc ax
+.done:
+        pop bp
+        ret
+
+; ----------------------------------------------------------------------------
+; rx_verw - int rx_verw(unsigned selector): may the caller write through it?
+; (VERW, at the caller's privilege; disk-scheduler.md M3: the disk server
+; checks a segment passed before it copies into it)
+;   In:       the stack: the selector
+;   Out:      AX = 1 if so, else 0
+;   Destroys: nothing else
+; ----------------------------------------------------------------------------
+rx_verw:
+        push bp
+        mov bp, sp
+        mov ax, ARG(0)
+        verw ax
         mov ax, 0
         jnz .done
         inc ax

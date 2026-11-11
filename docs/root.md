@@ -22,7 +22,7 @@ waiting.
 | 6, 7 | its own space and thread |
 | 8 on | each module's code, and its data as assembled, read-only, two slots a module |
 | 100, 101 | with extended memory: the memory for segments below 1 MB and the arena's, as untyped (slots 3 and 4 then hold extended memory) |
-| 102 | the boot information, read-only (`ROOT_SLOT_BOOT_INFO`; `layout.inc`'s `BI_*`): what the loader found of the memory (INT 12h, INT 15h AH=88h), and where the kernel made the memory for programs below 1 MB start and end (roadmap memory.md M2) |
+| 102 | the boot information, read-only (`ROOT_SLOT_BOOT_INFO`; `layout.inc`'s `BI_*`): what the loader found of the memory (INT 12h, INT 15h AH=88h), and where the kernel made the memory for programs below 1 MB start and end (roadmap memory.md M2); the drives the BIOS knows, a copy of which the disk drivers get in their slot 9 (`DRV_SLOT_BOOT_INFO`; disk-scheduler.md M2) |
 | 111 | the screen's text page, for the console driver |
 | 112-127 | every interrupt line the kernel does not keep, line n at 112 + n |
 
@@ -74,7 +74,17 @@ programs below 1 MB, 32 KB, so that the kernel's arena keeps its room
    memory for segments; for `ROOT_SERVE`'s, blocks of 8 KB from the
    allocator as the server asks, so that a small machine keeps no stacks of
    entries it never uses; a block is kept for good, as the threads are, and
-   a full one is followed by another (roadmap memory.md M6, M7).
+   a full one is followed by another (roadmap memory.md M6, M7). The OS
+   server gets the boot information too, read-only (`OS_SLOT_BOOT_INFO`),
+   and the disk drivers' endpoints are the disk server's.
+5. **The disk server** ("disk"; roadmap disk-scheduler.md M3;
+   *docs/disk-server.md*): a space of `DS_SLOTS`; its endpoint, a copy of
+   which the OS server gets in `OS_SLOT_DISK`; a copy of the fault endpoint
+   badged `ROOT_BADGE_DISK`, for `ROOT_PANIC` alone; the disk drivers'
+   endpoints; its cache's index and segments, from the lowest piece of
+   extended memory with room, else from the memory for segments; and its
+   `DS_THREADS` threads, each with a notification and a stack segment from
+   a block kept for its stacks, their faults the root's (`SERVE_BADGE`).
 
 A kernel call the root's building needs, refused, stops it with "rx286:
 the root could not build the system", as does an OS server that is not the
@@ -147,7 +157,8 @@ names:
   (*docs/processes.md*), and the tty thread. The thread and the
   notification come from the arena while it has room, and then from a
   block each (P15): blocks of 1 KB kept for good, spread through the memory
-  for segments, left no 64 KB block for a process without extended memory.
+  for segments, left no 64 KB block for a process on a machine without
+  extended memory (which rx286 ran on until disk-scheduler.md M8b).
   Its faults are the root's, badged `SERVE_BADGE`. It refuses (`E_INVAL`),
   before it takes anything, a stack of no bytes, of an odd number or of
   more than 8 KB, which no block of stacks would hold, and an SP that is 0,
@@ -180,9 +191,23 @@ entry with a count of the processes that run it. The allocator is tested
 on the host against a simulation of untyped memory
 (`tests/unit/c/test_buddy.c`), its reserves too. In `TEST_MEMORY` builds the
 root says what the boot information holds, the extended memory it holds,
-and where the diskette's DMA buffer lies (`tests/memory`); `TEST_DMA_HIGH`
+and where the diskette's DMA buffer, 15 KB, lies (`tests/memory`); `TEST_DMA_HIGH`
 builds retype that buffer from the highest piece of extended memory
 (`tests/memory/dma.test`).
+
+The memory the processes do not use goes to the disk server's cache
+(roadmap disk-scheduler.md M7, D10 A; *docs/disk-server.md*). With
+extended memory, the root lends it blocks of 256 KB while more than its
+reserve would stay free: an eighth of the extended memory, 64 KB at least.
+Each block becomes four segments in the disk server's space and a
+`DS_GROW`, a block at the end of each call that starts something (a fork,
+a spawn, a load), once the system has run 10 s. An
+allocation that finds no free block (`alloc`) asks for the block lent last
+back with `DS_SHRINK`, revokes it and tries again, until the allocation fits
+or nothing more comes back, which is `ENOMEM`. The root calls the disk
+server through a copy of its endpoint badged `DS_BADGE_ROOT`, which the disk
+server takes those two calls from alone. Without extended memory nothing
+is lent, and the disk server's space keeps its 64 slots below 1 MB.
 
 ## In test builds
 

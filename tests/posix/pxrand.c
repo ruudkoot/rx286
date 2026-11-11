@@ -31,8 +31,9 @@
 int rx_px(int call, rx_u16 bx, rx_u16 cx, rx_u16 si, rx_u16 di, struct rx_kregs *r);
 
 static const char *const paths[] = {
-    "/b/x1.txt", "/b/x2.txt", "/b/xd", "/b/xd/x3.txt", "/b/xd/xe", "/b", "/", "/dev",
-    "/dev/null", "/z", "/z/pxrand", "/b/nothing/x", "c:/docs", "/b/x1.txt/x",
+    "/mnt/rx286b/x1.txt", "/mnt/rx286b/x2.txt", "/mnt/rx286b/xd", "/mnt/rx286b/xd/x3.txt",
+    "/mnt/rx286b/xd/xe", "/mnt/rx286b", "/", "/dev",
+    "/dev/null", "/z", "/z/pxrand", "/mnt/rx286b/nothing/x", "c:/docs", "/mnt/rx286b/x1.txt/x",
 };
 #define PATHS (sizeof paths / sizeof paths[0])
 

@@ -41,6 +41,9 @@ OS_THREAD_STACK     equ 1024    ; each thread's stack segment
 OS_K_THREAD_STACK   equ 6       ; a program's slots of the server's, 8n + k: its thread's stack
 OS_SLOT_CONTROL_STACK equ 152   ; the control thread's stack
 OS_SLOT_TTY_STACK   equ 153     ; the tty thread's
+OS_SLOT_DISK        equ 154     ; the disk server's endpoint (disk.inc; disk-scheduler.md M3),
+                                ;    which alone it asks for sectors
+OS_SLOT_BOOT_INFO   equ 155     ; the boot information, read-only: its cache's size (M3)
 
 ; Every server's threads (memory.md M6, *The model for multi-threaded
 ; servers*): the root reports a fault of one, puts back the server's
@@ -55,6 +58,7 @@ SERVE_BADGE         equ 0x2000
 ROOT_BADGE_OS       equ 0x4000
 ROOT_BADGE_TEST     equ 0x4001  ; TEST_SERVICES: the test program's, whose copies go to it
 ROOT_BADGE_TWIN     equ 0x4002  ; TEST_TWIN: the test server's (tests/programs/twin.c, M6)
+ROOT_BADGE_DISK     equ 0x4003  ; the disk server's: ROOT_PANIC alone (disk-scheduler.md M3)
 OS_SLOT_ROOT        equ 160
 OS_SLOT_ARCHIVE     equ 161     ; the server's: /z, the archive module's bytes (os-server.md P6)
 OS_SLOT_KEYS        equ 162     ;    a notification the keyboard driver signals, when no

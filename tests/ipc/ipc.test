@@ -8,7 +8,6 @@
 # Ctrl+Break ends. DOSBox-X takes no timer interrupt in a test
 # (docs/emulators.md).
 program: ipc
-emulators: bochs mame
 define: TEST_CAPS
 keys: {wait 300}{ctrl-break}
 timeout: 90
